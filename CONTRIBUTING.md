@@ -46,6 +46,9 @@ Run `build/Release/NotArc.app/Contents/MacOS/NotArc --selftest`. It drives the a
 Spaces, shortcuts and more) using separate test data, prints `SELFTEST-...` lines and quits. Add a check there for
 the feature you build, and paste the relevant lines into your pull request. Also try the feature by hand.
 
+Changing the updater? Also run `scripts/test-update.sh`: it updates a throwaway copy of the app from the latest
+GitHub release and checks the copy was replaced. It never touches /Applications.
+
 ## Pull requests
 
 - Branch from `main`; pull requests are squash-merged.
