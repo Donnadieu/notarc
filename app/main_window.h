@@ -33,6 +33,26 @@
 - (ArcItem*)tabWithURLPrefix:(NSString*)prefix;  // current Space, for tests
 - (ArcItem*)currentPinnedSection;
 
+// Browser basics (Arc: View / History / Developer menus).
+- (IBAction)goBack:(id)sender;
+- (IBAction)goForward:(id)sender;
+- (IBAction)reloadPage:(id)sender;
+- (IBAction)hardReload:(id)sender;
+- (IBAction)zoomIn:(id)sender;
+- (IBAction)zoomOut:(id)sender;
+- (IBAction)actualSize:(id)sender;
+- (IBAction)findInPage:(id)sender;
+- (IBAction)findNext:(id)sender;
+- (IBAction)findPrevious:(id)sender;
+- (IBAction)toggleDevTools:(id)sender;
+- (IBAction)copyCurrentURL:(id)sender;          // Cmd+Shift+C in Arc
+- (IBAction)copyCurrentURLAsMarkdown:(id)sender;  // Cmd+Shift+Opt+C in Arc
+- (void)findText:(NSString*)text forward:(BOOL)forward;
+@property(nonatomic, readonly) int lastFindCount;  // tests
+- (double)currentZoomLevel;                       // tests
+- (BOOL)canGoBack;                                // tests
+- (NSString*)currentURL;                          // tests
+
 // Archive (Arc: auto-archive of Today tabs + Cmd+Shift+T style reopen).
 @property(nonatomic, copy) NSString* archivePath;
 - (NSUInteger)runAutoArchiveWithThreshold:(NSTimeInterval)threshold now:(NSDate*)now;  // returns # archived

@@ -5,11 +5,13 @@
 #include <string>
 
 #include "include/cef_client.h"
+#include "include/cef_find_handler.h"
 
 class BrowserClient : public CefClient,
                       public CefDisplayHandler,
                       public CefLifeSpanHandler,
-                      public CefLoadHandler {
+                      public CefLoadHandler,
+                      public CefFindHandler {
  public:
   using TitleCallback = std::function<void(int browser_id, const std::string& title)>;
   using UrlCallback = std::function<void(int browser_id, const std::string& url)>;
@@ -19,6 +21,12 @@ class BrowserClient : public CefClient,
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+  CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
+
+  using FindCallback = std::function<void(int browser_id, int count, int active)>;
+  void set_find_callback(FindCallback cb) { on_find_ = std::move(cb); }
+  void OnFindResult(CefRefPtr<CefBrowser> browser, int identifier, int count, const CefRect& selection_rect,
+                    int active_match_ordinal, bool final_update) override;
 
   void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override;
   void OnAddressChange(CefRefPtr<CefBrowser> browser,
@@ -42,6 +50,7 @@ class BrowserClient : public CefClient,
  private:
   TitleCallback on_title_;
   UrlCallback on_url_;
+  FindCallback on_find_;
   int open_browsers_ = 0;
   bool quit_when_empty_ = false;
 

@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-6 done, 6 partial, 58 not started or out of scope, of 70 items.
+6 done, 9 partial, 55 not started or out of scope, of 70 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -19,7 +19,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Go to Sidebar Item 1-9, last item, next/previous item (missing)
 - [ ] Hide/show sidebar, toolbar mode with full URL (missing)
 - [ ] Multi-select sidebar items and bulk actions (missing)
-- [ ] Copy URL, Copy URL as Markdown, copy links as Markdown, clean URL (missing)
+- [ ] Copy URL, Copy URL as Markdown, copy links as Markdown, clean URL (partial: copy URL and Markdown done)
 - [ ] Undo close (Cmd+Z in sidebar), reopen closed tab (partial: Cmd+Shift+T only)
 
 ## Spaces & profiles
@@ -38,7 +38,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Suggestions: open tabs, history, bookmarks, actions, top domains (missing)
 - [ ] Search engine choice, search suggestions (missing)
 - [ ] Switch to a recent tab (Ctrl+Tab) (missing)
-- [ ] Back/forward, reload, find in page, zoom, print (missing)
+- [ ] Back/forward, reload, find in page, zoom, print (partial: print missing)
 - [ ] Link routing rules (which Space opens which links) (missing)
 
 ## Split view & windows
@@ -95,7 +95,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 - [ ] Chrome extensions (Web Store), extension picker (missing)
 - [ ] Password saving/autofill, address/card autofill (missing)
-- [ ] DevTools (show/hide), developer mode (missing)
+- [ ] DevTools (show/hide), developer mode (partial: DevTools done)
 - [ ] Set as default browser, open links from other apps (missing)
 - [ ] Context menus (page, link, image, sidebar) (missing)
 - [ ] Sad tab / crash recovery, session restore (partial: sidebar restore only)
