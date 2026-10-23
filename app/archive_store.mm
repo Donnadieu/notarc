@@ -48,7 +48,7 @@ BOOL ArchiveStoreSave(NSArray<ArchivedTab*>* tabs, NSString* path) {
 NSTimeInterval AutoArchiveThreshold(void) {
   NSUserDefaults* d = NSUserDefaults.standardUserDefaults;
   if (![d objectForKey:@"autoArchiveThresholdHours"]) return 12 * 3600;
-  return [d doubleForKey:@"autoArchiveThresholdHours"] * 3600;
+  return [d doubleForKey:@"autoArchiveThresholdHours"] * 3600;  // 0 = never (Settings > Archive Today tabs)
 }
 
 NSMutableArray<ArchivedTab*>* ArchiveImportArc(NSString* arcArchivePath) {

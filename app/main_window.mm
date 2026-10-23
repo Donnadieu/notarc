@@ -4,6 +4,7 @@
 #import "app/archive_window.h"
 #import "app/arc_cookies.h"
 #import "app/little_window.h"
+#import "app/settings.h"
 
 #include <cstdio>
 #include <atomic>
@@ -73,7 +74,7 @@ NSString* ResolveCommandBarInput(NSString* input) {
   NSString* q = [text stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
   q = [q stringByReplacingOccurrencesOfString:@"&" withString:@"%26"];
   q = [q stringByReplacingOccurrencesOfString:@"+" withString:@"%2B"];
-  return [@"https://www.google.com/search?q=" stringByAppendingString:q];
+  return SearchURLForQuery(q);
 }
 
 static BOOL Contains(ArcItem* root, ArcItem* target);
@@ -984,6 +985,23 @@ static const CGFloat kPaneGap = 6;
 }
 
 - (NSUInteger)littleWindowCount { return _littleWindows.count; }
+
+- (NSUInteger)archiveIdleLittleWindowsAt:(NSDate*)now {
+  double hours = SettingDouble(kSettingLittleArchiveHours);
+  if (hours <= 0) return 0;
+  NSUInteger closed = 0;
+  for (LittleWindowController* lw in [_littleWindows copy]) {
+    if (lw.window.isKeyWindow || !lw.lastUsedAt) continue;
+    if ([now timeIntervalSinceDate:lw.lastUsedAt] < hours * 3600) continue;
+    [lw.window close];  // closing without moving archives the page
+    ++closed;
+  }
+  return closed;
+}
+
+- (void)setLittleWindowLastUsed:(NSDate*)date index:(NSUInteger)index {
+  if (index < _littleWindows.count) _littleWindows[index].lastUsedAt = date;
+}
 - (void)moveLittleWindowToMain:(NSUInteger)index {
   if (index < _littleWindows.count) [_littleWindows[index] openInMainWindow:nil];
 }
@@ -995,7 +1013,7 @@ static const CGFloat kPaneGap = 6;
   if (![url hasPrefix:@"http://"] && ![url hasPrefix:@"https://"]) return NO;
   if (![self itemForBrowser:browserId]) return NO;  // e.g. from a Peek or Little Window: let CEF handle it
   __weak MainWindowController* weakSelf = self;
-  if (disposition == CEF_WOD_NEW_WINDOW && gesture && !_peek) {
+  if (disposition == CEF_WOD_NEW_WINDOW && gesture && !_peek && SettingBool(kSettingPeekShiftClick)) {
     dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf openPeek:url]; });
     return YES;
   }
@@ -1019,7 +1037,7 @@ static NSString* SiteOf(NSString* url) {
 }
 
 - (BOOL)shouldPeekFromItem:(ArcItem*)item toURL:(NSString*)url {
-  if (!item || !url.length || _peek) return NO;
+  if (!item || !url.length || _peek || !SettingBool(kSettingPeekPinnedLinks)) return NO;
   if (![url hasPrefix:@"http://"] && ![url hasPrefix:@"https://"]) return NO;
   ArcSpace* space = [self spaceOwningItem:item];
   BOOL pinnedOrFavorite = Contains(space.pinned, item) || Contains(space.favorites, item);
@@ -1660,6 +1678,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
   __weak MainWindowController* weakSelf = self;
   _archiveTimer = [NSTimer scheduledTimerWithTimeInterval:60 repeats:YES block:^(NSTimer* t) {
     [weakSelf runAutoArchiveWithThreshold:AutoArchiveThreshold() now:[NSDate date]];
+    [weakSelf archiveIdleLittleWindowsAt:[NSDate date]];
   }];
 }
 

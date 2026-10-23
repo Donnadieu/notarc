@@ -23,4 +23,5 @@ typedef void (^LittleWindowMove)(NSString* url);
 - (void)presentAsPeekOver:(NSWindow*)parent;
 @property(nonatomic, readonly) NSString* currentURL;
 @property(nonatomic, readonly) NSString* pageTitle;
+@property(nonatomic, strong) NSDate* lastUsedAt;  // last time the window was focused; drives idle archiving
 @end
