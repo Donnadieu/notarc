@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
-project(NotArc LANGUAGES C CXX OBJC OBJCXX)
+project(NotArc VERSION 0.1.0 LANGUAGES C CXX OBJC OBJCXX)
+set(VERSION_SHORT ${PROJECT_VERSION})
 
 # CEF binary distribution. Upgrading Chromium = point this at a newer CEF build.
 set(CEF_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/third_party/cef" CACHE PATH "CEF binary distribution root")

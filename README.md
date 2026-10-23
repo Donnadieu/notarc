@@ -27,6 +27,21 @@ Working today:
 
 Planned: split view, Peek, Little Arc, Boosts, Easel and Notes and more. See [the parity checklist](docs/feature-parity.md).
 
+## Install
+
+1. Download the latest `NotArc-<version>-arm64.dmg` from [Releases](https://github.com/Donnadieu/notarc/releases).
+   NotArc currently needs an Apple Silicon Mac (M1 or newer) running macOS 13 or later.
+2. Open the disk image and drag NotArc into Applications.
+3. The first time only, right-click NotArc in Applications and choose **Open**, then **Open** again. NotArc isn't
+   signed with a paid Apple developer certificate yet, so macOS asks you to confirm. If macOS still refuses, go to
+   System Settings > Privacy & Security and click **Open Anyway**.
+
+On first launch NotArc imports your Arc Spaces, tabs and archive. To bring your logins over too, macOS asks once for
+access to the "Arc Safe Storage" Keychain item; click **Allow**. NotArc only reads Arc's data and never changes it.
+
+To update, download the newer release and replace the app in Applications. Your data stays in
+`~/Library/Application Support/NotArc`.
+
 ## Built on Chromium, upgraded with Chromium
 
 NotArc is a native macOS app written in Objective-C++. It embeds Chromium through the
@@ -35,7 +50,7 @@ in Chrome. Upgrading to a newer Chromium means downloading a newer CEF build and
 
 Current pin: CEF 156.0.7 (Chromium 156.0.8078.17), Apple Silicon.
 
-## Build
+## Build from source
 
 Requirements: an Apple Silicon Mac, Apple's Command Line Tools (Xcode isn't needed), `cmake` and `ninja`
 (`brew install cmake ninja`).
@@ -44,6 +59,7 @@ Requirements: an Apple Silicon Mac, Apple's Command Line Tools (Xcode isn't need
    unpack it under `third_party/std/`, and link it: `ln -sfn std/<cef_binary_folder> third_party/cef`
 2. `mkdir -p build && cd build && cmake -G Ninja -DCMAKE_BUILD_TYPE=Release .. && ninja`
 3. Open `build/Release/NotArc.app`
+4. Optional: `scripts/package.sh` makes the release disk image in `dist/`
 
 The first time NotArc imports your Arc logins, macOS asks for permission to read the "Arc Safe Storage" Keychain item.
 That key decrypts Arc's saved cookies on your own Mac. Nothing leaves your computer.
