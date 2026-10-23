@@ -37,6 +37,7 @@ static const CGFloat kToolbarHeight = 34;
   window.level = NSFloatingWindowLevel;  // a quick look stays above the main window
   if (!(self = [super initWithWindow:window])) return nil;
   window.delegate = self;
+  self.lastUsedAt = [NSDate date];
   _initialURL = [url copy];
   _lastURL = [url copy];
   _onMove = [onMove copy];
@@ -126,6 +127,9 @@ static const CGFloat kToolbarHeight = 34;
   if (_onMove && url.length) _onMove(url);
   [self.window close];
 }
+
+- (void)windowDidBecomeKey:(NSNotification*)notification { self.lastUsedAt = [NSDate date]; }
+- (void)windowDidResignKey:(NSNotification*)notification { self.lastUsedAt = [NSDate date]; }
 
 - (void)windowWillClose:(NSNotification*)notification {
   [self.window.parentWindow removeChildWindow:self.window];

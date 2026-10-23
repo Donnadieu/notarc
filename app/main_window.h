@@ -123,6 +123,10 @@
 - (BOOL)sidebarHidden;   // tests
 - (ArcItem*)shownItem;   // tests
 
+// Little Windows not focused for the "Archive Little Windows" setting are closed (and archived).
+- (NSUInteger)archiveIdleLittleWindowsAt:(NSDate*)now;
+- (void)setLittleWindowLastUsed:(NSDate*)date index:(NSUInteger)index;  // tests
+
 // Archive (Arc: auto-archive of Today tabs + Cmd+Shift+T style reopen).
 @property(nonatomic, copy) NSString* archivePath;
 - (NSUInteger)runAutoArchiveWithThreshold:(NSTimeInterval)threshold now:(NSDate*)now;  // returns # archived
