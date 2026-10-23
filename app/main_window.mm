@@ -150,6 +150,13 @@ static NSString* HexFromColor(NSColor* c) {
   BOOL _focusMode;
   CAGradientLayer* _themeGradient;
   NSPopover* _hoverCard;
+  NSView* _mediaBar;
+  NSTextField* _mediaTitle;
+  NSButton* _mediaPlay;
+  NSButton* _mediaMute;
+  ArcItem* _mediaItem;
+  NSScrollView* _sidebarScroll;
+  NSTimer* _mediaTimer;
   ArcItem* _hoverItem;
   NSTimer* _hoverTimer;
   void (^_themePreview)(void);
@@ -220,6 +227,28 @@ static NSString* HexFromColor(NSColor* c) {
   _themeView.hidden = YES;
   [sidebar addSubview:_themeView];
 
+  _mediaBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 6, kSidebarWidth - 16, 34)];
+  _mediaBar.wantsLayer = YES;
+  _mediaBar.layer.cornerRadius = 8;
+  _mediaBar.layer.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.08].CGColor;
+  _mediaPlay = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"pause.fill" accessibilityDescription:@"Pause"]
+                                  target:self action:@selector(mediaBarPlay:)];
+  _mediaPlay.bordered = NO;
+  _mediaPlay.frame = NSMakeRect(4, 5, 24, 24);
+  _mediaMute = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"speaker.wave.2.fill" accessibilityDescription:@"Mute"]
+                                  target:self action:@selector(mediaBarMute:)];
+  _mediaMute.bordered = NO;
+  _mediaMute.frame = NSMakeRect(kSidebarWidth - 16 - 28, 5, 24, 24);
+  _mediaTitle = [NSTextField labelWithString:@""];
+  _mediaTitle.lineBreakMode = NSLineBreakByTruncatingTail;
+  _mediaTitle.font = [NSFont systemFontOfSize:12];
+  _mediaTitle.frame = NSMakeRect(32, 8, kSidebarWidth - 16 - 64, 18);
+  NSClickGestureRecognizer* go = [[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(mediaBarShowTab:)];
+  [_mediaTitle addGestureRecognizer:go];
+  for (NSView* v in @[ _mediaPlay, _mediaTitle, _mediaMute ]) [_mediaBar addSubview:v];
+  _mediaBar.hidden = YES;
+  [sidebar addSubview:_mediaBar];
+
   _spacePicker = [[NSPopUpButton alloc]
       initWithFrame:NSMakeRect(8, bounds.size.height - 72, kSidebarWidth - 16, 26) pullsDown:NO];
   _spacePicker.autoresizingMask = NSViewMinYMargin;
@@ -233,6 +262,7 @@ static NSString* HexFromColor(NSColor* c) {
   scroll.autoresizingMask = NSViewHeightSizable;
   scroll.drawsBackground = NO;
   scroll.hasVerticalScroller = YES;
+  _sidebarScroll = scroll;
 
   _outline = [[NSOutlineView alloc] initWithFrame:scroll.bounds];
   NSTableColumn* col = [[NSTableColumn alloc] initWithIdentifier:@"item"];
@@ -560,6 +590,10 @@ NSString* CleanLinkURL(NSString* url) {
     dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf openPeek:target]; });
     return true;
   });
+  _client->set_media_callback([weakSelf](int browserId, const std::string& state, const std::string& title) {
+    [weakSelf browser:browserId mediaState:[NSString stringWithUTF8String:state.c_str()]];
+  });
+  _mediaTimer = [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer*) { [weakSelf pollMediaNow]; }];
   _client->set_find_callback([weakSelf](int browserId, int count, int active) {
     [weakSelf findResult:count active:active];
   });
@@ -602,6 +636,7 @@ NSString* CleanLinkURL(NSString* url) {
   if (!item.url.length) return;
   _shown.lastActiveAt = [NSDate date];  // the tab we leave was active until now
   _shown = item;
+  [self updateMediaBar];
   item.lastActiveAt = [NSDate date];
   [self ensureBrowserForItem:item];
   [self layoutPanes];
@@ -719,9 +754,102 @@ NSString* CleanLinkURL(NSString* url) {
   cell.textField.font = a.isSection ? [NSFont boldSystemFontOfSize:11] : [NSFont systemFontOfSize:13];
   NSString* symbol = a.isSection ? nil : (a.isFolder ? @"folder" : @"globe");
   if (a.isSplit) symbol = a.splitHorizontal ? @"rectangle.split.1x2" : @"rectangle.split.2x1";
+  if (a.audioMuted) symbol = @"speaker.slash.fill";
+  else if (a.mediaPlaying) symbol = @"speaker.wave.2.fill";
   cell.imageView.image = symbol ? [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil] : nil;
   return cell;
 }
+
+#pragma mark Media
+
+static NSString* const kMediaProbeJS =
+    @"(function(){var m=[].slice.call(document.querySelectorAll('video,audio'));"
+     "var on=m.some(function(e){return !e.paused&&!e.ended&&e.readyState>2&&!e.muted&&e.volume>0;});"
+     "var held=m.some(function(e){return e.__notarcPaused;});"
+     "console.log('__notarc_media__:'+(on?'playing':(held?'paused':'none')));})()";
+static NSString* const kMediaPauseJS =
+    @"(function(){[].slice.call(document.querySelectorAll('video,audio')).forEach(function(e){"
+     "if(!e.paused){e.__notarcPaused=true;e.pause();}});})()";
+static NSString* const kMediaResumeJS =
+    @"(function(){[].slice.call(document.querySelectorAll('video,audio')).forEach(function(e){"
+     "if(e.__notarcPaused){e.__notarcPaused=false;e.play();}});})()";
+
+- (ArcItem*)itemForBrowserId:(int)browserId {
+  for (ArcSpace* sp in _spaces)
+    for (ArcItem* t in sp.allTabs)
+      if (t.browserId == browserId) return t;
+  return nil;
+}
+
+- (void)runJS:(NSString*)js inItem:(ArcItem*)item {  // also used by the self-test
+  auto it = _browsers.find(item.browserId);
+  if (it == _browsers.end()) return;
+  CefRefPtr<CefFrame> f = it->second->GetMainFrame();
+  f->ExecuteJavaScript(js.UTF8String, f->GetURL(), 0);
+}
+
+- (void)pollMediaNow {
+  for (auto& kv : _browsers) {
+    CefRefPtr<CefFrame> f = kv.second->GetMainFrame();
+    if (f) f->ExecuteJavaScript(kMediaProbeJS.UTF8String, f->GetURL(), 0);
+  }
+}
+
+- (void)browser:(int)browserId mediaState:(NSString*)state {
+  ArcItem* item = [self itemForBrowserId:browserId];
+  if (!item) return;
+  BOOL playing = [state isEqualToString:@"playing"], paused = [state isEqualToString:@"paused"];
+  if (playing == item.mediaPlaying && paused == item.mediaPaused) return;
+  item.mediaPlaying = playing;
+  item.mediaPaused = paused;
+  if ([_outline rowForItem:item] >= 0) [_outline reloadItem:item];
+  [self updateMediaBar];
+}
+
+- (void)updateMediaBar {
+  ArcItem* pick = nil;
+  for (ArcItem* t in _space.allTabs)
+    if (t != _shown && t.browserId && (t.mediaPlaying || t.mediaPaused) && (!pick || (t.mediaPlaying && !pick.mediaPlaying)))
+      pick = t;
+  _mediaItem = pick;
+  BOOL show = pick != nil;
+  if (show) {
+    _mediaTitle.stringValue = pick.displayTitle ?: @"";
+    _mediaPlay.image = [NSImage imageWithSystemSymbolName:pick.mediaPlaying ? @"pause.fill" : @"play.fill" accessibilityDescription:nil];
+    _mediaMute.image = [NSImage imageWithSystemSymbolName:pick.audioMuted ? @"speaker.slash.fill" : @"speaker.wave.2.fill"
+                                 accessibilityDescription:nil];
+  }
+  if (_mediaBar.hidden == !show) return;
+  _mediaBar.hidden = !show;
+  NSRect f = _sidebarScroll.frame;
+  CGFloat bottom = show ? 46 : 8;
+  f.size.height += f.origin.y - bottom;
+  f.origin.y = bottom;
+  _sidebarScroll.frame = f;
+}
+
+- (ArcItem*)mediaBarItem { return _mediaBar.hidden ? nil : _mediaItem; }
+
+- (void)toggleMuteItem:(ArcItem*)item {
+  auto it = _browsers.find(item.browserId);
+  if (it == _browsers.end()) return;
+  item.audioMuted = !item.audioMuted;
+  it->second->GetHost()->SetAudioMuted(item.audioMuted);
+  if ([_outline rowForItem:item] >= 0) [_outline reloadItem:item];
+  [self updateMediaBar];
+}
+
+- (void)togglePlayItem:(ArcItem*)item {
+  [self runJS:item.mediaPlaying ? kMediaPauseJS : kMediaResumeJS inItem:item];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ [self pollMediaNow]; });
+}
+
+- (IBAction)toggleMuteCurrentTab:(id)sender { if (_shown) [self toggleMuteItem:_shown]; }
+- (void)mediaBarPlay:(id)sender { if (_mediaItem) [self togglePlayItem:_mediaItem]; }
+- (void)mediaBarMute:(id)sender { if (_mediaItem) [self toggleMuteItem:_mediaItem]; }
+- (void)mediaBarShowTab:(id)sender { if (_mediaItem) [self showItem:_mediaItem]; }
+- (void)menuToggleMute:(NSMenuItem*)sender { [self toggleMuteItem:sender.representedObject]; }
+- (void)menuTogglePlay:(NSMenuItem*)sender { [self togglePlayItem:sender.representedObject]; }
 
 #pragma mark Hover cards
 
@@ -1772,6 +1900,11 @@ static ArcItem* NewSection(NSString* title) {
     [m addItem:[self menuItem:@"Copy URL" action:@selector(menuCopyURL:) item:item]];
     [m addItem:[self menuItem:@"Copy URL as Markdown" action:@selector(menuCopyMarkdown:) item:item]];
     [m addItem:[self menuItem:@"Copy Clean Link" action:@selector(menuCopyClean:) item:item]];
+    if (item.browserId) {
+      [m addItem:[self menuItem:item.audioMuted ? @"Unmute Tab" : @"Mute Tab" action:@selector(menuToggleMute:) item:item]];
+      if (item.mediaPlaying || item.mediaPaused)
+        [m addItem:[self menuItem:item.mediaPlaying ? @"Pause Media" : @"Play Media" action:@selector(menuTogglePlay:) item:item]];
+    }
   }
   [m addItem:[NSMenuItem separatorItem]];
   if (isTab || item.isFolder) [m addItem:[self menuItem:@"Rename..." action:@selector(menuRename:) item:item]];
