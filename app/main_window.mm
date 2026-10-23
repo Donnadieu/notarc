@@ -82,7 +82,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
 @end
 
 @implementation MainWindowController {
-  NSArray<ArcSpace*>* _spaces;
+  NSMutableArray<ArcSpace*>* _spaces;
   ArcSpace* _space;  // currently shown Space
   NSPopUpButton* _spacePicker;
   NSOutlineView* _outline;
@@ -127,7 +127,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   [window center];
   if ((self = [super initWithWindow:window])) {
     window.delegate = self;
-    _spaces = spaces;
+    _spaces = [spaces mutableCopy];
     _space = spaces.firstObject;
     for (ArcSpace* s in spaces)
       if ([s.spaceID isEqualToString:focusedID]) _space = s;
@@ -150,8 +150,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   _spacePicker = [[NSPopUpButton alloc]
       initWithFrame:NSMakeRect(8, bounds.size.height - 72, kSidebarWidth - 16, 26) pullsDown:NO];
   _spacePicker.autoresizingMask = NSViewMinYMargin;
-  for (ArcSpace* s in _spaces) [_spacePicker addItemWithTitle:s.title];
-  if (_space) [_spacePicker selectItemAtIndex:[_spaces indexOfObject:_space]];
+  [self rebuildSpacePicker];
   _spacePicker.target = self;
   _spacePicker.action = @selector(spaceChanged:);
   [sidebar addSubview:_spacePicker];
@@ -198,13 +197,8 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
 }
 
 - (void)spaceChanged:(id)sender {
-  NSInteger i = _spacePicker.indexOfSelectedItem;
-  if (i < 0 || i >= (NSInteger)_spaces.count) return;
-  _space = _spaces[i];
-  [self reloadSidebar];
-  [self scheduleSave];
-  ArcItem* first = _space.allTabs.firstObject;
-  if (first) [self showItem:first];
+  ArcSpace* picked = _spacePicker.selectedItem.representedObject;
+  if (picked) [self switchToSpace:picked];
 }
 
 // One isolated browser profile per Arc Space (cookies, storage), keyed by Arc's profile name.
@@ -853,6 +847,162 @@ static NSString* SiteOf(NSString* url) {
 - (void)promotePeekToTab { [_peek openInMainWindow:nil]; }
 - (void)closePeek { [_peek.window close]; }
 
+#pragma mark Spaces
+
+static ArcItem* NewSection(NSString* title) {
+  ArcItem* section = [ArcItem new];
+  section.isSection = YES;
+  section.title = title;
+  section.children = [NSMutableArray array];
+  return section;
+}
+
+- (void)rebuildSpacePicker {
+  [_spacePicker removeAllItems];
+  for (ArcSpace* s in _spaces) {
+    [_spacePicker addItemWithTitle:s.title ?: @"Space"];
+    _spacePicker.lastItem.representedObject = s;  // titles may repeat
+  }
+  if (_space) [_spacePicker selectItemAtIndex:[_spaces indexOfObject:_space]];
+}
+
+- (void)switchToSpace:(ArcSpace*)space {
+  if (!space || space == _space) return;
+  _space = space;
+  _splitItems = nil;
+  [_spacePicker selectItemAtIndex:[_spaces indexOfObject:space]];
+  [self reloadSidebar];
+  [self scheduleSave];
+  ArcItem* first = _space.allTabs.firstObject;
+  if (first) [self showItem:first];
+  else {
+    _shown = nil;
+    [self layoutPanes];
+  }
+}
+
+- (void)selectSpaceAtIndex:(NSUInteger)index {
+  if (index < _spaces.count) [self switchToSpace:_spaces[index]];
+}
+
+- (NSArray<ArcSpace*>*)spaces { return _spaces; }
+- (ArcSpace*)currentSpace { return _space; }
+
+// A new Space shares the current Space's profile, so it starts signed in to the same accounts
+// (and shows the same Favorites), like Arc's default.
+- (ArcSpace*)createSpaceNamed:(NSString*)name {
+  ArcSpace* space = [ArcSpace new];
+  space.spaceID = NSUUID.UUID.UUIDString;
+  space.title = name.length ? name : @"New Space";
+  space.profileDirectory = _space.profileDirectory ?: @"Default";
+  space.pinned = NewSection(@"Pinned");
+  space.unpinned = NewSection(@"Today");
+  for (ArcSpace* s in _spaces)
+    if ([s.profileDirectory isEqualToString:space.profileDirectory] && s.favorites) space.favorites = s.favorites;
+  NSUInteger at = _space ? [_spaces indexOfObject:_space] + 1 : _spaces.count;
+  [_spaces insertObject:space atIndex:at];
+  [self rebuildSpacePicker];
+  [self switchToSpace:space];
+  [self scheduleSave];
+  return space;
+}
+
+- (void)renameSpace:(ArcSpace*)space to:(NSString*)name {
+  if (!space || !name.length) return;
+  space.title = name;
+  [self rebuildSpacePicker];
+  [self scheduleSave];
+}
+
+// Deleting a Space archives its Today and Pinned tabs (nothing is lost) and closes their web views.
+- (BOOL)deleteSpace:(ArcSpace*)space {
+  if (!space || _spaces.count < 2) return NO;
+  NSUInteger index = [_spaces indexOfObject:space];
+  if (index == NSNotFound) return NO;
+  NSMutableArray<ArcItem*>* owned = [NSMutableArray array];
+  NSMutableArray<ArcItem*>* stack = [NSMutableArray arrayWithObjects:space.pinned, space.unpinned, nil];
+  while (stack.count) {
+    ArcItem* item = stack.lastObject;
+    [stack removeLastObject];
+    if (item.url.length) [owned addObject:item];
+    [stack addObjectsFromArray:item.children];
+  }
+  for (ArcItem* item in owned) {
+    [self archiveItem:item space:space reason:@"spaceDeleted"];
+    [_splitItems removeObject:item];
+    [self unloadItem:item];
+  }
+  if (_splitItems.count < 2) _splitItems = nil;
+  [_spaces removeObjectAtIndex:index];
+  if (space == _space) {
+    _space = nil;
+    _shown = nil;
+    [self rebuildSpacePicker];
+    [self switchToSpace:_spaces[MIN(index, _spaces.count - 1)]];
+  } else {
+    [self rebuildSpacePicker];
+  }
+  [self scheduleSave];
+  return YES;
+}
+
+- (void)moveSpace:(ArcSpace*)space by:(NSInteger)delta {
+  NSInteger from = [_spaces indexOfObject:space];
+  NSInteger to = from + delta;
+  if (from == NSNotFound || to < 0 || to >= (NSInteger)_spaces.count) return;
+  [_spaces removeObjectAtIndex:from];
+  [_spaces insertObject:space atIndex:to];
+  [self rebuildSpacePicker];
+  [self scheduleSave];
+}
+
+- (NSString*)askForSpaceName:(NSString*)message initial:(NSString*)initial {
+  NSAlert* alert = [NSAlert new];
+  alert.messageText = message;
+  [alert addButtonWithTitle:@"OK"];
+  [alert addButtonWithTitle:@"Cancel"];
+  NSTextField* field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 260, 24)];
+  field.stringValue = initial ?: @"";
+  alert.accessoryView = field;
+  alert.window.initialFirstResponder = field;
+  if ([alert runModal] != NSAlertFirstButtonReturn) return nil;
+  return [field.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+}
+
+- (IBAction)newSpace:(id)sender {
+  NSString* name = [self askForSpaceName:@"New Space" initial:@""];
+  if (name) [self createSpaceNamed:name];
+}
+
+- (IBAction)renameCurrentSpace:(id)sender {
+  NSString* name = [self askForSpaceName:@"Rename Space" initial:_space.title];
+  if (name.length) [self renameSpace:_space to:name];
+}
+
+- (IBAction)deleteCurrentSpace:(id)sender {
+  if (_spaces.count < 2) {
+    NSBeep();
+    return;
+  }
+  NSAlert* alert = [NSAlert new];
+  alert.messageText = [NSString stringWithFormat:@"Delete \u201c%@\u201d?", _space.title];
+  alert.informativeText = @"Its tabs move to the Archive, so you can reopen them later.";
+  [alert addButtonWithTitle:@"Delete"];
+  [alert addButtonWithTitle:@"Cancel"];
+  alert.buttons.firstObject.hasDestructiveAction = YES;
+  if ([alert runModal] == NSAlertFirstButtonReturn) [self deleteSpace:_space];
+}
+
+- (IBAction)moveSpaceUp:(id)sender { [self moveSpace:_space by:-1]; }
+- (IBAction)moveSpaceDown:(id)sender { [self moveSpace:_space by:1]; }
+- (IBAction)nextSpace:(id)sender {
+  if (_spaces.count) [self selectSpaceAtIndex:([_spaces indexOfObject:_space] + 1) % _spaces.count];
+}
+- (IBAction)previousSpace:(id)sender {
+  if (_spaces.count) [self selectSpaceAtIndex:([_spaces indexOfObject:_space] + _spaces.count - 1) % _spaces.count];
+}
+- (IBAction)selectSpaceFromMenu:(NSMenuItem*)sender { [self selectSpaceAtIndex:sender.tag]; }
+
 #pragma mark Command bar and tab actions
 
 - (void)showCommandBarForNewTab:(BOOL)newTab {
@@ -1248,6 +1398,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
   for (ArcSpace* s in _spaces)
     if ([s.spaceID isEqualToString:tab.spaceID] && s != _space) {
       _space = s;
+      _splitItems = nil;
       [_spacePicker selectItemAtIndex:[_spaces indexOfObject:s]];
       [self reloadSidebar];
     }

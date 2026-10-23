@@ -114,6 +114,32 @@
       .keyEquivalentModifierMask = cs;
   splitItem.submenu = split;
 
+  NSMenuItem* spacesItem = [NSMenuItem new];
+  [bar addItem:spacesItem];
+  NSMenu* spacesMenu = [[NSMenu alloc] initWithTitle:@"Spaces"];
+  [spacesMenu addItemWithTitle:@"New Space..." action:@selector(newSpace:) keyEquivalent:@""];
+  [spacesMenu addItemWithTitle:@"Rename Space..." action:@selector(renameCurrentSpace:) keyEquivalent:@""];
+  [spacesMenu addItemWithTitle:@"Delete Space..." action:@selector(deleteCurrentSpace:) keyEquivalent:@""];
+  [spacesMenu addItem:[NSMenuItem separatorItem]];
+  [spacesMenu addItemWithTitle:@"Move Space Up" action:@selector(moveSpaceUp:) keyEquivalent:@""];
+  [spacesMenu addItemWithTitle:@"Move Space Down" action:@selector(moveSpaceDown:) keyEquivalent:@""];
+  [spacesMenu addItem:[NSMenuItem separatorItem]];
+  unichar left = NSLeftArrowFunctionKey, right = NSRightArrowFunctionKey;
+  [spacesMenu addItemWithTitle:@"Previous Space" action:@selector(previousSpace:)
+                 keyEquivalent:[NSString stringWithCharacters:&left length:1]]
+      .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  [spacesMenu addItemWithTitle:@"Next Space" action:@selector(nextSpace:)
+                 keyEquivalent:[NSString stringWithCharacters:&right length:1]]
+      .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  for (int i = 1; i <= 9; ++i) {
+    NSMenuItem* go = [spacesMenu addItemWithTitle:[NSString stringWithFormat:@"Go to Space %d", i]
+                                           action:@selector(selectSpaceFromMenu:)
+                                    keyEquivalent:[NSString stringWithFormat:@"%d", i]];
+    go.keyEquivalentModifierMask = NSEventModifierFlagControl;
+    go.tag = i - 1;
+  }
+  spacesItem.submenu = spacesMenu;
+
   NSMenuItem* histItem = [NSMenuItem new];
   [bar addItem:histItem];
   NSMenu* hist = [[NSMenu alloc] initWithTitle:@"History"];
@@ -311,6 +337,31 @@
       [w closePeek];
       std::printf("SELFTEST-PEEK afterClose=%d discardedInSidebar=%d\n", [w isPeeking],
                   [w tabWithURLPrefix:@"https://example.net/discarded"] != nil);
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 21 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSUInteger before = w.spaces.count;
+      ArcSpace* original = w.currentSpace;
+      ArcSpace* made = [w createSpaceNamed:@"SelfTest Space"];
+      BOOL switched = w.currentSpace == made;
+      BOOL sameProfile = [made.profileDirectory isEqualToString:original.profileDirectory];
+      [w openInNewTab:@"https://example.com/in-new-space"];
+      [w renameSpace:made to:@"SelfTest Renamed"];
+      NSUInteger idx = [w.spaces indexOfObject:made];
+      [w moveSpace:made by:-1];
+      BOOL moved = [w.spaces indexOfObject:made] == idx - 1;
+      [w selectSpaceAtIndex:0];
+      BOOL selectFirst = w.currentSpace == w.spaces.firstObject;
+      [w selectSpaceAtIndex:[w.spaces indexOfObject:made]];
+      NSUInteger archivedBefore = [w archivedTabs].count;
+      BOOL deleted = [w deleteSpace:made];
+      std::printf("SELFTEST-SPACES created=%d switched=%d sameProfile=%d renamed=%d moved=%d selectFirst=%d "
+                  "deleted=%d count=%lu->%lu archivedOnDelete=%ld lastReason=%s\n",
+                  made != nil, switched, sameProfile, [made.title isEqualToString:@"SelfTest Renamed"], moved,
+                  selectFirst, deleted, (unsigned long)before, (unsigned long)w.spaces.count,
+                  (long)([w archivedTabs].count - archivedBefore),
+                  ((ArchivedTab*)[w archivedTabs].lastObject).reason.UTF8String);
+      [w saveSidebarNow];
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 19 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
