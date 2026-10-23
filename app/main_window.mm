@@ -1535,6 +1535,15 @@ static const CGFloat kPaneGap = 6;
       onClose:^(LittleWindowController* lw, NSString* closedURL, NSString* title, BOOL moved) {
         [weakSelf littleWindowClosed:lw url:closedURL title:title moved:moved space:space];
       }];
+  NSMutableArray* names = [NSMutableArray array];
+  for (ArcSpace* sp in _spaces) [names addObject:sp.title ?: @"Space"];
+  little.spaceNames = names;
+  little.onMoveToSpace = ^(NSString* movedURL, NSUInteger i) {
+    MainWindowController* me = weakSelf;
+    if (!me || i >= me->_spaces.count) return;
+    if (me->_spaces[i] != me->_space) [me switchToSpace:me->_spaces[i]];
+    [me openInNewTab:movedURL];
+  };
   if (!_littleWindows) _littleWindows = [NSMutableArray array];
   [_littleWindows addObject:little];
   [little showWindow:nil];
@@ -1581,6 +1590,9 @@ static const CGFloat kPaneGap = 6;
 
 - (void)setLittleWindowLastUsed:(NSDate*)date index:(NSUInteger)index {
   if (index < _littleWindows.count) _littleWindows[index].lastUsedAt = date;
+}
+- (void)moveLittleWindow:(NSUInteger)index toSpaceAtIndex:(NSUInteger)spaceIndex {
+  if (index < _littleWindows.count) [_littleWindows[index] openInSpaceAtIndex:spaceIndex];
 }
 - (void)moveLittleWindowToMain:(NSUInteger)index {
   if (index < _littleWindows.count) [_littleWindows[index] openInMainWindow:nil];
