@@ -128,6 +128,7 @@
   [view addItemWithTitle:@"Show Toolbar" action:@selector(toggleToolbar:) keyEquivalent:@"s"]
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Hide Space Header" action:@selector(toggleSpaceHeader:) keyEquivalent:@""];
+  [view addItemWithTitle:@"Reset Site Permissions" action:@selector(resetSitePermissions:) keyEquivalent:@""];
   [view addItemWithTitle:@"Mute / Unmute Tab" action:@selector(toggleMuteCurrentTab:) keyEquivalent:@"m"]
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Focus Mode" action:@selector(toggleFocusMode:) keyEquivalent:@"F"]
@@ -910,6 +911,51 @@
                     first, tab, space, action, history, top, switched, learned);
       });
     });
+    // Site prompts: notification permission asked once, remembered; mic denied (never reaches macOS);
+    // a mailto: link asks before opening Mail and is cancelled.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 70 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openInNewTab:@"https://example.org/site-prompts"];
+      ArcItem* t = w.shownItem;
+      __block NSString* firstPrompt = nil, *micPrompt = nil, *mailPrompt = nil;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w showItem:t];
+        [w resetSitePermissions:nil];  // the SelfTest profile keeps Chromium's answers between runs
+        [w runJS:@"Notification.requestPermission().then(r => document.title = 'n1:' + r)" inItem:t];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          firstPrompt = w.pendingSitePrompt;
+          [w answerSitePrompt:YES remember:YES];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            NSString* t1 = t.liveTitle;
+            BOOL remembered = [[w sitePermissionsForOrigin:@"https://example.org"][@"notifications"] boolValue];
+            [w runJS:@"document.title='mic:start'; navigator.mediaDevices.getUserMedia({audio:true}).then(() => document.title='mic:yes', e => document.title='mic:' + e.name)"
+              inItem:t];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+              micPrompt = w.pendingSitePrompt;
+              [w answerSitePrompt:NO remember:NO];
+              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                NSString* t2 = t.liveTitle;
+                [w runJS:@"location.href = 'mailto:selftest@example.com'" inItem:t];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                  mailPrompt = w.pendingSitePrompt;
+                  [w answerSitePrompt:NO remember:NO];
+                  [w showItem:t];
+                  [w resetSitePermissions:nil];
+                  BOOL reset = [w sitePermissionsForOrigin:@"https://example.org"].count == 0;
+                  std::printf("SELFTEST-SITEPROMPT asked=%d granted=%d remembered=%d micAsked=%d micDenied=%d mailAsked=%d reset=%d\n",
+                              [firstPrompt hasPrefix:@"notifications:https://example.org"], [t1 isEqualToString:@"n1:granted"],
+                              remembered, [micPrompt hasPrefix:@"microphone:"], [t2 isEqualToString:@"mic:NotAllowedError"],
+                              [mailPrompt hasPrefix:@"open:mailto"], reset);
+                  if (getenv("NOTARC_PROMPT_DEBUG"))
+                    std::printf("PROMPT-DEBUG %s | %s | %s | %s | %s | url=%s\n", firstPrompt.UTF8String ?: "-", t1.UTF8String ?: "-",
+                                micPrompt.UTF8String ?: "-", t2.UTF8String ?: "-", mailPrompt.UTF8String ?: "-", t.url.UTF8String ?: "-");
+                });
+              });
+            });
+          });
+        });
+      });
+    });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 34 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
@@ -1236,10 +1282,12 @@ int main(int argc, char* argv[]) {
   std::vector<char*> args(argv, argv + argc);
   static char mockKeychain[] = "--use-mock-keychain";
   static char autoplay[] = "--autoplay-policy=no-user-gesture-required";  // media test plays without a click
+  static char fakeDevices[] = "--use-fake-device-for-media-stream";  // site-prompt test never touches a real mic
   for (int i = 1; i < argc; ++i)
     if (std::string(argv[i]) == "--selftest" || std::string(argv[i]) == "--selftest-reload") {
       args.push_back(mockKeychain);
       args.push_back(autoplay);
+      args.push_back(fakeDevices);
       break;
     }
   args.push_back(nullptr);

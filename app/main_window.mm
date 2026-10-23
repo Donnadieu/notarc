@@ -211,6 +211,8 @@ static const NSUInteger kMaxSuggestions = 8;
   LittleWindowController* _peek;
   NSView* _toast;
   NSView* _toolbar;
+  NSMutableArray<NSDictionary*>* _sitePrompts;  // queue; first one is showing
+  NSAlert* _siteAlert;
   NSTextField* _address;
   NSTimer* _toastTimer;
   NSString* _lastClosedPeekURL;
@@ -665,6 +667,13 @@ NSString* CleanLinkURL(NSString* url) {
   _client->set_renderer_callback([weakSelf](int browserId, int kind, int status) {
     [weakSelf browser:browserId rendererEvent:kind status:status];
   });
+  _client->set_permission_callback([weakSelf](int browserId, int requestId, const std::string& origin, uint32_t perms) {
+    [weakSelf browser:browserId permissionRequest:requestId origin:[NSString stringWithUTF8String:origin.c_str()]
+                 bits:perms];
+  });
+  _client->set_external_callback([weakSelf](int browserId, const std::string& url) {
+    [weakSelf browser:browserId externalURL:[NSString stringWithUTF8String:url.c_str()]];
+  });
   _client->set_find_callback([weakSelf](int browserId, int count, int active) {
     [weakSelf findResult:count active:active];
   });
@@ -965,6 +974,174 @@ static NSString* const kMediaResumeJS =
   }
   if (item == _hungItem) [self dismissHungSheet];
   if (kind == 0) [self showCrashedViewFor:item status:status];
+}
+
+// ---- Site prompts ---------------------------------------------------------------------------------
+static NSArray<NSArray*>* PermissionNames() {
+  return @[
+    @[ @(CEF_PERMISSION_TYPE_CAMERA_STREAM), @"camera", @"use your camera" ],
+    @[ @(CEF_PERMISSION_TYPE_MIC_STREAM), @"microphone", @"use your microphone" ],
+    @[ @(CEF_PERMISSION_TYPE_GEOLOCATION), @"location", @"know your location" ],
+    @[ @(CEF_PERMISSION_TYPE_NOTIFICATIONS), @"notifications", @"show notifications" ],
+    @[ @(CEF_PERMISSION_TYPE_CLIPBOARD), @"clipboard", @"see text and images you copy" ],
+    @[ @(CEF_PERMISSION_TYPE_MIDI_SYSEX), @"midi", @"control your MIDI devices" ],
+    @[ @(CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS), @"downloads", @"download multiple files" ],
+    @[ @(CEF_PERMISSION_TYPE_WINDOW_MANAGEMENT), @"windows", @"manage windows on your displays" ],
+    @[ @(CEF_PERMISSION_TYPE_LOCAL_FONTS), @"fonts", @"use the fonts on your Mac" ],
+    @[ @(CEF_PERMISSION_TYPE_IDLE_DETECTION), @"idle", @"know when you're using your Mac" ],
+    @[ @(CEF_PERMISSION_TYPE_STORAGE_ACCESS), @"storage", @"use its cookies on other sites" ],
+    @[ @(CEF_PERMISSION_TYPE_TOP_LEVEL_STORAGE_ACCESS), @"storage", @"use its cookies on other sites" ],
+    @[ @(CEF_PERMISSION_TYPE_PROTECTED_MEDIA_IDENTIFIER), @"drm", @"play protected content" ],
+    @[ @(CEF_PERMISSION_TYPE_KEYBOARD_LOCK), @"keyboard", @"capture keyboard shortcuts" ],
+    @[ @(CEF_PERMISSION_TYPE_POINTER_LOCK), @"pointer", @"lock your pointer" ],
+    @[ @(CEF_PERMISSION_TYPE_LOCAL_NETWORK), @"network", @"reach devices on your local network" ],
+    @[ @(CEF_PERMISSION_TYPE_SENSORS), @"sensors", @"use motion sensors" ],
+  ];
+}
+
+static NSString* OriginKey(NSString* origin) {
+  NSURL* u = [NSURL URLWithString:origin];
+  if (!u.host.length) return origin ?: @"";
+  return u.port ? [NSString stringWithFormat:@"%@://%@:%@", u.scheme, u.host, u.port] : [NSString stringWithFormat:@"%@://%@", u.scheme, u.host];
+}
+
+- (NSDictionary*)sitePermissionsForOrigin:(NSString*)origin {
+  return SettingObject(kSettingSitePermissions)[OriginKey(origin)] ?: @{};
+}
+
+- (void)rememberSite:(NSString*)origin names:(NSArray<NSString*>*)names allow:(BOOL)allow {
+  NSMutableDictionary* all = [SettingObject(kSettingSitePermissions) mutableCopy] ?: [NSMutableDictionary dictionary];
+  NSMutableDictionary* site = [all[OriginKey(origin)] mutableCopy] ?: [NSMutableDictionary dictionary];
+  for (NSString* n in names) site[n] = @(allow);
+  all[OriginKey(origin)] = site;
+  SettingSetObject(kSettingSitePermissions, all);
+}
+
+- (void)browser:(int)browserId permissionRequest:(int)requestId origin:(NSString*)origin bits:(uint32_t)bits {
+  NSMutableArray* names = [NSMutableArray array], *phrases = [NSMutableArray array];
+  for (NSArray* p in PermissionNames())
+    if ((bits & [p[0] unsignedIntValue]) && ![names containsObject:p[1]]) {
+      [names addObject:p[1]];
+      [phrases addObject:p[2]];
+    }
+  if (!names.count) {  // something we don't know how to describe: refuse quietly, like Chrome's default
+    _client->ResolvePermission(requestId, false);
+    return;
+  }
+  // Remembered answers: any remembered "no" refuses, all remembered "yes" allows.
+  NSDictionary* saved = [self sitePermissionsForOrigin:origin];
+  BOOL allKnown = YES;
+  for (NSString* n in names) {
+    if (saved[n] && ![saved[n] boolValue]) {
+      _client->ResolvePermission(requestId, false);
+      return;
+    }
+    if (!saved[n]) allKnown = NO;
+  }
+  if (allKnown) {
+    _client->ResolvePermission(requestId, true);
+    return;
+  }
+  NSString* list = phrases.count == 1 ? phrases[0]
+                 : [[[phrases subarrayWithRange:NSMakeRange(0, phrases.count - 1)] componentsJoinedByString:@", "]
+                       stringByAppendingFormat:@" and %@", phrases.lastObject];
+  [self queueSitePrompt:@{ @"type" : @"permission", @"id" : @(requestId), @"origin" : origin ?: @"", @"names" : names,
+                           @"title" : [NSString stringWithFormat:@"%@ wants to %@", [NSURL URLWithString:origin].host ?: origin, list],
+                           @"allow" : @"Allow", @"deny" : @"Don't Allow" }];
+}
+
+- (void)browser:(int)browserId externalURL:(NSString*)url {
+  NSURL* u = [NSURL URLWithString:url];
+  NSURL* app = u ? [NSWorkspace.sharedWorkspace URLForApplicationToOpenURL:u] : nil;
+  if (!app) return;  // nothing on this Mac opens it; Chromium shows nothing either
+  ArcItem* item = [self itemForBrowserId:browserId];
+  NSString* origin = item.url.length ? OriginKey(item.url) : @"";
+  NSString* name = [@"open:" stringByAppendingString:u.scheme.lowercaseString ?: @""];
+  NSNumber* saved = [self sitePermissionsForOrigin:origin][name];
+  if (saved) {
+    if (saved.boolValue) [NSWorkspace.sharedWorkspace openURL:u];
+    return;
+  }
+  NSString* appName = [NSFileManager.defaultManager displayNameAtPath:app.path].stringByDeletingPathExtension;
+  NSString* host = [NSURL URLWithString:origin].host;
+  [self queueSitePrompt:@{ @"type" : @"external", @"url" : url, @"origin" : origin, @"names" : @[ name ],
+                           @"title" : [NSString stringWithFormat:@"Open %@?", appName],
+                           @"detail" : host.length ? [NSString stringWithFormat:@"%@ wants to open this link in %@.", host, appName]
+                                                   : [NSString stringWithFormat:@"This link opens in %@.", appName],
+                           @"allow" : [@"Open " stringByAppendingString:appName], @"deny" : @"Cancel" }];
+}
+
+- (void)queueSitePrompt:(NSDictionary*)prompt {
+  if (!_sitePrompts) _sitePrompts = [NSMutableArray array];
+  [_sitePrompts addObject:prompt];
+  if (_sitePrompts.count == 1) [self showNextSitePrompt];
+}
+
+- (void)showNextSitePrompt {
+  NSDictionary* p = _sitePrompts.firstObject;
+  if (!p || _siteAlert) return;
+  if (_hungAlert || self.window.attachedSheet) {  // wait for the other sheet
+    __weak MainWindowController* weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ [weakSelf showNextSitePrompt]; });
+    return;
+  }
+  NSAlert* a = [NSAlert new];
+  a.messageText = p[@"title"];
+  if (p[@"detail"]) a.informativeText = p[@"detail"];
+  [a addButtonWithTitle:p[@"allow"]];
+  [a addButtonWithTitle:p[@"deny"]];
+  a.showsSuppressionButton = YES;
+  a.suppressionButton.title = @"Remember for this site";
+  _siteAlert = a;
+  __weak MainWindowController* weakSelf = self;
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    MainWindowController* me = weakSelf;
+    if (!me || me->_siteAlert != a) return;
+    [me finishSitePrompt:r == NSAlertFirstButtonReturn remember:a.suppressionButton.state == NSControlStateValueOn];
+  }];
+}
+
+- (void)finishSitePrompt:(BOOL)allow remember:(BOOL)remember {
+  NSDictionary* p = _sitePrompts.firstObject;
+  _siteAlert = nil;
+  if (!p) return;
+  [_sitePrompts removeObjectAtIndex:0];
+  if (remember) [self rememberSite:p[@"origin"] names:p[@"names"] allow:allow];
+  if ([p[@"type"] isEqualToString:@"permission"]) _client->ResolvePermission([p[@"id"] intValue], allow);
+  else if (allow) [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:p[@"url"]]];
+  [self showNextSitePrompt];
+}
+
+- (NSString*)pendingSitePrompt {
+  NSDictionary* p = _siteAlert ? _sitePrompts.firstObject : nil;
+  return p ? [NSString stringWithFormat:@"%@:%@", [p[@"names"] componentsJoinedByString:@","], p[@"origin"]] : nil;
+}
+
+- (void)answerSitePrompt:(BOOL)allow remember:(BOOL)remember {
+  NSAlert* a = _siteAlert;
+  if (!a) return;
+  _siteAlert = nil;  // completion handler sees a stale alert and does nothing
+  [self.window endSheet:a.window];
+  _siteAlert = a;
+  [self finishSitePrompt:allow remember:remember];
+}
+
+- (IBAction)resetSitePermissions:(id)sender {
+  // item.url is the committed address (a pending mailto:/app link never replaces it).
+  NSString* origin = _shown.url.length ? OriginKey(_shown.url) : nil;
+  if (!origin.length) return;
+  NSMutableDictionary* all = [SettingObject(kSettingSitePermissions) mutableCopy];
+  [all removeObjectForKey:origin];
+  SettingSetObject(kSettingSitePermissions, all ?: @{});
+  // Chromium also keeps its own copy of granted permissions in the Space's profile; clear that too.
+  auto it = _browsers.find(_shown.browserId);
+  if (it == _browsers.end()) return;
+  CefRefPtr<CefRequestContext> ctx = it->second->GetHost()->GetRequestContext();
+  CefString o([origin stringByAppendingString:@"/"].UTF8String);
+  for (cef_content_setting_types_t type :
+       {CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS, CEF_CONTENT_SETTING_TYPE_GEOLOCATION, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC,
+        CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA, CEF_CONTENT_SETTING_TYPE_CLIPBOARD_READ_WRITE})
+    ctx->SetContentSetting(o, o, type, CEF_CONTENT_SETTING_VALUE_DEFAULT);
 }
 
 - (void)showCrashedViewFor:(ArcItem*)item status:(int)status {

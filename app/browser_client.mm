@@ -4,6 +4,8 @@
 #include <cstdio>
 
 #include "include/cef_app.h"
+#include "include/wrapper/cef_closure_task.h"
+#include "include/base/cef_callback.h"
 #include "include/wrapper/cef_helpers.h"
 
 BrowserClient::BrowserClient(TitleCallback on_title, UrlCallback on_url)
@@ -166,4 +168,68 @@ void BrowserClient::ResolveHung(int browser_id, bool kill) {
   hung_.erase(it);
   if (kill) cb->Terminate();
   else cb->Wait();
+}
+
+bool BrowserClient::OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
+                                                   const CefString& origin, uint32_t requested,
+                                                   CefRefPtr<CefMediaAccessCallback> callback) {
+  CEF_REQUIRE_UI_THREAD();
+  if (!on_permission_) return false;
+  uint32_t perms = 0;
+  if (requested & (CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE))
+    perms |= CEF_PERMISSION_TYPE_CAMERA_STREAM;
+  if (requested & (CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE))
+    perms |= CEF_PERMISSION_TYPE_MIC_STREAM;
+  int id = next_permission_id_++;
+  PendingPermission p;
+  p.media = callback;
+  p.media_bits = requested;
+  pending_permissions_[id] = p;
+  on_permission_(browser->GetIdentifier(), id, origin.ToString(), perms);
+  return true;
+}
+
+bool BrowserClient::OnShowPermissionPrompt(CefRefPtr<CefBrowser> browser, uint64_t prompt_id, const CefString& origin,
+                                           uint32_t requested, CefRefPtr<CefPermissionPromptCallback> callback) {
+  CEF_REQUIRE_UI_THREAD();
+  if (!on_permission_) return false;
+  int id = next_permission_id_++;
+  PendingPermission p;
+  p.prompt = callback;
+  p.prompt_id = prompt_id;
+  pending_permissions_[id] = p;
+  on_permission_(browser->GetIdentifier(), id, origin.ToString(), requested);
+  return true;
+}
+
+void BrowserClient::OnDismissPermissionPrompt(CefRefPtr<CefBrowser>, uint64_t prompt_id, cef_permission_request_result_t) {
+  CEF_REQUIRE_UI_THREAD();
+  for (auto it = pending_permissions_.begin(); it != pending_permissions_.end(); ++it)
+    if (it->second.prompt && it->second.prompt_id == prompt_id) {
+      pending_permissions_.erase(it);  // Chromium gave up on it (page closed or navigated)
+      return;
+    }
+}
+
+void BrowserClient::ResolvePermission(int request_id, bool allow) {
+  auto it = pending_permissions_.find(request_id);
+  if (it == pending_permissions_.end()) return;
+  PendingPermission p = it->second;
+  pending_permissions_.erase(it);
+  if (p.media) {
+    if (allow) p.media->Continue(p.media_bits);
+    else p.media->Cancel();
+  } else if (p.prompt) {
+    p.prompt->Continue(allow ? CEF_PERMISSION_RESULT_ACCEPT : CEF_PERMISSION_RESULT_DENY);
+  }
+}
+
+void BrowserClient::OnProtocolExecution(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>, CefRefPtr<CefRequest> request,
+                                        bool& allow_os_execution) {
+  allow_os_execution = false;  // NotArc asks first and opens it itself
+  if (!browser || !on_external_) return;
+  int id = browser->GetIdentifier();
+  std::string url = request->GetURL().ToString();
+  ExternalCallback cb = on_external_;
+  CefPostTask(TID_UI, base::BindOnce([](ExternalCallback cb, int id, std::string url) { cb(id, url); }, cb, id, url));
 }
