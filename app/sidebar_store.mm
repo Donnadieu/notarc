@@ -22,6 +22,7 @@ static NSDictionary* EncodeItem(ArcItem* item) {
   if (item.liveTitle.length) d[@"savedTitle"] = item.liveTitle;
   if (item.url.length) d[@"url"] = item.url;
   if (item.pinnedURL.length) d[@"pinnedURL"] = item.pinnedURL;
+  if (item.browserId) d[@"open"] = @YES;
   if (item.lastActiveAt) d[@"lastActiveAt"] = @(item.lastActiveAt.timeIntervalSinceReferenceDate);
   d[@"folder"] = @(item.isFolder);
   if (item.isSplit) {
@@ -45,6 +46,7 @@ static ArcItem* DecodeItem(NSDictionary* d, int depth) {
   if ([d[@"pinnedURL"] isKindOfClass:NSString.class]) item.pinnedURL = d[@"pinnedURL"];
   if ([d[@"lastActiveAt"] isKindOfClass:NSNumber.class])
     item.lastActiveAt = [NSDate dateWithTimeIntervalSinceReferenceDate:[d[@"lastActiveAt"] doubleValue]];
+  item.wasOpen = [d[@"open"] boolValue];
   item.isFolder = [d[@"folder"] boolValue];
   item.isSplit = [d[@"split"] boolValue];
   item.splitHorizontal = [d[@"horizontal"] boolValue];
@@ -94,6 +96,7 @@ NSArray<ArcSpace*>* SidebarStoreLoad(NSString* path, NSString** focusedSpaceID, 
     if ([s[@"themeColors"] isKindOfClass:NSArray.class]) space.themeColors = s[@"themeColors"];
     space.themeIntensity = [s[@"themeIntensity"] respondsToSelector:@selector(doubleValue)] ? [s[@"themeIntensity"] doubleValue] : 0.5;
     if ([s[@"icon"] isKindOfClass:NSString.class]) space.iconEmoji = s[@"icon"];
+    if ([s[@"shown"] isKindOfClass:NSString.class]) space.shownItemID = s[@"shown"];
     if (s[@"favorites"]) {
       ArcItem* fav = sharedFavorites[space.profileDirectory] ?: Section(DecodeItem(s[@"favorites"], 0), @"Favorites");
       sharedFavorites[space.profileDirectory] = fav;
@@ -118,6 +121,7 @@ BOOL SidebarStoreSave(NSArray<ArcSpace*>* spaces, NSString* focusedSpaceID, NSSt
       s[@"themeIntensity"] = @(space.themeIntensity);
     }
     if (space.iconEmoji.length) s[@"icon"] = space.iconEmoji;
+    if (space.shownItemID.length) s[@"shown"] = space.shownItemID;
     if (space.favorites) s[@"favorites"] = EncodeItem(space.favorites);
     s[@"pinned"] = EncodeItem(space.pinned);
     s[@"today"] = EncodeItem(space.unpinned);
@@ -134,4 +138,22 @@ BOOL SidebarStoreSave(NSArray<ArcSpace*>* spaces, NSString* focusedSpaceID, NSSt
   [[NSFileManager defaultManager] createDirectoryAtPath:path.stringByDeletingLastPathComponent
                             withIntermediateDirectories:YES attributes:nil error:nil];
   return [bytes writeToFile:path options:NSDataWritingAtomic error:error];  // atomic: no half-written file
+}
+
+static NSString* SessionMarkerPath(BOOL selfTest) {
+  return [SidebarStorePath(selfTest).stringByDeletingLastPathComponent
+      stringByAppendingPathComponent:selfTest ? @"SelfTestSession.running" : @"Session.running"];
+}
+
+BOOL SessionMarkerBegin(BOOL selfTest) {
+  NSString* path = SessionMarkerPath(selfTest);
+  BOOL crashed = [[NSFileManager defaultManager] fileExistsAtPath:path];
+  [[NSFileManager defaultManager] createDirectoryAtPath:path.stringByDeletingLastPathComponent
+                            withIntermediateDirectories:YES attributes:nil error:nil];
+  [[NSData data] writeToFile:path atomically:YES];
+  return crashed;
+}
+
+void SessionMarkerEnd(BOOL selfTest) {
+  [[NSFileManager defaultManager] removeItemAtPath:SessionMarkerPath(selfTest) error:nil];
 }

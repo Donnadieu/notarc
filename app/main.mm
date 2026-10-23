@@ -282,6 +282,10 @@
     std::fprintf(stderr, "imported %lu archived tabs from Arc\n", (unsigned long)imported.count);
     if (self.selfTest) std::printf("SELFTEST-ARCIMPORT archived=%lu\n", (unsigned long)imported.count);
   }
+  BOOL crashedLastTime = SessionMarkerBegin(self.selfTest);
+  if (self.selfTest && !self.selfTestReload) crashedLastTime = NO;  // phase 1 starts clean
+  if (crashedLastTime) std::fprintf(stderr, "NotArc didn't quit cleanly last time; reopening open tabs\n");
+  self.window.restoreOpenTabs = crashedLastTime;
   [self.window saveSidebarNow];  // first launch: persist the import immediately
   [self.window showWindow:nil];
   [self.window createBrowsers];
@@ -295,6 +299,21 @@
   if (self.selfTest) {
     [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
     if (!self.selfTestReload) [self runSelfTestActions];
+    if (self.selfTestReload) {
+      // Phase 2 (run by scripts/test-session-restore.sh): report what came back, then quit cleanly.
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        MainWindowController* w = self.window;
+        std::printf("SELFTEST-RESTORE crashedLastTime=%d restored=%lu live=%lu shown=%s\n", crashedLastTime,
+                    (unsigned long)w.restoredTabCount, (unsigned long)w.liveTabCount, w.shownItem.url.UTF8String ?: "-");
+        std::fflush(stdout);
+        [NSApp terminate:nil];
+      });
+    }
+    if (!self.selfTestReload)
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 165 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [self.window openInNewTab:@"https://example.org/session-restore-marker"];
+        [self.window saveSidebarNow];
+      });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 170 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       for (NSDictionary* tab in [self.window tabSnapshot])
         std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
@@ -1146,6 +1165,7 @@ int main(int argc, char* argv[]) {
     [delegate performSelectorOnMainThread:@selector(start) withObject:nil waitUntilDone:NO];
 
     CefRunMessageLoop();
+    SessionMarkerEnd(selfTest);  // reached only on a clean quit; a crash or force-quit leaves the marker
     CefShutdown();
   }
   return 0;

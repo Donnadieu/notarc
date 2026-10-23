@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-28 done, 15 partial, 37 not started or out of scope, of 80 items.
+29 done, 14 partial, 37 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -102,7 +102,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] DevTools (show/hide), developer mode (partial: DevTools done)
 - [ ] Set as default browser, open links from other apps (partial: registers as a browser and opens links from other apps; no in-app "make default" prompt)
 - [ ] Context menus (page, link, image, sidebar) (partial: sidebar menu and NotArc link actions done; image actions are Chromium defaults)
-- [ ] Sad tab / crash recovery, session restore (partial: crashed tabs show "This page crashed" with Reload and a warning icon in the sidebar; sidebar restore; reopening pages after an app crash missing)
+- [x] Sad tab / crash recovery, session restore (crashed-tab Reload view; each Space reopens on its last tab; after an app crash or force-quit the open tabs are reloaded)
 - [ ] Settings window (all preferences) (partial: search engine, auto-archive, Peek and Little Window link options; profiles, appearance, Max and advanced panes missing)
 - [ ] Keyboard shortcuts with user overrides (missing)
 - [ ] App icon choice, sound effects, toasts (missing)

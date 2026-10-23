@@ -10,3 +10,8 @@ NSString* SidebarStorePath(BOOL selfTest);
 // Returns nil when no store exists yet (caller falls back to the Arc import).
 NSArray<ArcSpace*>* SidebarStoreLoad(NSString* path, NSString** focusedSpaceID, NSError** error);
 BOOL SidebarStoreSave(NSArray<ArcSpace*>* spaces, NSString* focusedSpaceID, NSString* path, NSError** error);
+
+// Session marker: created at launch, removed on a clean quit. Still there at the next launch = NotArc
+// crashed or was force-quit last time. SessionMarkerBegin returns YES in that case.
+BOOL SessionMarkerBegin(BOOL selfTest);
+void SessionMarkerEnd(BOOL selfTest);
