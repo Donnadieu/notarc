@@ -63,3 +63,26 @@ bool BrowserClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefF
   if (!navigation_filter_ || !user_gesture || is_redirect || !frame->IsMain()) return false;
   return navigation_filter_(browser->GetIdentifier(), request->GetURL().ToString());
 }
+
+static bool IsTabOrWindowDisposition(cef_window_open_disposition_t d) {
+  return d == CEF_WOD_NEW_FOREGROUND_TAB || d == CEF_WOD_NEW_BACKGROUND_TAB || d == CEF_WOD_NEW_WINDOW;
+}
+
+bool BrowserClient::OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                     const CefString& target_url, WindowOpenDisposition target_disposition,
+                                     bool user_gesture) {
+  CEF_REQUIRE_UI_THREAD();
+  if (!on_open_ || !IsTabOrWindowDisposition(target_disposition)) return false;
+  return on_open_(browser->GetIdentifier(), target_url.ToString(), target_disposition, user_gesture);
+}
+
+bool BrowserClient::OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int popup_id,
+                                  const CefString& target_url, const CefString& target_frame_name,
+                                  WindowOpenDisposition target_disposition, bool user_gesture,
+                                  const CefPopupFeatures& popupFeatures, CefWindowInfo& windowInfo,
+                                  CefRefPtr<CefClient>& client, CefBrowserSettings& settings,
+                                  CefRefPtr<CefDictionaryValue>& extra_info, bool* no_javascript_access) {
+  CEF_REQUIRE_UI_THREAD();
+  if (!on_open_ || !IsTabOrWindowDisposition(target_disposition)) return false;  // NEW_POPUP stays a popup
+  return on_open_(browser->GetIdentifier(), target_url.ToString(), target_disposition, user_gesture);
+}
