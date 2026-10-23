@@ -74,7 +74,8 @@ NSString* CleanLinkURL(NSString* url);
 - (void)openLittleWindow:(NSString*)input;
 - (IBAction)newLittleWindow:(id)sender;
 - (NSUInteger)littleWindowCount;                 // tests
-- (void)moveLittleWindowToMain:(NSUInteger)index;  // tests: same as its "Open in NotArc" button
+- (void)moveLittleWindowToMain:(NSUInteger)index;
+- (void)moveLittleWindow:(NSUInteger)index toSpaceAtIndex:(NSUInteger)spaceIndex;  // tests: its Move to Space menu  // tests: same as its "Open in NotArc" button
 - (void)closeLittleWindow:(NSUInteger)index;       // tests
 
 // Links asking for a new tab/window: Shift-click (disposition NEW_WINDOW) opens Peek from any tab, like

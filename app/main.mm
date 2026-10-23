@@ -796,6 +796,28 @@
       std::printf("SELFTEST-MULTI selected=%d links=%d markdown=%d folder=%d archived=%d\n", selected, linksOK, md,
                   folderOK, archived);
     });
+    // Little Window -> another Space via its Move to Space menu.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 62 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      ArcSpace* start = w.currentSpace;
+      NSUInteger target = NSNotFound;
+      for (NSUInteger i = 0; i < w.spaces.count; ++i)
+        if (w.spaces[i] != start && target == NSNotFound) target = i;
+      if (target == NSNotFound) { std::printf("SELFTEST-LITTLESPACE skipped=1\n"); return; }
+      [w openLittleWindow:@"https://example.com/little-to-space"];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        NSUInteger before = w.littleWindowCount, archivedBefore = w.archivedTabs.count;
+        [w moveLittleWindow:before - 1 toSpaceAtIndex:target];
+        ArcSpace* dest = w.spaces[target];
+        BOOL there = NO;
+        for (ArcItem* t in dest.unpinned.children)
+          if ([t.url hasPrefix:@"https://example.com/little-to-space"]) there = YES;
+        BOOL switched = w.currentSpace == dest;
+        BOOL closed = w.littleWindowCount == before - 1 && w.archivedTabs.count == archivedBefore;
+        [w switchToSpace:start];
+        std::printf("SELFTEST-LITTLESPACE inOtherSpace=%d switched=%d closedNotArchived=%d\n", there, switched, closed);
+      });
+    });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 34 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;

@@ -6,6 +6,7 @@
 static const CGFloat kToolbarHeight = 34;
 
 @implementation LittleWindowController {
+  NSPopUpButton* _spaceMenu;
   CefRefPtr<BrowserClient> _client;
   CefRefPtr<CefBrowser> _browser;
   NSView* _webContainer;
@@ -59,6 +60,11 @@ static const CGFloat kToolbarHeight = 34;
   open.autoresizingMask = NSViewMinXMargin;
   open.bezelStyle = NSBezelStyleRounded;
   [toolbar addSubview:open];
+  _spaceMenu = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(b.size.width - 140 - 44, 4, 40, 26) pullsDown:YES];
+  _spaceMenu.autoresizingMask = NSViewMinXMargin;
+  _spaceMenu.toolTip = @"Move to Space";
+  _spaceMenu.hidden = YES;
+  [toolbar addSubview:_spaceMenu];
   [root addSubview:toolbar];
 
   _webContainer = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, b.size.width, b.size.height - kToolbarHeight)];
@@ -120,6 +126,30 @@ static const CGFloat kToolbarHeight = 34;
 }
 
 - (NSString*)pageTitle { return _pageTitle ?: self.currentURL; }
+
+- (void)setSpaceNames:(NSArray<NSString*>*)names {
+  _spaceNames = [names copy];
+  [_spaceMenu removeAllItems];
+  [_spaceMenu addItemWithTitle:@""];  // pull-down title slot
+  _spaceMenu.itemArray.firstObject.image = [NSImage imageWithSystemSymbolName:@"rectangle.stack" accessibilityDescription:@"Move to Space"];
+  for (NSUInteger i = 0; i < names.count; ++i) {
+    NSMenuItem* mi = [_spaceMenu.menu addItemWithTitle:[@"Move to " stringByAppendingString:names[i]]
+                                                action:@selector(spaceChosen:) keyEquivalent:@""];
+    mi.target = self;
+    mi.tag = (NSInteger)i;
+  }
+  _spaceMenu.hidden = names.count < 2;
+}
+
+- (void)spaceChosen:(NSMenuItem*)sender { [self openInSpaceAtIndex:(NSUInteger)sender.tag]; }
+
+- (void)openInSpaceAtIndex:(NSUInteger)index {
+  NSString* url = self.currentURL;
+  if (!_onMoveToSpace || !url.length || index >= _spaceNames.count) return;
+  _moved = YES;
+  _onMoveToSpace(url, index);
+  [self.window close];
+}
 
 - (IBAction)openInMainWindow:(id)sender {
   NSString* url = self.currentURL;
