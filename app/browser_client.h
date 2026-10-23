@@ -94,6 +94,13 @@ class BrowserClient : public CefClient,
                    const CefString& error_text,
                    const CefString& failed_url) override;
 
+  // Pages report media state with console.log("__notarc_media__:<state>"); those lines are swallowed and
+  // passed here instead (state: "playing", "paused" or "none").
+  using MediaCallback = std::function<void(int browser_id, const std::string& state, const std::string& title)>;
+  void set_media_callback(MediaCallback cb) { on_media_ = std::move(cb); }
+  bool OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t level, const CefString& message,
+                        const CefString& source, int line) override;
+
   int open_browser_count() const { return open_browsers_; }
   // Closing individual tabs must not quit the app; only quit once the window is shutting down.
   void set_quit_when_empty(bool quit) { quit_when_empty_ = quit; }
@@ -106,6 +113,7 @@ class BrowserClient : public CefClient,
   NavigationFilter navigation_filter_;
   OpenCallback on_open_;
   LinkMenuCallback on_link_menu_;
+  MediaCallback on_media_;
   int open_browsers_ = 0;
   bool quit_when_empty_ = false;
 

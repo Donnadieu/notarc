@@ -138,6 +138,14 @@ NSString* CleanLinkURL(NSString* url);
 // Hover cards: resting the pointer on a sidebar tab for a moment shows a card with its title, site,
 // full address and when it was last used. Returns the card's text lines (for tests).
 - (NSArray<NSString*>*)showHoverCardForItem:(ArcItem*)item;
+// Media in the sidebar: tabs playing sound show a speaker; a bar at the bottom of the sidebar controls the
+// tab that is playing (or was last playing) while you look at another tab.
+- (void)toggleMuteItem:(ArcItem*)item;
+- (void)togglePlayItem:(ArcItem*)item;   // pauses playing media, or resumes media this tab paused
+- (void)pollMediaNow;                    // asks every open tab for its media state
+@property(nonatomic, readonly) ArcItem* mediaBarItem;  // tab shown in the media bar, nil when hidden
+- (IBAction)toggleMuteCurrentTab:(id)sender;
+- (void)runJS:(NSString*)js inItem:(ArcItem*)item;
 - (void)hideHoverCard;
 @property(nonatomic, readonly) BOOL hoverCardShown;
 - (IBAction)changeSpaceIcon:(id)sender;
