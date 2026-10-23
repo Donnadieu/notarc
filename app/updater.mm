@@ -18,7 +18,10 @@ int UpdaterCompareVersions(NSString* a, NSString* b) {
   return 0;
 }
 
+static NSString* g_versionOverride;
+
 NSString* UpdaterCurrentVersion(void) {
+  if (g_versionOverride) return g_versionOverride;
   return NSBundle.mainBundle.infoDictionary[@"CFBundleShortVersionString"] ?: @"0";
 }
 
@@ -137,18 +140,24 @@ static int Run(NSString* tool, NSArray<NSString*>* args, NSString** output) {
   }] resume];
 }
 
++ (void)setVersionOverride:(NSString*)version { g_versionOverride = [version copy]; }
+
 - (void)installStagedApp:(NSString*)stagedApp {
+  [self swapInStagedApp:stagedApp relaunch:YES];
+  [NSApp terminate:nil];
+}
+
+- (void)swapInStagedApp:(NSString*)stagedApp relaunch:(BOOL)relaunch {
   NSString* target = NSBundle.mainBundle.bundlePath;
   // Swap after we exit: keep the old copy until the new one is in place, then relaunch.
   NSString* script =
       @"while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; "
        "rm -rf \"$3.old\" && mv \"$3\" \"$3.old\" && mv \"$2\" \"$3\" && rm -rf \"$3.old\" || "
-       "{ [ -d \"$3\" ] || mv \"$3.old\" \"$3\"; }; open \"$3\"";
+       "{ [ -d \"$3\" ] || mv \"$3.old\" \"$3\"; }; [ \"$4\" = 1 ] && open \"$3\"; exit 0";
   NSTask* t = [NSTask new];
   t.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
-  t.arguments = @[ @"-c", script, @"notarc-update", @(getpid()).stringValue, stagedApp, target ];
+  t.arguments = @[ @"-c", script, @"notarc-update", @(getpid()).stringValue, stagedApp, target, relaunch ? @"1" : @"0" ];
   [t launchAndReturnError:nil];
-  [NSApp terminate:nil];
 }
 
 - (void)checkInteractive:(BOOL)interactive {

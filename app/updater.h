@@ -27,6 +27,11 @@ NSString* UpdaterCurrentVersion(void);
 - (void)prepareUpdate:(UpdateInfo*)info done:(void (^)(NSString* stagedApp, NSError* error))done;
 // Replaces the running bundle with stagedApp after this process exits, then relaunches it.
 - (void)installStagedApp:(NSString*)stagedApp;
+// Same swap without relaunching or quitting the app; returns once the swap script is running.
+// Used by --self-update-test, which runs it from a throwaway copy of NotArc.
+- (void)swapInStagedApp:(NSString*)stagedApp relaunch:(BOOL)relaunch;
+// --self-update-test: pretend to be this version so the published release counts as newer.
++ (void)setVersionOverride:(NSString*)version;
 // Menu / timer entry points. interactive = say "you're up to date" and show errors.
 - (void)checkInteractive:(BOOL)interactive;
 - (void)scheduleDailyChecks;
