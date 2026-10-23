@@ -14,7 +14,8 @@ void SettingsUseMemoryOnly(void);
 void SettingSetBool(NSString* key, BOOL value);
 id SettingObject(NSString* key);
 void SettingSetObject(NSString* key, id value);
-extern NSString* const kSettingCommandPicks;           // dictionary: suggestion key -> times picked (ranking)
+extern NSString* const kSettingCommandPicks;
+extern NSString* const kSettingSitePermissions;        // dictionary: origin -> {permission name -> YES/NO}           // dictionary: suggestion key -> times picked (ranking)
 extern NSString* const kSettingShowToolbar;            // BOOL, default NO: address bar with the full URL above pages
 extern NSString* const kSettingShowSpaceHeader;        // BOOL, default YES: Space picker at the top of the sidebar
 extern NSString* const kSettingLittleArchiveHours;     // double; 0 = never. Default 6.

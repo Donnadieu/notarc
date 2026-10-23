@@ -162,6 +162,13 @@ NSString* CleanLinkURL(NSString* url);
 // View > Show Toolbar: back/forward/reload and the full address above the page (Enter goes to what you type).
 // View > Hide Space Header: hides the Space picker at the top of the sidebar. Both are remembered.
 - (IBAction)toggleToolbar:(id)sender;
+// Site prompts. Permission requests (camera, microphone, location, notifications, ...) and links that open
+// another app show a sheet; "Remember for this site" stores the answer in the sitePermissions setting.
+// Tab > Reset Site Permissions forgets them for the current site.
+@property(nonatomic, readonly) NSString* pendingSitePrompt;  // tests: kind:origin of the sheet showing, or nil
+- (void)answerSitePrompt:(BOOL)allow remember:(BOOL)remember;  // tests: same as clicking the sheet
+- (IBAction)resetSitePermissions:(id)sender;
+- (NSDictionary*)sitePermissionsForOrigin:(NSString*)origin;
 // Command bar suggestions. Each is @{kind, title, subtitle, key} plus the object it acts on; kinds:
 // "go" (typed text), "tab" (switch to an open/pinned tab in any Space), "space", "history", "action" (menu
 // command), "site" (top visited site, shown when the field is empty). Picks are counted and rank higher later.

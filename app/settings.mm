@@ -9,6 +9,7 @@ NSString* const kSettingExternalLinksLittle = @"externalLinksOpenInLittleWindow"
 NSString* const kSettingLittleArchiveHours = @"littleWindowArchiveHours";
 NSString* const kSettingShowToolbar = @"showToolbar";
 NSString* const kSettingCommandPicks = @"commandBarPicks";
+NSString* const kSettingSitePermissions = @"sitePermissions";
 NSString* const kSettingShowSpaceHeader = @"showSpaceHeader";
 
 void SettingsRegisterDefaults(void) {

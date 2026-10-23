@@ -10,6 +10,8 @@
 #include "include/cef_download_handler.h"
 #include "include/cef_find_handler.h"
 #include "include/cef_focus_handler.h"
+#include "include/cef_permission_handler.h"
+#include "include/cef_resource_request_handler.h"
 #include "include/cef_request_handler.h"
 
 class BrowserClient : public CefClient,
@@ -20,7 +22,9 @@ class BrowserClient : public CefClient,
                       public CefFocusHandler,
                       public CefRequestHandler,
                       public CefContextMenuHandler,
-                      public CefDownloadHandler {
+                      public CefDownloadHandler,
+                      public CefPermissionHandler,
+                      public CefResourceRequestHandler {
  public:
   using TitleCallback = std::function<void(int browser_id, const std::string& title)>;
   using UrlCallback = std::function<void(int browser_id, const std::string& url)>;
@@ -35,6 +39,33 @@ class BrowserClient : public CefClient,
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
   CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
+  CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
+
+  // Site permissions (camera, mic, location, notifications, ...). The UI answers with ResolvePermission.
+  // request_id is ours; `permissions` uses CEF_PERMISSION_TYPE_* bits (media requests are mapped onto
+  // CAMERA_STREAM / MIC_STREAM). Called on the UI thread.
+  using PermissionCallback =
+      std::function<void(int browser_id, int request_id, const std::string& origin, uint32_t permissions)>;
+  void set_permission_callback(PermissionCallback cb) { on_permission_ = std::move(cb); }
+  void ResolvePermission(int request_id, bool allow);
+  bool OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                      const CefString& requesting_origin, uint32_t requested_permissions,
+                                      CefRefPtr<CefMediaAccessCallback> callback) override;
+  bool OnShowPermissionPrompt(CefRefPtr<CefBrowser> browser, uint64_t prompt_id, const CefString& requesting_origin,
+                              uint32_t requested_permissions, CefRefPtr<CefPermissionPromptCallback> callback) override;
+  void OnDismissPermissionPrompt(CefRefPtr<CefBrowser> browser, uint64_t prompt_id,
+                                 cef_permission_request_result_t result) override;
+
+  // Links to other apps (mailto:, zoommtg:, ...). Chromium never opens them itself; the UI asks first.
+  using ExternalCallback = std::function<void(int browser_id, const std::string& url)>;
+  void set_external_callback(ExternalCallback cb) { on_external_ = std::move(cb); }
+  CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+                                                                 CefRefPtr<CefRequest>, bool, bool, const CefString&,
+                                                                 bool&) override {
+    return this;
+  }
+  void OnProtocolExecution(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
+                           bool& allow_os_execution) override;
   // Downloads save straight into the download folder (no Save dialog), tracked by DownloadManager.
   bool OnBeforeDownload(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item,
                         const CefString& suggested_name, CefRefPtr<CefBeforeDownloadCallback> callback) override;
@@ -128,6 +159,16 @@ class BrowserClient : public CefClient,
   MediaCallback on_media_;
   RendererCallback on_renderer_;
   std::map<int, CefRefPtr<CefUnresponsiveProcessCallback>> hung_;
+  PermissionCallback on_permission_;
+  ExternalCallback on_external_;
+  struct PendingPermission {
+    CefRefPtr<CefMediaAccessCallback> media;
+    uint32_t media_bits = 0;
+    CefRefPtr<CefPermissionPromptCallback> prompt;
+    uint64_t prompt_id = 0;
+  };
+  std::map<int, PendingPermission> pending_permissions_;
+  int next_permission_id_ = 1;
   int open_browsers_ = 0;
   bool quit_when_empty_ = false;
 

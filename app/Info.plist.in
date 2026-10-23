@@ -52,6 +52,16 @@
 		<key>MallocNanoZone</key>
 		<string>0</string>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Websites you allow can use your camera.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Websites you allow can use your microphone.</string>
+	<key>NSLocationUsageDescription</key>
+	<string>Websites you allow can know your location.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Websites you allow can know your location.</string>
+	<key>NSBluetoothAlwaysUsageDescription</key>
+	<string>Websites you allow can connect to Bluetooth devices.</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>13.0</string>
 	<key>NSPrincipalClass</key>
