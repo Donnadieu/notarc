@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-6 done, 9 partial, 55 not started or out of scope, of 70 items.
+6 done, 9 partial, 65 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -40,6 +40,8 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Switch to a recent tab (Ctrl+Tab) (missing)
 - [ ] Back/forward, reload, find in page, zoom, print (partial: print missing)
 - [ ] Link routing rules (which Space opens which links) (missing)
+- [ ] Command bar ranking that learns from what you pick (missing)
+- [ ] Paste and Go (missing)
 
 ## Split view & windows
 
@@ -80,6 +82,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 ## AI (Arc Max)
 
 - [ ] Ask on page, ChatGPT in command bar, tidy titles, 5-second previews (missing (needs an LLM provider))
+- [ ] On-device tab categorisation and page summaries / page-to-Markdown (missing)
 
 ## Library & data
 
@@ -90,6 +93,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [x] Import from Arc (Spaces, tabs, archive, logins)
 - [ ] Import from Chrome/Safari/other browsers, password import (missing)
 - [ ] Clear browsing data (missing)
+- [ ] Tab thumbnails for switchers and previews (missing)
 
 ## Browser basics
 
@@ -102,6 +106,12 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Settings window (all preferences) (missing)
 - [ ] Keyboard shortcuts with user overrides (missing)
 - [ ] App icon choice, sound effects, toasts (missing)
+- [ ] PDF viewer (missing)
+- [ ] AppleScript support for windows and tabs (missing)
+- [ ] Two-finger swipe back/forward and overscroll (missing)
+- [ ] Web notifications, permission prompts, external app (protocol) dialogs (missing)
+- [ ] Hung page / unresponsive renderer dialog (missing)
+- [ ] Import bookmarks (missing)
 
 ## Sync & sharing (Arc account)
 
