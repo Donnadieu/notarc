@@ -1,3 +1,4 @@
+#import <QuartzCore/QuartzCore.h>
 #import "app/main_window.h"
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
@@ -82,6 +83,21 @@ NSString* ResolveCommandBarInput(NSString* input) {
 
 static BOOL Contains(ArcItem* root, ArcItem* target);
 
+static NSColor* ColorFromHex(NSString* hex) {
+  NSString* h = [hex stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"# "]];
+  if (h.length != 6) return nil;
+  unsigned v = 0;
+  if (![[NSScanner scannerWithString:h] scanHexInt:&v]) return nil;
+  return [NSColor colorWithSRGBRed:((v >> 16) & 0xFF) / 255.0 green:((v >> 8) & 0xFF) / 255.0 blue:(v & 0xFF) / 255.0 alpha:1];
+}
+
+static NSString* HexFromColor(NSColor* c) {
+  NSColor* s = [c colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+  if (!s) return nil;
+  return [NSString stringWithFormat:@"#%02X%02X%02X", (int)lround(s.redComponent * 255), (int)lround(s.greenComponent * 255),
+                                    (int)lround(s.blueComponent * 255)];
+}
+
 @interface MainWindowController () <NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate,
                                     NSMenuDelegate>
 @end
@@ -132,6 +148,9 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   ArchiveWindowController* _historyWindow;
   HistoryStore* _history;
   BOOL _focusMode;
+  CAGradientLayer* _themeGradient;
+  void (^_themePreview)(void);
+  NSPopUpButton* _themePalette;
   NSUndoManager* _undo;
   BOOL _sidebarWasHidden;
   NSPanel* _findBar;
@@ -185,6 +204,18 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   sidebar.autoresizingMask = NSViewHeightSizable;
   [root addSubview:sidebar];
   _sidebar = sidebar;
+  // Space theme tint: a gradient over the sidebar material, under every control.
+  _themeView = [[NSView alloc] initWithFrame:sidebar.bounds];
+  _themeView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  _themeView.wantsLayer = YES;
+  _themeGradient = [CAGradientLayer layer];
+  _themeGradient.frame = _themeView.bounds;
+  _themeGradient.autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable;
+  _themeGradient.startPoint = CGPointMake(0.5, 1);
+  _themeGradient.endPoint = CGPointMake(0.5, 0);
+  [_themeView.layer addSublayer:_themeGradient];
+  _themeView.hidden = YES;
+  [sidebar addSubview:_themeView];
 
   _spacePicker = [[NSPopUpButton alloc]
       initWithFrame:NSMakeRect(8, bounds.size.height - 72, kSidebarWidth - 16, 26) pullsDown:NO];
@@ -1230,12 +1261,130 @@ static ArcItem* NewSection(NSString* title) {
 }
 
 - (void)rebuildSpacePicker {
+  [self applyTheme];
   [_spacePicker removeAllItems];
   for (ArcSpace* s in _spaces) {
-    [_spacePicker addItemWithTitle:s.title ?: @"Space"];
+    [_spacePicker addItemWithTitle:s.iconEmoji.length ? [NSString stringWithFormat:@"%@  %@", s.iconEmoji, s.title ?: @"Space"]
+                                                    : (s.title ?: @"Space")];
     _spacePicker.lastItem.representedObject = s;  // titles may repeat
   }
   if (_space) [_spacePicker selectItemAtIndex:[_spaces indexOfObject:_space]];
+}
+
+- (void)applyTheme {
+  NSMutableArray* cg = [NSMutableArray array];
+  for (NSString* hex in _space.themeColors)
+    if (NSColor* c = ColorFromHex(hex)) [cg addObject:(id)c.CGColor];
+  _themeView.hidden = cg.count == 0;
+  if (!cg.count) return;
+  if (cg.count == 1) [cg addObject:cg[0]];
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  _themeGradient.colors = cg;
+  _themeGradient.opacity = (float)MAX(0.1, MIN(1.0, _space.themeIntensity ?: 0.5));
+  [CATransaction commit];
+}
+
+- (void)setTheme:(NSArray<NSString*>*)colors intensity:(double)intensity forSpace:(ArcSpace*)space {
+  space.themeColors = colors.count ? [colors subarrayWithRange:NSMakeRange(0, MIN(colors.count, (NSUInteger)2))] : nil;
+  space.themeIntensity = intensity;
+  if (space == _space) [self applyTheme];
+  [self scheduleSave];
+}
+
+- (void)setIcon:(NSString*)emoji forSpace:(ArcSpace*)space {
+  NSString* e = [emoji stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+  if (e.length) e = [e substringWithRange:[e rangeOfComposedCharacterSequenceAtIndex:0]];  // one emoji/character
+  space.iconEmoji = e.length ? e : nil;
+  [self rebuildSpacePicker];
+  [self scheduleSave];
+}
+
+// Theme editor: preset palettes or two custom colours, plus intensity. Changes preview live; Cancel reverts.
+- (IBAction)editThemeColor:(id)sender {
+  ArcSpace* space = _space;
+  if (!space) return;
+  NSArray* oldColors = space.themeColors;
+  double oldIntensity = space.themeIntensity;
+  NSArray* presets = @[
+    @[ @"None", @[] ], @[ @"Lavender", @[ @"#B9A8FF", @"#8B7CF6" ] ], @[ @"Ocean", @[ @"#5EC8F2", @"#2F6FDE" ] ],
+    @[ @"Mint", @[ @"#9BF0C9", @"#3BB58A" ] ], @[ @"Peach", @[ @"#FFC3A0", @"#FF7A7A" ] ],
+    @[ @"Sunset", @[ @"#FFB347", @"#E84A7F" ] ], @[ @"Forest", @[ @"#7FB77E", @"#2E5E3E" ] ],
+    @[ @"Graphite", @[ @"#8E8E93", @"#3A3A3C" ] ], @[ @"Rose", @[ @"#FFB3C7", @"#D9468F" ] ],
+    @[ @"Custom", @[] ]
+  ];
+  NSAlert* a = [NSAlert new];
+  a.messageText = [NSString stringWithFormat:@"Edit Theme Color: %@", space.title ?: @"Space"];
+  NSView* box = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 300, 96)];
+  NSPopUpButton* palette = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 68, 180, 26) pullsDown:NO];
+  for (NSArray* p in presets) [palette addItemWithTitle:p[0]];
+  NSColorWell* top = [[NSColorWell alloc] initWithFrame:NSMakeRect(190, 68, 44, 26)];
+  NSColorWell* bottom = [[NSColorWell alloc] initWithFrame:NSMakeRect(242, 68, 44, 26)];
+  top.color = ColorFromHex(oldColors.firstObject) ?: [NSColor colorWithSRGBRed:0.73 green:0.66 blue:1 alpha:1];
+  bottom.color = ColorFromHex(oldColors.lastObject) ?: top.color;
+  NSTextField* label = [NSTextField labelWithString:@"Intensity"];
+  label.frame = NSMakeRect(0, 36, 70, 20);
+  NSSlider* intensity = [NSSlider sliderWithValue:(oldColors.count ? oldIntensity : 0.5) minValue:0.1 maxValue:1 target:nil action:nil];
+  intensity.frame = NSMakeRect(74, 34, 212, 24);
+  NSInteger sel = oldColors.count ? presets.count - 1 : 0;
+  for (NSUInteger i = 1; i + 1 < presets.count; ++i)
+    if ([presets[i][1] isEqualToArray:oldColors ?: @[]]) sel = i;
+  [palette selectItemAtIndex:sel];
+  for (NSView* v in @[ palette, top, bottom, label, intensity ]) [box addSubview:v];
+  a.accessoryView = box;
+  [a addButtonWithTitle:@"Done"];
+  [a addButtonWithTitle:@"Cancel"];
+  __weak MainWindowController* weakSelf = self;
+  __block BOOL fromPreset = NO;
+  void (^preview)(void) = ^{
+    NSInteger i = palette.indexOfSelectedItem;
+    NSArray* colors = presets[i][1];
+    if (i == (NSInteger)presets.count - 1) colors = @[ HexFromColor(top.color) ?: @"#B9A8FF", HexFromColor(bottom.color) ?: @"#8B7CF6" ];
+    else if (colors.count && !fromPreset) {
+      fromPreset = YES;
+      top.color = ColorFromHex(colors[0]);
+      bottom.color = ColorFromHex(colors[1]);
+      fromPreset = NO;
+    }
+    [weakSelf setTheme:colors intensity:intensity.doubleValue forSpace:space];
+  };
+  _themePreview = [preview copy];
+  palette.target = self;
+  palette.action = @selector(themeControlChanged:);
+  intensity.target = self;
+  intensity.action = @selector(themeControlChanged:);
+  intensity.continuous = YES;
+  for (NSColorWell* w in @[ top, bottom ]) {
+    w.target = self;
+    w.action = @selector(themeWellChanged:);
+  }
+  _themePalette = palette;
+  if ([a runModal] != NSAlertFirstButtonReturn) [self setTheme:oldColors intensity:oldIntensity forSpace:space];
+  _themePreview = nil;
+  _themePalette = nil;
+  [NSColorPanel.sharedColorPanel orderOut:nil];
+}
+
+- (void)themeControlChanged:(id)sender { if (_themePreview) _themePreview(); }
+- (void)themeWellChanged:(id)sender {
+  [_themePalette selectItemAtIndex:_themePalette.numberOfItems - 1];  // touching a colour = Custom
+  if (_themePreview) _themePreview();
+}
+
+- (IBAction)changeSpaceIcon:(id)sender {
+  ArcSpace* space = _space;
+  if (!space) return;
+  NSAlert* a = [NSAlert new];
+  a.messageText = @"Change Space Icon";
+  a.informativeText = @"Type or paste an emoji (Ctrl+Cmd+Space opens the emoji picker). Leave empty for no icon.";
+  NSTextField* f = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 80, 28)];
+  f.font = [NSFont systemFontOfSize:18];
+  f.stringValue = space.iconEmoji ?: @"";
+  a.accessoryView = f;
+  a.window.initialFirstResponder = f;
+  [a addButtonWithTitle:@"Done"];
+  [a addButtonWithTitle:@"Cancel"];
+  if ([a runModal] == NSAlertFirstButtonReturn) [self setIcon:f.stringValue forSpace:space];
 }
 
 - (void)switchToSpace:(ArcSpace*)space {
@@ -1244,6 +1393,7 @@ static ArcItem* NewSection(NSString* title) {
   _splitItems = nil;
   [_spacePicker selectItemAtIndex:[_spaces indexOfObject:space]];
   [self reloadSidebar];
+  [self applyTheme];
   [self scheduleSave];
   ArcItem* first = _space.allTabs.firstObject;
   if (first) [self showItem:first];
@@ -2288,6 +2438,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
       _splitItems = nil;
       [_spacePicker selectItemAtIndex:[_spaces indexOfObject:s]];
       [self reloadSidebar];
+      [self applyTheme];
     }
   [self openInNewTab:tab.url];
   [_archiveWindow reload];
