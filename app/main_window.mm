@@ -2137,6 +2137,26 @@ static ArcItem* NewSection(NSString* title) {
   return folder;
 }
 
+- (ArcItem*)newNestedFolderIn:(ArcItem*)parent {
+  if (!parent.isFolder) return nil;
+  ArcItem* folder = [ArcItem new];
+  folder.itemID = NSUUID.UUID.UUIDString;
+  folder.title = @"New Folder";
+  folder.isFolder = YES;
+  folder.children = [NSMutableArray array];
+  [parent.children insertObject:folder atIndex:0];
+  [_outline reloadItem:parent reloadChildren:YES];
+  [_outline expandItem:parent];
+  [_outline expandItem:folder];
+  [self scheduleSave];
+  return folder;
+}
+- (void)menuNewNestedFolder:(NSMenuItem*)sender {
+  ArcItem* folder = [self newNestedFolderIn:sender.representedObject];
+  NSInteger row = [_outline rowForItem:folder];
+  if (row >= 0) [_outline editColumn:0 row:row withEvent:nil select:YES];
+}
+
 - (NSMenu*)sidebarMenuForItems:(NSArray<ArcItem*>*)items {
   NSMenu* m = [[NSMenu alloc] initWithTitle:@"Sidebar"];
   NSUInteger n = [self tabsIn:items].count;
@@ -2245,6 +2265,7 @@ static ArcItem* NewSection(NSString* title) {
   }
   [m addItem:[NSMenuItem separatorItem]];
   if (isTab || item.isFolder) [m addItem:[self menuItem:@"Rename..." action:@selector(menuRename:) item:item]];
+  if (item.isFolder) [m addItem:[self menuItem:@"New Nested Folder" action:@selector(menuNewNestedFolder:) item:item]];
   if (isTab || (!item.url.length && !item.isSection && !item.isSplit))
     [m addItem:[self menuItem:@"Duplicate" action:@selector(menuDuplicate:) item:item]];
   if (isToday) [m addItem:[self menuItem:@"Pin" action:@selector(menuTogglePin:) item:item]];
