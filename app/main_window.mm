@@ -352,6 +352,25 @@ static bool CookieBelongsToHost(const CefCookie& c, const std::string& host) {
          host[host.size() - d.size() - 1] == '.';
 }
 
+NSString* CleanLinkURL(NSString* url) {
+  NSURLComponents* c = [NSURLComponents componentsWithString:url ?: @""];
+  if (!c || !c.queryItems.count) return url;
+  static NSSet* exact = [NSSet setWithArray:@[
+    @"fbclid", @"gclid", @"gclsrc", @"dclid", @"gbraid", @"wbraid", @"msclkid", @"mc_cid", @"mc_eid", @"igshid",
+    @"yclid", @"twclid", @"ttclid", @"li_fat_id", @"_hsenc", @"_hsmi", @"mkt_tok", @"vero_id", @"oly_anon_id",
+    @"oly_enc_id", @"rb_clickid", @"s_cid", @"ref_src", @"ref_url", @"si", @"__s", @"_ga", @"_gl", @"spm"
+  ]];
+  NSMutableArray* kept = [NSMutableArray array];
+  for (NSURLQueryItem* q in c.queryItems) {
+    NSString* n = q.name.lowercaseString;
+    if ([n hasPrefix:@"utm_"] || [n hasPrefix:@"pk_"] || [exact containsObject:n]) continue;
+    [kept addObject:q];
+  }
+  if (kept.count == c.queryItems.count) return url;
+  c.queryItems = kept.count ? kept : nil;
+  return c.string ?: url;
+}
+
 // One isolated browser profile per Arc Space (cookies, storage), keyed by Arc's profile name.
 - (CefRefPtr<CefRequestContext>)contextForSpace:(ArcSpace*)space {
   std::string key = space.profileDirectory.UTF8String;
@@ -1508,10 +1527,12 @@ static ArcItem* NewSection(NSString* title) {
     [m addItem:[NSMenuItem separatorItem]];
     [m addItem:[self menuItem:@"Copy URL" action:@selector(menuCopyURL:) item:item]];
     [m addItem:[self menuItem:@"Copy URL as Markdown" action:@selector(menuCopyMarkdown:) item:item]];
+    [m addItem:[self menuItem:@"Copy Clean Link" action:@selector(menuCopyClean:) item:item]];
   }
   [m addItem:[NSMenuItem separatorItem]];
   if (isTab || item.isFolder) [m addItem:[self menuItem:@"Rename..." action:@selector(menuRename:) item:item]];
-  if (isTab) [m addItem:[self menuItem:@"Duplicate" action:@selector(menuDuplicate:) item:item]];
+  if (isTab || (!item.url.length && !item.isSection && !item.isSplit))
+    [m addItem:[self menuItem:@"Duplicate" action:@selector(menuDuplicate:) item:item]];
   if (isToday) [m addItem:[self menuItem:@"Pin" action:@selector(menuTogglePin:) item:item]];
   if (isPinned && [_space.pinned.children containsObject:item])
     [m addItem:[self menuItem:@"Unpin" action:@selector(menuTogglePin:) item:item]];
@@ -1561,6 +1582,16 @@ static ArcItem* NewSection(NSString* title) {
   [NSPasteboard.generalPasteboard clearContents];
   [NSPasteboard.generalPasteboard setString:((ArcItem*)sender.representedObject).url forType:NSPasteboardTypeString];
 }
+- (void)menuCopyClean:(NSMenuItem*)sender {
+  [NSPasteboard.generalPasteboard clearContents];
+  [NSPasteboard.generalPasteboard setString:CleanLinkURL(((ArcItem*)sender.representedObject).url)
+                                    forType:NSPasteboardTypeString];
+}
+- (IBAction)copyCleanLink:(id)sender {
+  if (!_shown) return;
+  [NSPasteboard.generalPasteboard clearContents];
+  [NSPasteboard.generalPasteboard setString:CleanLinkURL([self itemCurrentURL:_shown]) forType:NSPasteboardTypeString];
+}
 - (void)menuCopyMarkdown:(NSMenuItem*)sender {
   ArcItem* item = sender.representedObject;
   NSString* title = [item.displayTitle stringByReplacingOccurrencesOfString:@"]" withString:@"\\]"];
@@ -1608,9 +1639,36 @@ static ArcItem* NewSection(NSString* title) {
   [self scheduleSave];
 }
 
+- (ArcItem*)deepCopyItem:(ArcItem*)item {
+  ArcItem* copy = [ArcItem new];
+  copy.itemID = NSUUID.UUID.UUIDString;
+  copy.url = item.url.length ? [self itemCurrentURL:item] : nil;
+  copy.liveTitle = item.liveTitle;
+  copy.title = item.title;
+  copy.isSplit = item.isSplit;
+  copy.children = [NSMutableArray array];
+  for (ArcItem* c in item.children) [copy.children addObject:[self deepCopyItem:c]];
+  return copy;
+}
+
 // The copy goes right below the original in Today (a pinned tab's copy goes to the top of Today).
+// A folder's copy goes right below the folder in the same section, named "<name> copy".
 - (ArcItem*)duplicateItem:(ArcItem*)item {
-  if (!item.url.length || !_space) return nil;
+  if (!_space) return nil;
+  BOOL isFolder = !item.url.length && !item.isSection && !item.isSplit;
+  if (isFolder) {
+    ArcItem* copy = [self deepCopyItem:item];
+    copy.title = [NSString stringWithFormat:@"%@ copy", item.displayTitle ?: @"Folder"];
+    ArcItem* parent = [self parentOfItem:item];
+    if (!parent) return nil;
+    [parent.children insertObject:copy atIndex:[parent.children indexOfObject:item] + 1];
+    [_outline reloadData];
+    for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
+    [_outline expandItem:copy];
+    [self scheduleSave];
+    return copy;
+  }
+  if (!item.url.length) return nil;
   ArcItem* copy = [ArcItem new];
   copy.itemID = NSUUID.UUID.UUIDString;
   copy.url = [self itemCurrentURL:item];

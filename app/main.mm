@@ -82,6 +82,7 @@
   [edit addItemWithTitle:@"Find Previous" action:@selector(findPrevious:) keyEquivalent:@"G"];
   [edit addItem:[NSMenuItem separatorItem]];
   [edit addItemWithTitle:@"Copy URL" action:@selector(copyCurrentURL:) keyEquivalent:@"C"];
+  [edit addItemWithTitle:@"Copy Clean Link" action:@selector(copyCleanLink:) keyEquivalent:@""];
   NSMenuItem* md = [edit addItemWithTitle:@"Copy URL as Markdown" action:@selector(copyCurrentURLAsMarkdown:)
                             keyEquivalent:@"c"];
   md.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption;
@@ -546,6 +547,24 @@
           }];
         }];
       });
+    });
+    // Clean links and folder duplication.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 48 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      BOOL clean1 = [CleanLinkURL(@"https://a.example/p?id=7&utm_source=x&fbclid=y&UTM_Medium=z#top")
+          isEqualToString:@"https://a.example/p?id=7#top"];
+      BOOL clean2 = [CleanLinkURL(@"https://a.example/p?gclid=1") isEqualToString:@"https://a.example/p"];
+      BOOL clean3 = [CleanLinkURL(@"https://a.example/p?q=a%20b&page=2") isEqualToString:@"https://a.example/p?q=a%20b&page=2"];
+      ArcItem* folder = [w createFolderNamed:@"SelfTest DupFolder"];
+      [w openInNewTab:@"https://example.com/dup-a"];
+      ArcItem* a = w.shownItem;
+      [w moveItem:a toParent:folder index:0];
+      ArcItem* copy = [w duplicateItem:folder];
+      BOOL dup = copy && copy != folder && [copy.title isEqualToString:@"SelfTest DupFolder copy"] &&
+                 copy.children.count == folder.children.count && copy.children.count == 1 &&
+                 copy.children[0] != a && [((ArcItem*)copy.children[0]).url hasPrefix:@"https://example.com/dup-a"] &&
+                 ![copy.itemID isEqualToString:folder.itemID];
+      std::printf("SELFTEST-CLEANDUP clean=%d stripAll=%d keepOthers=%d folderDup=%d\n", clean1, clean2, clean3, dup);
     });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 34 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
