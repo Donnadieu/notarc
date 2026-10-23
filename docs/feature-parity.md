@@ -45,7 +45,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 ## Split view & windows
 
-- [ ] Split view: vertical/horizontal, up to 4 panes, add/close/move panes (partial: add, close and focus panes done; drag to resize, move panes and saving splits missing)
+- [ ] Split view: vertical/horizontal, up to 4 panes, add/close/move panes (partial: add in all four directions, flip layout, close and focus panes done; drag to resize, move panes, split as one sidebar item and saving splits missing)
 - [ ] Switch between split views; share split view (missing)
 - [ ] Multiple windows, move tab to window, Move to main window (missing)
 - [ ] Incognito window (missing)
@@ -55,7 +55,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 - [ ] Little Arc (mini browser for external links, global hotkey) (partial: Little Window for links from other apps, Cmd+Opt+Shift+N, archived on close; system-wide hotkey missing)
 - [ ] Open in main window / move to Space from Little Arc (partial: Open in NotArc moves to the current Space; choosing another Space missing)
-- [ ] Peek: preview links from pinned/favourite sites, email peeking (partial: links leaving a Pinned tab or Favorite's site open in a Peek overlay with Open as Tab; email peeking missing)
+- [ ] Peek: preview links from pinned/favourite sites, email peeking (partial: links leaving a Pinned tab or Favorite's site and Shift-clicked links open in Peek; Open as Tab; email peeking and undo missing)
 
 ## Media
 

@@ -108,9 +108,12 @@
   [bar addItem:splitItem];
   NSMenu* split = [[NSMenu alloc] initWithTitle:@"Split View"];
   NSEventModifierFlags cs = NSEventModifierFlagControl | NSEventModifierFlagShift;
-  [split addItemWithTitle:@"Add Vertical Split" action:@selector(addVerticalSplit:) keyEquivalent:@"="]
+  [split addItemWithTitle:@"Add Right Split" action:@selector(addVerticalSplit:) keyEquivalent:@"="]
       .keyEquivalentModifierMask = cs;
-  [split addItemWithTitle:@"Add Horizontal Split" action:@selector(addHorizontalSplit:) keyEquivalent:@""];
+  [split addItemWithTitle:@"Add Bottom Split" action:@selector(addHorizontalSplit:) keyEquivalent:@""];
+  [split addItemWithTitle:@"Add Left Split" action:@selector(addLeftSplit:) keyEquivalent:@""];
+  [split addItemWithTitle:@"Add Top Split" action:@selector(addTopSplit:) keyEquivalent:@""];
+  [split addItemWithTitle:@"Flip Split Layout" action:@selector(flipSplitLayout:) keyEquivalent:@""];
   [split addItemWithTitle:@"Close Split Pane" action:@selector(closeSplitPane:) keyEquivalent:@"-"]
       .keyEquivalentModifierMask = cs;
   [split addItemWithTitle:@"Focus Next Pane" action:@selector(focusNextPane:) keyEquivalent:@"]"]
@@ -417,6 +420,36 @@
                   "clearToday=%lu->%lu archivedDelta=%ld\n", hidden, shownAgain, first, second, back,
                   (unsigned long)todayBefore, (unsigned long)w.currentSpace.unpinned.children.count,
                   (long)([w archivedTabs].count - archivedBefore));
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w selectTabAtIndex:0];
+      [w openInSplit:@"https://example.com/left" horizontal:NO before:YES];
+      NSUInteger leftIdx = [w indexOfShownInSplit];
+      [w openInSplit:@"https://example.com/top" horizontal:YES before:YES];
+      NSArray<NSValue*>* f = [w paneFrames];
+      BOOL stacked = f.count == 3 && NSMinY(f[0].rectValue) >= NSMaxY(f[1].rectValue);
+      [w flipSplitLayout:nil];
+      NSArray<NSValue*>* g = [w paneFrames];
+      BOOL flipped = g.count == 3 && NSMaxX(g[0].rectValue) <= NSMinX(g[1].rectValue);
+      [w closeSplitPane:nil];
+      [w closeSplitPane:nil];
+      int shown = w.shownItem.browserId;
+      NSUInteger todayBefore = w.currentSpace.unpinned.children.count;
+      BOOL peekHandled = [w handleOpenURL:@"https://example.net/shift" fromBrowser:shown disposition:CEF_WOD_NEW_WINDOW
+                              userGesture:YES];
+      BOOL bgHandled = [w handleOpenURL:@"https://example.net/cmd" fromBrowser:shown
+                            disposition:CEF_WOD_NEW_BACKGROUND_TAB userGesture:YES];
+      BOOL unknownIgnored = ![w handleOpenURL:@"https://example.net/x" fromBrowser:-1 disposition:CEF_WOD_NEW_WINDOW
+                                  userGesture:YES];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+        std::printf("SELFTEST-SPLIT2 leftInsertedBefore=%d topStacked=%d flipped=%d\n", leftIdx == 0, stacked, flipped);
+        std::printf("SELFTEST-OPEN shiftPeek=%d peeking=%d cmdBackground=%d todayDelta=%ld stillShown=%d unknownIgnored=%d\n",
+                    peekHandled, [w isPeeking], bgHandled,
+                    (long)(w.currentSpace.unpinned.children.count - todayBefore), w.shownItem.browserId == shown,
+                    unknownIgnored);
+        [w closePeek];
+      });
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 19 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;

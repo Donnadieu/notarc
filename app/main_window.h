@@ -70,6 +70,18 @@
 - (void)moveLittleWindowToMain:(NSUInteger)index;  // tests: same as its "Open in NotArc" button
 - (void)closeLittleWindow:(NSUInteger)index;       // tests
 
+// Links asking for a new tab/window: Shift-click (disposition NEW_WINDOW) opens Peek from any tab, like
+// Arc's "Open a Peek window when clicking on links with Shift held"; Cmd-click and target=_blank open a
+// Today tab (Cmd-click in the background). Returns YES when handled.
+- (BOOL)handleOpenURL:(NSString*)url fromBrowser:(int)browserId disposition:(int)disposition userGesture:(BOOL)gesture;
+- (void)openInNewTab:(NSString*)input background:(BOOL)background;
+// Split directions (Arc: Add Left/Right/Top/Bottom Split) and Convert to Horizontal/Vertical Split View.
+- (IBAction)addLeftSplit:(id)sender;
+- (IBAction)addTopSplit:(id)sender;
+- (IBAction)flipSplitLayout:(id)sender;
+- (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal before:(BOOL)before;
+- (NSUInteger)indexOfShownInSplit;  // tests
+
 // Peek: links clicked on a Pinned tab or Favorite that leave its site open in an overlay instead
 // of navigating the tab away, so the pinned page stays put.
 - (BOOL)shouldPeekFromItem:(ArcItem*)item toURL:(NSString*)url;
