@@ -111,6 +111,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   BOOL _commandOpensLittle;
   NSMutableArray<LittleWindowController*>* _littleWindows;
   LittleWindowController* _peek;
+  NSView* _sidebar;
 }
 
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID {
@@ -146,6 +147,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   sidebar.blendingMode = NSVisualEffectBlendingModeBehindWindow;
   sidebar.autoresizingMask = NSViewHeightSizable;
   [root addSubview:sidebar];
+  _sidebar = sidebar;
 
   _spacePicker = [[NSPopUpButton alloc]
       initWithFrame:NSMakeRect(8, bounds.size.height - 72, kSidebarWidth - 16, 26) pullsDown:NO];
@@ -1003,6 +1005,67 @@ static ArcItem* NewSection(NSString* title) {
   if (_spaces.count) [self selectSpaceAtIndex:([_spaces indexOfObject:_space] + _spaces.count - 1) % _spaces.count];
 }
 - (IBAction)selectSpaceFromMenu:(NSMenuItem*)sender { [self selectSpaceAtIndex:sender.tag]; }
+
+#pragma mark Arc shortcuts
+
+- (IBAction)toggleSidebar:(id)sender {
+  BOOL hide = !_sidebar.hidden;
+  _sidebar.hidden = hide;
+  NSRect b = self.window.contentView.bounds;
+  CGFloat x = hide ? 0 : kSidebarWidth;
+  _content.frame = NSMakeRect(x, 0, b.size.width - x, b.size.height);
+  [self layoutPanes];
+}
+- (BOOL)sidebarHidden { return _sidebar.hidden; }
+- (ArcItem*)shownItem { return _shown; }
+
+- (void)selectTabAtIndex:(NSUInteger)index {
+  NSArray<ArcItem*>* tabs = _space.allTabs;
+  if (index < tabs.count) [self showItem:tabs[index]];
+}
+- (IBAction)selectTabFromMenu:(NSMenuItem*)sender { [self selectTabAtIndex:sender.tag]; }
+
+- (void)stepTab:(NSInteger)delta {
+  NSArray<ArcItem*>* tabs = _space.allTabs;
+  if (!tabs.count) return;
+  NSInteger i = _shown ? (NSInteger)[tabs indexOfObject:_shown] : -1;
+  if (i == NSNotFound) i = -1;
+  i = (i + delta + (NSInteger)tabs.count) % (NSInteger)tabs.count;
+  [self showItem:tabs[i]];
+}
+- (IBAction)nextTab:(id)sender { [self stepTab:1]; }
+- (IBAction)previousTab:(id)sender { [self stepTab:-1]; }
+
+// Archives every Today tab in the current Space (Arc: "Clear unpinned tabs").
+- (IBAction)clearToday:(id)sender {
+  for (ArcItem* item in [_space.unpinned.children copy]) {
+    if (item.isFolder) continue;
+    [self archiveItem:item space:_space reason:@"manual"];
+    [_splitItems removeObject:item];
+    [self unloadItem:item];
+    [_space.unpinned.children removeObject:item];
+    if (item == _shown) _shown = nil;
+  }
+  if (_splitItems.count < 2) _splitItems = nil;
+  [_outline reloadItem:_space.unpinned reloadChildren:YES];
+  [self scheduleSave];
+  if (!_shown) {
+    ArcItem* first = _space.allTabs.firstObject;
+    if (first) [self showItem:first];
+    else [self layoutPanes];
+  }
+}
+
+- (IBAction)focusPaneFromMenu:(NSMenuItem*)sender {
+  if (![_splitItems containsObject:_shown] || (NSUInteger)sender.tag >= _splitItems.count) return;
+  [self showItem:_splitItems[sender.tag]];
+  if (auto b = [self currentBrowser]) b->GetHost()->SetFocus(true);
+}
+
+// Arc closes Peek when you click outside it.
+- (void)windowDidBecomeKey:(NSNotification*)note {
+  if (note.object == self.window && _peek) [_peek.window close];
+}
 
 #pragma mark Command bar and tab actions
 
