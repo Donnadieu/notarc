@@ -54,3 +54,5 @@ GitHub release and checks the copy was replaced. It never touches /Applications.
 - Branch from `main`; pull requests are squash-merged.
 - Describe what changed, how it matches Arc, and how you tested it.
 - Update `docs/feature-parity.md` if your change completes or advances an item.
+
+If you change saving, launching or quitting, also run `./scripts/test-session-restore.sh`. It crashes a self-test copy on purpose (SIGKILL) and checks that the next launch reopens the open tabs. It only uses the self-test files.
