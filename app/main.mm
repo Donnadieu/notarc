@@ -764,6 +764,16 @@
       [w archiveItems:two];
       BOOL archived = w.archivedTabs.count == archivedBefore + 2 && ![w.currentSpace.unpinned.children containsObject:two[0]] &&
                       ![w.currentSpace.unpinned.children containsObject:two[1]];
+      ArcItem* nested = [w newNestedFolderIn:folder];
+      BOOL nestedOK = nested.isFolder && folder.children.firstObject == nested && folder.children.count == 4;
+      NSString* tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:@"notarc-nested-test.json"];
+      SidebarStoreSave(@[ w.currentSpace ], w.currentSpace.spaceID, tmp, nil);
+      ArcSpace* back = SidebarStoreLoad(tmp, nil, nil).firstObject;
+      [NSFileManager.defaultManager removeItemAtPath:tmp error:nil];
+      BOOL nestedSaved = NO;
+      for (ArcItem* f in back.pinned.children)
+        if ([f.itemID isEqualToString:folder.itemID]) nestedSaved = [f.children.firstObject.itemID isEqualToString:nested.itemID] && f.children.firstObject.isFolder;
+      std::printf("SELFTEST-NESTED created=%d saved=%d\n", nestedOK, nestedSaved);
       std::printf("SELFTEST-MULTI selected=%d links=%d markdown=%d folder=%d archived=%d\n", selected, linksOK, md,
                   folderOK, archived);
     });
