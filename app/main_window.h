@@ -52,6 +52,7 @@
 - (double)currentZoomLevel;                       // tests
 - (BOOL)canGoBack;                                // tests
 - (NSString*)currentURL;                          // tests
+- (BOOL)hasLiveBrowser;                           // tests: the shown tab has a web view
 
 // Split view: up to 4 tabs side by side (vertical) or stacked (horizontal) in one window.
 - (IBAction)addVerticalSplit:(id)sender;    // Ctrl+Shift+=
@@ -60,6 +61,13 @@
 - (IBAction)focusNextPane:(id)sender;       // Ctrl+Shift+]
 - (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal;
 - (NSArray<NSValue*>*)paneFrames;  // tests: frames of the visible panes
+
+// Little Window (Arc: Little Arc): quick-look window for links from other apps (Cmd+Opt+Shift+N for a blank one).
+- (void)openLittleWindow:(NSString*)input;
+- (IBAction)newLittleWindow:(id)sender;
+- (NSUInteger)littleWindowCount;                 // tests
+- (void)moveLittleWindowToMain:(NSUInteger)index;  // tests: same as its "Open in NotArc" button
+- (void)closeLittleWindow:(NSUInteger)index;       // tests
 
 // Archive (Arc: auto-archive of Today tabs + Cmd+Shift+T style reopen).
 @property(nonatomic, copy) NSString* archivePath;

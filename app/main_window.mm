@@ -3,6 +3,7 @@
 #import "app/archive_store.h"
 #import "app/archive_window.h"
 #import "app/arc_cookies.h"
+#import "app/little_window.h"
 
 #include <cstdio>
 #include <atomic>
@@ -107,6 +108,8 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   NSMutableArray<ArcItem*>* _splitItems;  // panes of the active split, in order; nil when no split
   BOOL _splitHorizontal;
   BOOL _commandOpensSplit;
+  BOOL _commandOpensLittle;
+  NSMutableArray<LittleWindowController*>* _littleWindows;
 }
 
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID {
@@ -416,6 +419,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
 
 - (void)closeAllBrowsers {
   _closing = YES;
+  for (LittleWindowController* lw in [_littleWindows copy]) [lw.window close];
   if (_client) _client->set_quit_when_empty(true);
   if (_browsers.empty()) {
     [self.window close];
@@ -517,6 +521,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
 - (IBAction)goForward:(id)sender { if (auto b = [self currentBrowser]) b->GoForward(); }
 - (IBAction)reloadPage:(id)sender { if (auto b = [self currentBrowser]) b->Reload(); }
 - (IBAction)hardReload:(id)sender { if (auto b = [self currentBrowser]) b->ReloadIgnoreCache(); }
+- (BOOL)hasLiveBrowser { return [self currentBrowser] != nullptr; }
 - (BOOL)canGoBack { auto b = [self currentBrowser]; return b && b->CanGoBack(); }
 - (NSString*)currentURL {
   auto b = [self currentBrowser];
@@ -691,6 +696,7 @@ static const CGFloat kPaneGap = 6;
     NSBeep();
     return;
   }
+  _commandOpensLittle = NO;
   _splitHorizontal = horizontal;
   _commandOpensSplit = YES;
   [self showCommandBarForNewTab:YES];
@@ -734,6 +740,64 @@ static const CGFloat kPaneGap = 6;
   NSUInteger index = ([_splitItems indexOfObject:_shown] + 1) % _splitItems.count;
   [self showItem:_splitItems[index]];
   if (auto b = [self currentBrowser]) b->GetHost()->SetFocus(true);
+}
+
+#pragma mark Little Window
+
+- (void)openLittleWindow:(NSString*)input {
+  NSString* url = ResolveCommandBarInput(input);
+  if (!url || !_space) return;
+  ArcSpace* space = _space;
+  CefRefPtr<CefRequestContext> context = [self contextForSpace:space];
+  __weak MainWindowController* weakSelf = self;
+  if (!_readyContexts.count(space.profileDirectory.UTF8String)) {
+    // The Space's profile is still starting (e.g. a link arrived at launch); try again shortly.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+      [weakSelf openLittleWindow:url];
+    });
+    return;
+  }
+  LittleWindowController* little = [[LittleWindowController alloc] initWithURL:url
+      context:context
+      onMove:^(NSString* movedURL) { [weakSelf openInNewTab:movedURL]; }
+      onClose:^(LittleWindowController* lw, NSString* closedURL, NSString* title, BOOL moved) {
+        [weakSelf littleWindowClosed:lw url:closedURL title:title moved:moved space:space];
+      }];
+  if (!_littleWindows) _littleWindows = [NSMutableArray array];
+  [_littleWindows addObject:little];
+  [little showWindow:nil];
+}
+
+// A Little Window that's closed without being moved still lands in the Archive, like Arc.
+- (void)littleWindowClosed:(LittleWindowController*)little
+                       url:(NSString*)url
+                     title:(NSString*)title
+                     moved:(BOOL)moved
+                     space:(ArcSpace*)space {
+  [_littleWindows removeObject:little];
+  if (moved || !url.length || [url isEqualToString:@"about:blank"]) return;
+  ArchivedTab* t = [ArchivedTab new];
+  t.url = url;
+  t.title = title ?: url;
+  t.spaceID = space.spaceID;
+  t.reason = @"littleWindow";
+  t.archivedAt = [NSDate date];
+  [[self archive] addObject:t];
+  if (self.archivePath) ArchiveStoreSave(_archive, self.archivePath);
+}
+
+- (IBAction)newLittleWindow:(id)sender {
+  _commandOpensSplit = NO;
+  _commandOpensLittle = YES;
+  [self showCommandBarForNewTab:YES];
+}
+
+- (NSUInteger)littleWindowCount { return _littleWindows.count; }
+- (void)moveLittleWindowToMain:(NSUInteger)index {
+  if (index < _littleWindows.count) [_littleWindows[index] openInMainWindow:nil];
+}
+- (void)closeLittleWindow:(NSUInteger)index {
+  if (index < _littleWindows.count) [_littleWindows[index].window close];
 }
 
 #pragma mark Command bar and tab actions
@@ -788,14 +852,17 @@ static const CGFloat kPaneGap = 6;
   if (command == @selector(insertNewline:)) {
     NSString* text = _commandField.stringValue;
     [self hideCommandBar];
-    if (_commandOpensSplit) [self openInSplit:text horizontal:_splitHorizontal];
+    if (_commandOpensLittle) [self openLittleWindow:text];
+    else if (_commandOpensSplit) [self openInSplit:text horizontal:_splitHorizontal];
     else if (_commandOpensNewTab) [self openInNewTab:text];
     else [self navigateCurrentTab:text];
     _commandOpensSplit = NO;
+    _commandOpensLittle = NO;
     return YES;
   }
   if (command == @selector(cancelOperation:)) {
     _commandOpensSplit = NO;
+    _commandOpensLittle = NO;
     [self hideCommandBar];
     return YES;
   }
@@ -804,6 +871,7 @@ static const CGFloat kPaneGap = 6;
 
 - (IBAction)newTab:(id)sender {
   _commandOpensSplit = NO;
+  _commandOpensLittle = NO;
   [self showCommandBarForNewTab:YES];
 }
 - (IBAction)openLocation:(id)sender { [self showCommandBarForNewTab:NO]; }
@@ -831,7 +899,14 @@ static const CGFloat kPaneGap = 6;
     return;
   }
   auto it = _browsers.find(_shown.browserId);
-  if (it == _browsers.end()) return;
+  if (it == _browsers.end()) {
+    // The tab's web view isn't created yet (its Space profile is still starting): load the new
+    // address when it is, instead of dropping it.
+    _shown.url = url;
+    [self ensureBrowserForItem:_shown];
+    [self scheduleSave];
+    return;
+  }
   it->second->GetMainFrame()->LoadURL(url.UTF8String);
 }
 
@@ -1156,6 +1231,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
 // view on window close is what actually tears the browsers down (DoClose returns false).
 - (void)windowWillClose:(NSNotification*)notification {
   if (notification.object != self.window) return;  // the Archive window closing is not a quit
+  for (LittleWindowController* lw in [_littleWindows copy]) [lw.window close];
   [_archiveTimer invalidate];
   [_archiveWindow close];
   [self saveSidebarNow];

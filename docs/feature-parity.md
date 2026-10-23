@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-6 done, 10 partial, 64 not started or out of scope, of 80 items.
+6 done, 12 partial, 62 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -53,8 +53,8 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 ## Little Arc & Peek
 
-- [ ] Little Arc (mini browser for external links, global hotkey) (missing)
-- [ ] Open in main window / move to Space from Little Arc (missing)
+- [ ] Little Arc (mini browser for external links, global hotkey) (partial: Little Window for links from other apps, Cmd+Opt+Shift+N, archived on close; system-wide hotkey missing)
+- [ ] Open in main window / move to Space from Little Arc (partial: Open in NotArc moves to the current Space; choosing another Space missing)
 - [ ] Peek: preview links from pinned/favourite sites, email peeking (missing)
 
 ## Media
