@@ -277,6 +277,7 @@ static NSString* HexFromColor(NSColor* c) {
   _outline.rowHeight = 28;
   _outline.style = NSTableViewStyleSourceList;
   _outline.floatsGroupRows = NO;
+  _outline.allowsMultipleSelection = YES;
   _outline.dataSource = self;
   _outline.delegate = self;
   [_outline registerForDraggedTypes:@[ kSidebarItemPasteboardType ]];
@@ -1085,6 +1086,7 @@ static NSString* RelativeAgo(NSDate* d) {
 
 - (void)outlineViewSelectionDidChange:(NSNotification*)notification {
   [self hideHoverCard];
+  if (_outline.selectedRowIndexes.count > 1) return;  // multi-select only marks rows; it doesn't switch tabs
   ArcItem* item = [_outline itemAtRow:_outline.selectedRow];
   if (item.isSplit) {
     if ([item.children containsObject:_shown]) return;
@@ -2021,12 +2023,198 @@ static ArcItem* NewSection(NSString* title) {
   if (menu != _outline.menu) return;
   [menu removeAllItems];
   ArcItem* item = _outline.clickedRow >= 0 ? [_outline itemAtRow:_outline.clickedRow] : nil;
-  NSMenu* built = item ? [self sidebarMenuForItem:item] : nil;
+  NSArray<ArcItem*>* selected = [self selectedSidebarItems];
+  NSMenu* built = item && selected.count > 1 && [selected containsObject:item] ? [self sidebarMenuForItems:selected]
+                  : (item ? [self sidebarMenuForItem:item] : nil);
   for (NSMenuItem* mi in [built.itemArray copy]) {
     [built removeItem:mi];
     [menu addItem:mi];
   }
 }
+
+#pragma mark Multi-select
+
+- (NSArray<ArcItem*>*)selectedSidebarItems {
+  NSMutableArray<ArcItem*>* out = [NSMutableArray array];
+  [_outline.selectedRowIndexes enumerateIndexesUsingBlock:^(NSUInteger row, BOOL*) {
+    ArcItem* it = [_outline itemAtRow:row];
+    if (it && !it.isSection) [out addObject:it];
+  }];
+  return out;
+}
+
+- (void)selectSidebarItems:(NSArray<ArcItem*>*)items {
+  NSMutableIndexSet* rows = [NSMutableIndexSet indexSet];
+  for (ArcItem* it in items) {
+    NSInteger r = [_outline rowForItem:it];
+    if (r >= 0) [rows addIndex:r];
+  }
+  [_outline selectRowIndexes:rows byExtendingSelection:NO];
+}
+
+// Tabs inside selected folders/splits count too, once each.
+- (NSArray<ArcItem*>*)tabsIn:(NSArray<ArcItem*>*)items {
+  NSMutableOrderedSet<ArcItem*>* tabs = [NSMutableOrderedSet orderedSet];
+  NSMutableArray* stack = [items.reverseObjectEnumerator.allObjects mutableCopy];
+  while (stack.count) {
+    ArcItem* t = stack.lastObject;
+    [stack removeLastObject];
+    if (t.url.length) [tabs addObject:t];
+    [stack addObjectsFromArray:t.children.reverseObjectEnumerator.allObjects];
+  }
+  return tabs.array;
+}
+
+- (NSString*)linksForItems:(NSArray<ArcItem*>*)items markdown:(BOOL)markdown {
+  NSMutableArray* lines = [NSMutableArray array];
+  for (ArcItem* t in [self tabsIn:items]) {
+    NSString* url = [self itemCurrentURL:t];
+    if (!markdown) [lines addObject:url];
+    else
+      [lines addObject:[NSString stringWithFormat:@"- [%@](%@)",
+                        [t.displayTitle ?: url stringByReplacingOccurrencesOfString:@"]" withString:@"\\]"], url]];
+  }
+  return [lines componentsJoinedByString:@"\n"];
+}
+
+- (void)archiveItems:(NSArray<ArcItem*>*)items {
+  for (ArcItem* item in [self tabsIn:items]) {
+    BOOL isToday = Contains(_space.unpinned, item);
+    if ([self parentOfItem:item].isSplit) [self detachFromSplit:item keep:!isToday];
+    if (isToday) [self archiveItem:item space:_space reason:@"manual"];
+    [self unloadItem:item];
+    if (!isToday && item.pinnedURL.length) {
+      item.url = item.pinnedURL;
+      item.liveTitle = nil;
+    }
+    if (isToday) RemoveItem(_space.unpinned, item);
+    if (item == _shown) _shown = nil;
+  }
+  // Folders left empty in Today go too (Today folders only exist when imported from Arc).
+  [_outline reloadData];
+  for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
+  [self scheduleSave];
+  if (!_shown) {
+    ArcItem* next = nil;
+    for (ArcItem* t in _space.allTabs)
+      if (!next && t.browserId) next = t;
+    if (next) [self showItem:next];
+    else [_outline deselectAll:nil];
+  } else {
+    [self selectSidebarRowFor:_shown];
+  }
+}
+
+- (ArcItem*)newFolderWithItems:(NSArray<ArcItem*>*)items {
+  if (!items.count || !_space) return nil;
+  ArcItem* folder = [ArcItem new];
+  folder.itemID = NSUUID.UUID.UUIDString;
+  folder.title = @"New Folder";
+  folder.isFolder = YES;
+  folder.children = [NSMutableArray array];
+  // Put it where the first pinned item sits, else at the end of Pinned.
+  ArcItem* parent = _space.pinned;
+  NSUInteger index = _space.pinned.children.count;
+  for (ArcItem* it in items) {
+    ArcItem* p = [self parentOfItem:it];
+    if ([self sectionContaining:it] == _space.pinned && (p.isSection || p.isFolder)) {
+      parent = p;
+      index = [p.children indexOfObject:it];
+      break;
+    }
+  }
+  [parent.children insertObject:folder atIndex:index];
+  for (ArcItem* it in items) {
+    if (it == folder || Contains(it, folder)) continue;
+    BOOL wasToday = Contains(_space.unpinned, it);
+    if ([self parentOfItem:it].isSplit) continue;  // panes move with their split
+    if ([self moveItem:it toParent:folder index:folder.children.count] && wasToday) [self markPinnedURLs:it];
+  }
+  [_outline reloadData];
+  for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
+  [_outline expandItem:folder];
+  [self scheduleSave];
+  return folder;
+}
+
+- (NSMenu*)sidebarMenuForItems:(NSArray<ArcItem*>*)items {
+  NSMenu* m = [[NSMenu alloc] initWithTitle:@"Sidebar"];
+  NSUInteger n = [self tabsIn:items].count;
+  NSMenuItem* (^add)(NSString*, SEL) = ^NSMenuItem*(NSString* title, SEL action) {
+    NSMenuItem* mi = [[NSMenuItem alloc] initWithTitle:title action:action keyEquivalent:@""];
+    mi.target = self;
+    mi.representedObject = items;
+    [m addItem:mi];
+    return mi;
+  };
+  NSString* tabs = n == 1 ? @"1 Tab" : [NSString stringWithFormat:@"%lu Tabs", (unsigned long)n];
+  add([@"Copy Links to " stringByAppendingString:tabs], @selector(bulkCopyLinks:));
+  add(@"Copy Links as Markdown", @selector(bulkCopyMarkdown:));
+  [m addItem:[NSMenuItem separatorItem]];
+  add([NSString stringWithFormat:@"New Folder with %lu Items", (unsigned long)items.count], @selector(bulkNewFolder:));
+  BOOL anyToday = NO, anyPinned = NO;
+  for (ArcItem* it in items) {
+    if ([self sectionContaining:it] == _space.unpinned) anyToday = YES;
+    else anyPinned = YES;
+  }
+  if (anyToday) add(@"Pin Selected", @selector(bulkPin:));
+  if (anyPinned) add(@"Unpin Selected", @selector(bulkUnpin:));
+  if (_spaces.count > 1) {
+    NSMenuItem* move = [[NSMenuItem alloc] initWithTitle:@"Move to" action:nil keyEquivalent:@""];
+    NSMenu* sub = [[NSMenu alloc] initWithTitle:@"Move to"];
+    for (ArcSpace* sp in _spaces) {
+      if (sp == _space) continue;
+      for (int pinned = 0; pinned < 2; ++pinned) {
+        NSMenuItem* mi = [[NSMenuItem alloc]
+            initWithTitle:[NSString stringWithFormat:@"%@ in %@", pinned ? @"Pinned" : @"Today", sp.title]
+                   action:@selector(bulkMoveToSpace:)
+            keyEquivalent:@""];
+        mi.target = self;
+        mi.representedObject = @[ items, sp, @(pinned) ];
+        [sub addItem:mi];
+      }
+    }
+    move.submenu = sub;
+    [m addItem:move];
+  }
+  [m addItem:[NSMenuItem separatorItem]];
+  add([(anyPinned && !anyToday ? @"Close " : @"Archive ") stringByAppendingString:tabs], @selector(bulkArchive:));
+  return m;
+}
+
+- (void)bulkCopyLinks:(NSMenuItem*)sender {
+  [NSPasteboard.generalPasteboard clearContents];
+  [NSPasteboard.generalPasteboard setString:[self linksForItems:sender.representedObject markdown:NO]
+                                    forType:NSPasteboardTypeString];
+}
+- (void)bulkCopyMarkdown:(NSMenuItem*)sender {
+  [NSPasteboard.generalPasteboard clearContents];
+  [NSPasteboard.generalPasteboard setString:[self linksForItems:sender.representedObject markdown:YES]
+                                    forType:NSPasteboardTypeString];
+}
+- (void)bulkNewFolder:(NSMenuItem*)sender {
+  ArcItem* folder = [self newFolderWithItems:sender.representedObject];
+  NSInteger row = [_outline rowForItem:folder];
+  if (row >= 0) [_outline editColumn:0 row:row withEvent:nil select:YES];
+}
+- (void)bulkPin:(NSMenuItem*)sender {
+  for (ArcItem* it in sender.representedObject)
+    if ([self sectionContaining:it] == _space.unpinned && ![self parentOfItem:it].isSplit &&
+        [self moveItem:it toParent:_space.pinned index:_space.pinned.children.count])
+      [self markPinnedURLs:it];
+}
+- (void)bulkUnpin:(NSMenuItem*)sender {
+  NSUInteger i = 0;
+  for (ArcItem* it in sender.representedObject)
+    if ([self sectionContaining:it] == _space.pinned && ![self parentOfItem:it].isSplit &&
+        [self moveItem:it toParent:_space.unpinned index:i++])
+      [self clearPinnedURLs:it];
+}
+- (void)bulkMoveToSpace:(NSMenuItem*)sender {
+  NSArray* args = sender.representedObject;
+  for (ArcItem* it in args[0]) [self moveItem:it toSpace:args[1] pinned:[args[2] boolValue]];
+}
+- (void)bulkArchive:(NSMenuItem*)sender { [self archiveItems:sender.representedObject]; }
 
 - (NSMenuItem*)menuItem:(NSString*)title action:(SEL)action item:(ArcItem*)item {
   NSMenuItem* mi = [[NSMenuItem alloc] initWithTitle:title action:action keyEquivalent:@""];
