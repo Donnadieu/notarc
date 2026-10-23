@@ -96,6 +96,20 @@
   dev.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
   viewItem.submenu = view;
 
+  NSMenuItem* splitItem = [NSMenuItem new];
+  [bar addItem:splitItem];
+  NSMenu* split = [[NSMenu alloc] initWithTitle:@"Split View"];
+  NSEventModifierFlags cs = NSEventModifierFlagControl | NSEventModifierFlagShift;
+  [split addItemWithTitle:@"Add Vertical Split" action:@selector(addVerticalSplit:) keyEquivalent:@"="]
+      .keyEquivalentModifierMask = cs;
+  [split addItemWithTitle:@"Add Horizontal Split" action:@selector(addHorizontalSplit:) keyEquivalent:@"-"]
+      .keyEquivalentModifierMask = cs;
+  [split addItemWithTitle:@"Focus Next Pane" action:@selector(focusNextPane:) keyEquivalent:@"]"]
+      .keyEquivalentModifierMask = cs;
+  [split addItemWithTitle:@"Close Split Pane" action:@selector(closeSplitPane:) keyEquivalent:@"w"]
+      .keyEquivalentModifierMask = cs;
+  splitItem.submenu = split;
+
   NSMenuItem* histItem = [NSMenuItem new];
   [bar addItem:histItem];
   NSMenu* hist = [[NSMenu alloc] initWithTitle:@"History"];
@@ -221,6 +235,21 @@
       [w copyCurrentURLAsMarkdown:nil];
       std::printf("SELFTEST-BASICS findDomainCount=%d markdown=%s\n", w.lastFindCount,
                   [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString].UTF8String);
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openInSplit:@"https://example.com" horizontal:NO];
+      [w openInSplit:@"https://example.org" horizontal:NO];
+      NSArray<NSValue*>* f = [w paneFrames];
+      BOOL sideBySide = f.count == 3 && NSMaxX(f[0].rectValue) <= NSMinX(f[1].rectValue) &&
+                        NSMaxX(f[1].rectValue) <= NSMinX(f[2].rectValue);
+      std::printf("SELFTEST-SPLIT panes=%lu sideBySide=%d widths=%.0f,%.0f,%.0f\n", (unsigned long)f.count, sideBySide,
+                  f.count > 0 ? f[0].rectValue.size.width : 0, f.count > 1 ? f[1].rectValue.size.width : 0,
+                  f.count > 2 ? f[2].rectValue.size.width : 0);
+      [w closeSplitPane:nil];
+      std::printf("SELFTEST-SPLIT afterClosePane=%lu\n", (unsigned long)[w paneFrames].count);
+      [w closeSplitPane:nil];
+      std::printf("SELFTEST-SPLIT afterSecondClose=%lu\n", (unsigned long)[w paneFrames].count);
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 19 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
