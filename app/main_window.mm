@@ -149,6 +149,9 @@ static NSString* HexFromColor(NSColor* c) {
   HistoryStore* _history;
   BOOL _focusMode;
   CAGradientLayer* _themeGradient;
+  NSPopover* _hoverCard;
+  ArcItem* _hoverItem;
+  NSTimer* _hoverTimer;
   void (^_themePreview)(void);
   NSPopUpButton* _themePalette;
   NSUndoManager* _undo;
@@ -244,6 +247,12 @@ static NSString* HexFromColor(NSColor* c) {
   _outline.dataSource = self;
   _outline.delegate = self;
   [_outline registerForDraggedTypes:@[ kSidebarItemPasteboardType ]];
+  [_outline addTrackingArea:[[NSTrackingArea alloc]
+                                initWithRect:NSZeroRect
+                                     options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited |
+                                             NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
+                                       owner:self
+                                    userInfo:nil]];
   [_outline setDraggingSourceOperationMask:NSDragOperationMove forLocal:YES];
   _outline.menu = [[NSMenu alloc] initWithTitle:@"Sidebar"];
   _outline.menu.delegate = self;
@@ -714,7 +723,91 @@ NSString* CleanLinkURL(NSString* url) {
   return cell;
 }
 
+#pragma mark Hover cards
+
+static NSString* RelativeAgo(NSDate* d) {
+  if (!d) return nil;
+  NSRelativeDateTimeFormatter* f = [NSRelativeDateTimeFormatter new];
+  f.unitsStyle = NSRelativeDateTimeFormatterUnitsStyleFull;
+  return [f localizedStringForDate:d relativeToDate:[NSDate date]];
+}
+
+- (void)mouseMoved:(NSEvent*)event {
+  NSPoint p = [_outline convertPoint:event.locationInWindow fromView:nil];
+  NSInteger row = [_outline rowAtPoint:p];
+  ArcItem* item = row >= 0 ? [_outline itemAtRow:row] : nil;
+  if (!item.url.length || item.isSection) item = nil;
+  if (item == _hoverItem) return;
+  _hoverItem = item;
+  [_hoverTimer invalidate];
+  _hoverTimer = nil;
+  if (_hoverCard.shown) [self hideHoverCard];
+  if (!item) return;
+  __weak MainWindowController* weakSelf = self;
+  _hoverTimer = [NSTimer scheduledTimerWithTimeInterval:0.7 repeats:NO block:^(NSTimer* t) {
+    MainWindowController* me = weakSelf;
+    if (me && me->_hoverItem == item) [me showHoverCardForItem:item];
+  }];
+}
+
+- (void)mouseExited:(NSEvent*)event {
+  _hoverItem = nil;
+  [_hoverTimer invalidate];
+  _hoverTimer = nil;
+  [self hideHoverCard];
+}
+
+- (BOOL)hoverCardShown { return _hoverCard.shown; }
+
+- (void)hideHoverCard {
+  [_hoverCard close];
+  _hoverCard = nil;
+}
+
+- (NSArray<NSString*>*)showHoverCardForItem:(ArcItem*)item {
+  [self hideHoverCard];
+  NSInteger row = [_outline rowForItem:item];
+  if (row < 0 || !item.url.length) return nil;
+  NSString* url = [self itemCurrentURL:item];
+  NSURL* u = [NSURL URLWithString:url];
+  NSString* host = u.host ?: url;
+  if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
+  NSMutableArray<NSString*>* lines = [NSMutableArray arrayWithObjects:item.displayTitle ?: host, host, nil];
+  NSString* state = item.browserId ? @"Open" : @"Asleep";
+  if (item == _shown) state = @"Showing now";
+  NSString* ago = RelativeAgo(item.lastActiveAt);
+  [lines addObject:ago ? [NSString stringWithFormat:@"%@ · last used %@", state, ago] : state];
+  if (item.pinnedURL.length && ![item.pinnedURL isEqualToString:url])
+    [lines addObject:[@"Pinned at " stringByAppendingString:item.pinnedURL]];
+  [lines addObject:url];
+
+  NSStackView* stack = [NSStackView new];
+  stack.orientation = NSUserInterfaceLayoutOrientationVertical;
+  stack.alignment = NSLayoutAttributeLeading;
+  stack.spacing = 3;
+  stack.edgeInsets = NSEdgeInsetsMake(10, 12, 10, 12);
+  for (NSUInteger i = 0; i < lines.count; ++i) {
+    NSTextField* l = [NSTextField wrappingLabelWithString:lines[i]];
+    l.preferredMaxLayoutWidth = 280;
+    l.maximumNumberOfLines = i == 0 ? 2 : (i + 1 == lines.count ? 3 : 1);
+    l.lineBreakMode = i + 1 == lines.count ? NSLineBreakByCharWrapping : NSLineBreakByTruncatingTail;
+    l.font = i == 0 ? [NSFont boldSystemFontOfSize:13] : [NSFont systemFontOfSize:i + 1 == lines.count ? 10 : 11];
+    l.textColor = i == 0 ? NSColor.labelColor : NSColor.secondaryLabelColor;
+    [stack addArrangedSubview:l];
+  }
+  NSViewController* vc = [NSViewController new];
+  vc.view = stack;
+  stack.frame = NSMakeRect(0, 0, 304, stack.fittingSize.height);
+  _hoverCard = [NSPopover new];
+  _hoverCard.contentViewController = vc;
+  _hoverCard.behavior = NSPopoverBehaviorApplicationDefined;
+  _hoverCard.animates = NO;
+  [_hoverCard showRelativeToRect:[_outline rectOfRow:row] ofView:_outline preferredEdge:NSRectEdgeMaxX];
+  return lines;
+}
+
 - (void)outlineViewSelectionDidChange:(NSNotification*)notification {
+  [self hideHoverCard];
   ArcItem* item = [_outline itemAtRow:_outline.selectedRow];
   if (item.isSplit) {
     if ([item.children containsObject:_shown]) return;

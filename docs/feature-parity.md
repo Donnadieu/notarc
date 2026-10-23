@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-23 done, 16 partial, 41 not started or out of scope, of 80 items.
+23 done, 17 partial, 40 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -14,7 +14,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [x] Archive tab, Archive Other Tabs / Above / Below, Clear Today tabs
 - [x] Close and Keep Pinned; reset pinned tab to its saved URL (also Replace Pinned URL with Current, Reset All Pinned Tabs)
 - [ ] Tidy tab titles (missing)
-- [ ] Hover previews / hover cards on sidebar items (missing)
+- [ ] Hover previews / hover cards on sidebar items (partial: hover card with title, site, state, last used and address; page thumbnail missing)
 - [ ] Unread badge on tabs (missing)
 - [x] Go to Sidebar Item 1-9, last item, next/previous item (Cmd+1-8, Cmd+9 last, Cmd+Opt+Up/Down)
 - [ ] Hide/show sidebar, toolbar mode with full URL (partial: Cmd+S hides the sidebar; toolbar mode missing)
