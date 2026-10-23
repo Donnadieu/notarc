@@ -132,6 +132,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   ArchiveWindowController* _historyWindow;
   HistoryStore* _history;
   BOOL _focusMode;
+  NSUndoManager* _undo;
   BOOL _sidebarWasHidden;
   NSPanel* _findBar;
   NSSearchField* _findField;
@@ -1924,16 +1925,66 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target) {
 
 - (NSArray*)archivedTabs { return [self archive]; }
 
+- (NSUndoManager*)sidebarUndoManager {
+  if (!_undo) _undo = [NSUndoManager new];
+  return _undo;
+}
+- (NSUndoManager*)windowWillReturnUndoManager:(NSWindow*)window { return [self sidebarUndoManager]; }
+- (IBAction)undoCloseTab:(id)sender {
+  if ([[self sidebarUndoManager].undoActionName isEqualToString:@"Close Tab"]) [[self sidebarUndoManager] undo];
+}
+
+// Undo of closing a Today tab: put it back where it was and take it out of the Archive.
+- (void)restoreClosedItem:(ArcItem*)item parent:(ArcItem*)parent index:(NSUInteger)index
+                    space:(ArcSpace*)space archived:(ArchivedTab*)archived {
+  if (archived && [[self archive] containsObject:archived]) {
+    [_archive removeObject:archived];
+    if (self.archivePath) ArchiveStoreSave(_archive, self.archivePath);
+  }
+  if (space != _space && [_spaces containsObject:space]) [self switchToSpace:space];
+  if (!Contains(space.unpinned, parent) && parent != space.unpinned) parent = space.unpinned;
+  if (!Contains(space.unpinned, item))
+    [parent.children insertObject:item atIndex:MIN(index, parent.children.count)];
+  [_outline reloadData];
+  for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
+  [self scheduleSave];
+  [self showItem:item];
+  __weak MainWindowController* weakSelf = self;
+  [[self sidebarUndoManager] registerUndoWithTarget:self handler:^(id target) {
+    MainWindowController* me = weakSelf;
+    if (!me) return;
+    [me showItem:item];
+    [me closeCurrentTab];
+  }];
+  [[self sidebarUndoManager] setActionName:@"Close Tab"];
+}
+
 - (void)closeCurrentTab {
   ArcItem* item = _shown;
   if (!item) return;
   NSArray<ArcItem*>* tabs = _space.allTabs;
   NSUInteger index = [tabs indexOfObject:item];
   BOOL isToday = Contains(_space.unpinned, item);
+  ArcItem* undoParent = nil;
+  NSUInteger undoIndex = 0;
+  if (isToday && ![self parentOfItem:item].isSplit) {
+    undoParent = [self parentOfItem:item];
+    undoIndex = [undoParent.children indexOfObject:item];
+  }
+  NSUInteger archiveCountBefore = [self archive].count;
   // A closed pinned pane stays pinned (unloaded) next to its split; a Today pane is archived.
   if ([self parentOfItem:item].isSplit) [self detachFromSplit:item keep:!isToday];
   if (isToday) [self archiveItem:item space:_space reason:@"manual"];  // Arc archives closed Today tabs
+  ArchivedTab* archived = [self archive].count > archiveCountBefore ? _archive.lastObject : nil;
   [self unloadItem:item];
+  if (undoParent) {
+    ArcSpace* space = _space;
+    __weak MainWindowController* weakSelf = self;
+    [[self sidebarUndoManager] registerUndoWithTarget:self handler:^(id target) {
+      [weakSelf restoreClosedItem:item parent:undoParent index:undoIndex space:space archived:archived];
+    }];
+    [[self sidebarUndoManager] setActionName:@"Close Tab"];
+  }
   // Close and Keep Pinned: the tab stays and reopens at its saved URL.
   if (!isToday && item.pinnedURL.length) {
     item.url = item.pinnedURL;
