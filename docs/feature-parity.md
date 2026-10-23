@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-9 done, 18 partial, 53 not started or out of scope, of 80 items.
+11 done, 19 partial, 50 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -8,10 +8,10 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 - [x] Vertical sidebar with Favorites (Top Apps), Pinned, Today
 - [ ] Folders, nested folders, drag and drop (partial: nested folders and New Folder from Selection missing)
-- [ ] Pin/unpin (Cmd+D), Move to Pinned/Today/Top Apps (partial: Top Apps moves missing)
-- [ ] Rename tab / item (missing)
-- [ ] Duplicate tab / duplicate folder (missing)
-- [ ] Archive tab, Archive Other Tabs / Above / Below, Clear Today tabs (partial: close-to-archive and Clear Today (Cmd+Shift+K) done)
+- [ ] Pin/unpin (Cmd+D), Move to Pinned/Today/Top Apps (partial: pin/unpin and Move to Pinned/Today of another Space done; Top Apps moves missing)
+- [x] Rename tab / item
+- [ ] Duplicate tab / duplicate folder (partial: duplicate tab done; duplicate folder missing)
+- [x] Archive tab, Archive Other Tabs / Above / Below, Clear Today tabs
 - [ ] Close and Keep Pinned; reset pinned tab to its saved URL (missing)
 - [ ] Tidy tab titles (missing)
 - [ ] Hover previews / hover cards on sidebar items (missing)
@@ -101,7 +101,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Password saving/autofill, address/card autofill (missing)
 - [ ] DevTools (show/hide), developer mode (partial: DevTools done)
 - [ ] Set as default browser, open links from other apps (partial: registers as a browser and opens links from other apps; no in-app "make default" prompt)
-- [ ] Context menus (page, link, image, sidebar) (missing)
+- [ ] Context menus (page, link, image, sidebar) (partial: sidebar menu and NotArc link actions done; image actions are Chromium defaults)
 - [ ] Sad tab / crash recovery, session restore (partial: sidebar restore only)
 - [ ] Settings window (all preferences) (partial: search engine, auto-archive, Peek and Little Window link options; profiles, appearance, Max and advanced panes missing)
 - [ ] Keyboard shortcuts with user overrides (missing)
