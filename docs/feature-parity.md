@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-31 done, 13 partial, 36 not started or out of scope, of 80 items.
+34 done, 12 partial, 34 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -30,17 +30,17 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Space themes: colours, gradients, icons/emoji (Space style editor) (partial: per-Space colour or two-colour gradient with intensity, preset palettes, emoji icon; grain and per-Space light/dark missing)
 - [ ] Swipe / Ctrl+number to switch Spaces (partial: Ctrl+1-9 and Cmd+Opt+arrows done; trackpad swipe missing)
 - [ ] Create/rename Profiles, assign Space to Profile (missing)
-- [ ] Show/hide Space header, search Spaces (partial: View > Hide/Show Space Header; searching Spaces missing)
+- [x] Show/hide Space header, search Spaces (View > Hide/Show Space Header; Spaces appear in command bar results)
 
 ## Command bar & navigation
 
 - [x] Command bar: new tab, go to URL, search (done (basic))
-- [ ] Suggestions: open tabs, history, bookmarks, actions, top domains (missing)
+- [x] Suggestions: open tabs, history, bookmarks, actions, top domains (open and pinned tabs in every Space, Spaces, history, menu actions, top sites when empty; arrow keys + Enter)
 - [ ] Search engine choice, search suggestions (partial: engine choice done; suggestions missing)
 - [x] Switch to a recent tab (Ctrl+Tab)
 - [x] Back/forward, reload, find in page, zoom, print
 - [ ] Link routing rules (which Space opens which links) (missing)
-- [ ] Command bar ranking that learns from what you pick (missing)
+- [x] Command bar ranking that learns from what you pick
 - [x] Paste and Go (Edit menu)
 
 ## Split view & windows
