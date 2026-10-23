@@ -185,6 +185,10 @@ NSString* CleanLinkURL(NSString* url);
 - (void)reopenArchivedTab:(ArchivedTab*)tab;
 - (NSUInteger)archiveWindowCountForQuery:(NSString*)query;  // tests: opens the window, filters
 - (NSArray*)archivedTabs;
+// Closing a Today tab registers an undo (Edit > Undo Close Tab, Cmd+Z when the page isn't handling it):
+// the tab comes back at the same place in the sidebar and leaves the Archive.
+@property(nonatomic, readonly) NSUndoManager* sidebarUndoManager;
+- (IBAction)undoCloseTab:(id)sender;  // works even while a web page has focus (its own Cmd+Z edits text)
 @end
 
 NSString* ResolveCommandBarInput(NSString* input);  // URL as-is (https added) or a search URL

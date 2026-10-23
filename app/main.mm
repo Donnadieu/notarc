@@ -94,6 +94,7 @@
   [file addItemWithTitle:@"New Tab" action:@selector(newTab:) keyEquivalent:@"t"];
   [file addItemWithTitle:@"Open Location..." action:@selector(openLocation:) keyEquivalent:@"l"];
   [file addItemWithTitle:@"Close Tab" action:@selector(closeTab:) keyEquivalent:@"w"];
+  [file addItemWithTitle:@"Undo Close Tab" action:@selector(undoCloseTab:) keyEquivalent:@""];
   [file addItemWithTitle:@"Reopen Archived Tab" action:@selector(reopenLastArchived:) keyEquivalent:@"T"];
   [file addItemWithTitle:@"Print..." action:@selector(printPage:) keyEquivalent:@"p"];
   [file addItemWithTitle:@"Show History" action:@selector(showHistory:) keyEquivalent:@"y"];
@@ -565,6 +566,26 @@
                  copy.children[0] != a && [((ArcItem*)copy.children[0]).url hasPrefix:@"https://example.com/dup-a"] &&
                  ![copy.itemID isEqualToString:folder.itemID];
       std::printf("SELFTEST-CLEANDUP clean=%d stripAll=%d keepOthers=%d folderDup=%d\n", clean1, clean2, clean3, dup);
+    });
+    // Undo Close Tab: comes back at the same place, leaves the Archive; Redo closes it again.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 50 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openInNewTab:@"https://example.com/undo-a"];
+      ArcItem* a = w.shownItem;
+      [w openInNewTab:@"https://example.com/undo-b"];
+      NSArray* before = w.currentSpace.allTabs;
+      NSUInteger posA = [before indexOfObject:a];
+      NSUInteger archived = w.archivedTabs.count;
+      [w showItem:a];
+      [w closeCurrentTab];
+      BOOL gone = ![w.currentSpace.allTabs containsObject:a] && w.archivedTabs.count == archived + 1;
+      NSUndoManager* um = [w windowWillReturnUndoManager:w.window];
+      BOOL canUndo = um.canUndo && [um.undoActionName isEqualToString:@"Close Tab"];
+      [um undo];
+      BOOL back = [w.currentSpace.allTabs indexOfObject:a] == posA && w.shownItem == a && w.archivedTabs.count == archived;
+      [um redo];
+      BOOL redone = ![w.currentSpace.allTabs containsObject:a] && w.archivedTabs.count == archived + 1;
+      std::printf("SELFTEST-UNDO closed=%d canUndo=%d restoredSamePlace=%d redo=%d\n", gone, canUndo, back, redone);
     });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 34 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{

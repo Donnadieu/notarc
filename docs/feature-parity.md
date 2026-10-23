@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-22 done, 16 partial, 42 not started or out of scope, of 80 items.
+23 done, 15 partial, 42 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -20,7 +20,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Hide/show sidebar, toolbar mode with full URL (partial: Cmd+S hides the sidebar; toolbar mode missing)
 - [ ] Multi-select sidebar items and bulk actions (missing)
 - [ ] Copy URL, Copy URL as Markdown, copy links as Markdown, clean URL (partial: copy URL, Markdown and Copy Clean Link done; copying several links at once needs multi-select)
-- [ ] Undo close (Cmd+Z in sidebar), reopen closed tab (partial: Cmd+Shift+T only)
+- [x] Undo close (Cmd+Z in sidebar, Edit/File > Undo Close Tab), reopen closed tab (Cmd+Shift+T)
 
 ## Spaces & profiles
 
