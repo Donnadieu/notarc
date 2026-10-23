@@ -295,7 +295,7 @@
   if (self.selfTest) {
     [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
     if (!self.selfTestReload) [self runSelfTestActions];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 170 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       for (NSDictionary* tab in [self.window tabSnapshot])
         std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
                     [tab[@"profile"] UTF8String], [tab[@"title"] UTF8String], [tab[@"url"] UTF8String]);
@@ -661,9 +661,18 @@
                   "for(var i=0;i<n;i++)v.setInt16(44+i*2,Math.sin(i*2*Math.PI*440/r)*200,true);"
                   "var a=document.createElement('audio');a.src=URL.createObjectURL(new Blob([b],{type:'audio/wav'}));"
                   "document.body.appendChild(a);a.play();})()" inItem:m];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        __block int waits = 0;
+        __block void (^check)(void);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-retain-cycles"  // broken by check = nil
+        check = ^{
           [w pollMediaNow];
-          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          if (!m.mediaPlaying && ++waits < 24) {
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), check);
+            return;
+          }
+          check = nil;
+          {
             BOOL playing = m.mediaPlaying;
             [w showItem:m];  // other timed checks may have switched tabs meanwhile
             BOOL barHiddenWhileShown = w.mediaBarItem == nil;
@@ -683,6 +692,49 @@
                             playing, barHiddenWhileShown, bar, muted, !m.audioMuted, paused, resumed);
               });
             });
+          }
+        };
+#pragma clang diagnostic pop
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), check);
+      });
+    });
+    // Crashed page: chrome://crash kills the renderer; the tab shows the crashed view and Reload brings it back.
+    // Frozen page: a busy loop plus a key press trips the hang monitor; Exit Page ends it.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 75 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{  // after MEDIA
+      MainWindowController* w = self.window;
+      [w openInNewTab:@"https://example.net/crash-test"];  // own site = own process, so the hang can't stall other checks
+      ArcItem* c = w.shownItem;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w loadURL:@"chrome://crash" inItem:c];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          BOOL crashed = c.crashed;
+          [w reloadCrashedItem:c];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            [w showItem:c];
+            BOOL back = !c.crashed && [w.currentURL hasPrefix:@"https://example.net"];
+            [w runJS:@"setTimeout(function(){var t=Date.now();while(Date.now()-t<90000){}},50)" inItem:c];
+            __block int tries = 0;
+            __block void (^poke)(void);
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-retain-cycles"  // cycle is broken by poke = nil when done
+            poke = ^{
+              if (w.hungItem || ++tries > 30) {
+                BOOL hung = w.hungItem == c;
+                [w answerHungSheet:YES];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                  std::printf("SELFTEST-CRASH crashed=%d reloaded=%d hungSheet=%d exitPage=%d sheetGone=%d\n", crashed, back,
+                              hung, c.crashed, w.hungItem == nil);
+                  [w reloadCrashedItem:c];
+                });
+                poke = nil;
+                return;
+              }
+              if (w.shownItem != c) [w showItem:c];  // Chromium only watches visible pages for hangs
+              [w sendKeyToItem:c];
+              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), poke);
+            };
+#pragma clang diagnostic pop
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), poke);
           });
         });
       });

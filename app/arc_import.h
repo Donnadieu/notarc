@@ -20,7 +20,8 @@
 @property(nonatomic) int browserId;
 @property(nonatomic) BOOL mediaPlaying;  // audio or video playing (not saved)
 @property(nonatomic) BOOL mediaPaused;   // has media that was playing and is now paused (not saved)
-@property(nonatomic) BOOL audioMuted;    // tab muted (not saved)  // 0 until a web view exists for this tab
+@property(nonatomic) BOOL audioMuted;
+@property(nonatomic) BOOL crashed;  // the page's process died; a Reload overlay covers it (not saved)    // tab muted (not saved)  // 0 until a web view exists for this tab
 @property(nonatomic, strong) NSDate* lastActiveAt;  // drives auto-archive of Today tabs
 - (NSString*)displayTitle;
 @end

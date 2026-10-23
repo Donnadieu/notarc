@@ -2,6 +2,7 @@
 #pragma once
 
 #include <functional>
+#include <map>
 #include <string>
 
 #include "include/cef_client.h"
@@ -101,6 +102,17 @@ class BrowserClient : public CefClient,
   bool OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t level, const CefString& message,
                         const CefString& source, int line) override;
 
+  // Renderer health: kind 0 = the page's process crashed or was killed, 1 = it stopped responding,
+  // 2 = it recovered. While a page is unresponsive, ResolveHung(id, kill) ends the wait.
+  using RendererCallback = std::function<void(int browser_id, int kind, int status)>;
+  void set_renderer_callback(RendererCallback cb) { on_renderer_ = std::move(cb); }
+  void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code,
+                                 const CefString& error_string) override;
+  bool OnRenderProcessUnresponsive(CefRefPtr<CefBrowser> browser,
+                                   CefRefPtr<CefUnresponsiveProcessCallback> callback) override;
+  void OnRenderProcessResponsive(CefRefPtr<CefBrowser> browser) override;
+  void ResolveHung(int browser_id, bool kill);
+
   int open_browser_count() const { return open_browsers_; }
   // Closing individual tabs must not quit the app; only quit once the window is shutting down.
   void set_quit_when_empty(bool quit) { quit_when_empty_ = quit; }
@@ -114,6 +126,8 @@ class BrowserClient : public CefClient,
   OpenCallback on_open_;
   LinkMenuCallback on_link_menu_;
   MediaCallback on_media_;
+  RendererCallback on_renderer_;
+  std::map<int, CefRefPtr<CefUnresponsiveProcessCallback>> hung_;
   int open_browsers_ = 0;
   bool quit_when_empty_ = false;
 
