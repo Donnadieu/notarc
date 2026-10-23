@@ -40,7 +40,7 @@ NSString* SearchURLForQuery(NSString* q) {
 
 // Archive intervals offered in Arc: 12 hours, 24 hours, 7 days, 30 days, never.
 static NSArray* ArchiveChoices() {
-  return @[ @[ @"After 12 hours", @12 ], @[ @"After 24 hours", @24 ], @[ @"After 7 days", @(24 * 7) ],
+  return @[ @[ @"After 6 hours", @6 ], @[ @"After 12 hours", @12 ], @[ @"After 24 hours", @24 ], @[ @"After 7 days", @(24 * 7) ],
             @[ @"After 30 days", @(24 * 30) ], @[ @"Never", @0 ] ];
 }
 static NSArray* LittleArchiveChoices() {
