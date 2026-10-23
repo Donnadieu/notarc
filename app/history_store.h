@@ -13,6 +13,7 @@
 - (void)recordURL:(NSString*)url title:(NSString*)title space:(NSString*)space;
 - (void)updateTitle:(NSString*)title forURL:(NSString*)url;
 - (void)clear;
+- (NSUInteger)clearSince:(NSDate*)since;  // removes visits at or after `since`; returns how many
 - (void)saveNow;
 @end
 

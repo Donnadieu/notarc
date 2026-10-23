@@ -11,8 +11,10 @@
 #include <atomic>
 #include <functional>
 #include <map>
+#include <memory>
 #include <set>
 #include <string>
+#include <vector>
 
 #include "app/browser_client.h"
 #include "include/cef_browser.h"
@@ -239,6 +241,117 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   if (picked) [self switchToSpace:picked];
 }
 
+class BlockDeleteCookies : public CefDeleteCookiesCallback {
+ public:
+  explicit BlockDeleteCookies(void (^done)(int)) : done_([done copy]) {}
+  void OnComplete(int n) override {
+    void (^done)(int) = done_;
+    if (done) dispatch_async(dispatch_get_main_queue(), ^{ done(n); });
+  }
+ private:
+  void (^done_)(int);
+  IMPLEMENT_REFCOUNTING(BlockDeleteCookies);
+};
+
+// Visits every cookie, collects those matching `match`; when the visit ends, deletes them one by one
+// through DeleteCookies (which reports completion) if `remove`, then reports the count on the main queue.
+class MatchCookieVisitor : public CefCookieVisitor {
+ public:
+  MatchCookieVisitor(CefRefPtr<CefCookieManager> mgr, std::function<bool(const CefCookie&)> match, bool remove,
+                     void (^done)(NSUInteger))
+      : mgr_(mgr), match_(std::move(match)), remove_(remove), done_([done copy]) {}
+  ~MatchCookieVisitor() override {
+    auto hits = std::make_shared<std::vector<std::pair<std::string, std::string>>>(std::move(hits_));
+    void (^done)(NSUInteger) = done_;
+    CefRefPtr<CefCookieManager> mgr = mgr_;
+    BOOL remove = remove_;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      NSUInteger n = hits->size();
+      if (!remove || hits->empty()) {
+        if (done) done(n);
+        return;
+      }
+      dispatch_group_t g = dispatch_group_create();
+      for (auto& h : *hits) {
+        dispatch_group_enter(g);
+        std::string dbgUrl = h.first, dbgName = h.second;
+        if (!mgr->DeleteCookies(h.first, h.second, new BlockDeleteCookies(^(int deleted) {
+              if (getenv("NOTARC_COOKIE_DEBUG"))
+                fprintf(stderr, "COOKIE-DEL %s %s -> %d\n", dbgUrl.c_str(), dbgName.c_str(), deleted);
+              dispatch_group_leave(g);
+            })))
+          dispatch_group_leave(g);
+      }
+      dispatch_group_notify(g, dispatch_get_main_queue(), ^{
+        if (done) done(n);
+      });
+    });
+  }
+  bool Visit(const CefCookie& c, int, int, bool&) override {
+    if (getenv("NOTARC_COOKIE_DEBUG") && CefString(&c.name).ToString().rfind("nt_", 0) == 0)
+      fprintf(stderr, "COOKIE-SEEN %s domain=%s path=%s match=%d\n", CefString(&c.name).ToString().c_str(),
+              CefString(&c.domain).ToString().c_str(), CefString(&c.path).ToString().c_str(), (int)match_(c));
+    if (match_(c)) {
+      std::string d = CefString(&c.domain).ToString();
+      if (!d.empty() && d[0] == '.') d = d.substr(1);
+      std::string url = (c.secure ? "https://" : "http://") + d + CefString(&c.path).ToString();
+      hits_.emplace_back(url, CefString(&c.name).ToString());
+    }
+    return true;
+  }
+ private:
+  CefRefPtr<CefCookieManager> mgr_;
+  std::function<bool(const CefCookie&)> match_;
+  bool remove_;
+  void (^done_)(NSUInteger);
+  std::vector<std::pair<std::string, std::string>> hits_;
+  IMPLEMENT_REFCOUNTING(MatchCookieVisitor);
+};
+
+class BlockCompletion : public CefCompletionCallback {
+ public:
+  explicit BlockCompletion(void (^done)(void)) : done_([done copy]) {}
+  void OnComplete() override {
+    void (^done)(void) = done_;
+    if (done) dispatch_async(dispatch_get_main_queue(), done);
+  }
+ private:
+  void (^done_)(void);
+  IMPLEMENT_REFCOUNTING(BlockCompletion);
+};
+
+class BlockSetCookie : public CefSetCookieCallback {
+ public:
+  explicit BlockSetCookie(void (^done)(void)) : done_([done copy]) {}
+  void OnComplete(bool ok) override {
+    if (getenv("NOTARC_COOKIE_DEBUG")) fprintf(stderr, "COOKIE-SET ok=%d\n", ok);
+    void (^done)(void) = done_;
+    if (done) dispatch_async(dispatch_get_main_queue(), done);
+  }
+ private:
+  void (^done_)(void);
+  IMPLEMENT_REFCOUNTING(BlockSetCookie);
+};
+
+static double CookieCreatedUnix(const CefCookie& c) {
+  return c.creation.val / 1e6 - 11644473600.0;  // microseconds since 1601 -> seconds since 1970
+}
+
+static std::string HostOf(const std::string& url) {
+  NSURL* u = [NSURL URLWithString:[NSString stringWithUTF8String:url.c_str()]];
+  return u.host.lowercaseString.UTF8String ?: "";
+}
+
+// Cookie domain ".example.com" or "example.com" belongs to host "www.example.com" / "example.com".
+static bool CookieBelongsToHost(const CefCookie& c, const std::string& host) {
+  std::string d = CefString(&c.domain).ToString();
+  if (!d.empty() && d[0] == '.') d = d.substr(1);
+  if (d.empty() || host.empty()) return false;
+  if (host == d) return true;
+  return host.size() > d.size() && host.compare(host.size() - d.size(), d.size(), d) == 0 &&
+         host[host.size() - d.size() - 1] == '.';
+}
+
 // One isolated browser profile per Arc Space (cookies, storage), keyed by Arc's profile name.
 - (CefRefPtr<CefRequestContext>)contextForSpace:(ArcSpace*)space {
   std::string key = space.profileDirectory.UTF8String;
@@ -248,7 +361,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
       [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
           stringByAppendingPathComponent:@"NotArc"];
   // Chrome-style CEF only accepts profile dirs that are direct children of root_cache_path.
-  NSString* name = [@"Space " stringByAppendingString:space.profileDirectory];
+  NSString* name = [(self.selfTestProfiles ? @"SelfTest Space " : @"Space ") stringByAppendingString:space.profileDirectory];
   NSString* path = [support stringByAppendingPathComponent:name];
   [[NSFileManager defaultManager] createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
   CefRequestContextSettings settings;
@@ -267,7 +380,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   CefRefPtr<CefRequestContext> ctx = _contexts[profile.UTF8String];
   NSString* marker = [[NSString stringWithUTF8String:ctx->GetCachePath().ToString().c_str()]
       stringByAppendingPathComponent:@"ArcCookiesImported"];
-  if (![[NSFileManager defaultManager] fileExistsAtPath:marker]) {
+  if (!self.selfTestProfiles && ![[NSFileManager defaultManager] fileExistsAtPath:marker]) {
     __weak MainWindowController* weakSelf = self;
     [self importArcCookiesForProfile:profile context:ctx done:^(NSUInteger read, int ok) {
       std::fprintf(stderr, "imported %d/%lu Arc cookies into %s\n", ok, (unsigned long)read, profile.UTF8String);
@@ -2100,6 +2213,136 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
   }
   [_historyWindow reload];
   [_historyWindow showWindow:nil];
+}
+
+- (std::vector<CefRefPtr<CefRequestContext>>)allContexts {
+  std::vector<CefRefPtr<CefRequestContext>> out;
+  for (auto& kv : _contexts) out.push_back(kv.second);
+  if (auto g = CefRequestContext::GetGlobalContext()) out.push_back(g);
+  return out;
+}
+
+- (void)clearBrowsingDataSince:(NSDate*)since history:(BOOL)history cookies:(BOOL)cookies cache:(BOOL)cache
+                          done:(void (^)(NSUInteger, NSUInteger))done {
+  NSUInteger historyRemoved = 0;
+  if (history) {
+    historyRemoved = since ? [[self historyStore] clearSince:since] : [self historyStore].visits.count;
+    if (!since) [[self historyStore] clear];
+    [_historyWindow reload];
+  }
+  auto contexts = [self allContexts];
+  dispatch_group_t group = dispatch_group_create();
+  __block NSUInteger cookiesRemoved = 0;
+  double sinceUnix = since ? since.timeIntervalSince1970 : 0;
+  for (auto& ctx : contexts) {
+    if (cookies) {
+      if (auto mgr = ctx->GetCookieManager(nullptr)) {
+        dispatch_group_enter(group);
+        BOOL started = mgr->VisitAllCookies(new MatchCookieVisitor(mgr,
+            [sinceUnix](const CefCookie& c) { return sinceUnix == 0 || CookieCreatedUnix(c) >= sinceUnix - 1; }, true,
+            ^(NSUInteger n) {
+              cookiesRemoved += n;
+              dispatch_group_leave(group);
+            }));
+        if (!started) dispatch_group_leave(group);
+      }
+    }
+    if (cache) {
+      dispatch_group_enter(group);
+      ctx->ClearHttpCache(new BlockCompletion(^{ dispatch_group_leave(group); }));
+    }
+  }
+  dispatch_group_notify(group, dispatch_get_main_queue(), ^{
+    if (done) done(historyRemoved, cookiesRemoved);
+  });
+}
+
+- (IBAction)clearBrowsingData:(id)sender {
+  NSAlert* a = [NSAlert new];
+  a.messageText = @"Clear Browsing Data";
+  a.informativeText = @"Applies to every Space. Your tabs, Spaces and Archive are not affected.";
+  NSView* box = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 300, 110)];
+  NSPopUpButton* range = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 82, 220, 26) pullsDown:NO];
+  NSArray* titles = @[ @"Last hour", @"Last 24 hours", @"Last 7 days", @"Last 4 weeks", @"All time" ];
+  NSArray* secs = @[ @3600, @86400, @604800, @2419200, @0 ];
+  [range addItemsWithTitles:titles];
+  for (NSUInteger i = 0; i < titles.count; ++i) [range itemAtIndex:i].tag = [secs[i] integerValue];
+  [range selectItemAtIndex:4];
+  NSButton* hist = [NSButton checkboxWithTitle:@"Browsing history" target:nil action:nil];
+  NSButton* cook = [NSButton checkboxWithTitle:@"Cookies (signs you out of sites)" target:nil action:nil];
+  NSButton* cach = [NSButton checkboxWithTitle:@"Cached images and files (all time)" target:nil action:nil];
+  hist.frame = NSMakeRect(0, 56, 300, 20);
+  cook.frame = NSMakeRect(0, 30, 300, 20);
+  cach.frame = NSMakeRect(0, 4, 300, 20);
+  hist.state = NSControlStateValueOn;
+  cach.state = NSControlStateValueOn;
+  for (NSView* v in @[ range, hist, cook, cach ]) [box addSubview:v];
+  a.accessoryView = box;
+  [a addButtonWithTitle:@"Clear Data"];
+  [a addButtonWithTitle:@"Cancel"];
+  if ([a runModal] != NSAlertFirstButtonReturn) return;
+  NSInteger s = range.selectedItem.tag;
+  [self clearBrowsingDataSince:s ? [NSDate dateWithTimeIntervalSinceNow:-s] : nil
+                       history:hist.state == NSControlStateValueOn
+                       cookies:cook.state == NSControlStateValueOn
+                         cache:cach.state == NSControlStateValueOn
+                          done:nil];
+}
+
+- (void)clearCookiesAndRefreshWithDone:(void (^)(NSUInteger))done {
+  CefRefPtr<CefBrowser> b = [self currentBrowser];
+  if (!b) {
+    if (done) done(0);
+    return;
+  }
+  std::string url = b->GetMainFrame()->GetURL().ToString();
+  std::string host = HostOf(url);
+  if (getenv("NOTARC_COOKIE_DEBUG"))
+    fprintf(stderr, "COOKIE-CLEARSITE url=%s shown=%s\n", url.c_str(), _shown.url.UTF8String ?: "-");
+  NSURL* u = [NSURL URLWithString:[NSString stringWithUTF8String:url.c_str()]];
+  if (host.empty() || !([u.scheme isEqualToString:@"http"] || [u.scheme isEqualToString:@"https"])) {
+    if (done) done(0);
+    return;
+  }
+  // Site storage (localStorage, IndexedDB, service workers, cache storage) for this origin.
+  CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
+  NSString* origin = [NSString stringWithFormat:@"%@://%@%@", u.scheme, u.host, u.port ? [NSString stringWithFormat:@":%@", u.port] : @""];
+  params->SetString("origin", origin.UTF8String);
+  params->SetString("storageTypes", "local_storage,indexeddb,websql,cache_storage,service_workers,file_systems,shader_cache");
+  b->GetHost()->ExecuteDevToolsMethod(0, "Storage.clearDataForOrigin", params);
+  auto mgr = b->GetHost()->GetRequestContext()->GetCookieManager(nullptr);
+  void (^finish)(NSUInteger) = ^(NSUInteger n) {
+    b->Reload();
+    if (done) done(n);
+  };
+  if (!mgr || !mgr->VisitAllCookies(new MatchCookieVisitor(mgr,
+                  [host](const CefCookie& c) { return CookieBelongsToHost(c, host); }, true, finish)))
+    finish(0);
+}
+
+- (IBAction)clearCookiesAndRefresh:(id)sender { [self clearCookiesAndRefreshWithDone:nil]; }
+
+- (void)selfTestSetCookie:(NSString*)url name:(NSString*)name done:(void (^)(void))done {
+  CefRefPtr<CefBrowser> b = [self currentBrowser];
+  auto mgr = b ? b->GetHost()->GetRequestContext()->GetCookieManager(nullptr) : nullptr;
+  if (!mgr) return done();
+  CefCookie c;
+  CefString(&c.name) = name.UTF8String;
+  CefString(&c.value) = "1";
+  CefString(&c.path) = "/";
+  c.secure = [url hasPrefix:@"https"];
+  c.has_expires = true;
+  c.expires.val = (int64_t)(([NSDate dateWithTimeIntervalSinceNow:3600].timeIntervalSince1970 + 11644473600.0) * 1e6);
+  if (!mgr->SetCookie(url.UTF8String, c, new BlockSetCookie(done))) done();
+}
+
+- (void)selfTestCountCookiesNamed:(NSString*)name done:(void (^)(NSUInteger))done {
+  CefRefPtr<CefBrowser> b = [self currentBrowser];
+  auto mgr = b ? b->GetHost()->GetRequestContext()->GetCookieManager(nullptr) : nullptr;
+  std::string n = name.UTF8String;
+  if (!mgr || !mgr->VisitAllCookies(new MatchCookieVisitor(mgr,
+                  [n](const CefCookie& c) { return CefString(&c.name).ToString() == n; }, false, done)))
+    done(0);
 }
 
 - (IBAction)clearHistory:(id)sender {
