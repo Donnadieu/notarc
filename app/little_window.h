@@ -19,6 +19,8 @@ typedef void (^LittleWindowMove)(NSString* url);
                      onMove:(LittleWindowMove)onMove
                     onClose:(LittleWindowClosed)onClose;
 - (IBAction)openInMainWindow:(id)sender;
+// Peek: shown as an overlay attached to `parent`, button reads "Open as Tab", Esc closes it.
+- (void)presentAsPeekOver:(NSWindow*)parent;
 @property(nonatomic, readonly) NSString* currentURL;
 @property(nonatomic, readonly) NSString* pageTitle;
 @end

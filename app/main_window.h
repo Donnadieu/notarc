@@ -69,6 +69,14 @@
 - (void)moveLittleWindowToMain:(NSUInteger)index;  // tests: same as its "Open in NotArc" button
 - (void)closeLittleWindow:(NSUInteger)index;       // tests
 
+// Peek: links clicked on a Pinned tab or Favorite that leave its site open in an overlay instead
+// of navigating the tab away, so the pinned page stays put.
+- (BOOL)shouldPeekFromItem:(ArcItem*)item toURL:(NSString*)url;
+- (void)openPeek:(NSString*)url;
+- (BOOL)isPeeking;              // tests
+- (void)promotePeekToTab;       // tests: same as "Open as Tab"
+- (void)closePeek;              // tests
+
 // Archive (Arc: auto-archive of Today tabs + Cmd+Shift+T style reopen).
 @property(nonatomic, copy) NSString* archivePath;
 - (NSUInteger)runAutoArchiveWithThreshold:(NSTimeInterval)threshold now:(NSDate*)now;  // returns # archived

@@ -183,7 +183,7 @@
   if (self.selfTest) {
     [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
     if (!self.selfTestReload) [self runSelfTestActions];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 45 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       for (NSDictionary* tab in [self.window tabSnapshot])
         std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
                     [tab[@"profile"] UTF8String], [tab[@"title"] UTF8String], [tab[@"url"] UTF8String]);
@@ -198,11 +198,14 @@
 - (void)runBasicsTestWhenReady:(int)attempt {
   MainWindowController* w = self.window;
   if (![w hasLiveBrowser] || ![[w currentURL] hasPrefix:@"https://example.com"]) {
-    if (attempt < 40)
+    if (attempt < 80)
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
         [self runBasicsTestWhenReady:attempt + 1];
       });
-    else std::printf("SELFTEST-BASICS tabNeverLoaded=1\n");
+    else {
+      std::printf("SELFTEST-BASICS tabNeverLoaded=1 live=%d url=%s\n", [w hasLiveBrowser], [w currentURL].UTF8String);
+      [self runRemainingSelfTestActions];
+    }
     return;
   }
   [w navigateCurrentTab:@"https://www.iana.org/help/example-domains"];
@@ -222,10 +225,17 @@
     [w copyCurrentURLAsMarkdown:nil];
     std::printf("SELFTEST-BASICS findDomainCount=%d markdown=%s\n", w.lastFindCount,
                 [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString].UTF8String);
+    [self runRemainingSelfTestActions];
   });
 }
 
+// Basics run alone first; the other steps would otherwise navigate or close its tab mid-test.
 - (void)runSelfTestActions {
+  [self.window openInNewTab:@"https://example.com"];
+  [self runBasicsTestWhenReady:0];
+}
+
+- (void)runRemainingSelfTestActions {
   {
     [self.window openInNewTab:@"example.com"];            // command bar: bare host -> https
     [self.window openInNewTab:@"arc browser reverse engineering"];  // command bar: search
@@ -247,10 +257,6 @@
       std::printf("SELFTEST-ORG folder=%d intoFolder=%d pinned=%d cycleRefused=%d\n", folder != nil, intoFolder,
                   pinned, !cycle);
       [w saveSidebarNow];
-    });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-      [self.window openInNewTab:@"https://example.com"];
-      [self runBasicsTestWhenReady:0];
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
@@ -283,6 +289,28 @@
       std::printf("SELFTEST-LITTLE movedInSidebar=%d left=%lu archivedDelta=%ld lastReason=%s lastURL=%s\n", inSidebar,
                   (unsigned long)[w littleWindowCount], (long)([w archivedTabs].count - archivedBefore),
                   last.reason.UTF8String, last.url.UTF8String);
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 18500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      ArcItem* pinned = [w currentPinnedSection].children.firstObject;
+      while (pinned.isFolder) pinned = pinned.children.firstObject;
+      ArcItem* today = [w tabWithURLPrefix:@"https://example.com/little-moved"];  // moved into Today above
+      NSString* sameSite = pinned.url ? [[NSURL URLWithString:pinned.url].scheme stringByAppendingFormat:@"://%@/other",
+                                                                                    [NSURL URLWithString:pinned.url].host]
+                                      : @"";
+      std::printf("SELFTEST-PEEK pinnedOther=%d pinnedSameSite=%d todayOther=%d\n",
+                  [w shouldPeekFromItem:pinned toURL:@"https://en.wikipedia.org/wiki/Peek"],
+                  [w shouldPeekFromItem:pinned toURL:sameSite],
+                  [w shouldPeekFromItem:today toURL:@"https://en.wikipedia.org/wiki/Peek"]);
+      [w openPeek:@"https://example.net/peeked"];
+      BOOL open = [w isPeeking];
+      [w promotePeekToTab];
+      std::printf("SELFTEST-PEEK opened=%d afterPromote=%d promotedInSidebar=%d\n", open, [w isPeeking],
+                  [w tabWithURLPrefix:@"https://example.net/peeked"] != nil);
+      [w openPeek:@"https://example.net/discarded"];
+      [w closePeek];
+      std::printf("SELFTEST-PEEK afterClose=%d discardedInSidebar=%d\n", [w isPeeking],
+                  [w tabWithURLPrefix:@"https://example.net/discarded"] != nil);
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 19 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;

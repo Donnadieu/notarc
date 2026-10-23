@@ -10,6 +10,7 @@ static const CGFloat kToolbarHeight = 34;
   CefRefPtr<CefBrowser> _browser;
   NSView* _webContainer;
   NSTextField* _titleLabel;
+  NSButton* _openButton;
   NSString* _initialURL;
   NSString* _pageTitle;
   NSString* _lastURL;
@@ -52,6 +53,7 @@ static const CGFloat kToolbarHeight = 34;
   _titleLabel.textColor = NSColor.secondaryLabelColor;
   [toolbar addSubview:_titleLabel];
   NSButton* open = [NSButton buttonWithTitle:@"Open in NotArc" target:self action:@selector(openInMainWindow:)];
+  _openButton = open;
   open.frame = NSMakeRect(b.size.width - 140, 4, 132, 26);
   open.autoresizingMask = NSViewMinXMargin;
   open.bezelStyle = NSBezelStyleRounded;
@@ -83,6 +85,20 @@ static const CGFloat kToolbarHeight = 34;
   return self;
 }
 
+- (void)presentAsPeekOver:(NSWindow*)parent {
+  NSWindow* w = self.window;
+  w.level = NSNormalWindowLevel;
+  w.styleMask = w.styleMask & ~NSWindowStyleMaskMiniaturizable;
+  _openButton.title = @"Open as Tab";
+  NSRect f = parent.frame;
+  CGFloat inset = 0.08;
+  [w setFrame:NSInsetRect(f, f.size.width * inset, f.size.height * inset) display:NO];
+  [parent addChildWindow:w ordered:NSWindowAbove];
+  [w makeKeyAndOrderFront:nil];
+}
+
+- (void)cancelOperation:(id)sender { [self.window close]; }
+
 - (void)pageTitleChanged:(NSString*)title {
   _pageTitle = [title copy];
   _titleLabel.stringValue = title;
@@ -111,6 +127,7 @@ static const CGFloat kToolbarHeight = 34;
 }
 
 - (void)windowWillClose:(NSNotification*)notification {
+  [self.window.parentWindow removeChildWindow:self.window];
   NSString* url = self.currentURL;
   NSString* title = self.pageTitle;
   if (_browser) {

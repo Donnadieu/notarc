@@ -56,3 +56,10 @@ void BrowserClient::OnGotFocus(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
   if (on_focus_) on_focus_(browser->GetIdentifier());
 }
+
+bool BrowserClient::OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                   CefRefPtr<CefRequest> request, bool user_gesture, bool is_redirect) {
+  CEF_REQUIRE_UI_THREAD();
+  if (!navigation_filter_ || !user_gesture || is_redirect || !frame->IsMain()) return false;
+  return navigation_filter_(browser->GetIdentifier(), request->GetURL().ToString());
+}

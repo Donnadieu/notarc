@@ -7,13 +7,15 @@
 #include "include/cef_client.h"
 #include "include/cef_find_handler.h"
 #include "include/cef_focus_handler.h"
+#include "include/cef_request_handler.h"
 
 class BrowserClient : public CefClient,
                       public CefDisplayHandler,
                       public CefLifeSpanHandler,
                       public CefLoadHandler,
                       public CefFindHandler,
-                      public CefFocusHandler {
+                      public CefFocusHandler,
+                      public CefRequestHandler {
  public:
   using TitleCallback = std::function<void(int browser_id, const std::string& title)>;
   using UrlCallback = std::function<void(int browser_id, const std::string& url)>;
@@ -25,6 +27,14 @@ class BrowserClient : public CefClient,
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
   CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
   CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
+  CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+
+  // Asked before a user-initiated main-frame navigation; returning true cancels it (the window
+  // shows the link somewhere else instead, e.g. Peek).
+  using NavigationFilter = std::function<bool(int browser_id, const std::string& url)>;
+  void set_navigation_filter(NavigationFilter f) { navigation_filter_ = std::move(f); }
+  bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
+                      bool user_gesture, bool is_redirect) override;
 
   // Fires when a web view takes keyboard focus (e.g. the user clicks a split view pane).
   using FocusCallback = std::function<void(int browser_id)>;
@@ -60,6 +70,7 @@ class BrowserClient : public CefClient,
   UrlCallback on_url_;
   FindCallback on_find_;
   FocusCallback on_focus_;
+  NavigationFilter navigation_filter_;
   int open_browsers_ = 0;
   bool quit_when_empty_ = false;
 
