@@ -8,6 +8,7 @@ NSString* const kSettingPeekShiftClick = @"peekShiftClick";
 NSString* const kSettingExternalLinksLittle = @"externalLinksOpenInLittleWindow";
 NSString* const kSettingLittleArchiveHours = @"littleWindowArchiveHours";
 NSString* const kSettingShowToolbar = @"showToolbar";
+NSString* const kSettingCommandPicks = @"commandBarPicks";
 NSString* const kSettingShowSpaceHeader = @"showSpaceHeader";
 
 void SettingsRegisterDefaults(void) {
@@ -28,6 +29,14 @@ void SettingsUseMemoryOnly(void) { g_memorySettings = [NSMutableDictionary dicti
 void SettingSetBool(NSString* key, BOOL value) {
   if (g_memorySettings) g_memorySettings[key] = @(value);
   else [NSUserDefaults.standardUserDefaults setBool:value forKey:key];
+}
+id SettingObject(NSString* key) {
+  if (g_memorySettings) return g_memorySettings[key];
+  return [NSUserDefaults.standardUserDefaults objectForKey:key];
+}
+void SettingSetObject(NSString* key, id value) {
+  if (g_memorySettings) g_memorySettings[key] = value;
+  else [NSUserDefaults.standardUserDefaults setObject:value forKey:key];
 }
 BOOL SettingBool(NSString* key) {
   if (NSNumber* v = g_memorySettings[key]) return v.boolValue;
