@@ -25,7 +25,7 @@ Working today:
 - **Move over from Arc.** On first launch NotArc reads your Arc data on your own Mac and imports your Spaces, tabs,
   archive and logins. It only reads Arc's files and never changes them.
 
-Planned: split view, Peek, Little Arc, Boosts, Easel and Notes, and more polish.
+Planned: split view, Peek, Little Arc, Boosts, Easel and Notes and more. See [the parity checklist](docs/feature-parity.md).
 
 ## Built on Chromium, upgraded with Chromium
 
@@ -54,6 +54,7 @@ Developer flags: `--selftest` runs an automated smoke test, `--dump-arc` prints 
 ## Project layout
 
 - `app/`: the browser (window, sidebar, command bar, archive, Arc import)
+- `docs/feature-parity.md`: checklist of every Arc feature and its status in NotArc
 - `docs/arc-data-format.md`: how Arc stores your sidebar and archive on disk, so they can be imported
 
 ## Contributing
