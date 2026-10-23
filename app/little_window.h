@@ -12,6 +12,7 @@
 // moved = YES when the page was moved into the main window (so it shouldn't be archived).
 typedef void (^LittleWindowClosed)(LittleWindowController* little, NSString* url, NSString* title, BOOL moved);
 typedef void (^LittleWindowMove)(NSString* url);
+typedef void (^LittleWindowMoveToSpace)(NSString* url, NSUInteger spaceIndex);
 
 @interface LittleWindowController : NSWindowController <NSWindowDelegate>
 - (instancetype)initWithURL:(NSString*)url
@@ -19,6 +20,10 @@ typedef void (^LittleWindowMove)(NSString* url);
                      onMove:(LittleWindowMove)onMove
                     onClose:(LittleWindowClosed)onClose;
 - (IBAction)openInMainWindow:(id)sender;
+// "Move to Space" menu next to the Open button: one entry per Space name; picking one calls onMoveToSpace.
+@property(nonatomic, copy) NSArray<NSString*>* spaceNames;
+@property(nonatomic, copy) LittleWindowMoveToSpace onMoveToSpace;
+- (void)openInSpaceAtIndex:(NSUInteger)index;
 // Peek: shown as an overlay attached to `parent`, button reads "Open as Tab", Esc closes it.
 - (void)presentAsPeekOver:(NSWindow*)parent;
 @property(nonatomic, readonly) NSString* currentURL;
