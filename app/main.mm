@@ -124,6 +124,8 @@
   [bar addItem:viewItem];
   NSMenu* view = [[NSMenu alloc] initWithTitle:@"View"];
   [view addItemWithTitle:@"Toggle Sidebar" action:@selector(toggleSidebar:) keyEquivalent:@"s"];
+  [view addItemWithTitle:@"Mute / Unmute Tab" action:@selector(toggleMuteCurrentTab:) keyEquivalent:@"m"]
+      .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Focus Mode" action:@selector(toggleFocusMode:) keyEquivalent:@"F"]
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption;
   [view addItemWithTitle:@"Enter Full Screen" action:@selector(toggleFullScreen:) keyEquivalent:@"f"]
@@ -634,6 +636,7 @@
       [w openInNewTab:@"https://www.example.com/hover?x=1"];
       ArcItem* t = w.shownItem;
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w showItem:t];  // other timed checks may have opened tabs meanwhile
         NSArray* lines = [w showHoverCardForItem:t];
         BOOL shown = w.hoverCardShown;
         BOOL host = [lines containsObject:@"example.com"];
@@ -641,6 +644,47 @@
         BOOL state = [lines[2] hasPrefix:@"Showing now"];
         [w hideHoverCard];
         std::printf("SELFTEST-HOVER shown=%d host=%d url=%d state=%d hidden=%d\n", shown, host, url, state, !w.hoverCardShown);
+      });
+    });
+    // Media: a tab playing audio gets a speaker in the sidebar and drives the media bar from another tab.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 56 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openInNewTab:@"https://example.com/media-test"];
+      ArcItem* m = w.shownItem;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        // 20 s of a quiet 440 Hz tone as a WAV blob in an <audio> element.
+        [w runJS:@"(function(){var r=8000,n=r*20,b=new ArrayBuffer(44+n*2),v=new DataView(b);"
+                  "function s(o,t){for(var i=0;i<t.length;i++)v.setUint8(o+i,t.charCodeAt(i));}"
+                  "s(0,'RIFF');v.setUint32(4,36+n*2,true);s(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);"
+                  "v.setUint16(22,1,true);v.setUint32(24,r,true);v.setUint32(28,r*2,true);v.setUint16(32,2,true);"
+                  "v.setUint16(34,16,true);s(36,'data');v.setUint32(40,n*2,true);"
+                  "for(var i=0;i<n;i++)v.setInt16(44+i*2,Math.sin(i*2*Math.PI*440/r)*200,true);"
+                  "var a=document.createElement('audio');a.src=URL.createObjectURL(new Blob([b],{type:'audio/wav'}));"
+                  "document.body.appendChild(a);a.play();})()" inItem:m];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          [w pollMediaNow];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            BOOL playing = m.mediaPlaying;
+            [w showItem:m];  // other timed checks may have switched tabs meanwhile
+            BOOL barHiddenWhileShown = w.mediaBarItem == nil;
+            [w openInNewTab:@"https://example.com/media-other"];
+            BOOL bar = w.mediaBarItem == m;
+            [w toggleMuteItem:m];
+            BOOL muted = m.audioMuted;
+            [w toggleMuteItem:m];
+            [w togglePlayItem:m];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+              BOOL paused = !m.mediaPlaying && m.mediaPaused && w.mediaBarItem == m;
+              [w togglePlayItem:m];
+              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                BOOL resumed = m.mediaPlaying;
+                [w togglePlayItem:m];
+                std::printf("SELFTEST-MEDIA playing=%d barHiddenOnSameTab=%d bar=%d mute=%d unmuted=%d paused=%d resumed=%d\n",
+                            playing, barHiddenWhileShown, bar, muted, !m.audioMuted, paused, resumed);
+              });
+            });
+          });
+        });
       });
     });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
@@ -968,9 +1012,11 @@ int main(int argc, char* argv[]) {
   // "Chromium Safe Storage" Keychain item, so repeated test runs never show Keychain prompts.
   std::vector<char*> args(argv, argv + argc);
   static char mockKeychain[] = "--use-mock-keychain";
+  static char autoplay[] = "--autoplay-policy=no-user-gesture-required";  // media test plays without a click
   for (int i = 1; i < argc; ++i)
     if (std::string(argv[i]) == "--selftest" || std::string(argv[i]) == "--selftest-reload") {
       args.push_back(mockKeychain);
+      args.push_back(autoplay);
       break;
     }
   args.push_back(nullptr);

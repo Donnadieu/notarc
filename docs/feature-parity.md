@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-23 done, 17 partial, 40 not started or out of scope, of 80 items.
+24 done, 17 partial, 39 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -59,7 +59,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 ## Media
 
-- [ ] Media controls in sidebar (play/pause, mute) (missing)
+- [x] Media controls in sidebar (play/pause, mute): speaker icon on playing tabs, media bar for the playing tab, Mute Tab (Cmd+Shift+M), sidebar menu Pause/Play Media
 - [ ] Automatic picture-in-picture, mini player (missing)
 - [ ] Toggle microphone/camera for calls (missing)
 

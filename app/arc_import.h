@@ -17,7 +17,10 @@
 @property(nonatomic) BOOL splitHorizontal;                       // stacked instead of side by side
 @property(nonatomic, copy) NSArray<NSNumber*>* splitFractions;   // pane sizes summing to 1; nil = equal
 @property(nonatomic, strong) NSMutableArray<ArcItem*>* children;
-@property(nonatomic) int browserId;  // 0 until a web view exists for this tab
+@property(nonatomic) int browserId;
+@property(nonatomic) BOOL mediaPlaying;  // audio or video playing (not saved)
+@property(nonatomic) BOOL mediaPaused;   // has media that was playing and is now paused (not saved)
+@property(nonatomic) BOOL audioMuted;    // tab muted (not saved)  // 0 until a web view exists for this tab
 @property(nonatomic, strong) NSDate* lastActiveAt;  // drives auto-archive of Today tabs
 - (NSString*)displayTitle;
 @end

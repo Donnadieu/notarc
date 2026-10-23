@@ -123,3 +123,16 @@ void BrowserClient::OnDownloadUpdated(CefRefPtr<CefBrowser> browser, CefRefPtr<C
   CEF_REQUIRE_UI_THREAD();
   DownloadsUpdated(download_item, callback);
 }
+
+bool BrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t, const CefString& message,
+                                     const CefString&, int) {
+  static const std::string kPrefix = "__notarc_media__:";
+  std::string m = message.ToString();
+  if (m.compare(0, kPrefix.size(), kPrefix) != 0) return false;
+  std::string rest = m.substr(kPrefix.size());
+  size_t bar = rest.find('|');
+  std::string state = rest.substr(0, bar);
+  std::string title = bar == std::string::npos ? "" : rest.substr(bar + 1);
+  if (on_media_) on_media_(browser->GetIdentifier(), state, title);
+  return true;
+}
