@@ -7,6 +7,8 @@ NSString* const kSettingPeekPinnedLinks = @"peekPinnedLinks";
 NSString* const kSettingPeekShiftClick = @"peekShiftClick";
 NSString* const kSettingExternalLinksLittle = @"externalLinksOpenInLittleWindow";
 NSString* const kSettingLittleArchiveHours = @"littleWindowArchiveHours";
+NSString* const kSettingShowToolbar = @"showToolbar";
+NSString* const kSettingShowSpaceHeader = @"showSpaceHeader";
 
 void SettingsRegisterDefaults(void) {
   [NSUserDefaults.standardUserDefaults registerDefaults:@{
@@ -16,10 +18,21 @@ void SettingsRegisterDefaults(void) {
     kSettingPeekShiftClick : @YES,
     kSettingExternalLinksLittle : @YES,
     kSettingLittleArchiveHours : @6,
+    kSettingShowToolbar : @NO,
+    kSettingShowSpaceHeader : @YES,
   }];
 }
 
-BOOL SettingBool(NSString* key) { return [NSUserDefaults.standardUserDefaults boolForKey:key]; }
+static NSMutableDictionary* g_memorySettings;
+void SettingsUseMemoryOnly(void) { g_memorySettings = [NSMutableDictionary dictionary]; }
+void SettingSetBool(NSString* key, BOOL value) {
+  if (g_memorySettings) g_memorySettings[key] = @(value);
+  else [NSUserDefaults.standardUserDefaults setBool:value forKey:key];
+}
+BOOL SettingBool(NSString* key) {
+  if (NSNumber* v = g_memorySettings[key]) return v.boolValue;
+  return [NSUserDefaults.standardUserDefaults boolForKey:key];
+}
 double SettingDouble(NSString* key) { return [NSUserDefaults.standardUserDefaults doubleForKey:key]; }
 
 static NSArray<NSArray<NSString*>*>* Engines() {
