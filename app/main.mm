@@ -744,8 +744,33 @@
 }
 @end
 
+// --self-update-test: run from a throwaway copy of NotArc. Pretends to be 0.0.1, downloads and verifies the
+// latest release, swaps it into this copy after exiting (no relaunch). The caller checks the copy's version.
+static int RunSelfUpdateTest() {
+  @autoreleasepool {
+    [Updater setVersionOverride:@"0.0.1"];
+    __block int rc = 1;
+    [[Updater shared] fetchLatest:^(UpdateInfo* info, NSError* error) {
+      std::printf("UPDATETEST latest=%s error=%s\n", info.version.UTF8String ?: "-", error.localizedDescription.UTF8String ?: "-");
+      if (!info || UpdaterCompareVersions(info.version, UpdaterCurrentVersion()) <= 0) return CFRunLoopStop(CFRunLoopGetMain());
+      [[Updater shared] prepareUpdate:info done:^(NSString* staged, NSError* err) {
+        std::printf("UPDATETEST staged=%d error=%s\n", staged != nil, err.localizedDescription.UTF8String ?: "-");
+        if (staged) {
+          [[Updater shared] swapInStagedApp:staged relaunch:NO];
+          rc = 0;
+        }
+        CFRunLoopStop(CFRunLoopGetMain());
+      }];
+    }];
+    CFRunLoopRun();
+    std::fflush(stdout);
+    return rc;  // exiting lets the swap script replace this bundle
+  }
+}
+
 int main(int argc, char* argv[]) {
   for (int i = 1; i < argc; ++i) {
+    if (std::string(argv[i]) == "--self-update-test") return RunSelfUpdateTest();
     if (std::string(argv[i]) == "--check-arc-cookies") {  // decrypt Arc cookies; print counts only, never values
       @autoreleasepool {
         NSError* error = nil;
