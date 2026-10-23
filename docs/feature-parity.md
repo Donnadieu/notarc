@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-7 done, 14 partial, 59 not started or out of scope, of 80 items.
+7 done, 16 partial, 57 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -11,13 +11,13 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Pin/unpin (Cmd+D), Move to Pinned/Today/Top Apps (partial: Top Apps moves missing)
 - [ ] Rename tab / item (missing)
 - [ ] Duplicate tab / duplicate folder (missing)
-- [ ] Archive tab, Archive Other Tabs / Above / Below, Clear Today tabs (partial: only close-to-archive)
+- [ ] Archive tab, Archive Other Tabs / Above / Below, Clear Today tabs (partial: close-to-archive and Clear Today (Cmd+Shift+K) done)
 - [ ] Close and Keep Pinned; reset pinned tab to its saved URL (missing)
 - [ ] Tidy tab titles (missing)
 - [ ] Hover previews / hover cards on sidebar items (missing)
 - [ ] Unread badge on tabs (missing)
-- [ ] Go to Sidebar Item 1-9, last item, next/previous item (missing)
-- [ ] Hide/show sidebar, toolbar mode with full URL (missing)
+- [ ] Go to Sidebar Item 1-9, last item, next/previous item (partial: Cmd+1-9 and Cmd+Opt+Up/Down done; last item missing)
+- [ ] Hide/show sidebar, toolbar mode with full URL (partial: Cmd+S hides the sidebar; toolbar mode missing)
 - [ ] Multi-select sidebar items and bulk actions (missing)
 - [ ] Copy URL, Copy URL as Markdown, copy links as Markdown, clean URL (partial: copy URL and Markdown done)
 - [ ] Undo close (Cmd+Z in sidebar), reopen closed tab (partial: Cmd+Shift+T only)

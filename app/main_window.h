@@ -95,6 +95,18 @@
 - (NSArray<ArcSpace*>*)spaces;
 - (ArcSpace*)currentSpace;
 
+// Shortcuts matching Arc's: Cmd+S sidebar, Cmd+1-9 tab N, Cmd+Opt+Up/Down tabs, Cmd+Shift+K clear Today,
+// Ctrl+Shift+1-4 split pane N.
+- (IBAction)toggleSidebar:(id)sender;
+- (IBAction)selectTabFromMenu:(NSMenuItem*)sender;  // tag = index
+- (IBAction)nextTab:(id)sender;
+- (IBAction)previousTab:(id)sender;
+- (IBAction)clearToday:(id)sender;
+- (IBAction)focusPaneFromMenu:(NSMenuItem*)sender;  // tag = index
+- (void)selectTabAtIndex:(NSUInteger)index;
+- (BOOL)sidebarHidden;   // tests
+- (ArcItem*)shownItem;   // tests
+
 // Archive (Arc: auto-archive of Today tabs + Cmd+Shift+T style reopen).
 @property(nonatomic, copy) NSString* archivePath;
 - (NSUInteger)runAutoArchiveWithThreshold:(NSTimeInterval)threshold now:(NSDate*)now;  // returns # archived
