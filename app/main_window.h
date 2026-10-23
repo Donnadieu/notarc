@@ -77,6 +77,23 @@
 - (void)promotePeekToTab;       // tests: same as "Open as Tab"
 - (void)closePeek;              // tests
 
+// Spaces: create, rename, delete (tabs go to the Archive), reorder, switch (Ctrl+1-9).
+- (IBAction)newSpace:(id)sender;
+- (IBAction)renameCurrentSpace:(id)sender;
+- (IBAction)deleteCurrentSpace:(id)sender;
+- (IBAction)moveSpaceUp:(id)sender;
+- (IBAction)moveSpaceDown:(id)sender;
+- (IBAction)nextSpace:(id)sender;
+- (IBAction)previousSpace:(id)sender;
+- (IBAction)selectSpaceFromMenu:(NSMenuItem*)sender;  // tag = index
+- (ArcSpace*)createSpaceNamed:(NSString*)name;
+- (void)renameSpace:(ArcSpace*)space to:(NSString*)name;
+- (BOOL)deleteSpace:(ArcSpace*)space;
+- (void)moveSpace:(ArcSpace*)space by:(NSInteger)delta;
+- (void)selectSpaceAtIndex:(NSUInteger)index;
+- (NSArray<ArcSpace*>*)spaces;
+- (ArcSpace*)currentSpace;
+
 // Archive (Arc: auto-archive of Today tabs + Cmd+Shift+T style reopen).
 @property(nonatomic, copy) NSString* archivePath;
 - (NSUInteger)runAutoArchiveWithThreshold:(NSTimeInterval)threshold now:(NSDate*)now;  // returns # archived
