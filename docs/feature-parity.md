@@ -1,13 +1,13 @@
 # Feature parity with Arc 1.169
 
-27 done, 16 partial, 37 not started or out of scope, of 80 items.
+28 done, 15 partial, 37 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 ## Sidebar & tabs
 
 - [x] Vertical sidebar with Favorites (Top Apps), Pinned, Today
-- [ ] Folders, nested folders, drag and drop (partial: New Folder with selected items done; creating nested folders missing)
+- [x] Folders, nested folders, drag and drop (New Folder, New Nested Folder, New Folder with selected items, drag into and between folders)
 - [ ] Pin/unpin (Cmd+D), Move to Pinned/Today/Top Apps (partial: pin/unpin and Move to Pinned/Today of another Space done; Top Apps moves missing)
 - [x] Rename tab / item
 - [x] Duplicate tab / duplicate folder
