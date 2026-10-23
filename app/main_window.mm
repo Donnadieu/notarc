@@ -180,6 +180,9 @@ static NSString* HexFromColor(NSColor* c) {
   NSMutableArray<NSView*>* _dividers;
   NSMutableArray<LittleWindowController*>* _littleWindows;
   LittleWindowController* _peek;
+  NSView* _toast;
+  NSTimer* _toastTimer;
+  NSString* _lastClosedPeekURL;
   NSView* _sidebar;
 }
 
@@ -1648,11 +1651,63 @@ static NSString* SiteOf(NSString* url) {
   _peek = [[LittleWindowController alloc] initWithURL:url
       context:[self contextForSpace:_space]
       onMove:^(NSString* movedURL) { [weakSelf openInNewTab:movedURL]; }
-      onClose:^(LittleWindowController*, NSString*, NSString*, BOOL) { [weakSelf peekClosed]; }];
+      onClose:^(LittleWindowController*, NSString* closedURL, NSString*, BOOL moved) {
+        [weakSelf peekClosed:closedURL moved:moved];
+      }];
   [_peek presentAsPeekOver:self.window];
+  [self hideToast];
 }
 
-- (void)peekClosed { _peek = nil; }
+- (void)peekClosed:(NSString*)url moved:(BOOL)moved {
+  _peek = nil;
+  if (moved || _closing || !url.length || [url isEqualToString:@"about:blank"]) return;
+  _lastClosedPeekURL = [url copy];
+  __weak MainWindowController* weakSelf = self;
+  [[self sidebarUndoManager] registerUndoWithTarget:self handler:^(id) { [weakSelf reopenClosedPeek:nil]; }];
+  [[self sidebarUndoManager] setActionName:@"Close Peek"];
+  [self showToast:@"Peek closed" action:@"Undo" selector:@selector(reopenClosedPeek:)];
+}
+
+- (NSString*)lastClosedPeekURL { return _lastClosedPeekURL; }
+- (BOOL)peekToastShown { return _toast != nil; }
+
+- (IBAction)reopenClosedPeek:(id)sender {
+  NSString* url = _lastClosedPeekURL;
+  [self hideToast];
+  if (!url.length || _peek) return;
+  _lastClosedPeekURL = nil;
+  [self openPeek:url];
+}
+
+// Small toast at the bottom centre of the page area with one action button.
+- (void)showToast:(NSString*)text action:(NSString*)action selector:(SEL)selector {
+  [self hideToast];
+  NSTextField* label = [NSTextField labelWithString:text];
+  label.textColor = NSColor.whiteColor;
+  NSButton* b = [NSButton buttonWithTitle:action target:self action:selector];
+  b.bezelStyle = NSBezelStyleRounded;
+  NSStackView* stack = [NSStackView stackViewWithViews:@[ label, b ]];
+  stack.edgeInsets = NSEdgeInsetsMake(6, 14, 6, 8);
+  stack.spacing = 10;
+  stack.wantsLayer = YES;
+  stack.layer.cornerRadius = 10;
+  stack.layer.backgroundColor = [NSColor colorWithWhite:0.1 alpha:0.9].CGColor;
+  NSSize sz = stack.fittingSize;
+  NSRect c = _content.frame;
+  stack.frame = NSMakeRect(NSMidX(c) - sz.width / 2, NSMinY(c) + 20, sz.width, sz.height);
+  stack.autoresizingMask = NSViewMinXMargin | NSViewMaxXMargin | NSViewMaxYMargin;
+  [self.window.contentView addSubview:stack positioned:NSWindowAbove relativeTo:nil];
+  _toast = stack;
+  __weak MainWindowController* weakSelf = self;
+  _toastTimer = [NSTimer scheduledTimerWithTimeInterval:6 repeats:NO block:^(NSTimer*) { [weakSelf hideToast]; }];
+}
+
+- (void)hideToast {
+  [_toastTimer invalidate];
+  _toastTimer = nil;
+  [_toast removeFromSuperview];
+  _toast = nil;
+}
 - (BOOL)isPeeking { return _peek != nil; }
 - (void)promotePeekToTab { [_peek openInMainWindow:nil]; }
 - (void)closePeek { [_peek.window close]; }
