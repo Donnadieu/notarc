@@ -139,6 +139,11 @@
 
 // Archive (Arc: auto-archive of Today tabs + Cmd+Shift+T style reopen).
 @property(nonatomic, copy) NSString* archivePath;
+@property(nonatomic, copy) NSString* historyPath;  // set before the first page loads
+- (IBAction)showHistory:(id)sender;
+- (IBAction)clearHistory:(id)sender;
+- (NSArray<ArchivedTab*>*)historyVisits;
+- (NSUInteger)historyWindowCountForQuery:(NSString*)query;
 - (NSUInteger)runAutoArchiveWithThreshold:(NSTimeInterval)threshold now:(NSDate*)now;  // returns # archived
 - (IBAction)reopenLastArchived:(id)sender;
 - (IBAction)showArchive:(id)sender;

@@ -27,6 +27,8 @@ set(APP_SRCS
   app/archive_store.mm
   app/archive_window.h
   app/archive_window.mm
+  app/history_store.h
+  app/history_store.mm
   app/arc_cookies.h
   app/arc_cookies.mm
   app/little_window.h

@@ -2,6 +2,7 @@
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
 #import "app/archive_window.h"
+#import "app/history_store.h"
 #import "app/arc_cookies.h"
 #import "app/little_window.h"
 #import "app/settings.h"
@@ -126,6 +127,8 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   NSMutableArray<ArchivedTab*>* _archive;
   NSTimer* _archiveTimer;
   ArchiveWindowController* _archiveWindow;
+  ArchiveWindowController* _historyWindow;
+  HistoryStore* _history;
   NSPanel* _findBar;
   NSSearchField* _findField;
   NSTextField* _findLabel;
@@ -450,6 +453,9 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   if (!item) return;
   if (title.length) item.liveTitle = title;
   if (url.length) item.url = url;
+  if (self.historyPath && !_history) _history = [[HistoryStore alloc] initWithPath:self.historyPath];
+  if (url.length) [_history recordURL:url title:title space:[self spaceOwningItem:item].title];
+  else if (title.length) [_history updateTitle:title forURL:item.url];
   ArcItem* parent = [self parentOfItem:item];
   [_outline reloadItem:parent.isSplit ? parent : item];
   [self scheduleSave];
@@ -1956,6 +1962,45 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
   }
   [_archiveWindow reload];
   [_archiveWindow showWindow:nil];
+}
+
+- (HistoryStore*)historyStore {
+  if (!_history && self.historyPath) _history = [[HistoryStore alloc] initWithPath:self.historyPath];
+  return _history;
+}
+
+- (NSArray<ArchivedTab*>*)historyVisits { return [self historyStore].visits ?: @[]; }
+
+- (IBAction)showHistory:(id)sender {
+  if (!_historyWindow) {
+    __weak MainWindowController* weakSelf = self;
+    _historyWindow = [[ArchiveWindowController alloc]
+        initWithProvider:^NSArray<ArchivedTab*>* { return [weakSelf historyVisits]; }
+                  reopen:^(ArchivedTab* visit) { [weakSelf openInNewTab:visit.url]; }];
+    _historyWindow.baseTitle = @"History";
+    [_historyWindow setPlaceholder:@"Search history" dateHeader:@"Visited" reasonHeader:@"Space"];
+  }
+  [_historyWindow reload];
+  [_historyWindow showWindow:nil];
+}
+
+- (IBAction)clearHistory:(id)sender {
+  if (sender) {
+    NSAlert* a = [NSAlert new];
+    a.messageText = @"Clear all browsing history?";
+    a.informativeText = @"Your tabs, Spaces and Archive are not affected.";
+    [a addButtonWithTitle:@"Clear History"];
+    [a addButtonWithTitle:@"Cancel"];
+    if ([a runModal] != NSAlertFirstButtonReturn) return;
+  }
+  [[self historyStore] clear];
+  [_historyWindow reload];
+}
+
+- (NSUInteger)historyWindowCountForQuery:(NSString*)query {
+  [self showHistory:nil];
+  [_historyWindow setQuery:query];
+  return _historyWindow.visibleCount;
 }
 
 - (NSUInteger)archiveWindowCountForQuery:(NSString*)query {
