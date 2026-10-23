@@ -209,7 +209,7 @@
   if (self.selfTest) {
     [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
     if (!self.selfTestReload) [self runSelfTestActions];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 80 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       for (NSDictionary* tab in [self.window tabSnapshot])
         std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
                     [tab[@"profile"] UTF8String], [tab[@"title"] UTF8String], [tab[@"url"] UTF8String]);
@@ -223,19 +223,19 @@
 // then runs navigate -> back -> zoom -> find -> copy as Markdown, each step a little apart.
 - (void)runBasicsTestWhenReady:(int)attempt {
   MainWindowController* w = self.window;
-  if (![w hasLiveBrowser] || ![[w currentURL] hasPrefix:@"https://example.com"]) {
-    if (attempt < 80)
+  if (![w hasLiveBrowser] || [w isLoading] || ![[w currentURL] hasPrefix:@"https://example.com"]) {
+    if (attempt < 160)
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
         [self runBasicsTestWhenReady:attempt + 1];
       });
     else {
-      std::printf("SELFTEST-BASICS tabNeverLoaded=1 live=%d url=%s\n", [w hasLiveBrowser], [w currentURL].UTF8String);
+      std::printf("SELFTEST-BASICS tabNeverLoaded=1 live=%d loading=%d url=%s\n", [w hasLiveBrowser], [w isLoading], [w currentURL].UTF8String);
       [self runRemainingSelfTestActions];
     }
     return;
   }
   [w navigateCurrentTab:@"https://www.iana.org/help/example-domains"];
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
     BOOL couldGoBack = [w canGoBack];
     [w goBack:nil];
     [w zoomIn:nil];

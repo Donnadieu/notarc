@@ -526,6 +526,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
 - (IBAction)reloadPage:(id)sender { if (auto b = [self currentBrowser]) b->Reload(); }
 - (IBAction)hardReload:(id)sender { if (auto b = [self currentBrowser]) b->ReloadIgnoreCache(); }
 - (BOOL)hasLiveBrowser { return [self currentBrowser] != nullptr; }
+- (BOOL)isLoading { auto b = [self currentBrowser]; return b && b->IsLoading(); }
 - (BOOL)canGoBack { auto b = [self currentBrowser]; return b && b->CanGoBack(); }
 - (NSString*)currentURL {
   auto b = [self currentBrowser];
