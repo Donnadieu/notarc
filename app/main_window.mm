@@ -104,6 +104,9 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   NSSearchField* _findField;
   NSTextField* _findLabel;
   int _lastFindCount;
+  NSMutableArray<ArcItem*>* _splitItems;  // panes of the active split, in order; nil when no split
+  BOOL _splitHorizontal;
+  BOOL _commandOpensSplit;
 }
 
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID {
@@ -327,6 +330,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
       [weakSelf](int browserId, const std::string& url) {
         [weakSelf browser:browserId title:nil url:[NSString stringWithUTF8String:url.c_str()]];
       });
+  _client->set_focus_callback([weakSelf](int browserId) { [weakSelf paneFocused:browserId]; });
   _client->set_find_callback([weakSelf](int browserId, int count, int active) {
     [weakSelf findResult:count active:active];
   });
@@ -371,12 +375,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   _shown = item;
   item.lastActiveAt = [NSDate date];
   [self ensureBrowserForItem:item];
-  for (auto& kv : _browsers) {
-    BOOL visible = kv.first == item.browserId;
-    NSView* view = CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(kv.second->GetHost()->GetWindowHandle());
-    view.hidden = !visible;
-    kv.second->GetHost()->WasHidden(!visible);
-  }
+  [self layoutPanes];
   NSInteger row = [_outline rowForItem:item];
   if (row >= 0) [_outline selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
 }
@@ -615,6 +614,128 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
                                     forType:NSPasteboardTypeString];
 }
 
+#pragma mark Split view
+
+static const CGFloat kPaneGap = 6;
+
+// Panes on screen: the whole split if the shown tab belongs to it, otherwise just that tab.
+- (NSArray<ArcItem*>*)visiblePanes {
+  if (_shown && [_splitItems containsObject:_shown]) return _splitItems;
+  return _shown ? @[ _shown ] : @[];
+}
+
+- (NSArray<NSValue*>*)framesForPaneCount:(NSUInteger)n {
+  NSMutableArray* frames = [NSMutableArray array];
+  NSRect b = _content.bounds;
+  if (n == 0) return frames;
+  CGFloat gap = n > 1 ? kPaneGap : 0;
+  CGFloat total = (_splitHorizontal ? b.size.height : b.size.width) - gap * (n - 1);
+  CGFloat each = floor(total / n);
+  for (NSUInteger i = 0; i < n; ++i) {
+    CGFloat size = i == n - 1 ? total - each * (n - 1) : each;
+    CGFloat offset = i * (each + gap);
+    // Horizontal splits stack top to bottom; AppKit's origin is bottom-left.
+    NSRect r = _splitHorizontal ? NSMakeRect(0, b.size.height - offset - size, b.size.width, size)
+                                : NSMakeRect(offset, 0, size, b.size.height);
+    [frames addObject:[NSValue valueWithRect:r]];
+  }
+  return frames;
+}
+
+- (void)layoutPanes {
+  NSArray<ArcItem*>* panes = [self visiblePanes];
+  for (ArcItem* pane in panes) [self ensureBrowserForItem:pane];
+  NSArray<NSValue*>* frames = [self framesForPaneCount:panes.count];
+  for (auto& kv : _browsers) {
+    NSUInteger index = NSNotFound;
+    for (NSUInteger i = 0; i < panes.count; ++i)
+      if (panes[i].browserId == kv.first) index = i;
+    NSView* view = CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(kv.second->GetHost()->GetWindowHandle());
+    BOOL visible = index != NSNotFound;
+    if (visible) {
+      view.frame = frames[index].rectValue;
+      // A single pane follows the window; split panes are re-laid out on resize.
+      view.autoresizingMask = panes.count == 1 ? (NSViewWidthSizable | NSViewHeightSizable) : NSViewNotSizable;
+    }
+    view.hidden = !visible;
+    kv.second->GetHost()->WasHidden(!visible);
+  }
+}
+
+- (NSArray<NSValue*>*)paneFrames {
+  NSMutableArray* out = [NSMutableArray array];
+  for (ArcItem* pane in [self visiblePanes]) {
+    auto it = _browsers.find(pane.browserId);
+    if (it == _browsers.end()) continue;
+    [out addObject:[NSValue valueWithRect:CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(it->second->GetHost()->GetWindowHandle()).frame]];
+  }
+  return out;
+}
+
+- (void)windowDidResize:(NSNotification*)note {
+  if (_splitItems.count > 1) [self layoutPanes];
+}
+
+- (void)paneFocused:(int)browserId {
+  ArcItem* item = [self itemForBrowser:browserId];
+  if (!item || item == _shown || ![_splitItems containsObject:item]) return;
+  _shown.lastActiveAt = [NSDate date];
+  _shown = item;
+  item.lastActiveAt = [NSDate date];
+  NSInteger row = [_outline rowForItem:item];
+  if (row >= 0) [_outline selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
+}
+
+- (void)beginSplit:(BOOL)horizontal {
+  if (!_shown || _splitItems.count >= 4) {
+    NSBeep();
+    return;
+  }
+  _splitHorizontal = horizontal;
+  _commandOpensSplit = YES;
+  [self showCommandBarForNewTab:YES];
+}
+
+- (IBAction)addVerticalSplit:(id)sender { [self beginSplit:NO]; }
+- (IBAction)addHorizontalSplit:(id)sender { [self beginSplit:YES]; }
+
+// The new pane is a normal Today tab placed next to the focused pane, like Arc.
+- (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal {
+  NSString* url = ResolveCommandBarInput(input);
+  if (!url || !_space || !_shown) return;
+  if (![_splitItems containsObject:_shown]) {
+    _splitItems = [NSMutableArray arrayWithObject:_shown];
+    _splitHorizontal = horizontal;
+  }
+  if (_splitItems.count >= 4) return;
+  ArcItem* tab = [ArcItem new];
+  tab.itemID = NSUUID.UUID.UUIDString;
+  tab.url = url;
+  tab.children = [NSMutableArray array];
+  [_space.unpinned.children insertObject:tab atIndex:0];
+  [_outline reloadItem:_space.unpinned reloadChildren:YES];
+  [_splitItems insertObject:tab atIndex:[_splitItems indexOfObject:_shown] + 1];
+  [self scheduleSave];
+  [self showItem:tab];
+}
+
+// Removes the focused pane from the split; its tab stays in the sidebar.
+- (IBAction)closeSplitPane:(id)sender {
+  if (![_splitItems containsObject:_shown]) return;
+  NSUInteger index = [_splitItems indexOfObject:_shown];
+  [_splitItems removeObjectAtIndex:index];
+  ArcItem* next = _splitItems[MIN(index, _splitItems.count - 1)];
+  if (_splitItems.count < 2) _splitItems = nil;
+  [self showItem:next];
+}
+
+- (IBAction)focusNextPane:(id)sender {
+  if (![_splitItems containsObject:_shown]) return;
+  NSUInteger index = ([_splitItems indexOfObject:_shown] + 1) % _splitItems.count;
+  [self showItem:_splitItems[index]];
+  if (auto b = [self currentBrowser]) b->GetHost()->SetFocus(true);
+}
+
 #pragma mark Command bar and tab actions
 
 - (void)showCommandBarForNewTab:(BOOL)newTab {
@@ -667,18 +788,24 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   if (command == @selector(insertNewline:)) {
     NSString* text = _commandField.stringValue;
     [self hideCommandBar];
-    if (_commandOpensNewTab) [self openInNewTab:text];
+    if (_commandOpensSplit) [self openInSplit:text horizontal:_splitHorizontal];
+    else if (_commandOpensNewTab) [self openInNewTab:text];
     else [self navigateCurrentTab:text];
+    _commandOpensSplit = NO;
     return YES;
   }
   if (command == @selector(cancelOperation:)) {
+    _commandOpensSplit = NO;
     [self hideCommandBar];
     return YES;
   }
   return NO;
 }
 
-- (IBAction)newTab:(id)sender { [self showCommandBarForNewTab:YES]; }
+- (IBAction)newTab:(id)sender {
+  _commandOpensSplit = NO;
+  [self showCommandBarForNewTab:YES];
+}
 - (IBAction)openLocation:(id)sender { [self showCommandBarForNewTab:NO]; }
 - (IBAction)closeTab:(id)sender { [self closeCurrentTab]; }
 
@@ -754,6 +881,10 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target) {
   NSArray<ArcItem*>* tabs = _space.allTabs;
   NSUInteger index = [tabs indexOfObject:item];
   BOOL isToday = Contains(_space.unpinned, item);
+  if ([_splitItems containsObject:item]) {
+    [_splitItems removeObject:item];
+    if (_splitItems.count < 2) _splitItems = nil;
+  }
   if (isToday) [self archiveItem:item space:_space reason:@"manual"];  // Arc archives closed Today tabs
   [self unloadItem:item];
   // Pinned tabs and Favorites stay in the sidebar (Arc just unloads them); Today tabs are removed.
@@ -952,7 +1083,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
   NSUInteger archived = 0;
   for (ArcSpace* space in _spaces) {
     for (ArcItem* item in [space.unpinned.children copy]) {
-      if (item == _shown || item.isFolder || !item.url.length) continue;
+      if (item == _shown || [_splitItems containsObject:item] || item.isFolder || !item.url.length) continue;
       if (!item.lastActiveAt) item.lastActiveAt = now;  // unknown age: start the clock now
       if ([now timeIntervalSinceDate:item.lastActiveAt] < threshold) continue;
       [self archiveItem:item space:space reason:@"auto"];
