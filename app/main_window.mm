@@ -452,6 +452,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   ArcItem* item = [self itemForBrowser:browserId];
   if (!item) return;
   if (title.length) item.liveTitle = title;
+  if (url.length && !item.pinnedURL.length && [self isPinnedItem:item]) item.pinnedURL = item.url ?: url;
   if (url.length) item.url = url;
   if (self.historyPath && !_history) _history = [[HistoryStore alloc] initWithPath:self.historyPath];
   if (url.length) [_history recordURL:url title:title space:[self spaceOwningItem:item].title];
@@ -1387,6 +1388,10 @@ static ArcItem* NewSection(NSString* title) {
   if (isToday) [m addItem:[self menuItem:@"Pin" action:@selector(menuTogglePin:) item:item]];
   if (isPinned && [_space.pinned.children containsObject:item])
     [m addItem:[self menuItem:@"Unpin" action:@selector(menuTogglePin:) item:item]];
+  if (!isToday && item.pinnedURL.length) {
+    [m addItem:[self menuItem:@"Reset to Pinned URL" action:@selector(menuResetPinned:) item:item]];
+    [m addItem:[self menuItem:@"Replace Pinned URL with Current" action:@selector(menuReplacePinned:) item:item]];
+  }
   if ((isToday || isPinned) && _spaces.count > 1) {
     NSMenuItem* move = [[NSMenuItem alloc] initWithTitle:@"Move to" action:nil keyEquivalent:@""];
     NSMenu* sub = [[NSMenu alloc] initWithTitle:@"Move to"];
@@ -1410,7 +1415,7 @@ static ArcItem* NewSection(NSString* title) {
   }
   if (isTab) {
     [m addItem:[NSMenuItem separatorItem]];
-    [m addItem:[self menuItem:isToday ? @"Archive Tab" : @"Close Tab" action:@selector(menuClose:) item:item]];
+    [m addItem:[self menuItem:isToday ? @"Archive Tab" : @"Close and Keep Pinned" action:@selector(menuClose:) item:item]];
   }
   return m;
 }
@@ -1444,10 +1449,13 @@ static ArcItem* NewSection(NSString* title) {
 - (void)menuDuplicate:(NSMenuItem*)sender { [self duplicateItem:sender.representedObject]; }
 - (void)menuTogglePin:(NSMenuItem*)sender {
   ArcItem* item = sender.representedObject;
-  if ([self sectionContaining:item] == _space.unpinned)
+  if ([self sectionContaining:item] == _space.unpinned) {
     [self moveItem:item toParent:_space.pinned index:_space.pinned.children.count];
-  else
+    [self markPinnedURLs:item];
+  } else {
     [self moveItem:item toParent:_space.unpinned index:0];
+    [self clearPinnedURLs:item];
+  }
 }
 - (void)menuMoveToSpace:(NSMenuItem*)sender {
   NSArray* args = sender.representedObject;
@@ -1456,6 +1464,8 @@ static ArcItem* NewSection(NSString* title) {
 - (void)menuArchiveOthers:(NSMenuItem*)sender { [self archiveTodayTabsRelativeTo:sender.representedObject mode:0]; }
 - (void)menuArchiveAbove:(NSMenuItem*)sender { [self archiveTodayTabsRelativeTo:sender.representedObject mode:1]; }
 - (void)menuArchiveBelow:(NSMenuItem*)sender { [self archiveTodayTabsRelativeTo:sender.representedObject mode:2]; }
+- (void)menuResetPinned:(NSMenuItem*)sender { [self resetPinnedItem:sender.representedObject]; }
+- (void)menuReplacePinned:(NSMenuItem*)sender { [self replacePinnedURLWithCurrent:sender.representedObject]; }
 - (void)menuClose:(NSMenuItem*)sender {
   ArcItem* item = sender.representedObject;
   if (item != _shown) [self showItem:item];
@@ -1739,6 +1749,11 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target) {
   if ([self parentOfItem:item].isSplit) [self detachFromSplit:item keep:!isToday];
   if (isToday) [self archiveItem:item space:_space reason:@"manual"];  // Arc archives closed Today tabs
   [self unloadItem:item];
+  // Close and Keep Pinned: the tab stays and reopens at its saved URL.
+  if (!isToday && item.pinnedURL.length) {
+    item.url = item.pinnedURL;
+    item.liveTitle = nil;
+  }
   // Pinned tabs and Favorites stay in the sidebar (Arc just unloads them); Today tabs are removed.
   if (RemoveItem(_space.unpinned, item)) [_outline reloadItem:_space.unpinned reloadChildren:YES];
   else [_outline reloadItem:item];
@@ -1840,10 +1855,74 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
   ArcItem* item = _splitGroup ?: _shown;  // pinning a split pins the whole split
   if (!item) return;
   ArcItem* section = [self sectionContaining:item];
-  if (section == _space.unpinned)
+  if (section == _space.unpinned) {
     [self moveItem:item toParent:_space.pinned index:_space.pinned.children.count];
-  else if (section == _space.pinned)
+    [self markPinnedURLs:item];
+  } else if (section == _space.pinned) {
     [self moveItem:item toParent:_space.unpinned index:0];
+    [self clearPinnedURLs:item];
+  }
+}
+
+- (void)markPinnedURLs:(ArcItem*)item {
+  if (item.url.length) item.pinnedURL = [self itemCurrentURL:item];
+  for (ArcItem* c in item.children) [self markPinnedURLs:c];
+}
+- (void)clearPinnedURLs:(ArcItem*)item {
+  item.pinnedURL = nil;
+  for (ArcItem* c in item.children) [self clearPinnedURLs:c];
+}
+
+- (BOOL)isPinnedItem:(ArcItem*)item {
+  ArcItem* section = [self sectionContaining:item];
+  return section && section != _space.unpinned;
+}
+
+- (void)resetPinnedItem:(ArcItem*)item {
+  if (!item.pinnedURL.length) return;
+  item.url = item.pinnedURL;
+  item.liveTitle = nil;
+  auto it = _browsers.find(item.browserId);
+  if (it != _browsers.end()) it->second->GetMainFrame()->LoadURL(item.pinnedURL.UTF8String);
+  [_outline reloadItem:item];
+  [self scheduleSave];
+}
+
+- (void)replacePinnedURLWithCurrent:(ArcItem*)item {
+  if (![self isPinnedItem:item] || !item.url.length) return;
+  item.pinnedURL = [self itemCurrentURL:item];
+  [self scheduleSave];
+}
+
+- (NSUInteger)resetPinnedTabsInSpace {
+  NSUInteger n = 0;
+  for (ArcItem* t in _space.allTabs) {
+    if (![self isPinnedItem:t] || !t.pinnedURL.length) continue;
+    if ([[self itemCurrentURL:t] isEqualToString:t.pinnedURL] && [t.url isEqualToString:t.pinnedURL]) continue;
+    if (t == _shown) {
+      [self resetPinnedItem:t];
+    } else {
+      [self unloadItem:t];
+      t.url = t.pinnedURL;
+      t.liveTitle = nil;
+    }
+    ++n;
+  }
+  [_outline reloadData];
+  for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
+  if (_shown) [self selectSidebarRowFor:_shown];
+  [self scheduleSave];
+  return n;
+}
+
+- (IBAction)resetPinnedTab:(id)sender { if (_shown) [self resetPinnedItem:_shown]; }
+- (IBAction)replacePinnedURL:(id)sender { if (_shown) [self replacePinnedURLWithCurrent:_shown]; }
+- (IBAction)resetAllPinnedTabs:(id)sender { [self resetPinnedTabsInSpace]; }
+
+- (BOOL)validateMenuItem:(NSMenuItem*)mi {
+  if (mi.action == @selector(resetPinnedTab:) || mi.action == @selector(replacePinnedURL:))
+    return _shown && [self isPinnedItem:_shown] && _shown.pinnedURL.length;
+  return YES;
 }
 
 - (ArcItem*)tabWithURLPrefix:(NSString*)prefix {

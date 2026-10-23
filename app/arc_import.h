@@ -7,7 +7,9 @@
 @property(nonatomic, copy) NSString* itemID;
 @property(nonatomic, copy) NSString* title;      // user rename, else Arc's saved title
 @property(nonatomic, copy) NSString* liveTitle;  // title reported by the loaded page
-@property(nonatomic, copy) NSString* url;        // nil for folders and section roots
+@property(nonatomic, copy) NSString* url;        // nil for folders and section roots; current page
+// Pinned tabs and Favorites: the URL the tab returns to when closed or reset (Arc's saved URL).
+@property(nonatomic, copy) NSString* pinnedURL;
 @property(nonatomic) BOOL isFolder;
 @property(nonatomic) BOOL isSection;  // the Pinned / Today root of a Space
 // A split view shown as one sidebar item; its children are the panes, in order.

@@ -58,6 +58,7 @@ static ArcItem* BuildItem(NSString* itemID, NSDictionary<NSString*, NSDictionary
   NSString* title = Str(raw[@"title"]);
   if (tab) {
     item.url = Str(tab[@"savedURL"]);
+    item.pinnedURL = item.url;  // only kept for pinned tabs and Favorites (see MainWindowController)
     id last = tab[@"timeLastActiveAt"];  // seconds since 2001-01-01
     if ([last isKindOfClass:NSNumber.class])
       item.lastActiveAt = [NSDate dateWithTimeIntervalSinceReferenceDate:[last doubleValue]];

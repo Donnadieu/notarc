@@ -120,6 +120,15 @@
 - (IBAction)switchToRecentTab:(id)sender;  // Ctrl+Tab: the most recently used other tab in this Space
 - (IBAction)pasteAndGo:(id)sender;          // clipboard URL or search text -> new Today tab
 - (IBAction)printPage:(id)sender;
+// Pinned tabs (Arc): closing keeps the tab and returns it to its saved URL next time.
+- (void)showItem:(ArcItem*)item;
+- (BOOL)isPinnedItem:(ArcItem*)item;
+- (void)resetPinnedItem:(ArcItem*)item;            // back to the saved URL
+- (void)replacePinnedURLWithCurrent:(ArcItem*)item;
+- (NSUInteger)resetPinnedTabsInSpace;               // unloads and resets every changed pinned tab
+- (IBAction)resetPinnedTab:(id)sender;
+- (IBAction)replacePinnedURL:(id)sender;
+- (IBAction)resetAllPinnedTabs:(id)sender;
 - (IBAction)previousTab:(id)sender;
 - (IBAction)clearToday:(id)sender;
 - (IBAction)focusPaneFromMenu:(NSMenuItem*)sender;  // tag = index
