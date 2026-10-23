@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-12 done, 19 partial, 49 not started or out of scope, of 80 items.
+13 done, 19 partial, 48 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -121,4 +121,4 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 ## Install & updates
 
 - [x] Downloadable app from GitHub Releases
-- [ ] Automatic update check and install (missing)
+- [x] Automatic update check and install (daily check of GitHub Releases, SHA-256 verified, Install and Relaunch; Check for Updates... in the app menu; works from 0.5.0 on)

@@ -29,6 +29,8 @@ set(APP_SRCS
   app/archive_window.mm
   app/history_store.h
   app/history_store.mm
+  app/updater.h
+  app/updater.mm
   app/arc_cookies.h
   app/arc_cookies.mm
   app/little_window.h
@@ -49,7 +51,7 @@ target_compile_options(${APP_NAME} PRIVATE
   $<$<COMPILE_LANGUAGE:OBJCXX>:${CEF_COMPILER_FLAGS} ${CEF_CXX_COMPILER_FLAGS}>
   $<$<AND:$<COMPILE_LANGUAGE:OBJCXX>,$<CONFIG:Release>>:${CEF_COMPILER_FLAGS_RELEASE} ${CEF_CXX_COMPILER_FLAGS_RELEASE}>)
 add_dependencies(${APP_NAME} libcef_dll_wrapper)
-target_link_libraries(${APP_NAME} libcef_dll_wrapper ${CEF_STANDARD_LIBS} sqlite3 "-framework Security")
+target_link_libraries(${APP_NAME} libcef_dll_wrapper ${CEF_STANDARD_LIBS} sqlite3 "-framework Security")  # updater uses Foundation + CommonCrypto (libSystem)
 set_target_properties(${APP_NAME} PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/app/Info.plist.in)
 COPY_MAC_FRAMEWORK("${APP_NAME}" "${CEF_BINARY_DIR}" "${APP_BUNDLE}")
