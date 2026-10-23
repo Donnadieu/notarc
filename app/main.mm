@@ -114,6 +114,7 @@
   littleItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
   // Peek and Little Window: move the page into the sidebar (handled by those windows only).
   [file addItemWithTitle:@"Open in Sidebar" action:@selector(openInMainWindow:) keyEquivalent:@"o"];
+  [file addItemWithTitle:@"Reopen Closed Peek" action:@selector(reopenClosedPeek:) keyEquivalent:@""];
   [file addItemWithTitle:@"Clear Today" action:@selector(clearToday:) keyEquivalent:@"K"];
   [file addItemWithTitle:@"Reset Pinned Tab" action:@selector(resetPinnedTab:) keyEquivalent:@""];
   [file addItemWithTitle:@"Replace Pinned URL with Current" action:@selector(replacePinnedURL:) keyEquivalent:@""];
@@ -816,6 +817,24 @@
         BOOL closed = w.littleWindowCount == before - 1 && w.archivedTabs.count == archivedBefore;
         [w switchToSpace:start];
         std::printf("SELFTEST-LITTLESPACE inOtherSpace=%d switched=%d closedNotArchived=%d\n", there, switched, closed);
+      });
+    });
+    // Closing a Peek offers Undo: toast shown, Undo reopens the same page; opening as a tab offers nothing.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 64 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openPeek:@"https://example.net/peek-undo"];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w closePeek];
+        BOOL toast = w.peekToastShown && [w.lastClosedPeekURL hasPrefix:@"https://example.net/peek-undo"];
+        BOOL undoName = [w.sidebarUndoManager.undoActionName isEqualToString:@"Close Peek"];
+        [w.sidebarUndoManager undo];
+        BOOL reopened = w.isPeeking && !w.peekToastShown;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          [w promotePeekToTab];
+          BOOL noToastAfterPromote = !w.peekToastShown && !w.isPeeking;
+          std::printf("SELFTEST-PEEKUNDO toast=%d undoName=%d reopened=%d noToastAfterPromote=%d\n", toast, undoName,
+                      reopened, noToastAfterPromote);
+        });
       });
     });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
