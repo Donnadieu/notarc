@@ -99,6 +99,9 @@
   [file addItemWithTitle:@"Show Archive" action:@selector(showArchive:) keyEquivalent:@""];
   [file addItemWithTitle:@"Show Downloads" action:@selector(showDownloads:) keyEquivalent:@"J"];
   [file addItemWithTitle:@"Clear History..." action:@selector(clearHistory:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Clear Browsing Data..." action:@selector(clearBrowsingData:) keyEquivalent:@"\x08"]
+      .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+  [file addItemWithTitle:@"Clear Cookies and Refresh" action:@selector(clearCookiesAndRefresh:) keyEquivalent:@""];
   [file addItem:[NSMenuItem separatorItem]];
   [file addItemWithTitle:@"Pin / Unpin Tab" action:@selector(togglePin:) keyEquivalent:@"d"];
   [file addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@""];
@@ -256,6 +259,7 @@
     spaces = @[ fallback ];
   }
   self.window = [[MainWindowController alloc] initWithSpaces:spaces focusedSpaceID:focused];
+  self.window.selfTestProfiles = self.selfTest;
   self.window.storePath = storePath;
   self.window.archivePath = ArchiveStorePath(self.selfTest);
   self.window.historyPath = HistoryStorePath(self.selfTest);
@@ -501,6 +505,47 @@
       BOOL out = !w.focusMode && w.sidebarHidden == before && ![w.window standardWindowButton:NSWindowCloseButton].hidden;
       BOOL fsCapable = (w.window.collectionBehavior & NSWindowCollectionBehaviorFullScreenNone) == 0;
       std::printf("SELFTEST-FOCUS focus=%d restored=%d fullScreenAllowed=%d\n", inFocus, out, fsCapable);
+    });
+    // Clear Cookies and Refresh (this site only), then Clear Browsing Data (last hour).
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 46 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openInNewTab:@"https://example.com/clear-test"];
+      ArcItem* clearTab = w.shownItem;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w showItem:clearTab];  // other timed checks may have switched tabs meanwhile
+        [w selfTestSetCookie:@"https://example.com/" name:@"nt_site" done:^{
+          [w selfTestSetCookie:@"https://example.org/" name:@"nt_other" done:^{
+            [w selfTestCountCookiesNamed:@"nt_site" done:^(NSUInteger siteBefore) {
+              [w showItem:clearTab];
+              [w clearCookiesAndRefreshWithDone:^(NSUInteger removed) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                  [w selfTestCountCookiesNamed:@"nt_site" done:^(NSUInteger siteAfter) {
+                    [w selfTestCountCookiesNamed:@"nt_other" done:^(NSUInteger otherKept) {
+                      NSDate* since = [NSDate dateWithTimeIntervalSinceNow:-3600];
+                      NSUInteger recentVisits = 0;
+                      for (ArchivedTab* v in w.historyVisits) recentVisits += [v.archivedAt compare:since] != NSOrderedAscending;
+                      [w clearBrowsingDataSince:since history:YES cookies:YES cache:YES
+                                           done:^(NSUInteger histRemoved, NSUInteger cookiesRemoved) {
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                          [w selfTestCountCookiesNamed:@"nt_other" done:^(NSUInteger otherAfter) {
+                            NSUInteger recentLeft = 0;
+                            for (ArchivedTab* v in w.historyVisits) recentLeft += [v.archivedAt compare:since] != NSOrderedAscending;
+                            std::printf("SELFTEST-CLEARDATA siteBefore=%lu siteRemoved=%lu siteAfter=%lu otherKept=%lu "
+                                        "recentVisits=%lu histRemoved=%lu recentLeft=%lu cookiesRemoved=%lu otherAfter=%lu\n",
+                                        (unsigned long)siteBefore, (unsigned long)removed, (unsigned long)siteAfter,
+                                        (unsigned long)otherKept, (unsigned long)recentVisits, (unsigned long)histRemoved,
+                                        (unsigned long)recentLeft, (unsigned long)cookiesRemoved, (unsigned long)otherAfter);
+                          }];
+                        });
+                      }];
+                    }];
+                  }];
+                });
+              }];
+            }];
+          }];
+        }];
+      });
     });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 34 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{

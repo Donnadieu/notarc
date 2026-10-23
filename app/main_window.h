@@ -9,6 +9,9 @@
 
 @interface MainWindowController : NSWindowController <NSWindowDelegate>
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID;
+// Self-test: Space profiles live in separate "SelfTest Space ..." folders and Arc cookies are not imported,
+// so tests never read or change the real profiles.
+@property(nonatomic) BOOL selfTestProfiles;
 @property(nonatomic, copy) NSString* storePath;  // where the sidebar is saved; nil = don't save
 - (void)saveSidebarNow;
 - (void)createBrowsers;  // after CefInitialize; opens the first tab of the focused Space
@@ -124,6 +127,17 @@
 // same command (Cmd+Opt+Shift+F) leaves it; full screen is the standard macOS one (Ctrl+Cmd+F).
 @property(nonatomic, readonly) BOOL focusMode;
 - (IBAction)toggleFocusMode:(id)sender;
+// Clear Browsing Data: history and cookies from `since` on (nil = all time) in every Space's profile;
+// the HTTP cache is always cleared in full (Chromium has no time range for it).
+- (void)clearBrowsingDataSince:(NSDate*)since history:(BOOL)history cookies:(BOOL)cookies cache:(BOOL)cache
+                          done:(void (^)(NSUInteger historyRemoved, NSUInteger cookiesRemoved))done;
+- (IBAction)clearBrowsingData:(id)sender;
+// Arc's "Clear Cookies and Refresh": the current site's cookies and storage, then reload.
+- (void)clearCookiesAndRefreshWithDone:(void (^)(NSUInteger cookiesRemoved))done;
+- (IBAction)clearCookiesAndRefresh:(id)sender;
+// Self-test helpers (current tab's profile).
+- (void)selfTestSetCookie:(NSString*)url name:(NSString*)name done:(void (^)(void))done;
+- (void)selfTestCountCookiesNamed:(NSString*)name done:(void (^)(NSUInteger count))done;
 // Pinned tabs (Arc): closing keeps the tab and returns it to its saved URL next time.
 - (void)showItem:(ArcItem*)item;
 - (BOOL)isPinnedItem:(ArcItem*)item;

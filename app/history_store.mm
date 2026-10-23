@@ -59,6 +59,16 @@ static BOOL Recordable(NSString* url) {
   }
 }
 
+- (NSUInteger)clearSince:(NSDate*)since {
+  NSUInteger before = _visits.count;
+  NSIndexSet* gone = [_visits indexesOfObjectsPassingTest:^BOOL(ArchivedTab* v, NSUInteger i, BOOL* stop) {
+    return [v.archivedAt compare:since] != NSOrderedAscending;
+  }];
+  [_visits removeObjectsAtIndexes:gone];
+  [self saveNow];
+  return before - _visits.count;
+}
+
 - (void)clear {
   [_visits removeAllObjects];
   [self saveNow];
