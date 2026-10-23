@@ -23,6 +23,11 @@ static NSDictionary* EncodeItem(ArcItem* item) {
   if (item.url.length) d[@"url"] = item.url;
   if (item.lastActiveAt) d[@"lastActiveAt"] = @(item.lastActiveAt.timeIntervalSinceReferenceDate);
   d[@"folder"] = @(item.isFolder);
+  if (item.isSplit) {
+    d[@"split"] = @YES;
+    d[@"horizontal"] = @(item.splitHorizontal);
+    if (item.splitFractions) d[@"fractions"] = item.splitFractions;
+  }
   NSMutableArray* children = [NSMutableArray array];
   for (ArcItem* child in item.children) [children addObject:EncodeItem(child)];
   d[@"children"] = children;
@@ -39,11 +44,16 @@ static ArcItem* DecodeItem(NSDictionary* d, int depth) {
   if ([d[@"lastActiveAt"] isKindOfClass:NSNumber.class])
     item.lastActiveAt = [NSDate dateWithTimeIntervalSinceReferenceDate:[d[@"lastActiveAt"] doubleValue]];
   item.isFolder = [d[@"folder"] boolValue];
+  item.isSplit = [d[@"split"] boolValue];
+  item.splitHorizontal = [d[@"horizontal"] boolValue];
+  if ([d[@"fractions"] isKindOfClass:NSArray.class]) item.splitFractions = d[@"fractions"];
   item.children = [NSMutableArray array];
   for (id child in d[@"children"]) {
     ArcItem* c = DecodeItem(child, depth + 1);
     if (c) [item.children addObject:c];
   }
+  if (item.isSplit && item.children.count < 2) return item.children.firstObject;  // damaged split: keep the tab
+  if (item.splitFractions.count != item.children.count) item.splitFractions = nil;
   return item;
 }
 

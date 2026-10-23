@@ -423,17 +423,40 @@
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
-      [w selectTabAtIndex:0];
+      [w openInNewTab:@"https://example.com/split-base"];  // Favorites can't hold splits, so start from Today
+      ArcItem* base = w.shownItem;
       [w openInSplit:@"https://example.com/left" horizontal:NO before:YES];
-      NSUInteger leftIdx = [w indexOfShownInSplit];
+      BOOL leftIdxOK = [w splitGroupOfShown] != nil && [w indexOfShownInSplit] == 0 &&
+                       [w splitGroupOfShown].children[1] == base;
       [w openInSplit:@"https://example.com/top" horizontal:YES before:YES];
       NSArray<NSValue*>* f = [w paneFrames];
       BOOL stacked = f.count == 3 && NSMinY(f[0].rectValue) >= NSMaxY(f[1].rectValue);
       [w flipSplitLayout:nil];
       NSArray<NSValue*>* g = [w paneFrames];
       BOOL flipped = g.count == 3 && NSMaxX(g[0].rectValue) <= NSMinX(g[1].rectValue);
+      ArcItem* group = [w splitGroupOfShown];
+      BOOL oneItem = group.isSplit && group.children.count == 3 &&
+                     [w.currentSpace.unpinned.children containsObject:group];
+      NSUInteger dividers = [w dividerCount];
+      [w moveDivider:0 toPosition:0.5];
+      NSArray<NSValue*>* h = [w paneFrames];
+      CGFloat total = h.count == 3 ? NSMaxX(h[2].rectValue) : 1;
+      BOOL resized = h.count == 3 && fabs(h[0].rectValue.size.width / total - 0.5) < 0.03;
+      [w saveSidebarNow];
+      NSString* focused = nil;
+      NSArray<ArcSpace*>* saved = SidebarStoreLoad(w.storePath, &focused, nil);
+      BOOL persisted = NO;
+      for (ArcSpace* sp in saved)
+        for (ArcItem* it in sp.unpinned.children)
+          if (it.isSplit && it.children.count == 3 && it.splitFractions.count == 3 &&
+              fabs(it.splitFractions[0].doubleValue - 0.5) < 0.03)
+            persisted = YES;
+      std::printf("SELFTEST-SPLIT3 oneSidebarItem=%d dividers=%lu dragResized=%d persisted=%d\n", oneItem,
+                  (unsigned long)dividers, resized, persisted);
       [w closeSplitPane:nil];
       [w closeSplitPane:nil];
+      std::printf("SELFTEST-SPLIT3 dissolved=%d separatedKept=%d\n", [w splitGroupOfShown] == nil,
+                  [w.currentSpace.allTabs containsObject:w.shownItem]);
       int shown = w.shownItem.browserId;
       NSUInteger todayBefore = w.currentSpace.unpinned.children.count;
       BOOL peekHandled = [w handleOpenURL:@"https://example.net/shift" fromBrowser:shown disposition:CEF_WOD_NEW_WINDOW
@@ -443,7 +466,7 @@
       BOOL unknownIgnored = ![w handleOpenURL:@"https://example.net/x" fromBrowser:-1 disposition:CEF_WOD_NEW_WINDOW
                                   userGesture:YES];
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
-        std::printf("SELFTEST-SPLIT2 leftInsertedBefore=%d topStacked=%d flipped=%d\n", leftIdx == 0, stacked, flipped);
+        std::printf("SELFTEST-SPLIT2 leftInsertedBefore=%d topStacked=%d flipped=%d\n", leftIdxOK, stacked, flipped);
         std::printf("SELFTEST-OPEN shiftPeek=%d peeking=%d cmdBackground=%d todayDelta=%ld stillShown=%d unknownIgnored=%d\n",
                     peekHandled, [w isPeeking], bgHandled,
                     (long)(w.currentSpace.unpinned.children.count - todayBefore), w.shownItem.browserId == shown,

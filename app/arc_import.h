@@ -10,6 +10,10 @@
 @property(nonatomic, copy) NSString* url;        // nil for folders and section roots
 @property(nonatomic) BOOL isFolder;
 @property(nonatomic) BOOL isSection;  // the Pinned / Today root of a Space
+// A split view shown as one sidebar item; its children are the panes, in order.
+@property(nonatomic) BOOL isSplit;
+@property(nonatomic) BOOL splitHorizontal;                       // stacked instead of side by side
+@property(nonatomic, copy) NSArray<NSNumber*>* splitFractions;   // pane sizes summing to 1; nil = equal
 @property(nonatomic, strong) NSMutableArray<ArcItem*>* children;
 @property(nonatomic) int browserId;  // 0 until a web view exists for this tab
 @property(nonatomic, strong) NSDate* lastActiveAt;  // drives auto-archive of Today tabs

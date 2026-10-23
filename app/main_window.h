@@ -81,6 +81,10 @@
 - (IBAction)flipSplitLayout:(id)sender;
 - (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal before:(BOOL)before;
 - (NSUInteger)indexOfShownInSplit;  // tests
+// A split is one sidebar item (Arc does the same). Dragging a divider resizes the panes on either side.
+- (ArcItem*)splitGroupOfShown;                                   // nil when the shown tab isn't split
+- (void)moveDivider:(NSUInteger)index toPosition:(CGFloat)position;  // position: 0-1 along the split
+- (NSUInteger)dividerCount;                                      // tests
 
 // Peek: links clicked on a Pinned tab or Favorite that leave its site open in an overlay instead
 // of navigating the tab away, so the pinned page stays put.

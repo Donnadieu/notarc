@@ -45,7 +45,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 ## Split view & windows
 
-- [ ] Split view: vertical/horizontal, up to 4 panes, add/close/move panes (partial: add in all four directions, flip layout, close and focus panes done; drag to resize, move panes, split as one sidebar item and saving splits missing)
+- [ ] Split view: vertical/horizontal, up to 4 panes, add/close/move panes (partial: add in all four directions, flip layout, close and focus panes, split as one sidebar item, draggable dividers and saving splits done; dragging a tab into the page to split and maximize pane missing)
 - [ ] Switch between split views; share split view (missing)
 - [ ] Multiple windows, move tab to window, Move to main window (missing)
 - [ ] Incognito window (missing)
