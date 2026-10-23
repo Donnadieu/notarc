@@ -120,6 +120,10 @@
 - (IBAction)switchToRecentTab:(id)sender;  // Ctrl+Tab: the most recently used other tab in this Space
 - (IBAction)pasteAndGo:(id)sender;          // clipboard URL or search text -> new Today tab
 - (IBAction)printPage:(id)sender;
+// Focus mode: hides the sidebar and the window's title-bar buttons so only the page shows. The
+// same command (Cmd+Opt+Shift+F) leaves it; full screen is the standard macOS one (Ctrl+Cmd+F).
+@property(nonatomic, readonly) BOOL focusMode;
+- (IBAction)toggleFocusMode:(id)sender;
 // Pinned tabs (Arc): closing keeps the tab and returns it to its saved URL next time.
 - (void)showItem:(ArcItem*)item;
 - (BOOL)isPinnedItem:(ArcItem*)item;

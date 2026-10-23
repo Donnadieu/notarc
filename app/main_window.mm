@@ -129,6 +129,8 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   ArchiveWindowController* _archiveWindow;
   ArchiveWindowController* _historyWindow;
   HistoryStore* _history;
+  BOOL _focusMode;
+  BOOL _sidebarWasHidden;
   NSPanel* _findBar;
   NSSearchField* _findField;
   NSTextField* _findLabel;
@@ -1249,6 +1251,18 @@ static ArcItem* NewSection(NSString* title) {
   [self layoutPanes];
 }
 - (BOOL)sidebarHidden { return _sidebar.hidden; }
+
+- (IBAction)toggleFocusMode:(id)sender {
+  _focusMode = !_focusMode;
+  if (_focusMode) {
+    _sidebarWasHidden = _sidebar.hidden;
+    if (!_sidebar.hidden) [self toggleSidebar:nil];
+  } else if (_sidebar.hidden && !_sidebarWasHidden) {
+    [self toggleSidebar:nil];
+  }
+  for (NSWindowButton b : {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton})
+    [self.window standardWindowButton:b].hidden = _focusMode;
+}
 - (ArcItem*)shownItem { return _shown; }
 
 - (void)selectTabAtIndex:(NSUInteger)index {
