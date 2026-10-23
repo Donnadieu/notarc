@@ -854,7 +854,8 @@
         BOOL below = NSMaxY(pane) <= w.window.contentView.bounds.size.height - 30;
         [w submitToolbarAddress:@"example.org/toolbar-typed"];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-          BOOL navigated = [w.currentURL hasPrefix:@"https://example.org/toolbar-typed"] &&
+          [w showItem:t];  // other timed checks may have switched tabs meanwhile
+          BOOL navigated = [t.url hasPrefix:@"https://example.org/toolbar-typed"] &&
                            [w.toolbarAddress hasPrefix:@"https://example.org/toolbar-typed"];
           [w toggleToolbar:nil];
           BOOL hidden = !w.toolbarShown;
@@ -864,6 +865,49 @@
           std::printf("SELFTEST-TOOLBAR shown=%d fullURL=%d pageBelow=%d typedGo=%d hidden=%d headerToggle=%d\n", shown,
                       full, below, navigated, hidden, headerHidden && w.spaceHeaderShown);
         });
+      });
+    });
+    // Command bar suggestions: open tabs (any Space), Spaces, history, menu actions, top sites, learned ranking.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 68 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openInNewTab:@"https://example.com/suggest-alpha"];
+      [w openInNewTab:@"https://example.com/suggest-beta"];
+      ArcItem* alpha = nil;
+      for (ArcItem* t in w.currentSpace.allTabs)
+        if ([t.url hasPrefix:@"https://example.com/suggest-alpha"]) alpha = t;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        BOOL (^has)(NSArray*, NSString*, NSString*) = ^BOOL(NSArray* list, NSString* kind, NSString* sub) {
+          for (NSDictionary* d in list)
+            if ([d[@"kind"] isEqualToString:kind] && ([d[@"title"] containsString:sub] || [d[@"url"] containsString:sub] ||
+                                                      [((ArcItem*)d[@"item"]).url containsString:sub]))
+              return YES;
+          return NO;
+        };
+        NSArray* tabs = [w commandSuggestionsFor:@"suggest-alpha"];
+        BOOL first = [tabs.firstObject[@"kind"] isEqualToString:@"go"];
+        BOOL tab = has(tabs, @"tab", @"suggest-alpha");
+        ArcSpace* other = nil;
+        for (ArcSpace* sp in w.spaces) if (sp != w.currentSpace) other = sp;
+        BOOL space = !other || has([w commandSuggestionsFor:[other.title substringToIndex:MIN((NSUInteger)3, other.title.length)]],
+                                   @"space", other.title);
+        BOOL action = has([w commandSuggestionsFor:@"focus mo"], @"action", @"Focus Mode");
+        BOOL history = has([w commandSuggestionsFor:@"example"], @"history", @"example") ||
+                       has([w commandSuggestionsFor:@"example"], @"tab", @"example");
+        BOOL top = [w commandSuggestionsFor:@""].count > 0;
+        // Learned ranking: picking the beta tab twice for the query "suggest" puts it first among results.
+        NSDictionary* beta = nil;
+        for (NSDictionary* d in [w commandSuggestionsFor:@"suggest"])
+          if ([d[@"kind"] isEqualToString:@"tab"] && [((ArcItem*)d[@"item"]).url containsString:@"suggest-beta"]) beta = d;
+        [w performCommandSuggestion:beta];
+        [w performCommandSuggestion:beta];
+        BOOL switched = [w.shownItem.url containsString:@"suggest-beta"];
+        NSArray* after = [w commandSuggestionsFor:@"suggest"];
+        [w showItem:alpha];
+        NSArray* after2 = [w commandSuggestionsFor:@"suggest"];
+        BOOL learned = after2.count > 1 && [((ArcItem*)after2[1][@"item"]).url containsString:@"suggest-beta"];
+        (void)after;
+        std::printf("SELFTEST-SUGGEST goFirst=%d tab=%d space=%d action=%d history=%d topSites=%d switched=%d learned=%d\n",
+                    first, tab, space, action, history, top, switched, learned);
       });
     });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.

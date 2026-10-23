@@ -99,6 +99,30 @@ static NSString* HexFromColor(NSColor* c) {
 }
 
 static const CGFloat kToolbarHeight = 38;
+static const CGFloat kSuggestionRow = 34;
+static const NSUInteger kMaxSuggestions = 8;
+
+// Data source for the command bar's suggestion list (kept separate from the sidebar's outline delegate).
+@interface CommandSuggestionList : NSObject <NSTableViewDataSource, NSTableViewDelegate>
+@property(nonatomic, copy) NSArray<NSDictionary*>* items;
+@end
+@implementation CommandSuggestionList
+- (NSInteger)numberOfRowsInTableView:(NSTableView*)t { return (NSInteger)self.items.count; }
+- (id)tableView:(NSTableView*)t objectValueForTableColumn:(NSTableColumn*)c row:(NSInteger)row {
+  NSDictionary* s = self.items[row];
+  static NSDictionary* kinds = @{ @"go" : @"↩", @"tab" : @"Switch to Tab", @"space" : @"Space", @"history" : @"History",
+                                  @"action" : @"Action", @"site" : @"Top Site" };
+  NSMutableAttributedString* a = [[NSMutableAttributedString alloc]
+      initWithString:s[@"title"] ?: @""
+          attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:14], NSForegroundColorAttributeName : NSColor.labelColor}];
+  NSString* sub = [s[@"subtitle"] length] ? [@"   " stringByAppendingString:s[@"subtitle"]] : @"";
+  [a appendAttributedString:[[NSAttributedString alloc]
+                                initWithString:[sub stringByAppendingFormat:@"   · %@", kinds[s[@"kind"]] ?: @""]
+                                    attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:11],
+                                                 NSForegroundColorAttributeName : NSColor.secondaryLabelColor}]];
+  return a;
+}
+@end
 
 @interface MainWindowController () <NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate,
                                     NSMenuDelegate>
@@ -141,6 +165,9 @@ static const CGFloat kToolbarHeight = 38;
   ArcItem* _shown;
   BOOL _closing;
   NSPanel* _commandBar;
+  NSTableView* _suggestionTable;
+  NSScrollView* _suggestionScroll;
+  CommandSuggestionList* _suggestionList;
   NSTextField* _commandField;
   BOOL _commandOpensNewTab;
   BOOL _saveScheduled;
@@ -2695,15 +2722,191 @@ static ArcItem* NewSection(NSString* title) {
     _commandField.drawsBackground = NO;
     _commandField.delegate = self;
     [_commandBar.contentView addSubview:_commandField];
+    _suggestionList = [CommandSuggestionList new];
+    _suggestionTable = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 640, 0)];
+    NSTableColumn* col = [[NSTableColumn alloc] initWithIdentifier:@"s"];
+    col.width = 620;
+    [_suggestionTable addTableColumn:col];
+    _suggestionTable.headerView = nil;
+    _suggestionTable.rowHeight = kSuggestionRow - 2;
+    _suggestionTable.backgroundColor = NSColor.clearColor;
+    _suggestionTable.dataSource = _suggestionList;
+    _suggestionTable.delegate = _suggestionList;
+    _suggestionTable.target = self;
+    _suggestionTable.action = @selector(suggestionClicked:);
+    _suggestionTable.refusesFirstResponder = YES;
+    _suggestionScroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 640, 0)];
+    _suggestionScroll.documentView = _suggestionTable;
+    _suggestionScroll.drawsBackground = NO;
+    [_commandBar.contentView addSubview:_suggestionScroll];
   }
   _commandField.placeholderString = newTab ? @"Search or enter URL (new tab)" : @"Search or enter URL";
   _commandField.stringValue = (!newTab && _shown.url) ? _shown.url : @"";
-  NSRect f = self.window.frame;
-  [_commandBar setFrameOrigin:NSMakePoint(NSMidX(f) - 320, NSMaxY(f) - 220)];
+  [self refreshSuggestions];
   [self.window addChildWindow:_commandBar ordered:NSWindowAbove];
   [_commandBar makeKeyAndOrderFront:nil];
   [_commandBar makeFirstResponder:_commandField];
   [_commandField selectText:nil];
+}
+
+// Lays the panel out for the current suggestions: field on top, list below, top edge fixed.
+- (void)refreshSuggestions {
+  _suggestionList.items = [self commandSuggestionsFor:_commandField.stringValue];
+  [_suggestionTable reloadData];
+  if (_suggestionList.items.count) [_suggestionTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
+  CGFloat listH = _suggestionList.items.count * kSuggestionRow + (_suggestionList.items.count ? 8 : 0);
+  CGFloat h = 52 + listH;
+  NSRect f = self.window.frame;
+  [_commandBar setFrame:NSMakeRect(NSMidX(f) - 320, NSMaxY(f) - 168 - h, 640, h) display:YES];
+  _commandField.frame = NSMakeRect(12, h - 42, 616, 32);
+  _suggestionScroll.frame = NSMakeRect(6, 4, 628, listH);
+  _suggestionScroll.hidden = listH == 0;
+}
+
+static NSString* HostOf(NSString* url) {
+  NSString* h = [NSURL URLWithString:url].host ?: @"";
+  return [h hasPrefix:@"www."] ? [h substringFromIndex:4] : h;
+}
+
+// Match score: 0 = no match. Title/host prefix beats a substring anywhere.
+static double MatchScore(NSString* q, NSString* title, NSString* url) {
+  if (!q.length) return 1;
+  NSString* t = title.lowercaseString ?: @"", *u = url.lowercaseString ?: @"", *h = HostOf(url).lowercaseString;
+  if ([h hasPrefix:q]) return 6;
+  if ([t hasPrefix:q]) return 5;
+  if ([t rangeOfString:[@" " stringByAppendingString:q]].location != NSNotFound) return 4;
+  if ([t containsString:q]) return 3;
+  if ([u containsString:q]) return 2;
+  return 0;
+}
+
+- (void)collectMenuActions:(NSMenu*)menu query:(NSString*)q into:(NSMutableArray*)out {
+  for (NSMenuItem* mi in menu.itemArray) {
+    if (mi.submenu) {
+      [self collectMenuActions:mi.submenu query:q into:out];
+      continue;
+    }
+    if (mi.isSeparatorItem || !mi.action || !mi.title.length || mi.hidden) continue;
+    if (mi.action == @selector(newTab:) || mi.action == @selector(openLocation:)) continue;  // we're already here
+    double m = MatchScore(q, mi.title, nil);
+    if (m <= 0) continue;
+    [out addObject:@{ @"kind" : @"action", @"title" : mi.title, @"subtitle" : menu.title ?: @"",
+                      @"key" : [@"action:" stringByAppendingString:NSStringFromSelector(mi.action)], @"item" : mi,
+                      @"score" : @(m + 0.5) }];
+  }
+}
+
+- (NSArray<NSDictionary*>*)commandSuggestionsFor:(NSString*)text {
+  NSString* q = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].lowercaseString;
+  NSDictionary* picks = SettingObject(kSettingCommandPicks);
+  BOOL urlOnly = _commandOpensSplit || _commandOpensLittle;
+  NSMutableArray<NSDictionary*>* out = [NSMutableArray array];
+  NSMutableSet<NSString*>* seenURLs = [NSMutableSet set];
+  if (!_history && self.historyPath) _history = [[HistoryStore alloc] initWithPath:self.historyPath];
+
+  if (!q.length) {
+    // Empty field: most visited sites.
+    NSCountedSet* hosts = [NSCountedSet set];
+    NSMutableDictionary* lastURL = [NSMutableDictionary dictionary];
+    for (ArchivedTab* v in _history.visits) {
+      NSString* h = HostOf(v.url);
+      if (!h.length) continue;
+      [hosts addObject:h];
+      lastURL[h] = [NSString stringWithFormat:@"https://%@/", [NSURL URLWithString:v.url].host];
+    }
+    NSArray* top = [hosts.allObjects sortedArrayUsingComparator:^NSComparisonResult(id a, id b) {
+      NSUInteger ca = [hosts countForObject:a], cb = [hosts countForObject:b];
+      return ca == cb ? [a compare:b] : (ca > cb ? NSOrderedAscending : NSOrderedDescending);
+    }];
+    for (NSString* h in top) {
+      if (out.count >= 6) break;
+      [out addObject:@{ @"kind" : @"site", @"title" : h, @"subtitle" : @"", @"key" : [@"site:" stringByAppendingString:h],
+                        @"url" : lastURL[h] }];
+    }
+    return out;
+  }
+
+  NSMutableArray<NSDictionary*>* ranked = [NSMutableArray array];
+  if (!urlOnly) {
+    for (ArcSpace* sp in _spaces) {
+      for (ArcItem* t in [self tabsIn:[self sectionsOfSpace:sp]]) {
+        NSString* url = t.url;
+        double m = MatchScore(q, t.displayTitle, url);
+        if (m <= 0 || t == _shown) continue;
+        [seenURLs addObject:url ?: @""];
+        double bonus = (t.browserId ? 1.5 : 1.0) + (sp == _space ? 0.3 : 0);
+        [ranked addObject:@{ @"kind" : @"tab", @"title" : t.displayTitle ?: url, @"subtitle" :
+                               sp == _space ? HostOf(url) : [NSString stringWithFormat:@"%@ · %@", HostOf(url), sp.title],
+                             @"key" : [@"tab:" stringByAppendingString:t.itemID ?: url], @"item" : t, @"space" : sp,
+                             @"score" : @(m + bonus) }];
+      }
+      double m = MatchScore(q, sp.title, nil);
+      if (m > 0 && sp != _space)
+        [ranked addObject:@{ @"kind" : @"space", @"title" : sp.iconEmoji.length ? [NSString stringWithFormat:@"%@ %@", sp.iconEmoji, sp.title] : sp.title,
+                             @"subtitle" : @"Switch Space", @"key" : [@"space:" stringByAppendingString:sp.spaceID ?: sp.title],
+                             @"space" : sp, @"score" : @(m + 1.2) }];
+    }
+    [self collectMenuActions:NSApp.mainMenu query:q into:ranked];
+  }
+  NSUInteger scanned = 0;
+  for (ArchivedTab* v in _history.visits.reverseObjectEnumerator) {
+    if (++scanned > 5000) break;
+    if ([seenURLs containsObject:v.url]) continue;
+    double m = MatchScore(q, v.title, v.url);
+    if (m <= 0) continue;
+    [seenURLs addObject:v.url];
+    [ranked addObject:@{ @"kind" : @"history", @"title" : v.title.length ? v.title : v.url, @"subtitle" : HostOf(v.url),
+                         @"key" : [@"url:" stringByAppendingString:v.url], @"url" : v.url, @"score" : @(m) }];
+  }
+  // Learned ranking: every earlier pick of the same suggestion adds weight (capped).
+  NSArray* sorted = [ranked sortedArrayUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
+    double sa = [a[@"score"] doubleValue] + MIN(10, [picks[a[@"key"]] doubleValue]) * 1.5;
+    double sb = [b[@"score"] doubleValue] + MIN(10, [picks[b[@"key"]] doubleValue]) * 1.5;
+    return sa == sb ? NSOrderedSame : (sa > sb ? NSOrderedAscending : NSOrderedDescending);
+  }];
+  NSString* resolved = ResolveCommandBarInput(text) ?: text;
+  BOOL looksURL = ![resolved containsString:@"?q="] && ![resolved containsString:@"search?"];
+  [out addObject:@{ @"kind" : @"go", @"title" : text, @"subtitle" : looksURL ? resolved : @"Search", @"key" : @"go", @"text" : text }];
+  for (NSDictionary* d in sorted) {
+    if (out.count >= kMaxSuggestions) break;
+    [out addObject:d];
+  }
+  return out;
+}
+
+- (void)suggestionClicked:(id)sender {
+  NSInteger row = _suggestionTable.clickedRow;
+  if (row >= 0 && row < (NSInteger)_suggestionList.items.count) [self performCommandSuggestion:_suggestionList.items[row]];
+}
+
+- (void)performCommandSuggestion:(NSDictionary*)s {
+  NSString* kind = s[@"kind"];
+  if (![kind isEqualToString:@"go"]) {
+    NSMutableDictionary* picks = [SettingObject(kSettingCommandPicks) mutableCopy] ?: [NSMutableDictionary dictionary];
+    picks[s[@"key"]] = @([picks[s[@"key"]] integerValue] + 1);
+    if (picks.count > 500) [picks removeAllObjects];  // keep it small; ranking simply relearns
+    SettingSetObject(kSettingCommandPicks, picks);
+  }
+  BOOL split = _commandOpensSplit, little = _commandOpensLittle, newTab = _commandOpensNewTab;
+  _commandOpensSplit = NO;
+  _commandOpensLittle = NO;
+  if (_commandBar.isVisible) [self hideCommandBar];
+  if ([kind isEqualToString:@"tab"]) {
+    ArcSpace* sp = s[@"space"];
+    if (sp != _space) [self switchToSpace:sp];
+    [self showItem:s[@"item"]];
+  } else if ([kind isEqualToString:@"space"]) {
+    [self switchToSpace:s[@"space"]];
+  } else if ([kind isEqualToString:@"action"]) {
+    NSMenuItem* mi = s[@"item"];
+    [NSApp sendAction:mi.action to:mi.target from:mi];
+  } else {
+    NSString* target = s[@"url"] ?: s[@"text"];
+    if (little) [self openLittleWindow:target];
+    else if (split) [self openInSplit:target horizontal:_pendingSplitHorizontal before:_splitBefore];
+    else if (newTab) [self openInNewTab:target];
+    else [self navigateCurrentTab:target];
+  }
 }
 
 - (void)hideCommandBar {
@@ -2724,6 +2927,21 @@ static ArcItem* NewSection(NSString* title) {
       return YES;
     }
     return NO;
+  }
+  if (command == @selector(moveDown:) || command == @selector(moveUp:)) {
+    NSInteger n = (NSInteger)_suggestionList.items.count;
+    if (!n) return YES;
+    NSInteger r = _suggestionTable.selectedRow + (command == @selector(moveDown:) ? 1 : -1);
+    r = (r + n) % n;
+    [_suggestionTable selectRowIndexes:[NSIndexSet indexSetWithIndex:r] byExtendingSelection:NO];
+    [_suggestionTable scrollRowToVisible:r];
+    return YES;
+  }
+  if (command == @selector(insertNewline:) && _suggestionTable.selectedRow >= 0 &&
+      _suggestionTable.selectedRow < (NSInteger)_suggestionList.items.count &&
+      ![_suggestionList.items[_suggestionTable.selectedRow][@"kind"] isEqualToString:@"go"]) {
+    [self performCommandSuggestion:_suggestionList.items[_suggestionTable.selectedRow]];
+    return YES;
   }
   if (command == @selector(insertNewline:)) {
     NSString* text = _commandField.stringValue;
@@ -3091,6 +3309,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
 // Folder renames from the sidebar (double-click / New Folder).
 - (void)controlTextDidChange:(NSNotification*)note {
   if (note.object == _findField) [self findText:_findField.stringValue forward:YES];
+  if (note.object == _commandField) [self refreshSuggestions];
 }
 
 - (void)controlTextDidEndEditing:(NSNotification*)note {

@@ -162,6 +162,11 @@ NSString* CleanLinkURL(NSString* url);
 // View > Show Toolbar: back/forward/reload and the full address above the page (Enter goes to what you type).
 // View > Hide Space Header: hides the Space picker at the top of the sidebar. Both are remembered.
 - (IBAction)toggleToolbar:(id)sender;
+// Command bar suggestions. Each is @{kind, title, subtitle, key} plus the object it acts on; kinds:
+// "go" (typed text), "tab" (switch to an open/pinned tab in any Space), "space", "history", "action" (menu
+// command), "site" (top visited site, shown when the field is empty). Picks are counted and rank higher later.
+- (NSArray<NSDictionary*>*)commandSuggestionsFor:(NSString*)text;
+- (void)performCommandSuggestion:(NSDictionary*)suggestion;
 - (IBAction)toggleSpaceHeader:(id)sender;
 @property(nonatomic, readonly) BOOL toolbarShown;
 @property(nonatomic, readonly) BOOL spaceHeaderShown;
