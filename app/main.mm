@@ -74,6 +74,7 @@
   [edit addItemWithTitle:@"Cut" action:@selector(cut:) keyEquivalent:@"x"];
   [edit addItemWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];
   [edit addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
+  [edit addItemWithTitle:@"Paste and Go" action:@selector(pasteAndGo:) keyEquivalent:@""];
   [edit addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
   [edit addItem:[NSMenuItem separatorItem]];
   [edit addItemWithTitle:@"Find..." action:@selector(findInPage:) keyEquivalent:@"f"];
@@ -93,6 +94,7 @@
   [file addItemWithTitle:@"Open Location..." action:@selector(openLocation:) keyEquivalent:@"l"];
   [file addItemWithTitle:@"Close Tab" action:@selector(closeTab:) keyEquivalent:@"w"];
   [file addItemWithTitle:@"Reopen Archived Tab" action:@selector(reopenLastArchived:) keyEquivalent:@"T"];
+  [file addItemWithTitle:@"Print..." action:@selector(printPage:) keyEquivalent:@"p"];
   [file addItemWithTitle:@"Show History" action:@selector(showHistory:) keyEquivalent:@"y"];
   [file addItemWithTitle:@"Show Archive" action:@selector(showArchive:) keyEquivalent:@""];
   [file addItemWithTitle:@"Show Downloads" action:@selector(showDownloads:) keyEquivalent:@"J"];
@@ -200,7 +202,10 @@
                                      action:@selector(selectTabFromMenu:)
                               keyEquivalent:[NSString stringWithFormat:@"%d", i]];
     go.tag = i - 1;
+    if (i == 9) go.title = @"Go to Last Tab";
   }
+  [tabs addItemWithTitle:@"Switch to Recent Tab" action:@selector(switchToRecentTab:) keyEquivalent:@"\t"]
+      .keyEquivalentModifierMask = NSEventModifierFlagControl;
   tabsItem.submenu = tabs;
   NSApp.mainMenu = bar;
 }
@@ -450,6 +455,24 @@
     // Updater: version ordering, GitHub release parsing, and a real download + checksum + extract of
     // the published release (nothing is installed).
     // Downloads: a real small file into a temp folder, twice, so the second gets a numbered name.
+    // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 34 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [NSPasteboard.generalPasteboard clearContents];
+      [NSPasteboard.generalPasteboard setString:@"  https://example.org/pasted \n" forType:NSPasteboardTypeString];
+      [w pasteAndGo:nil];
+      BOOL pasted = [w.shownItem.url isEqualToString:@"https://example.org/pasted"];
+      ArcItem* a = w.shownItem;
+      [w openInNewTab:@"https://example.org/recent-b"];
+      ArcItem* b = w.shownItem;
+      [w switchToRecentTab:nil];
+      BOOL backToA = w.shownItem == a;
+      [w switchToRecentTab:nil];
+      BOOL backToB = w.shownItem == b;
+      [w selectTabAtIndex:8];
+      BOOL last = w.shownItem == w.currentSpace.allTabs.lastObject;
+      std::printf("SELFTEST-QUICK pasteAndGo=%d recentTab=%d recentAgain=%d cmd9Last=%d\n", pasted, backToA, backToB, last);
+    });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 40 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       DownloadManager* dm = [DownloadManager shared];
       NSString* dir = [[ArchiveStorePath(YES) stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"SelfTestDownloads"];

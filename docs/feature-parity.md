@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-14 done, 19 partial, 47 not started or out of scope, of 80 items.
+18 done, 17 partial, 45 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -16,7 +16,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Tidy tab titles (missing)
 - [ ] Hover previews / hover cards on sidebar items (missing)
 - [ ] Unread badge on tabs (missing)
-- [ ] Go to Sidebar Item 1-9, last item, next/previous item (partial: Cmd+1-9 and Cmd+Opt+Up/Down done; last item missing)
+- [x] Go to Sidebar Item 1-9, last item, next/previous item (Cmd+1-8, Cmd+9 last, Cmd+Opt+Up/Down)
 - [ ] Hide/show sidebar, toolbar mode with full URL (partial: Cmd+S hides the sidebar; toolbar mode missing)
 - [ ] Multi-select sidebar items and bulk actions (missing)
 - [ ] Copy URL, Copy URL as Markdown, copy links as Markdown, clean URL (partial: copy URL and Markdown done)
@@ -37,11 +37,11 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [x] Command bar: new tab, go to URL, search (done (basic))
 - [ ] Suggestions: open tabs, history, bookmarks, actions, top domains (missing)
 - [ ] Search engine choice, search suggestions (partial: engine choice done; suggestions missing)
-- [ ] Switch to a recent tab (Ctrl+Tab) (missing)
-- [ ] Back/forward, reload, find in page, zoom, print (partial: print missing)
+- [x] Switch to a recent tab (Ctrl+Tab)
+- [x] Back/forward, reload, find in page, zoom, print
 - [ ] Link routing rules (which Space opens which links) (missing)
 - [ ] Command bar ranking that learns from what you pick (missing)
-- [ ] Paste and Go (missing)
+- [x] Paste and Go (Edit menu)
 
 ## Split view & windows
 

@@ -1252,7 +1252,27 @@ static ArcItem* NewSection(NSString* title) {
 
 - (void)selectTabAtIndex:(NSUInteger)index {
   NSArray<ArcItem*>* tabs = _space.allTabs;
+  if (index == 8 && tabs.count) index = tabs.count - 1;  // Cmd+9 = last item, as in Arc and Chrome
   if (index < tabs.count) [self showItem:tabs[index]];
+}
+
+- (IBAction)switchToRecentTab:(id)sender {
+  ArcItem* best = nil;
+  for (ArcItem* t in _space.allTabs) {
+    if (t == _shown || !t.lastActiveAt) continue;
+    if (!best || [t.lastActiveAt compare:best.lastActiveAt] == NSOrderedDescending) best = t;
+  }
+  if (best) [self showItem:best];
+}
+
+- (IBAction)pasteAndGo:(id)sender {
+  NSString* text = [[NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString]
+      stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+  if (text.length) [self openInNewTab:text];
+}
+
+- (IBAction)printPage:(id)sender {
+  if (auto b = [self currentBrowser]) b->GetHost()->Print();
 }
 - (IBAction)selectTabFromMenu:(NSMenuItem*)sender { [self selectTabAtIndex:sender.tag]; }
 

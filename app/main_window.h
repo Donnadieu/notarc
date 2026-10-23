@@ -117,6 +117,9 @@
 - (IBAction)toggleSidebar:(id)sender;
 - (IBAction)selectTabFromMenu:(NSMenuItem*)sender;  // tag = index
 - (IBAction)nextTab:(id)sender;
+- (IBAction)switchToRecentTab:(id)sender;  // Ctrl+Tab: the most recently used other tab in this Space
+- (IBAction)pasteAndGo:(id)sender;          // clipboard URL or search text -> new Today tab
+- (IBAction)printPage:(id)sender;
 - (IBAction)previousTab:(id)sender;
 - (IBAction)clearToday:(id)sender;
 - (IBAction)focusPaneFromMenu:(NSMenuItem*)sender;  // tag = index
