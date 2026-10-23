@@ -8,6 +8,7 @@
 #import "app/main_window.h"
 #import "app/settings.h"
 #include "app/browser_client.h"
+#import "app/history_store.h"
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
 #import "app/arc_cookies.h"
@@ -80,7 +81,9 @@
   [file addItemWithTitle:@"Open Location..." action:@selector(openLocation:) keyEquivalent:@"l"];
   [file addItemWithTitle:@"Close Tab" action:@selector(closeTab:) keyEquivalent:@"w"];
   [file addItemWithTitle:@"Reopen Archived Tab" action:@selector(reopenLastArchived:) keyEquivalent:@"T"];
-  [file addItemWithTitle:@"Show Archive" action:@selector(showArchive:) keyEquivalent:@"y"];
+  [file addItemWithTitle:@"Show History" action:@selector(showHistory:) keyEquivalent:@"y"];
+  [file addItemWithTitle:@"Show Archive" action:@selector(showArchive:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Clear History..." action:@selector(clearHistory:) keyEquivalent:@""];
   [file addItem:[NSMenuItem separatorItem]];
   [file addItemWithTitle:@"Pin / Unpin Tab" action:@selector(togglePin:) keyEquivalent:@"d"];
   [file addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@""];
@@ -230,6 +233,8 @@
   self.window = [[MainWindowController alloc] initWithSpaces:spaces focusedSpaceID:focused];
   self.window.storePath = storePath;
   self.window.archivePath = ArchiveStorePath(self.selfTest);
+  self.window.historyPath = HistoryStorePath(self.selfTest);
+  if (self.selfTest) [[NSFileManager defaultManager] removeItemAtPath:self.window.historyPath error:nil];
   if (self.selfTest && !self.selfTestReload)
     [[NSFileManager defaultManager] removeItemAtPath:self.window.archivePath error:nil];
   // First launch: bring over Arc's archive once (read-only), like the sidebar import.
@@ -427,6 +432,18 @@
                   "clearToday=%lu->%lu archivedDelta=%ld\n", hidden, shownAgain, first, second, back,
                   (unsigned long)todayBefore, (unsigned long)w.currentSpace.unpinned.children.count,
                   (long)([w archivedTabs].count - archivedBefore));
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 36 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSUInteger visits = w.historyVisits.count;
+      NSUInteger example = [w historyWindowCountForQuery:@"example"];
+      NSUInteger none = [w historyWindowCountForQuery:@"zzz-no-such-page"];
+      BOOL titled = NO;
+      for (ArchivedTab* v in w.historyVisits) if ([v.title isEqualToString:@"Example Domain"]) titled = YES;
+      [w clearHistory:nil];
+      NSUInteger afterClear = w.historyVisits.count;
+      std::printf("SELFTEST-HISTORY visits=%lu matchExample=%lu matchNone=%lu titled=%d afterClear=%lu\n",
+                  (unsigned long)visits, (unsigned long)example, (unsigned long)none, titled, (unsigned long)afterClear);
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 32 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
