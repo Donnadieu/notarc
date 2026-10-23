@@ -110,6 +110,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   BOOL _commandOpensSplit;
   BOOL _commandOpensLittle;
   NSMutableArray<LittleWindowController*>* _littleWindows;
+  LittleWindowController* _peek;
 }
 
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID {
@@ -334,6 +335,14 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
         [weakSelf browser:browserId title:nil url:[NSString stringWithUTF8String:url.c_str()]];
       });
   _client->set_focus_callback([weakSelf](int browserId) { [weakSelf paneFocused:browserId]; });
+  _client->set_navigation_filter([weakSelf](int browserId, const std::string& url) -> bool {
+    MainWindowController* strong = weakSelf;
+    if (!strong) return false;
+    NSString* target = [NSString stringWithUTF8String:url.c_str()];
+    if (![strong shouldPeekFromItem:[strong itemForBrowser:browserId] toURL:target]) return false;
+    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf openPeek:target]; });
+    return true;
+  });
   _client->set_find_callback([weakSelf](int browserId, int count, int active) {
     [weakSelf findResult:count active:active];
   });
@@ -420,6 +429,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
 - (void)closeAllBrowsers {
   _closing = YES;
   for (LittleWindowController* lw in [_littleWindows copy]) [lw.window close];
+  [_peek.window close];
   if (_client) _client->set_quit_when_empty(true);
   if (_browsers.empty()) {
     [self.window close];
@@ -799,6 +809,49 @@ static const CGFloat kPaneGap = 6;
 - (void)closeLittleWindow:(NSUInteger)index {
   if (index < _littleWindows.count) [_littleWindows[index].window close];
 }
+
+#pragma mark Peek
+
+// "mail.google.com" and "docs.google.com" count as the same site; good enough without a public suffix list.
+static NSString* SiteOf(NSString* url) {
+  NSString* host = [NSURL URLWithString:url].host.lowercaseString;
+  NSArray<NSString*>* parts = [host componentsSeparatedByString:@"."];
+  if (parts.count < 2) return host;
+  NSString* last2 = [[parts subarrayWithRange:NSMakeRange(parts.count - 2, 2)] componentsJoinedByString:@"."];
+  // co.uk, com.au and similar: keep three labels.
+  if (parts.count >= 3 && parts[parts.count - 2].length <= 3 && parts.lastObject.length == 2)
+    return [[parts subarrayWithRange:NSMakeRange(parts.count - 3, 3)] componentsJoinedByString:@"."];
+  return last2;
+}
+
+- (BOOL)shouldPeekFromItem:(ArcItem*)item toURL:(NSString*)url {
+  if (!item || !url.length || _peek) return NO;
+  if (![url hasPrefix:@"http://"] && ![url hasPrefix:@"https://"]) return NO;
+  ArcSpace* space = [self spaceOwningItem:item];
+  BOOL pinnedOrFavorite = Contains(space.pinned, item) || Contains(space.favorites, item);
+  if (!pinnedOrFavorite) return NO;
+  auto it = _browsers.find(item.browserId);
+  NSString* current = it != _browsers.end()
+                          ? [NSString stringWithUTF8String:it->second->GetMainFrame()->GetURL().ToString().c_str()]
+                          : item.url;
+  NSString* from = SiteOf(current), *to = SiteOf(url);
+  return from.length && to.length && ![from isEqualToString:to];
+}
+
+- (void)openPeek:(NSString*)url {
+  if (_peek || !_space) return;
+  __weak MainWindowController* weakSelf = self;
+  _peek = [[LittleWindowController alloc] initWithURL:url
+      context:[self contextForSpace:_space]
+      onMove:^(NSString* movedURL) { [weakSelf openInNewTab:movedURL]; }
+      onClose:^(LittleWindowController*, NSString*, NSString*, BOOL) { [weakSelf peekClosed]; }];
+  [_peek presentAsPeekOver:self.window];
+}
+
+- (void)peekClosed { _peek = nil; }
+- (BOOL)isPeeking { return _peek != nil; }
+- (void)promotePeekToTab { [_peek openInMainWindow:nil]; }
+- (void)closePeek { [_peek.window close]; }
 
 #pragma mark Command bar and tab actions
 
@@ -1232,6 +1285,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
 - (void)windowWillClose:(NSNotification*)notification {
   if (notification.object != self.window) return;  // the Archive window closing is not a quit
   for (LittleWindowController* lw in [_littleWindows copy]) [lw.window close];
+  [_peek.window close];
   [_archiveTimer invalidate];
   [_archiveWindow close];
   [self saveSidebarNow];
