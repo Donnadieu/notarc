@@ -9,6 +9,7 @@
 #import "app/settings.h"
 #include "app/browser_client.h"
 #import "app/history_store.h"
+#import "app/updater.h"
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
 #import "app/arc_cookies.h"
@@ -48,6 +49,7 @@
   NSMenuItem* appItem = [NSMenuItem new];
   [bar addItem:appItem];
   NSMenu* appMenu = [NSMenu new];
+  [appMenu addItemWithTitle:@"Check for Updates..." action:@selector(checkForUpdates:) keyEquivalent:@""];
   [appMenu addItemWithTitle:@"Settings..." action:@selector(showSettings:) keyEquivalent:@","];
   [appMenu addItem:[NSMenuItem separatorItem]];
   [appMenu addItemWithTitle:@"Quit NotArc" action:@selector(terminate:) keyEquivalent:@"q"];
@@ -234,6 +236,7 @@
   self.window.storePath = storePath;
   self.window.archivePath = ArchiveStorePath(self.selfTest);
   self.window.historyPath = HistoryStorePath(self.selfTest);
+  if (!self.selfTest) [[Updater shared] scheduleDailyChecks];
   if (self.selfTest) [[NSFileManager defaultManager] removeItemAtPath:self.window.historyPath error:nil];
   if (self.selfTest && !self.selfTestReload)
     [[NSFileManager defaultManager] removeItemAtPath:self.window.archivePath error:nil];
@@ -433,6 +436,33 @@
                   (unsigned long)todayBefore, (unsigned long)w.currentSpace.unpinned.children.count,
                   (long)([w archivedTabs].count - archivedBefore));
     });
+    // Updater: version ordering, GitHub release parsing, and a real download + checksum + extract of
+    // the published release (nothing is installed).
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 38 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      BOOL order = UpdaterCompareVersions(@"v0.10.0", @"0.9.3") == 1 && UpdaterCompareVersions(@"0.4", @"0.4.0") == 0 &&
+                   UpdaterCompareVersions(@"0.4.0", @"0.4.1") == -1;
+      NSDictionary* fake = @{@"tag_name" : @"v9.0.0", @"prerelease" : @NO, @"assets" : @[
+        @{@"name" : @"NotArc-9.0.0-arm64.dmg", @"browser_download_url" : @"https://example.com/a.dmg"},
+        @{@"name" : @"NotArc-9.0.0-arm64.dmg.sha256", @"browser_download_url" : @"https://example.com/a.dmg.sha256"}]};
+      UpdateInfo* parsed = [Updater infoFromReleaseJSON:fake];
+      NSMutableDictionary* pre = [fake mutableCopy];
+      pre[@"prerelease"] = @YES;
+      BOOL parse = [parsed.version isEqualToString:@"9.0.0"] && [parsed.dmgURL.absoluteString hasSuffix:@"a.dmg"] &&
+                   ![Updater infoFromReleaseJSON:pre];
+      [[Updater shared] fetchLatest:^(UpdateInfo* info, NSError* error) {
+        std::printf("SELFTEST-UPDATER order=%d parse=%d current=%s latest=%s error=%s\n", order, parse,
+                    UpdaterCurrentVersion().UTF8String, info.version.UTF8String ?: "-",
+                    error.localizedDescription.UTF8String ?: "-");
+        if (!info) return;
+        [[Updater shared] prepareUpdate:info done:^(NSString* staged, NSError* err) {
+          NSString* v = [NSDictionary dictionaryWithContentsOfFile:
+                                          [staged stringByAppendingPathComponent:@"Contents/Info.plist"]][@"CFBundleShortVersionString"];
+          std::printf("SELFTEST-UPDATER staged=%d stagedVersion=%s checksumOK=%d error=%s\n", staged != nil,
+                      v.UTF8String ?: "-", staged != nil, err.localizedDescription.UTF8String ?: "-");
+          if (staged) [NSFileManager.defaultManager removeItemAtPath:staged.stringByDeletingLastPathComponent error:nil];
+        }];
+      }];
+    });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 36 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
       NSUInteger visits = w.historyVisits.count;
@@ -585,6 +615,8 @@
 - (BOOL)applicationSupportsSecureRestorableState:(NSApplication*)app { return YES; }
 
 // Links clicked in other apps (when NotArc is the default browser) open in a Little Window.
+- (IBAction)checkForUpdates:(id)sender { [[Updater shared] checkInteractive:YES]; }
+
 - (IBAction)showSettings:(id)sender {
   [[SettingsWindowController shared] showWindow:nil];
   [[SettingsWindowController shared].window makeKeyAndOrderFront:nil];

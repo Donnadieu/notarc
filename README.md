@@ -41,8 +41,10 @@ Planned: Boosts, Easel, Notes, extensions, settings and more. See [the parity ch
 On first launch NotArc imports your Arc Spaces, tabs and archive. To bring your logins over too, macOS asks once for
 access to the "Arc Safe Storage" Keychain item; click **Allow**. NotArc only reads Arc's data and never changes it.
 
-To update, download the newer release and replace the app in Applications. Your data stays in
-`~/Library/Application Support/NotArc`.
+From 0.5.0 on, NotArc checks GitHub Releases once a day and offers **Install and Relaunch** when a new
+version is out (or use NotArc > Check for Updates...). Each download is checked against its published
+SHA-256 before it's installed. On 0.4.0 or earlier, download the newer release once and replace the app in
+Applications. Your data stays in `~/Library/Application Support/NotArc`.
 
 ## Built on Chromium, upgraded with Chromium
 
