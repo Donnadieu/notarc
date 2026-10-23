@@ -117,6 +117,10 @@
   [bar addItem:viewItem];
   NSMenu* view = [[NSMenu alloc] initWithTitle:@"View"];
   [view addItemWithTitle:@"Toggle Sidebar" action:@selector(toggleSidebar:) keyEquivalent:@"s"];
+  [view addItemWithTitle:@"Focus Mode" action:@selector(toggleFocusMode:) keyEquivalent:@"F"]
+      .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption;
+  [view addItemWithTitle:@"Enter Full Screen" action:@selector(toggleFullScreen:) keyEquivalent:@"f"]
+      .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
   [view addItem:[NSMenuItem separatorItem]];
   [view addItemWithTitle:@"Reload Page" action:@selector(reloadPage:) keyEquivalent:@"r"];
   [view addItemWithTitle:@"Hard Reload" action:@selector(hardReload:) keyEquivalent:@"R"];
@@ -487,6 +491,16 @@
           });
         });
       });
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 44 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      BOOL before = w.sidebarHidden;
+      [w toggleFocusMode:nil];
+      BOOL inFocus = w.focusMode && w.sidebarHidden && [w.window standardWindowButton:NSWindowCloseButton].hidden;
+      [w toggleFocusMode:nil];
+      BOOL out = !w.focusMode && w.sidebarHidden == before && ![w.window standardWindowButton:NSWindowCloseButton].hidden;
+      BOOL fsCapable = (w.window.collectionBehavior & NSWindowCollectionBehaviorFullScreenNone) == 0;
+      std::printf("SELFTEST-FOCUS focus=%d restored=%d fullScreenAllowed=%d\n", inFocus, out, fsCapable);
     });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 34 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
