@@ -22,10 +22,12 @@ Working today:
 - **Command bar.** Cmd+T opens a new tab, Cmd+L goes to an address or search, Cmd+W closes a tab.
 - **Auto-archive.** Today tabs you haven't used in 12 hours are tidied away into a searchable Archive (Cmd+Y);
   Cmd+Shift+T brings the last one back.
+- **Split view** (up to 4 panes), **Little Window** for links from other apps, and **Peek** for links clicked on
+  pinned sites
 - **Move over from Arc.** On first launch NotArc reads your Arc data on your own Mac and imports your Spaces, tabs,
   archive and logins. It only reads Arc's files and never changes them.
 
-Planned: split view, Peek, Little Arc, Boosts, Easel and Notes and more. See [the parity checklist](docs/feature-parity.md).
+Planned: Boosts, Easel, Notes, extensions, settings and more. See [the parity checklist](docs/feature-parity.md).
 
 ## Install
 
