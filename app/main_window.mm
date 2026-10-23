@@ -109,6 +109,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   BOOL _splitHorizontal;
   BOOL _commandOpensSplit;
   BOOL _commandOpensLittle;
+  BOOL _splitBefore;
   NSMutableArray<LittleWindowController*>* _littleWindows;
   LittleWindowController* _peek;
   NSView* _sidebar;
@@ -331,6 +332,14 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
         [weakSelf browser:browserId title:nil url:[NSString stringWithUTF8String:url.c_str()]];
       });
   _client->set_focus_callback([weakSelf](int browserId) { [weakSelf paneFocused:browserId]; });
+  _client->set_open_callback([weakSelf](int browserId, const std::string& url, int disposition, bool gesture) -> bool {
+    MainWindowController* strong = weakSelf;
+    if (!strong) return false;
+    NSString* target = [NSString stringWithUTF8String:url.c_str()];
+    // Decide now (so CEF knows not to open its own window), act after this callback returns.
+    BOOL handled = [strong handleOpenURL:target fromBrowser:browserId disposition:disposition userGesture:gesture];
+    return handled;
+  });
   _client->set_navigation_filter([weakSelf](int browserId, const std::string& url) -> bool {
     MainWindowController* strong = weakSelf;
     if (!strong) return false;
@@ -704,6 +713,7 @@ static const CGFloat kPaneGap = 6;
     return;
   }
   _commandOpensLittle = NO;
+  _splitBefore = NO;
   _splitHorizontal = horizontal;
   _commandOpensSplit = YES;
   [self showCommandBarForNewTab:YES];
@@ -714,22 +724,43 @@ static const CGFloat kPaneGap = 6;
 
 // The new pane is a normal Today tab placed next to the focused pane, like Arc.
 - (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal {
+  [self openInSplit:input horizontal:horizontal before:NO];
+}
+
+// The new pane is a normal Today tab placed beside the focused pane (after it for right/bottom, before it
+// for left/top). The direction sets the layout of the whole split.
+- (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal before:(BOOL)before {
   NSString* url = ResolveCommandBarInput(input);
   if (!url || !_space || !_shown) return;
-  if (![_splitItems containsObject:_shown]) {
-    _splitItems = [NSMutableArray arrayWithObject:_shown];
-    _splitHorizontal = horizontal;
-  }
+  if (![_splitItems containsObject:_shown]) _splitItems = [NSMutableArray arrayWithObject:_shown];
   if (_splitItems.count >= 4) return;
+  _splitHorizontal = horizontal;
   ArcItem* tab = [ArcItem new];
   tab.itemID = NSUUID.UUID.UUIDString;
   tab.url = url;
   tab.children = [NSMutableArray array];
   [_space.unpinned.children insertObject:tab atIndex:0];
   [_outline reloadItem:_space.unpinned reloadChildren:YES];
-  [_splitItems insertObject:tab atIndex:[_splitItems indexOfObject:_shown] + 1];
+  NSUInteger at = [_splitItems indexOfObject:_shown] + (before ? 0 : 1);
+  [_splitItems insertObject:tab atIndex:at];
   [self scheduleSave];
   [self showItem:tab];
+}
+
+- (NSUInteger)indexOfShownInSplit { return [_splitItems indexOfObject:_shown]; }
+
+- (IBAction)addLeftSplit:(id)sender {
+  [self beginSplit:NO];
+  _splitBefore = YES;
+}
+- (IBAction)addTopSplit:(id)sender {
+  [self beginSplit:YES];
+  _splitBefore = YES;
+}
+- (IBAction)flipSplitLayout:(id)sender {
+  if (_splitItems.count < 2) return;
+  _splitHorizontal = !_splitHorizontal;
+  [self layoutPanes];
 }
 
 // Removes the focused pane from the split; its tab stays in the sidebar.
@@ -805,6 +836,19 @@ static const CGFloat kPaneGap = 6;
 }
 - (void)closeLittleWindow:(NSUInteger)index {
   if (index < _littleWindows.count) [_littleWindows[index].window close];
+}
+
+- (BOOL)handleOpenURL:(NSString*)url fromBrowser:(int)browserId disposition:(int)disposition userGesture:(BOOL)gesture {
+  if (![url hasPrefix:@"http://"] && ![url hasPrefix:@"https://"]) return NO;
+  if (![self itemForBrowser:browserId]) return NO;  // e.g. from a Peek or Little Window: let CEF handle it
+  __weak MainWindowController* weakSelf = self;
+  if (disposition == CEF_WOD_NEW_WINDOW && gesture && !_peek) {
+    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf openPeek:url]; });
+    return YES;
+  }
+  BOOL background = disposition == CEF_WOD_NEW_BACKGROUND_TAB;
+  dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf openInNewTab:url background:background]; });
+  return YES;
 }
 
 #pragma mark Peek
@@ -1120,7 +1164,7 @@ static ArcItem* NewSection(NSString* title) {
     NSString* text = _commandField.stringValue;
     [self hideCommandBar];
     if (_commandOpensLittle) [self openLittleWindow:text];
-    else if (_commandOpensSplit) [self openInSplit:text horizontal:_splitHorizontal];
+    else if (_commandOpensSplit) [self openInSplit:text horizontal:_splitHorizontal before:_splitBefore];
     else if (_commandOpensNewTab) [self openInNewTab:text];
     else [self navigateCurrentTab:text];
     _commandOpensSplit = NO;
@@ -1143,6 +1187,23 @@ static ArcItem* NewSection(NSString* title) {
 }
 - (IBAction)openLocation:(id)sender { [self showCommandBarForNewTab:NO]; }
 - (IBAction)closeTab:(id)sender { [self closeCurrentTab]; }
+
+- (void)openInNewTab:(NSString*)input background:(BOOL)background {
+  if (!background) {
+    [self openInNewTab:input];
+    return;
+  }
+  NSString* url = ResolveCommandBarInput(input);
+  if (!url || !_space) return;
+  ArcItem* tab = [ArcItem new];
+  tab.itemID = NSUUID.UUID.UUIDString;
+  tab.url = url;
+  tab.children = [NSMutableArray array];
+  tab.lastActiveAt = [NSDate date];
+  [_space.unpinned.children insertObject:tab atIndex:0];
+  [_outline reloadItem:_space.unpinned reloadChildren:YES];
+  [self scheduleSave];  // the web view is created when the tab is first shown
+}
 
 // Arc puts new tabs at the top of the current Space's Today section.
 - (void)openInNewTab:(NSString*)input {

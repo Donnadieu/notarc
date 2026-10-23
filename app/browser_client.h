@@ -33,6 +33,19 @@ class BrowserClient : public CefClient,
   // shows the link somewhere else instead, e.g. Peek).
   using NavigationFilter = std::function<bool(int browser_id, const std::string& url)>;
   void set_navigation_filter(NavigationFilter f) { navigation_filter_ = std::move(f); }
+  // Links that ask for a new tab or window (Cmd-click, Shift-click, target=_blank). Returning true means the
+  // window handled it, so CEF doesn't open its own native window. Real popups (window.open with a size,
+  // e.g. sign-in dialogs) are not routed here.
+  using OpenCallback = std::function<bool(int browser_id, const std::string& url, int disposition, bool user_gesture)>;
+  void set_open_callback(OpenCallback cb) { on_open_ = std::move(cb); }
+  bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString& target_url,
+                        WindowOpenDisposition target_disposition, bool user_gesture) override;
+  bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int popup_id,
+                     const CefString& target_url, const CefString& target_frame_name,
+                     WindowOpenDisposition target_disposition, bool user_gesture,
+                     const CefPopupFeatures& popupFeatures, CefWindowInfo& windowInfo, CefRefPtr<CefClient>& client,
+                     CefBrowserSettings& settings, CefRefPtr<CefDictionaryValue>& extra_info,
+                     bool* no_javascript_access) override;
   bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
                       bool user_gesture, bool is_redirect) override;
 
@@ -71,6 +84,7 @@ class BrowserClient : public CefClient,
   FindCallback on_find_;
   FocusCallback on_focus_;
   NavigationFilter navigation_filter_;
+  OpenCallback on_open_;
   int open_browsers_ = 0;
   bool quit_when_empty_ = false;
 
