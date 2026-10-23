@@ -91,6 +91,9 @@ NSArray<ArcSpace*>* SidebarStoreLoad(NSString* path, NSString** focusedSpaceID, 
     space.spaceID = s[@"id"];
     space.title = s[@"title"] ?: @"Space";
     space.profileDirectory = s[@"profile"] ?: @"Default";
+    if ([s[@"themeColors"] isKindOfClass:NSArray.class]) space.themeColors = s[@"themeColors"];
+    space.themeIntensity = [s[@"themeIntensity"] respondsToSelector:@selector(doubleValue)] ? [s[@"themeIntensity"] doubleValue] : 0.5;
+    if ([s[@"icon"] isKindOfClass:NSString.class]) space.iconEmoji = s[@"icon"];
     if (s[@"favorites"]) {
       ArcItem* fav = sharedFavorites[space.profileDirectory] ?: Section(DecodeItem(s[@"favorites"], 0), @"Favorites");
       sharedFavorites[space.profileDirectory] = fav;
@@ -110,6 +113,11 @@ BOOL SidebarStoreSave(NSArray<ArcSpace*>* spaces, NSString* focusedSpaceID, NSSt
     s[@"id"] = space.spaceID ?: NSUUID.UUID.UUIDString;
     s[@"title"] = space.title ?: @"Space";
     s[@"profile"] = space.profileDirectory ?: @"Default";
+    if (space.themeColors.count) {
+      s[@"themeColors"] = space.themeColors;
+      s[@"themeIntensity"] = @(space.themeIntensity);
+    }
+    if (space.iconEmoji.length) s[@"icon"] = space.iconEmoji;
     if (space.favorites) s[@"favorites"] = EncodeItem(space.favorites);
     s[@"pinned"] = EncodeItem(space.pinned);
     s[@"today"] = EncodeItem(space.unpinned);

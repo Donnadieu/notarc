@@ -1,3 +1,4 @@
+#import <QuartzCore/QuartzCore.h>
 // NotArc browser process entry point.
 #import <Cocoa/Cocoa.h>
 
@@ -166,6 +167,8 @@
   NSMenu* spacesMenu = [[NSMenu alloc] initWithTitle:@"Spaces"];
   [spacesMenu addItemWithTitle:@"New Space..." action:@selector(newSpace:) keyEquivalent:@""];
   [spacesMenu addItemWithTitle:@"Rename Space..." action:@selector(renameCurrentSpace:) keyEquivalent:@""];
+  [spacesMenu addItemWithTitle:@"Edit Theme Color..." action:@selector(editThemeColor:) keyEquivalent:@""];
+  [spacesMenu addItemWithTitle:@"Change Space Icon..." action:@selector(changeSpaceIcon:) keyEquivalent:@""];
   [spacesMenu addItemWithTitle:@"Delete Space..." action:@selector(deleteCurrentSpace:) keyEquivalent:@""];
   [spacesMenu addItem:[NSMenuItem separatorItem]];
   [spacesMenu addItemWithTitle:@"Move Space Up" action:@selector(moveSpaceUp:) keyEquivalent:@""];
@@ -586,6 +589,37 @@
       [um redo];
       BOOL redone = ![w.currentSpace.allTabs containsObject:a] && w.archivedTabs.count == archived + 1;
       std::printf("SELFTEST-UNDO closed=%d canUndo=%d restoredSamePlace=%d redo=%d\n", gone, canUndo, back, redone);
+    });
+    // Space themes: colours tint the sidebar per Space, survive a save/load round trip, icon shows in the picker.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 52 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      ArcSpace* sp = w.currentSpace;
+      [w setTheme:@[ @"#5EC8F2", @"#2F6FDE" ] intensity:0.7 forSpace:sp];
+      BOOL shown = !w.themeView.hidden;
+      CAGradientLayer* g = (CAGradientLayer*)w.themeView.layer.sublayers.firstObject;
+      BOOL colors = g.colors.count == 2 && fabs(g.opacity - 0.7) < 0.01;
+      [w setIcon:@"🚀 extra" forSpace:sp];
+      BOOL icon = [sp.iconEmoji isEqualToString:@"🚀"];
+      NSString* tmp = [NSTemporaryDirectory() stringByAppendingPathComponent:@"notarc-theme-test.json"];
+      SidebarStoreSave(@[ sp ], sp.spaceID, tmp, nil);
+      ArcSpace* back = SidebarStoreLoad(tmp, nil, nil).firstObject;
+      [NSFileManager.defaultManager removeItemAtPath:tmp error:nil];
+      BOOL saved = [back.themeColors isEqualToArray:@[ @"#5EC8F2", @"#2F6FDE" ]] && fabs(back.themeIntensity - 0.7) < 0.01 &&
+                   [back.iconEmoji isEqualToString:@"🚀"];
+      ArcSpace* other = nil;
+      for (ArcSpace* s2 in w.spaces) if (s2 != sp) other = s2;
+      BOOL perSpace = YES;
+      if (other) {
+        [w switchToSpace:other];
+        perSpace = other.themeColors.count ? !w.themeView.hidden : w.themeView.hidden;
+        [w switchToSpace:sp];
+        perSpace = perSpace && !w.themeView.hidden;
+      }
+      [w setTheme:nil intensity:0.5 forSpace:sp];
+      BOOL cleared = w.themeView.hidden;
+      [w setIcon:@"" forSpace:sp];
+      std::printf("SELFTEST-THEME shown=%d colors=%d icon=%d saved=%d perSpace=%d cleared=%d\n", shown, colors, icon, saved,
+                  perSpace, cleared && sp.iconEmoji == nil);
     });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 34 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
