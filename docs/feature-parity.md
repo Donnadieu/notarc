@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-21 done, 17 partial, 42 not started or out of scope, of 80 items.
+22 done, 16 partial, 42 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -10,7 +10,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Folders, nested folders, drag and drop (partial: nested folders and New Folder from Selection missing)
 - [ ] Pin/unpin (Cmd+D), Move to Pinned/Today/Top Apps (partial: pin/unpin and Move to Pinned/Today of another Space done; Top Apps moves missing)
 - [x] Rename tab / item
-- [ ] Duplicate tab / duplicate folder (partial: duplicate tab done; duplicate folder missing)
+- [x] Duplicate tab / duplicate folder
 - [x] Archive tab, Archive Other Tabs / Above / Below, Clear Today tabs
 - [x] Close and Keep Pinned; reset pinned tab to its saved URL (also Replace Pinned URL with Current, Reset All Pinned Tabs)
 - [ ] Tidy tab titles (missing)
@@ -19,7 +19,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [x] Go to Sidebar Item 1-9, last item, next/previous item (Cmd+1-8, Cmd+9 last, Cmd+Opt+Up/Down)
 - [ ] Hide/show sidebar, toolbar mode with full URL (partial: Cmd+S hides the sidebar; toolbar mode missing)
 - [ ] Multi-select sidebar items and bulk actions (missing)
-- [ ] Copy URL, Copy URL as Markdown, copy links as Markdown, clean URL (partial: copy URL and Markdown done)
+- [ ] Copy URL, Copy URL as Markdown, copy links as Markdown, clean URL (partial: copy URL, Markdown and Copy Clean Link done; copying several links at once needs multi-select)
 - [ ] Undo close (Cmd+Z in sidebar), reopen closed tab (partial: Cmd+Shift+T only)
 
 ## Spaces & profiles
