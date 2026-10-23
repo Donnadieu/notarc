@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-7 done, 16 partial, 57 not started or out of scope, of 80 items.
+8 done, 17 partial, 55 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -53,7 +53,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 ## Little Arc & Peek
 
-- [ ] Little Arc (mini browser for external links, global hotkey) (partial: Little Window for links from other apps, Cmd+Opt+Shift+N, archived on close; system-wide hotkey missing)
+- [ ] Little Arc (mini browser for external links, global hotkey) (partial: Little Window for links from other apps, Cmd+Opt+N, archived on close; system-wide hotkey missing)
 - [ ] Open in main window / move to Space from Little Arc (partial: Open in NotArc moves to the current Space; choosing another Space missing)
 - [ ] Peek: preview links from pinned/favourite sites, email peeking (partial: links leaving a Pinned tab or Favorite's site and Shift-clicked links open in Peek; Open as Tab; email peeking and undo missing)
 
@@ -100,7 +100,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Chrome extensions (Web Store), extension picker (missing)
 - [ ] Password saving/autofill, address/card autofill (missing)
 - [ ] DevTools (show/hide), developer mode (partial: DevTools done)
-- [ ] Set as default browser, open links from other apps (missing)
+- [ ] Set as default browser, open links from other apps (partial: registers as a browser and opens links from other apps; no in-app "make default" prompt)
 - [ ] Context menus (page, link, image, sidebar) (missing)
 - [ ] Sad tab / crash recovery, session restore (partial: sidebar restore only)
 - [ ] Settings window (all preferences) (missing)
@@ -120,5 +120,5 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 ## Install & updates
 
-- [ ] Downloadable app from GitHub Releases (missing)
+- [x] Downloadable app from GitHub Releases
 - [ ] Automatic update check and install (missing)
