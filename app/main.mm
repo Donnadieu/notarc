@@ -10,6 +10,7 @@
 #include "app/browser_client.h"
 #import "app/history_store.h"
 #import "app/updater.h"
+#import "app/downloads.h"
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
 #import "app/arc_cookies.h"
@@ -31,6 +32,15 @@
   [super sendEvent:event];
 }
 - (void)terminate:(id)sender {
+  NSUInteger active = [DownloadManager shared].inProgressCount;
+  if (active && sender) {
+    NSAlert* a = [NSAlert new];
+    a.messageText = active == 1 ? @"A download is in progress." : [NSString stringWithFormat:@"%lu downloads are in progress.", (unsigned long)active];
+    a.informativeText = @"Quitting NotArc will cancel them.";
+    [a addButtonWithTitle:@"Quit"];
+    [a addButtonWithTitle:@"Cancel"];
+    if ([a runModal] != NSAlertFirstButtonReturn) return;
+  }
   for (NSWindow* w in self.windows) [w performClose:nil];
 }
 @end
@@ -85,6 +95,7 @@
   [file addItemWithTitle:@"Reopen Archived Tab" action:@selector(reopenLastArchived:) keyEquivalent:@"T"];
   [file addItemWithTitle:@"Show History" action:@selector(showHistory:) keyEquivalent:@"y"];
   [file addItemWithTitle:@"Show Archive" action:@selector(showArchive:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Show Downloads" action:@selector(showDownloads:) keyEquivalent:@"J"];
   [file addItemWithTitle:@"Clear History..." action:@selector(clearHistory:) keyEquivalent:@""];
   [file addItem:[NSMenuItem separatorItem]];
   [file addItemWithTitle:@"Pin / Unpin Tab" action:@selector(togglePin:) keyEquivalent:@"d"];
@@ -260,7 +271,7 @@
   if (self.selfTest) {
     [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
     if (!self.selfTestReload) [self runSelfTestActions];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 95 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       for (NSDictionary* tab in [self.window tabSnapshot])
         std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
                     [tab[@"profile"] UTF8String], [tab[@"title"] UTF8String], [tab[@"url"] UTF8String]);
@@ -438,6 +449,32 @@
     });
     // Updater: version ordering, GitHub release parsing, and a real download + checksum + extract of
     // the published release (nothing is installed).
+    // Downloads: a real small file into a temp folder, twice, so the second gets a numbered name.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 40 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      DownloadManager* dm = [DownloadManager shared];
+      NSString* dir = [[ArchiveStorePath(YES) stringByDeletingLastPathComponent] stringByAppendingPathComponent:@"SelfTestDownloads"];
+      [NSFileManager.defaultManager removeItemAtPath:dir error:nil];
+      dm.folderOverride = dir;
+      NSString* url = @"https://github.com/Donnadieu/notarc/releases/download/v0.5.0/NotArc-0.5.0-arm64.dmg.sha256";
+      [self.window startDownload:url];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 6 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [self.window startDownload:url];
+      });
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 14 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        NSArray* files = [[NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:nil]
+            sortedArrayUsingSelector:@selector(compare:)];
+        NSUInteger done = 0;
+        for (DownloadEntry* e in dm.entries) done += e.state == DownloadComplete;
+        NSString* body = [NSString stringWithContentsOfFile:[dir stringByAppendingPathComponent:@"NotArc-0.5.0-arm64.dmg.sha256"]
+                                                   encoding:NSUTF8StringEncoding error:nil];
+        [dm showWindow];
+        std::printf("SELFTEST-DOWNLOADS entries=%lu complete=%lu inProgress=%lu files=%s contentOK=%d filter=%lu filterNone=%lu\n",
+                    (unsigned long)dm.entries.count, (unsigned long)done, (unsigned long)dm.inProgressCount,
+                    [files componentsJoinedByString:@"|"].UTF8String, [body hasPrefix:@"88a4734e"],
+                    (unsigned long)[dm entriesMatching:@"arm64"].count, (unsigned long)[dm entriesMatching:@"zzz"].count);
+        [NSFileManager.defaultManager removeItemAtPath:dir error:nil];
+      });
+    });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 38 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       BOOL order = UpdaterCompareVersions(@"v0.10.0", @"0.9.3") == 1 && UpdaterCompareVersions(@"0.4", @"0.4.0") == 0 &&
                    UpdaterCompareVersions(@"0.4.0", @"0.4.1") == -1;
@@ -615,6 +652,8 @@
 - (BOOL)applicationSupportsSecureRestorableState:(NSApplication*)app { return YES; }
 
 // Links clicked in other apps (when NotArc is the default browser) open in a Little Window.
+- (IBAction)showDownloads:(id)sender { [[DownloadManager shared] showWindow]; }
+
 - (IBAction)checkForUpdates:(id)sender { [[Updater shared] checkInteractive:YES]; }
 
 - (IBAction)showSettings:(id)sender {
