@@ -1,4 +1,5 @@
 #include "app/browser_client.h"
+#import "app/downloads.h"
 
 #include <cstdio>
 
@@ -108,4 +109,17 @@ bool BrowserClient::OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPt
   on_link_menu_(browser->GetIdentifier(), command, params->GetLinkUrl().ToString(),
                 params->GetSelectionText().ToString());
   return true;
+}
+
+bool BrowserClient::OnBeforeDownload(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item,
+                                     const CefString& suggested_name, CefRefPtr<CefBeforeDownloadCallback> callback) {
+  CEF_REQUIRE_UI_THREAD();
+  callback->Continue(DownloadsDestination(suggested_name.ToString()), false);
+  return true;
+}
+
+void BrowserClient::OnDownloadUpdated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item,
+                                      CefRefPtr<CefDownloadItemCallback> callback) {
+  CEF_REQUIRE_UI_THREAD();
+  DownloadsUpdated(download_item, callback);
 }

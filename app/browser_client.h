@@ -6,6 +6,7 @@
 
 #include "include/cef_client.h"
 #include "include/cef_context_menu_handler.h"
+#include "include/cef_download_handler.h"
 #include "include/cef_find_handler.h"
 #include "include/cef_focus_handler.h"
 #include "include/cef_request_handler.h"
@@ -17,7 +18,8 @@ class BrowserClient : public CefClient,
                       public CefFindHandler,
                       public CefFocusHandler,
                       public CefRequestHandler,
-                      public CefContextMenuHandler {
+                      public CefContextMenuHandler,
+                      public CefDownloadHandler {
  public:
   using TitleCallback = std::function<void(int browser_id, const std::string& title)>;
   using UrlCallback = std::function<void(int browser_id, const std::string& url)>;
@@ -31,6 +33,12 @@ class BrowserClient : public CefClient,
   CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
   CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
+  CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
+  // Downloads save straight into the download folder (no Save dialog), tracked by DownloadManager.
+  bool OnBeforeDownload(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item,
+                        const CefString& suggested_name, CefRefPtr<CefBeforeDownloadCallback> callback) override;
+  void OnDownloadUpdated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item,
+                         CefRefPtr<CefDownloadItemCallback> callback) override;
 
   // Right-clicking a link adds NotArc's link actions on top of Chromium's menu.
   enum LinkCommand { kLinkNewTab = 0, kLinkBackgroundTab, kLinkSplit, kLinkPeek, kLinkLittle, kLinkCopyMarkdown, kLinkCount };
