@@ -135,6 +135,11 @@ NSString* CleanLinkURL(NSString* url);
 - (void)setIcon:(NSString*)emoji forSpace:(ArcSpace*)space;
 - (void)switchToSpace:(ArcSpace*)space;
 - (IBAction)editThemeColor:(id)sender;
+// Hover cards: resting the pointer on a sidebar tab for a moment shows a card with its title, site,
+// full address and when it was last used. Returns the card's text lines (for tests).
+- (NSArray<NSString*>*)showHoverCardForItem:(ArcItem*)item;
+- (void)hideHoverCard;
+@property(nonatomic, readonly) BOOL hoverCardShown;
 - (IBAction)changeSpaceIcon:(id)sender;
 @property(nonatomic, readonly) NSView* themeView;  // the tint layer over the sidebar (for tests)
 // Clear Browsing Data: history and cookies from `since` on (nil = all time) in every Space's profile;
