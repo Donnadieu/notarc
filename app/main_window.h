@@ -7,6 +7,9 @@
 #import "app/arc_import.h"
 #import "app/archive_store.h"
 
+// URL with tracking parameters (utm_*, fbclid, gclid, ...) removed; other parameters keep their order.
+NSString* CleanLinkURL(NSString* url);
+
 @interface MainWindowController : NSWindowController <NSWindowDelegate>
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID;
 // Self-test: Space profiles live in separate "SelfTest Space ..." folders and Arc cookies are not imported,
@@ -163,7 +166,8 @@
 - (void)handleLinkCommand:(int)command url:(NSString*)url fromBrowser:(int)browserId;
 - (NSMenu*)sidebarMenuForItem:(ArcItem*)item;
 - (void)renameItem:(ArcItem*)item to:(NSString*)title;
-- (ArcItem*)duplicateItem:(ArcItem*)item;
+- (ArcItem*)duplicateItem:(ArcItem*)item;  // tabs and folders (folders copy their whole contents)
+- (IBAction)copyCleanLink:(id)sender;      // current page's URL without tracking parameters
 // mode: 0 = other tabs, 1 = tabs above, 2 = tabs below (Today only). Returns how many were archived.
 - (NSUInteger)archiveTodayTabsRelativeTo:(ArcItem*)item mode:(int)mode;
 - (BOOL)moveItem:(ArcItem*)item toSpace:(ArcSpace*)space pinned:(BOOL)pinned;
