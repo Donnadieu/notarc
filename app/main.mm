@@ -57,6 +57,15 @@
   [edit addItemWithTitle:@"Copy" action:@selector(copy:) keyEquivalent:@"c"];
   [edit addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
   [edit addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
+  [edit addItem:[NSMenuItem separatorItem]];
+  [edit addItemWithTitle:@"Find..." action:@selector(findInPage:) keyEquivalent:@"f"];
+  [edit addItemWithTitle:@"Find Next" action:@selector(findNext:) keyEquivalent:@"g"];
+  [edit addItemWithTitle:@"Find Previous" action:@selector(findPrevious:) keyEquivalent:@"G"];
+  [edit addItem:[NSMenuItem separatorItem]];
+  [edit addItemWithTitle:@"Copy URL" action:@selector(copyCurrentURL:) keyEquivalent:@"C"];
+  NSMenuItem* md = [edit addItemWithTitle:@"Copy URL as Markdown" action:@selector(copyCurrentURLAsMarkdown:)
+                            keyEquivalent:@"c"];
+  md.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption;
   editItem.submenu = edit;
 
   NSMenuItem* fileItem = [NSMenuItem new];
@@ -72,6 +81,27 @@
   NSMenuItem* folderItem = [file addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@"n"];
   folderItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
   fileItem.submenu = file;
+
+  NSMenuItem* viewItem = [NSMenuItem new];
+  [bar addItem:viewItem];
+  NSMenu* view = [[NSMenu alloc] initWithTitle:@"View"];
+  [view addItemWithTitle:@"Reload Page" action:@selector(reloadPage:) keyEquivalent:@"r"];
+  [view addItemWithTitle:@"Hard Reload" action:@selector(hardReload:) keyEquivalent:@"R"];
+  [view addItem:[NSMenuItem separatorItem]];
+  [view addItemWithTitle:@"Zoom In" action:@selector(zoomIn:) keyEquivalent:@"="];
+  [view addItemWithTitle:@"Zoom Out" action:@selector(zoomOut:) keyEquivalent:@"-"];
+  [view addItemWithTitle:@"Actual Size" action:@selector(actualSize:) keyEquivalent:@"0"];
+  [view addItem:[NSMenuItem separatorItem]];
+  NSMenuItem* dev = [view addItemWithTitle:@"Developer Tools" action:@selector(toggleDevTools:) keyEquivalent:@"i"];
+  dev.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  viewItem.submenu = view;
+
+  NSMenuItem* histItem = [NSMenuItem new];
+  [bar addItem:histItem];
+  NSMenu* hist = [[NSMenu alloc] initWithTitle:@"History"];
+  [hist addItemWithTitle:@"Back" action:@selector(goBack:) keyEquivalent:@"["];
+  [hist addItemWithTitle:@"Forward" action:@selector(goForward:) keyEquivalent:@"]"];
+  histItem.submenu = hist;
   NSApp.mainMenu = bar;
 }
 
@@ -165,6 +195,32 @@
       std::printf("SELFTEST-ORG folder=%d intoFolder=%d pinned=%d cycleRefused=%d\n", folder != nil, intoFolder,
                   pinned, !cycle);
       [w saveSidebarNow];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self.window openInNewTab:@"https://example.com"];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self.window navigateCurrentTab:@"https://www.iana.org/help/example-domains"];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 9 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      BOOL couldGoBack = [w canGoBack];
+      [w goBack:nil];
+      [w zoomIn:nil];
+      [w zoomIn:nil];
+      std::printf("SELFTEST-BASICS canGoBack=%d zoomAfter2In=%.1f\n", couldGoBack, [w currentZoomLevel]);
+      [w actualSize:nil];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 11 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      std::printf("SELFTEST-BASICS afterBack=%s zoomReset=%.1f\n", [w currentURL].UTF8String, [w currentZoomLevel]);
+      [w findText:@"domain" forward:YES];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 13 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w copyCurrentURLAsMarkdown:nil];
+      std::printf("SELFTEST-BASICS findDomainCount=%d markdown=%s\n", w.lastFindCount,
+                  [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString].UTF8String);
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 19 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;

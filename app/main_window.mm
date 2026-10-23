@@ -100,6 +100,10 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   NSMutableArray<ArchivedTab*>* _archive;
   NSTimer* _archiveTimer;
   ArchiveWindowController* _archiveWindow;
+  NSPanel* _findBar;
+  NSSearchField* _findField;
+  NSTextField* _findLabel;
+  int _lastFindCount;
 }
 
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID {
@@ -323,6 +327,9 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
       [weakSelf](int browserId, const std::string& url) {
         [weakSelf browser:browserId title:nil url:[NSString stringWithUTF8String:url.c_str()]];
       });
+  _client->set_find_callback([weakSelf](int browserId, int count, int active) {
+    [weakSelf findResult:count active:active];
+  });
   ArcItem* first = _space.allTabs.firstObject;
   if (first) [self showItem:first];
   [self startAutoArchiveTimer];
@@ -500,6 +507,114 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
     std::fprintf(stderr, "sidebar save failed: %s\n", error.localizedDescription.UTF8String);
 }
 
+#pragma mark Browser basics
+
+- (CefRefPtr<CefBrowser>)currentBrowser {
+  auto it = _browsers.find(_shown.browserId);
+  return it == _browsers.end() ? nullptr : it->second;
+}
+
+- (IBAction)goBack:(id)sender { if (auto b = [self currentBrowser]) b->GoBack(); }
+- (IBAction)goForward:(id)sender { if (auto b = [self currentBrowser]) b->GoForward(); }
+- (IBAction)reloadPage:(id)sender { if (auto b = [self currentBrowser]) b->Reload(); }
+- (IBAction)hardReload:(id)sender { if (auto b = [self currentBrowser]) b->ReloadIgnoreCache(); }
+- (BOOL)canGoBack { auto b = [self currentBrowser]; return b && b->CanGoBack(); }
+- (NSString*)currentURL {
+  auto b = [self currentBrowser];
+  return b ? [NSString stringWithUTF8String:b->GetMainFrame()->GetURL().ToString().c_str()] : _shown.url;
+}
+
+// Chromium zoom levels: 0 = 100%, each step is a factor of 1.2.
+- (void)stepZoom:(double)delta {
+  auto b = [self currentBrowser];
+  if (!b) return;
+  double level = delta == 0 ? 0 : b->GetHost()->GetZoomLevel() + delta;
+  b->GetHost()->SetZoomLevel(MAX(-7.6, MIN(9.0, level)));
+}
+- (IBAction)zoomIn:(id)sender { [self stepZoom:0.5]; }
+- (IBAction)zoomOut:(id)sender { [self stepZoom:-0.5]; }
+- (IBAction)actualSize:(id)sender { [self stepZoom:0]; }
+- (double)currentZoomLevel { auto b = [self currentBrowser]; return b ? b->GetHost()->GetZoomLevel() : 0; }
+
+- (IBAction)findInPage:(id)sender {
+  if (!_findBar) {
+    _findBar = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 340, 40)
+                                          styleMask:NSWindowStyleMaskBorderless
+                                            backing:NSBackingStoreBuffered
+                                              defer:NO];
+    _findBar.backgroundColor = NSColor.windowBackgroundColor;
+    _findField = [[NSSearchField alloc] initWithFrame:NSMakeRect(8, 8, 240, 24)];
+    _findField.placeholderString = @"Find in page";
+    _findField.delegate = (id<NSSearchFieldDelegate>)self;
+    _findField.sendsSearchStringImmediately = YES;
+    [_findBar.contentView addSubview:_findField];
+    _findLabel = [NSTextField labelWithString:@""];
+    _findLabel.frame = NSMakeRect(254, 12, 80, 16);
+    [_findBar.contentView addSubview:_findLabel];
+  }
+  NSRect f = self.window.frame;
+  [_findBar setFrameOrigin:NSMakePoint(NSMaxX(f) - 356, NSMaxY(f) - 80)];
+  [self.window addChildWindow:_findBar ordered:NSWindowAbove];
+  [_findBar makeKeyAndOrderFront:nil];
+  [_findBar makeFirstResponder:_findField];
+}
+
+- (void)hideFindBar {
+  if (auto b = [self currentBrowser]) b->GetHost()->StopFinding(true);
+  [self.window removeChildWindow:_findBar];
+  [_findBar orderOut:nil];
+  [self.window makeKeyWindow];
+}
+
+- (void)findText:(NSString*)text forward:(BOOL)forward {
+  auto b = [self currentBrowser];
+  if (!b) return;
+  if (!text.length) {
+    b->GetHost()->StopFinding(true);
+    _findLabel.stringValue = @"";
+    return;
+  }
+  b->GetHost()->Find(text.UTF8String, forward, false, true);
+}
+
+- (IBAction)findNext:(id)sender { [self findText:_findField.stringValue forward:YES]; }
+- (IBAction)findPrevious:(id)sender { [self findText:_findField.stringValue forward:NO]; }
+
+- (void)findResult:(int)count active:(int)active {
+  _lastFindCount = count;
+  _findLabel.stringValue = count ? [NSString stringWithFormat:@"%d of %d", active, count] : @"No matches";
+}
+
+- (int)lastFindCount { return _lastFindCount; }
+
+- (IBAction)toggleDevTools:(id)sender {
+  auto b = [self currentBrowser];
+  if (!b) return;
+  if (b->GetHost()->HasDevTools()) {
+    b->GetHost()->CloseDevTools();
+    return;
+  }
+  CefWindowInfo info;
+  CefBrowserSettings settings;
+  b->GetHost()->ShowDevTools(info, nullptr, settings, CefPoint());
+}
+
+- (IBAction)copyCurrentURL:(id)sender {
+  NSString* url = [self currentURL];
+  if (!url.length) return;
+  [NSPasteboard.generalPasteboard clearContents];
+  [NSPasteboard.generalPasteboard setString:url forType:NSPasteboardTypeString];
+}
+
+- (IBAction)copyCurrentURLAsMarkdown:(id)sender {
+  NSString* url = [self currentURL];
+  if (!url.length) return;
+  NSString* title = [_shown.displayTitle stringByReplacingOccurrencesOfString:@"]" withString:@"\\]"];
+  [NSPasteboard.generalPasteboard clearContents];
+  [NSPasteboard.generalPasteboard setString:[NSString stringWithFormat:@"[%@](%@)", title, url]
+                                    forType:NSPasteboardTypeString];
+}
+
 #pragma mark Command bar and tab actions
 
 - (void)showCommandBarForNewTab:(BOOL)newTab {
@@ -537,6 +652,18 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
 }
 
 - (BOOL)control:(NSControl*)control textView:(NSTextView*)textView doCommandBySelector:(SEL)command {
+  if (control == _findField) {
+    if (command == @selector(insertNewline:)) {
+      BOOL shift = (NSApp.currentEvent.modifierFlags & NSEventModifierFlagShift) != 0;
+      [self findText:_findField.stringValue forward:!shift];
+      return YES;
+    }
+    if (command == @selector(cancelOperation:)) {
+      [self hideFindBar];
+      return YES;
+    }
+    return NO;
+  }
   if (command == @selector(insertNewline:)) {
     NSString* text = _commandField.stringValue;
     [self hideCommandBar];
@@ -746,9 +873,13 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
 }
 
 // Folder renames from the sidebar (double-click / New Folder).
+- (void)controlTextDidChange:(NSNotification*)note {
+  if (note.object == _findField) [self findText:_findField.stringValue forward:YES];
+}
+
 - (void)controlTextDidEndEditing:(NSNotification*)note {
   NSTextField* field = note.object;
-  if (field == _commandField) return;
+  if (field == _commandField || field == _findField) return;
   NSInteger row = [_outline rowForView:field];
   ArcItem* item = row >= 0 ? [_outline itemAtRow:row] : nil;
   if (!item || item.isSection || !field.stringValue.length) return;

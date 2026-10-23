@@ -45,3 +45,9 @@ void BrowserClient::OnLoadError(CefRefPtr<CefBrowser> browser,
   std::fprintf(stderr, "load error %d %s for %s\n", static_cast<int>(error_code),
                error_text.ToString().c_str(), failed_url.ToString().c_str());
 }
+
+void BrowserClient::OnFindResult(CefRefPtr<CefBrowser> browser, int identifier, int count,
+                                 const CefRect& selection_rect, int active_match_ordinal, bool final_update) {
+  CEF_REQUIRE_UI_THREAD();
+  if (final_update && on_find_) on_find_(browser->GetIdentifier(), count, active_match_ordinal);
+}
