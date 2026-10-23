@@ -74,11 +74,22 @@ Developer flags: `--selftest` runs an automated smoke test, `--dump-arc` prints 
 - `app/`: the browser (window, sidebar, command bar, archive, Arc import)
 - `docs/feature-parity.md`: checklist of every Arc feature and its status in NotArc
 - `docs/arc-data-format.md`: how Arc stores your sidebar and archive on disk, so they can be imported
+- `CONTRIBUTING.md`: how to build, test and contribute
 
-## Contributing
+## Help wanted
 
-Issues and pull requests are welcome. Please don't contribute anything copied from Arc (code, icons, images or text).
-NotArc has to stay an independent implementation.
+NotArc is built by volunteers, and there's a lot of Arc left to rebuild: Boosts, Easel, Notes, Settings, extensions,
+context menus and more. If you know C++, Objective-C++ or macOS development, or just use Arc every day and can test,
+we'd love your help.
+
+- See what's missing in the [parity checklist](docs/feature-parity.md).
+- Pick an issue labelled [good first issue](https://github.com/Donnadieu/notarc/labels/good%20first%20issue) or
+  [parity](https://github.com/Donnadieu/notarc/labels/parity).
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and send a pull request.
+- Questions and ideas go in [Discussions](https://github.com/Donnadieu/notarc/discussions).
+
+Please don't contribute anything copied from Arc (code, icons, images or text). NotArc has to stay an independent
+implementation.
 
 ## License
 
