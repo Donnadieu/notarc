@@ -98,6 +98,8 @@ static NSString* HexFromColor(NSColor* c) {
                                     (int)lround(s.blueComponent * 255)];
 }
 
+static const CGFloat kToolbarHeight = 38;
+
 @interface MainWindowController () <NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate,
                                     NSMenuDelegate>
 @end
@@ -181,6 +183,8 @@ static NSString* HexFromColor(NSColor* c) {
   NSMutableArray<LittleWindowController*>* _littleWindows;
   LittleWindowController* _peek;
   NSView* _toast;
+  NSView* _toolbar;
+  NSTextField* _address;
   NSTimer* _toastTimer;
   NSString* _lastClosedPeekURL;
   NSView* _sidebar;
@@ -302,6 +306,35 @@ static NSString* HexFromColor(NSColor* c) {
   _content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   _content.wantsLayer = YES;
   [root addSubview:_content];
+
+  _toolbar = [[NSView alloc] initWithFrame:NSMakeRect(kSidebarWidth, bounds.size.height - kToolbarHeight,
+                                                      bounds.size.width - kSidebarWidth, kToolbarHeight)];
+  _toolbar.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
+  NSArray* buttons = @[ @[ @"chevron.left", @"goBack:" ], @[ @"chevron.right", @"goForward:" ], @[ @"arrow.clockwise", @"reloadPage:" ] ];
+  CGFloat bx = 8;
+  for (NSArray* b in buttons) {
+    NSButton* btn = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:b[0] accessibilityDescription:nil]
+                                       target:self action:NSSelectorFromString(b[1])];
+    btn.bordered = NO;
+    btn.frame = NSMakeRect(bx, 6, 26, 26);
+    btn.tag = 1;  // shifted right of the window buttons when the sidebar is hidden
+    [_toolbar addSubview:btn];
+    bx += 28;
+  }
+  _address = [[NSTextField alloc] initWithFrame:NSMakeRect(bx + 6, 7, _toolbar.bounds.size.width - bx - 16, 24)];
+  _address.autoresizingMask = NSViewWidthSizable;
+  _address.bezelStyle = NSTextFieldRoundedBezel;
+  _address.font = [NSFont systemFontOfSize:12];
+  _address.lineBreakMode = NSLineBreakByTruncatingMiddle;
+  _address.cell.scrollable = YES;
+  _address.target = self;
+  _address.action = @selector(addressEntered:);
+  _address.tag = 1;
+  [_toolbar addSubview:_address];
+  _toolbar.hidden = YES;
+  [root addSubview:_toolbar];
+  if (!SettingBool(kSettingShowSpaceHeader)) [self applySpaceHeader:NO];
+  [self layoutContentArea];
 
   [self reloadSidebar];
 }
@@ -675,6 +708,7 @@ NSString* CleanLinkURL(NSString* url) {
   [self ensureBrowserForItem:item];
   [self layoutPanes];
   [self selectSidebarRowFor:item];
+  [self updateToolbarAddress];
 }
 
 - (void)openTabsForSelfTest:(NSUInteger)count {
@@ -698,6 +732,7 @@ NSString* CleanLinkURL(NSString* url) {
   if (title.length) item.liveTitle = title;
   if (url.length && !item.pinnedURL.length && [self isPinnedItem:item]) item.pinnedURL = item.url ?: url;
   if (url.length) item.url = url;
+  if (url.length && item == _shown) [self updateToolbarAddress];
   if (self.historyPath && !_history) _history = [[HistoryStore alloc] initWithPath:self.historyPath];
   if (url.length) [_history recordURL:url title:title space:[self spaceOwningItem:item].title];
   else if (title.length) [_history updateTitle:title forURL:item.url];
@@ -1988,13 +2023,71 @@ static ArcItem* NewSection(NSString* title) {
 #pragma mark Arc shortcuts
 
 - (IBAction)toggleSidebar:(id)sender {
-  BOOL hide = !_sidebar.hidden;
-  _sidebar.hidden = hide;
+  _sidebar.hidden = !_sidebar.hidden;
+  [self layoutContentArea];
+}
+
+// Page area = window minus the sidebar (if shown) minus the toolbar (if shown).
+- (void)layoutContentArea {
   NSRect b = self.window.contentView.bounds;
-  CGFloat x = hide ? 0 : kSidebarWidth;
-  _content.frame = NSMakeRect(x, 0, b.size.width - x, b.size.height);
+  CGFloat x = _sidebar.hidden ? 0 : kSidebarWidth;
+  BOOL bar = SettingBool(kSettingShowToolbar) && !_focusMode;
+  _toolbar.hidden = !bar;
+  CGFloat top = bar ? kToolbarHeight : 0;
+  _toolbar.frame = NSMakeRect(x, b.size.height - kToolbarHeight, b.size.width - x, kToolbarHeight);
+  // With no sidebar the window buttons sit over the toolbar's left end.
+  CGFloat shift = _sidebar.hidden ? 72 : 0;
+  CGFloat bx = 8 + shift;
+  for (NSView* v in _toolbar.subviews) {
+    if (v == _address) continue;
+    NSRect f = v.frame;
+    f.origin.x = bx;
+    v.frame = f;
+    bx += 28;
+  }
+  _address.frame = NSMakeRect(bx + 6, 7, _toolbar.bounds.size.width - bx - 16, 24);
+  _content.frame = NSMakeRect(x, 0, b.size.width - x, b.size.height - top);
+  [self updateToolbarAddress];
   [self layoutPanes];
 }
+
+- (IBAction)toggleToolbar:(id)sender {
+  SettingSetBool(kSettingShowToolbar, !SettingBool(kSettingShowToolbar));
+  [self layoutContentArea];
+}
+- (BOOL)toolbarShown { return !_toolbar.hidden; }
+- (NSString*)toolbarAddress { return _address.stringValue; }
+
+- (void)updateToolbarAddress {
+  if (_toolbar.hidden || _address.currentEditor) return;  // don't overwrite what the user is typing
+  _address.stringValue = _shown ? ([self itemCurrentURL:_shown] ?: @"") : @"";
+}
+
+- (void)addressEntered:(NSTextField*)sender { [self submitToolbarAddress:sender.stringValue]; }
+- (void)submitToolbarAddress:(NSString*)text {
+  NSString* url = ResolveCommandBarInput(text);
+  if (!url.length) return;
+  [self.window makeFirstResponder:nil];
+  if (_shown) [self loadURL:url inItem:_shown];
+  else [self openInNewTab:url];
+  _address.stringValue = url;
+}
+
+- (IBAction)toggleSpaceHeader:(id)sender {
+  BOOL show = !SettingBool(kSettingShowSpaceHeader);
+  SettingSetBool(kSettingShowSpaceHeader, show);
+  [self applySpaceHeader:show];
+}
+- (BOOL)spaceHeaderShown { return !_spacePicker.hidden; }
+- (void)applySpaceHeader:(BOOL)show {
+  if (_spacePicker.hidden == !show) return;
+  _spacePicker.hidden = !show;
+  NSRect f = _sidebarScroll.frame;
+  f.size.height += show ? -34 : 34;
+  _sidebarScroll.frame = f;
+}
+
+
 - (BOOL)sidebarHidden { return _sidebar.hidden; }
 
 - (IBAction)toggleFocusMode:(id)sender {
@@ -2007,6 +2100,7 @@ static ArcItem* NewSection(NSString* title) {
   }
   for (NSWindowButton b : {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton})
     [self.window standardWindowButton:b].hidden = _focusMode;
+  [self layoutContentArea];
 }
 - (ArcItem*)shownItem { return _shown; }
 
@@ -2980,6 +3074,9 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
 - (IBAction)resetAllPinnedTabs:(id)sender { [self resetPinnedTabsInSpace]; }
 
 - (BOOL)validateMenuItem:(NSMenuItem*)mi {
+  if (mi.action == @selector(toggleToolbar:)) mi.title = SettingBool(kSettingShowToolbar) ? @"Hide Toolbar" : @"Show Toolbar";
+  if (mi.action == @selector(toggleSpaceHeader:))
+    mi.title = SettingBool(kSettingShowSpaceHeader) ? @"Hide Space Header" : @"Show Space Header";
   if (mi.action == @selector(resetPinnedTab:) || mi.action == @selector(replacePinnedURL:))
     return _shown && [self isPinnedItem:_shown] && _shown.pinnedURL.length;
   return YES;

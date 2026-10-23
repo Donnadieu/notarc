@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-30 done, 13 partial, 37 not started or out of scope, of 80 items.
+31 done, 13 partial, 36 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -17,7 +17,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Hover previews / hover cards on sidebar items (partial: hover card with title, site, state, last used and address; page thumbnail missing)
 - [ ] Unread badge on tabs (missing)
 - [x] Go to Sidebar Item 1-9, last item, next/previous item (Cmd+1-8, Cmd+9 last, Cmd+Opt+Up/Down)
-- [ ] Hide/show sidebar, toolbar mode with full URL (partial: Cmd+S hides the sidebar; toolbar mode missing)
+- [x] Hide/show sidebar, toolbar mode with full URL (Cmd+S sidebar; View > Show Toolbar (Cmd+Shift+S) with back/forward/reload and the full editable URL)
 - [x] Multi-select sidebar items and bulk actions (Cmd/Shift-click; Copy Links, Copy Links as Markdown, New Folder with N Items, Pin/Unpin Selected, Move to Space, Archive N Tabs)
 - [x] Copy URL, Copy URL as Markdown, copy links as Markdown, clean URL
 - [x] Undo close (Cmd+Z in sidebar, Edit/File > Undo Close Tab), reopen closed tab (Cmd+Shift+T)
@@ -30,7 +30,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Space themes: colours, gradients, icons/emoji (Space style editor) (partial: per-Space colour or two-colour gradient with intensity, preset palettes, emoji icon; grain and per-Space light/dark missing)
 - [ ] Swipe / Ctrl+number to switch Spaces (partial: Ctrl+1-9 and Cmd+Opt+arrows done; trackpad swipe missing)
 - [ ] Create/rename Profiles, assign Space to Profile (missing)
-- [ ] Show/hide Space header, search Spaces (missing)
+- [ ] Show/hide Space header, search Spaces (partial: View > Hide/Show Space Header; searching Spaces missing)
 
 ## Command bar & navigation
 

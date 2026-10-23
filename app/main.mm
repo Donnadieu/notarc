@@ -125,6 +125,9 @@
   [bar addItem:viewItem];
   NSMenu* view = [[NSMenu alloc] initWithTitle:@"View"];
   [view addItemWithTitle:@"Toggle Sidebar" action:@selector(toggleSidebar:) keyEquivalent:@"s"];
+  [view addItemWithTitle:@"Show Toolbar" action:@selector(toggleToolbar:) keyEquivalent:@"s"]
+      .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
+  [view addItemWithTitle:@"Hide Space Header" action:@selector(toggleSpaceHeader:) keyEquivalent:@""];
   [view addItemWithTitle:@"Mute / Unmute Tab" action:@selector(toggleMuteCurrentTab:) keyEquivalent:@"m"]
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Focus Mode" action:@selector(toggleFocusMode:) keyEquivalent:@"F"]
@@ -837,6 +840,32 @@
         });
       });
     });
+    // Toolbar with full URL and Space header toggle (settings restored afterwards so runs stay independent).
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 66 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openInNewTab:@"https://example.com/toolbar-test?q=1"];
+      ArcItem* t = w.shownItem;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w showItem:t];
+        [w toggleToolbar:nil];
+        BOOL shown = w.toolbarShown;
+        BOOL full = [w.toolbarAddress isEqualToString:@"https://example.com/toolbar-test?q=1"];
+        NSRect pane = [[w paneFrames].firstObject rectValue];
+        BOOL below = NSMaxY(pane) <= w.window.contentView.bounds.size.height - 30;
+        [w submitToolbarAddress:@"example.org/toolbar-typed"];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          BOOL navigated = [w.currentURL hasPrefix:@"https://example.org/toolbar-typed"] &&
+                           [w.toolbarAddress hasPrefix:@"https://example.org/toolbar-typed"];
+          [w toggleToolbar:nil];
+          BOOL hidden = !w.toolbarShown;
+          [w toggleSpaceHeader:nil];
+          BOOL headerHidden = !w.spaceHeaderShown;
+          [w toggleSpaceHeader:nil];
+          std::printf("SELFTEST-TOOLBAR shown=%d fullURL=%d pageBelow=%d typedGo=%d hidden=%d headerToggle=%d\n", shown,
+                      full, below, navigated, hidden, headerHidden && w.spaceHeaderShown);
+        });
+      });
+    });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 34 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
@@ -1198,6 +1227,7 @@ int main(int argc, char* argv[]) {
 
     if (!CefInitialize(main_args, settings, nullptr, nullptr)) return CefGetExitCode();
     SettingsRegisterDefaults();
+    if (selfTest) SettingsUseMemoryOnly();
 
     AppDelegate* delegate = [AppDelegate new];
     delegate.selfTest = selfTest;
