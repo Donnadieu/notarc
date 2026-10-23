@@ -35,6 +35,7 @@
 @property(nonatomic, strong) MainWindowController* window;
 @property(nonatomic) BOOL selfTest;
 @property(nonatomic) BOOL selfTestReload;  // phase 2: reopen the saved store, no actions
+@property(nonatomic, strong) NSMutableArray<NSString*>* pendingURLs;  // links that arrived before the window
 @end
 
 @implementation AppDelegate
@@ -80,6 +81,9 @@
   [file addItemWithTitle:@"Pin / Unpin Tab" action:@selector(togglePin:) keyEquivalent:@"d"];
   NSMenuItem* folderItem = [file addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@"n"];
   folderItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  NSMenuItem* littleItem = [file addItemWithTitle:@"New Little Window" action:@selector(newLittleWindow:)
+                                    keyEquivalent:@"N"];
+  littleItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption | NSEventModifierFlagShift;
   fileItem.submenu = file;
 
   NSMenuItem* viewItem = [NSMenuItem new];
@@ -172,6 +176,8 @@
   [self.window saveSidebarNow];  // first launch: persist the import immediately
   [self.window showWindow:nil];
   [self.window createBrowsers];
+  for (NSString* url in self.pendingURLs) [self.window openLittleWindow:url];
+  self.pendingURLs = nil;
   [NSApp activateIgnoringOtherApps:YES];
 
   if (self.selfTest) {
@@ -185,6 +191,38 @@
       [self.window closeAllBrowsers];
     });
   }
+}
+
+// Browser-basics test: waits for the new tab's web view (its Space profile may still be starting),
+// then runs navigate -> back -> zoom -> find -> copy as Markdown, each step a little apart.
+- (void)runBasicsTestWhenReady:(int)attempt {
+  MainWindowController* w = self.window;
+  if (![w hasLiveBrowser] || ![[w currentURL] hasPrefix:@"https://example.com"]) {
+    if (attempt < 40)
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+        [self runBasicsTestWhenReady:attempt + 1];
+      });
+    else std::printf("SELFTEST-BASICS tabNeverLoaded=1\n");
+    return;
+  }
+  [w navigateCurrentTab:@"https://www.iana.org/help/example-domains"];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    BOOL couldGoBack = [w canGoBack];
+    [w goBack:nil];
+    [w zoomIn:nil];
+    [w zoomIn:nil];
+    std::printf("SELFTEST-BASICS canGoBack=%d zoomAfter2In=%.1f\n", couldGoBack, [w currentZoomLevel]);
+    [w actualSize:nil];
+  });
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 6 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    std::printf("SELFTEST-BASICS afterBack=%s zoomReset=%.1f\n", [w currentURL].UTF8String, [w currentZoomLevel]);
+    [w findText:@"domain" forward:YES];
+  });
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    [w copyCurrentURLAsMarkdown:nil];
+    std::printf("SELFTEST-BASICS findDomainCount=%d markdown=%s\n", w.lastFindCount,
+                [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString].UTF8String);
+  });
 }
 
 - (void)runSelfTestActions {
@@ -212,29 +250,7 @@
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [self.window openInNewTab:@"https://example.com"];
-    });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-      [self.window navigateCurrentTab:@"https://www.iana.org/help/example-domains"];
-    });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 9 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-      MainWindowController* w = self.window;
-      BOOL couldGoBack = [w canGoBack];
-      [w goBack:nil];
-      [w zoomIn:nil];
-      [w zoomIn:nil];
-      std::printf("SELFTEST-BASICS canGoBack=%d zoomAfter2In=%.1f\n", couldGoBack, [w currentZoomLevel]);
-      [w actualSize:nil];
-    });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 11 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-      MainWindowController* w = self.window;
-      std::printf("SELFTEST-BASICS afterBack=%s zoomReset=%.1f\n", [w currentURL].UTF8String, [w currentZoomLevel]);
-      [w findText:@"domain" forward:YES];
-    });
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 13 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-      MainWindowController* w = self.window;
-      [w copyCurrentURLAsMarkdown:nil];
-      std::printf("SELFTEST-BASICS findDomainCount=%d markdown=%s\n", w.lastFindCount,
-                  [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString].UTF8String);
+      [self runBasicsTestWhenReady:0];
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 15 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
@@ -250,6 +266,23 @@
       std::printf("SELFTEST-SPLIT afterClosePane=%lu\n", (unsigned long)[w paneFrames].count);
       [w closeSplitPane:nil];
       std::printf("SELFTEST-SPLIT afterSecondClose=%lu\n", (unsigned long)[w paneFrames].count);
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 17 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openLittleWindow:@"https://example.com/little-moved"];
+      [w openLittleWindow:@"https://example.org/little-closed"];
+      std::printf("SELFTEST-LITTLE open=%lu\n", (unsigned long)[w littleWindowCount]);
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 18 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSUInteger archivedBefore = [w archivedTabs].count;
+      [w moveLittleWindowToMain:0];
+      BOOL inSidebar = [w tabWithURLPrefix:@"https://example.com/little-moved"] != nil;
+      [w closeLittleWindow:0];
+      ArchivedTab* last = [w archivedTabs].lastObject;
+      std::printf("SELFTEST-LITTLE movedInSidebar=%d left=%lu archivedDelta=%ld lastReason=%s lastURL=%s\n", inSidebar,
+                  (unsigned long)[w littleWindowCount], (long)([w archivedTabs].count - archivedBefore),
+                  last.reason.UTF8String, last.url.UTF8String);
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 19 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
@@ -271,6 +304,18 @@
 }
 
 - (BOOL)applicationSupportsSecureRestorableState:(NSApplication*)app { return YES; }
+
+// Links clicked in other apps (when NotArc is the default browser) open in a Little Window.
+- (void)application:(NSApplication*)app openURLs:(NSArray<NSURL*>*)urls {
+  for (NSURL* url in urls) {
+    if (!self.window) {
+      if (!self.pendingURLs) self.pendingURLs = [NSMutableArray array];
+      [self.pendingURLs addObject:url.absoluteString];
+    } else {
+      [self.window openLittleWindow:url.absoluteString];
+    }
+  }
+}
 @end
 
 int main(int argc, char* argv[]) {
