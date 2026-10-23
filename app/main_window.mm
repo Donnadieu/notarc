@@ -605,10 +605,28 @@ NSString* CleanLinkURL(NSString* url) {
   _client->set_find_callback([weakSelf](int browserId, int count, int active) {
     [weakSelf findResult:count active:active];
   });
-  ArcItem* first = _space.allTabs.firstObject;
+  if (self.restoreOpenTabs) {
+    NSUInteger n = 0;
+    for (ArcSpace* sp in _spaces)
+      for (ArcItem* t in sp.allTabs)
+        if (t.wasOpen && n < 30) {  // cap: a crash with hundreds of open tabs shouldn't reload them all
+          [self ensureBrowserForItem:t];
+          ++n;
+        }
+    _restoredTabCount = n;
+  }
+  ArcItem* first = [self lastShownInSpace:_space];
   if (first) [self showItem:first];
   [self startAutoArchiveTimer];
 }
+
+- (ArcItem*)lastShownInSpace:(ArcSpace*)space {
+  for (ArcItem* t in space.allTabs)
+    if ([t.itemID isEqualToString:space.shownItemID]) return t;
+  return space.allTabs.firstObject;
+}
+
+- (NSUInteger)liveTabCount { return _browsers.size(); }
 
 // Web views are created lazily, the first time a tab is opened (Arc does the same).
 - (void)ensureBrowserForItem:(ArcItem*)item {
@@ -644,6 +662,11 @@ NSString* CleanLinkURL(NSString* url) {
   if (!item.url.length) return;
   _shown.lastActiveAt = [NSDate date];  // the tab we leave was active until now
   _shown = item;
+  ArcSpace* owner = [self spaceOwningItem:item];
+  if (item.itemID && ![owner.shownItemID isEqualToString:item.itemID]) {
+    owner.shownItemID = item.itemID;
+    [self scheduleSave];
+  }
   [self updateMediaBar];
   item.lastActiveAt = [NSDate date];
   [self ensureBrowserForItem:item];
@@ -1767,7 +1790,7 @@ static ArcItem* NewSection(NSString* title) {
   [self reloadSidebar];
   [self applyTheme];
   [self scheduleSave];
-  ArcItem* first = _space.allTabs.firstObject;
+  ArcItem* first = [self lastShownInSpace:_space];
   if (first) [self showItem:first];
   else {
     _shown = nil;
