@@ -146,6 +146,13 @@ NSString* CleanLinkURL(NSString* url);
 @property(nonatomic, readonly) ArcItem* mediaBarItem;  // tab shown in the media bar, nil when hidden
 - (IBAction)toggleMuteCurrentTab:(id)sender;
 - (void)runJS:(NSString*)js inItem:(ArcItem*)item;
+// Crashed and frozen pages: a crashed tab shows "This page crashed" with Reload; a page that stops
+// responding gets a sheet offering Wait or Exit Page (which shows the crashed view).
+- (void)reloadCrashedItem:(ArcItem*)item;
+- (void)loadURL:(NSString*)url inItem:(ArcItem*)item;
+- (void)sendKeyToItem:(ArcItem*)item;  // used by the self-test to trigger the hang monitor
+@property(nonatomic, readonly) ArcItem* hungItem;
+- (void)answerHungSheet:(BOOL)exitPage;  // page the Wait/Exit sheet is about, nil if none
 - (void)hideHoverCard;
 @property(nonatomic, readonly) BOOL hoverCardShown;
 - (IBAction)changeSpaceIcon:(id)sender;
