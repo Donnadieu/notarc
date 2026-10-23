@@ -79,16 +79,20 @@
   [file addItemWithTitle:@"Show Archive" action:@selector(showArchive:) keyEquivalent:@"y"];
   [file addItem:[NSMenuItem separatorItem]];
   [file addItemWithTitle:@"Pin / Unpin Tab" action:@selector(togglePin:) keyEquivalent:@"d"];
-  NSMenuItem* folderItem = [file addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@"n"];
-  folderItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  [file addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@""];
   NSMenuItem* littleItem = [file addItemWithTitle:@"New Little Window" action:@selector(newLittleWindow:)
-                                    keyEquivalent:@"N"];
-  littleItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption | NSEventModifierFlagShift;
+                                    keyEquivalent:@"n"];
+  littleItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  // Peek and Little Window: move the page into the sidebar (handled by those windows only).
+  [file addItemWithTitle:@"Open in Sidebar" action:@selector(openInMainWindow:) keyEquivalent:@"o"];
+  [file addItemWithTitle:@"Clear Today" action:@selector(clearToday:) keyEquivalent:@"K"];
   fileItem.submenu = file;
 
   NSMenuItem* viewItem = [NSMenuItem new];
   [bar addItem:viewItem];
   NSMenu* view = [[NSMenu alloc] initWithTitle:@"View"];
+  [view addItemWithTitle:@"Toggle Sidebar" action:@selector(toggleSidebar:) keyEquivalent:@"s"];
+  [view addItem:[NSMenuItem separatorItem]];
   [view addItemWithTitle:@"Reload Page" action:@selector(reloadPage:) keyEquivalent:@"r"];
   [view addItemWithTitle:@"Hard Reload" action:@selector(hardReload:) keyEquivalent:@"R"];
   [view addItem:[NSMenuItem separatorItem]];
@@ -106,12 +110,18 @@
   NSEventModifierFlags cs = NSEventModifierFlagControl | NSEventModifierFlagShift;
   [split addItemWithTitle:@"Add Vertical Split" action:@selector(addVerticalSplit:) keyEquivalent:@"="]
       .keyEquivalentModifierMask = cs;
-  [split addItemWithTitle:@"Add Horizontal Split" action:@selector(addHorizontalSplit:) keyEquivalent:@"-"]
+  [split addItemWithTitle:@"Add Horizontal Split" action:@selector(addHorizontalSplit:) keyEquivalent:@""];
+  [split addItemWithTitle:@"Close Split Pane" action:@selector(closeSplitPane:) keyEquivalent:@"-"]
       .keyEquivalentModifierMask = cs;
   [split addItemWithTitle:@"Focus Next Pane" action:@selector(focusNextPane:) keyEquivalent:@"]"]
       .keyEquivalentModifierMask = cs;
-  [split addItemWithTitle:@"Close Split Pane" action:@selector(closeSplitPane:) keyEquivalent:@"w"]
-      .keyEquivalentModifierMask = cs;
+  for (int i = 1; i <= 4; ++i) {
+    NSMenuItem* pane = [split addItemWithTitle:[NSString stringWithFormat:@"Focus Pane %d", i]
+                                        action:@selector(focusPaneFromMenu:)
+                                 keyEquivalent:[NSString stringWithFormat:@"%d", i]];
+    pane.keyEquivalentModifierMask = cs;
+    pane.tag = i - 1;
+  }
   splitItem.submenu = split;
 
   NSMenuItem* spacesItem = [NSMenuItem new];
@@ -145,7 +155,30 @@
   NSMenu* hist = [[NSMenu alloc] initWithTitle:@"History"];
   [hist addItemWithTitle:@"Back" action:@selector(goBack:) keyEquivalent:@"["];
   [hist addItemWithTitle:@"Forward" action:@selector(goForward:) keyEquivalent:@"]"];
+  unichar la = NSLeftArrowFunctionKey, ra = NSRightArrowFunctionKey, ua = NSUpArrowFunctionKey,
+          da = NSDownArrowFunctionKey;
+  NSMenuItem* backAlt = [hist addItemWithTitle:@"Back" action:@selector(goBack:)
+                                 keyEquivalent:[NSString stringWithCharacters:&la length:1]];
+  backAlt.alternate = NO;
+  [hist addItemWithTitle:@"Forward" action:@selector(goForward:)
+           keyEquivalent:[NSString stringWithCharacters:&ra length:1]];
   histItem.submenu = hist;
+
+  NSMenuItem* tabsItem = [NSMenuItem new];
+  [bar addItem:tabsItem];
+  NSMenu* tabs = [[NSMenu alloc] initWithTitle:@"Tabs"];
+  NSEventModifierFlags co = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  [tabs addItemWithTitle:@"Previous Tab" action:@selector(previousTab:)
+           keyEquivalent:[NSString stringWithCharacters:&ua length:1]].keyEquivalentModifierMask = co;
+  [tabs addItemWithTitle:@"Next Tab" action:@selector(nextTab:)
+           keyEquivalent:[NSString stringWithCharacters:&da length:1]].keyEquivalentModifierMask = co;
+  for (int i = 1; i <= 9; ++i) {
+    NSMenuItem* go = [tabs addItemWithTitle:[NSString stringWithFormat:@"Go to Tab %d", i]
+                                     action:@selector(selectTabFromMenu:)
+                              keyEquivalent:[NSString stringWithFormat:@"%d", i]];
+    go.tag = i - 1;
+  }
+  tabsItem.submenu = tabs;
   NSApp.mainMenu = bar;
 }
 
@@ -362,6 +395,28 @@
                   (long)([w archivedTabs].count - archivedBefore),
                   ((ArchivedTab*)[w archivedTabs].lastObject).reason.UTF8String);
       [w saveSidebarNow];
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 23 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w toggleSidebar:nil];
+      BOOL hidden = [w sidebarHidden];
+      [w toggleSidebar:nil];
+      BOOL shownAgain = ![w sidebarHidden];
+      NSArray<ArcItem*>* tabs = w.currentSpace.allTabs;
+      [w selectTabAtIndex:0];
+      BOOL first = [w shownItem] == tabs.firstObject;
+      [w nextTab:nil];
+      BOOL second = tabs.count > 1 && [w shownItem] == tabs[1];
+      [w previousTab:nil];
+      BOOL back = [w shownItem] == tabs.firstObject;
+      [w openInNewTab:@"https://example.com/clear-me"];
+      NSUInteger todayBefore = w.currentSpace.unpinned.children.count;
+      NSUInteger archivedBefore = [w archivedTabs].count;
+      [w clearToday:nil];
+      std::printf("SELFTEST-SHORTCUTS sidebarHidden=%d sidebarBack=%d tab1=%d nextTab=%d prevTab=%d "
+                  "clearToday=%lu->%lu archivedDelta=%ld\n", hidden, shownAgain, first, second, back,
+                  (unsigned long)todayBefore, (unsigned long)w.currentSpace.unpinned.children.count,
+                  (long)([w archivedTabs].count - archivedBefore));
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 19 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;

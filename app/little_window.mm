@@ -98,6 +98,7 @@ static const CGFloat kToolbarHeight = 34;
 }
 
 - (void)cancelOperation:(id)sender { [self.window close]; }
+- (IBAction)closeTab:(id)sender { [self.window close]; }  // Cmd+W closes a Peek or Little Window
 
 - (void)pageTitleChanged:(NSString*)title {
   _pageTitle = [title copy];
