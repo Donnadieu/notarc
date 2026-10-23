@@ -57,7 +57,16 @@
 - (void)reload {
   _rows = ArchiveSearch(_provider(), _search.stringValue);
   [_table reloadData];
-  self.window.title = [NSString stringWithFormat:@"Archive (%lu)", (unsigned long)_rows.count];
+  self.window.title =
+      [NSString stringWithFormat:@"%@ (%lu)", self.baseTitle ?: @"Archive", (unsigned long)_rows.count];
+}
+
+- (void)setPlaceholder:(NSString*)placeholder dateHeader:(NSString*)dateHeader reasonHeader:(NSString*)reasonHeader {
+  _search.placeholderString = placeholder;
+  [_table tableColumnWithIdentifier:@"date"].title = dateHeader;
+  [_table tableColumnWithIdentifier:@"reason"].title = reasonHeader;
+  [_table tableColumnWithIdentifier:@"reason"].width = 140;
+  [self reload];
 }
 
 - (void)setQuery:(NSString*)query {
