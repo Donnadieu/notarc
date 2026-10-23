@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-34 done, 12 partial, 34 not started or out of scope, of 80 items.
+34 done, 13 partial, 33 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -109,7 +109,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] PDF viewer (missing)
 - [ ] AppleScript support for windows and tabs (missing)
 - [ ] Two-finger swipe back/forward and overscroll (missing)
-- [ ] Web notifications, permission prompts, external app (protocol) dialogs (missing)
+- [ ] Web notifications, permission prompts, external app (protocol) dialogs (partial: sheets for camera, mic, location, notifications and other permissions, plus "Open <App>?" for links to other apps; "Remember for this site"; View > Reset Site Permissions; showing web notifications in macOS Notification Center not verified)
 - [x] Hung page / unresponsive renderer dialog (Page Unresponsive sheet: Wait or Exit Page)
 - [ ] Import bookmarks (missing)
 
