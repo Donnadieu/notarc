@@ -136,3 +136,34 @@ bool BrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
   if (on_media_) on_media_(browser->GetIdentifier(), state, title);
   return true;
 }
+
+void BrowserClient::OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int,
+                                              const CefString&) {
+  CEF_REQUIRE_UI_THREAD();
+  hung_.erase(browser->GetIdentifier());
+  if (on_renderer_) on_renderer_(browser->GetIdentifier(), 0, static_cast<int>(status));
+}
+
+bool BrowserClient::OnRenderProcessUnresponsive(CefRefPtr<CefBrowser> browser,
+                                                CefRefPtr<CefUnresponsiveProcessCallback> callback) {
+  CEF_REQUIRE_UI_THREAD();
+  if (!on_renderer_) return false;
+  hung_[browser->GetIdentifier()] = callback;
+  on_renderer_(browser->GetIdentifier(), 1, 0);
+  return true;
+}
+
+void BrowserClient::OnRenderProcessResponsive(CefRefPtr<CefBrowser> browser) {
+  CEF_REQUIRE_UI_THREAD();
+  hung_.erase(browser->GetIdentifier());
+  if (on_renderer_) on_renderer_(browser->GetIdentifier(), 2, 0);
+}
+
+void BrowserClient::ResolveHung(int browser_id, bool kill) {
+  auto it = hung_.find(browser_id);
+  if (it == hung_.end()) return;
+  CefRefPtr<CefUnresponsiveProcessCallback> cb = it->second;
+  hung_.erase(it);
+  if (kill) cb->Terminate();
+  else cb->Wait();
+}

@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-24 done, 17 partial, 39 not started or out of scope, of 80 items.
+25 done, 17 partial, 38 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -102,7 +102,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] DevTools (show/hide), developer mode (partial: DevTools done)
 - [ ] Set as default browser, open links from other apps (partial: registers as a browser and opens links from other apps; no in-app "make default" prompt)
 - [ ] Context menus (page, link, image, sidebar) (partial: sidebar menu and NotArc link actions done; image actions are Chromium defaults)
-- [ ] Sad tab / crash recovery, session restore (partial: sidebar restore only)
+- [ ] Sad tab / crash recovery, session restore (partial: crashed tabs show "This page crashed" with Reload and a warning icon in the sidebar; sidebar restore; reopening pages after an app crash missing)
 - [ ] Settings window (all preferences) (partial: search engine, auto-archive, Peek and Little Window link options; profiles, appearance, Max and advanced panes missing)
 - [ ] Keyboard shortcuts with user overrides (missing)
 - [ ] App icon choice, sound effects, toasts (missing)
@@ -110,7 +110,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] AppleScript support for windows and tabs (missing)
 - [ ] Two-finger swipe back/forward and overscroll (missing)
 - [ ] Web notifications, permission prompts, external app (protocol) dialogs (missing)
-- [ ] Hung page / unresponsive renderer dialog (missing)
+- [x] Hung page / unresponsive renderer dialog (Page Unresponsive sheet: Wait or Exit Page)
 - [ ] Import bookmarks (missing)
 
 ## Sync & sharing (Arc account)

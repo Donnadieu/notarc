@@ -151,6 +151,9 @@ static NSString* HexFromColor(NSColor* c) {
   CAGradientLayer* _themeGradient;
   NSPopover* _hoverCard;
   NSView* _mediaBar;
+  NSMutableDictionary<NSNumber*, NSView*>* _crashViews;
+  ArcItem* _hungItem;
+  NSAlert* _hungAlert;
   NSTextField* _mediaTitle;
   NSButton* _mediaPlay;
   NSButton* _mediaMute;
@@ -591,9 +594,13 @@ NSString* CleanLinkURL(NSString* url) {
     return true;
   });
   _client->set_media_callback([weakSelf](int browserId, const std::string& state, const std::string& title) {
+    if (getenv("NOTARC_MEDIA_DEBUG") && !title.empty()) std::fprintf(stderr, "MEDIA-DEBUG %d %s %s\n", browserId, state.c_str(), title.c_str());
     [weakSelf browser:browserId mediaState:[NSString stringWithUTF8String:state.c_str()]];
   });
   _mediaTimer = [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer*) { [weakSelf pollMediaNow]; }];
+  _client->set_renderer_callback([weakSelf](int browserId, int kind, int status) {
+    [weakSelf browser:browserId rendererEvent:kind status:status];
+  });
   _client->set_find_callback([weakSelf](int browserId, int count, int active) {
     [weakSelf findResult:count active:active];
   });
@@ -754,7 +761,8 @@ NSString* CleanLinkURL(NSString* url) {
   cell.textField.font = a.isSection ? [NSFont boldSystemFontOfSize:11] : [NSFont systemFontOfSize:13];
   NSString* symbol = a.isSection ? nil : (a.isFolder ? @"folder" : @"globe");
   if (a.isSplit) symbol = a.splitHorizontal ? @"rectangle.split.1x2" : @"rectangle.split.2x1";
-  if (a.audioMuted) symbol = @"speaker.slash.fill";
+  if (a.crashed) symbol = @"exclamationmark.triangle";
+  else if (a.audioMuted) symbol = @"speaker.slash.fill";
   else if (a.mediaPlaying) symbol = @"speaker.wave.2.fill";
   cell.imageView.image = symbol ? [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil] : nil;
   return cell;
@@ -766,7 +774,8 @@ static NSString* const kMediaProbeJS =
     @"(function(){var m=[].slice.call(document.querySelectorAll('video,audio'));"
      "var on=m.some(function(e){return !e.paused&&!e.ended&&e.readyState>2&&!e.muted&&e.volume>0;});"
      "var held=m.some(function(e){return e.__notarcPaused;});"
-     "console.log('__notarc_media__:'+(on?'playing':(held?'paused':'none')));})()";
+     "console.log('__notarc_media__:'+(on?'playing':(held?'paused':'none'))+'|'+m.map(function(e){"
+     "return [e.paused,e.ended,e.readyState,e.muted,e.volume,e.error&&e.error.code].join(',');}).join(';'));})()";
 static NSString* const kMediaPauseJS =
     @"(function(){[].slice.call(document.querySelectorAll('video,audio')).forEach(function(e){"
      "if(!e.paused){e.__notarcPaused=true;e.pause();}});})()";
@@ -850,6 +859,146 @@ static NSString* const kMediaResumeJS =
 - (void)mediaBarShowTab:(id)sender { if (_mediaItem) [self showItem:_mediaItem]; }
 - (void)menuToggleMute:(NSMenuItem*)sender { [self toggleMuteItem:sender.representedObject]; }
 - (void)menuTogglePlay:(NSMenuItem*)sender { [self togglePlayItem:sender.representedObject]; }
+
+#pragma mark Crashed and frozen pages
+
+- (NSView*)webViewForItem:(ArcItem*)item {
+  auto it = _browsers.find(item.browserId);
+  return it == _browsers.end() ? nil : CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(it->second->GetHost()->GetWindowHandle());
+}
+
+- (void)browser:(int)browserId rendererEvent:(int)kind status:(int)status {
+  ArcItem* item = [self itemForBrowserId:browserId];
+  if (!item) return;
+  if (kind == 1) {
+    [self showHungSheetFor:item];
+    return;
+  }
+  if (item == _hungItem) [self dismissHungSheet];
+  if (kind == 0) [self showCrashedViewFor:item status:status];
+}
+
+- (void)showCrashedViewFor:(ArcItem*)item status:(int)status {
+  item.crashed = YES;
+  item.mediaPlaying = item.mediaPaused = NO;
+  NSView* web = [self webViewForItem:item];
+  if (!web) return;
+  if (!_crashViews) _crashViews = [NSMutableDictionary dictionary];
+  [_crashViews[@(item.browserId)] removeFromSuperview];
+  NSView* v = [[NSView alloc] initWithFrame:web.bounds];
+  v.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  v.wantsLayer = YES;
+  v.layer.backgroundColor = NSColor.windowBackgroundColor.CGColor;
+  NSImageView* icon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"exclamationmark.triangle"
+                                                                 accessibilityDescription:nil]];
+  icon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:36 weight:NSFontWeightRegular];
+  icon.contentTintColor = NSColor.secondaryLabelColor;
+  NSTextField* title = [NSTextField labelWithString:@"This page crashed"];
+  title.font = [NSFont boldSystemFontOfSize:18];
+  // 2 = killed, 3 = crashed, 4 = out of memory (cef_termination_status_t).
+  NSString* why = status == 4 ? @"It ran out of memory." : (status == 2 ? @"Its process was stopped." : @"Something went wrong while showing it.");
+  NSTextField* detail = [NSTextField wrappingLabelWithString:[why stringByAppendingFormat:@"\n%@", item.url ?: @""]];
+  detail.alignment = NSTextAlignmentCenter;
+  detail.textColor = NSColor.secondaryLabelColor;
+  detail.preferredMaxLayoutWidth = 420;
+  NSButton* reload = [NSButton buttonWithTitle:@"Reload" target:self action:@selector(crashReloadClicked:)];
+  reload.bezelColor = NSColor.controlAccentColor;
+  reload.keyEquivalent = @"\r";
+  reload.tag = item.browserId;
+  NSStackView* stack = [NSStackView stackViewWithViews:@[ icon, title, detail, reload ]];
+  stack.orientation = NSUserInterfaceLayoutOrientationVertical;
+  stack.spacing = 10;
+  stack.translatesAutoresizingMaskIntoConstraints = NO;
+  [v addSubview:stack];
+  [NSLayoutConstraint activateConstraints:@[
+    [stack.centerXAnchor constraintEqualToAnchor:v.centerXAnchor],
+    [stack.centerYAnchor constraintEqualToAnchor:v.centerYAnchor]
+  ]];
+  [web addSubview:v positioned:NSWindowAbove relativeTo:nil];
+  _crashViews[@(item.browserId)] = v;
+  if ([_outline rowForItem:item] >= 0) [_outline reloadItem:item];
+}
+
+- (void)crashReloadClicked:(NSButton*)sender {
+  ArcItem* item = [self itemForBrowserId:(int)sender.tag];
+  if (item) [self reloadCrashedItem:item];
+}
+
+- (void)reloadCrashedItem:(ArcItem*)item {
+  auto it = _browsers.find(item.browserId);
+  if (it == _browsers.end()) return;
+  [_crashViews[@(item.browserId)] removeFromSuperview];
+  [_crashViews removeObjectForKey:@(item.browserId)];
+  item.crashed = NO;
+  NSString* url = [self itemCurrentURL:item];
+  it->second->GetMainFrame()->LoadURL((url.length ? url : item.url).UTF8String);
+  if ([_outline rowForItem:item] >= 0) [_outline reloadItem:item];
+}
+
+- (void)loadURL:(NSString*)url inItem:(ArcItem*)item {
+  auto it = _browsers.find(item.browserId);
+  if (it != _browsers.end()) it->second->GetMainFrame()->LoadURL(url.UTF8String);
+}
+
+- (void)sendKeyToItem:(ArcItem*)item {
+  auto it = _browsers.find(item.browserId);
+  if (it == _browsers.end()) return;
+  it->second->GetHost()->SetFocus(true);
+  CefKeyEvent e;
+  e.type = KEYEVENT_RAWKEYDOWN;
+  e.windows_key_code = 0x41;
+  e.native_key_code = 0;
+  it->second->GetHost()->SendKeyEvent(e);
+  e.type = KEYEVENT_CHAR;
+  e.character = e.unmodified_character = 'a';
+  it->second->GetHost()->SendKeyEvent(e);
+  e.type = KEYEVENT_KEYUP;
+  it->second->GetHost()->SendKeyEvent(e);
+  // Key events need a focused window; clicks reach the page (and the hang monitor) without one.
+  CefMouseEvent m;
+  m.x = 40;
+  m.y = 40;
+  it->second->GetHost()->SendMouseClickEvent(m, MBT_LEFT, false, 1);
+  it->second->GetHost()->SendMouseClickEvent(m, MBT_LEFT, true, 1);
+}
+
+- (ArcItem*)hungItem { return _hungItem; }
+
+- (void)showHungSheetFor:(ArcItem*)item {
+  if (_hungAlert) return;
+  _hungItem = item;
+  NSAlert* a = [NSAlert new];
+  a.messageText = @"Page Unresponsive";
+  a.informativeText = [NSString stringWithFormat:@"\"%@\" isn't responding. You can wait for it or exit the page.",
+                                                 item.displayTitle ?: item.url ?: @"This page"];
+  [a addButtonWithTitle:@"Wait"];
+  [a addButtonWithTitle:@"Exit Page"];
+  _hungAlert = a;
+  int browserId = item.browserId;
+  __weak MainWindowController* weakSelf = self;
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    MainWindowController* me = weakSelf;
+    if (!me || me->_hungAlert != a) return;
+    me->_hungAlert = nil;
+    me->_hungItem = nil;
+    if (r == NSAlertFirstButtonReturn || r == NSAlertSecondButtonReturn)
+      me->_client->ResolveHung(browserId, r == NSAlertSecondButtonReturn);
+  }];
+}
+
+- (void)dismissHungSheet {
+  NSAlert* a = _hungAlert;
+  _hungAlert = nil;
+  _hungItem = nil;
+  if (a) [self.window endSheet:a.window returnCode:NSModalResponseAbort];
+}
+
+// Self-test hook: press a button of the open Wait/Exit sheet.
+- (void)answerHungSheet:(BOOL)exitPage {
+  if (!_hungAlert) return;
+  NSAlert* a = _hungAlert;
+  [self.window endSheet:a.window returnCode:exitPage ? NSAlertSecondButtonReturn : NSAlertFirstButtonReturn];
+}
 
 #pragma mark Hover cards
 
