@@ -149,6 +149,12 @@ NSString* CleanLinkURL(NSString* url);
 // Crashed and frozen pages: a crashed tab shows "This page crashed" with Reload; a page that stops
 // responding gets a sheet offering Wait or Exit Page (which shows the crashed view).
 - (void)reloadCrashedItem:(ArcItem*)item;
+// Multi-select: Cmd/Shift-click selects several sidebar rows; the sidebar menu then acts on all of them.
+- (NSArray<ArcItem*>*)selectedSidebarItems;
+- (void)selectSidebarItems:(NSArray<ArcItem*>*)items;
+- (void)archiveItems:(NSArray<ArcItem*>*)items;          // Today tabs archived, pinned tabs closed (kept)
+- (NSString*)linksForItems:(NSArray<ArcItem*>*)items markdown:(BOOL)markdown;
+- (ArcItem*)newFolderWithItems:(NSArray<ArcItem*>*)items;  // in Pinned, where the first pinned item was
 - (void)loadURL:(NSString*)url inItem:(ArcItem*)item;
 - (void)sendKeyToItem:(ArcItem*)item;  // used by the self-test to trigger the hang monitor
 @property(nonatomic, readonly) ArcItem* hungItem;

@@ -739,6 +739,34 @@
         });
       });
     });
+    // Multi-select: select three tabs, copy their links, put them in a new folder, archive two others at once.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      for (int i = 5; i >= 1; --i)
+        [w openInNewTab:[NSString stringWithFormat:@"https://example.org/multi-%d", i] background:YES];
+      NSArray<ArcItem*>* today = w.currentSpace.unpinned.children;
+      if (today.count < 5) {
+        std::printf("SELFTEST-MULTI setup=0\n");
+        return;
+      }
+      NSArray<ArcItem*>* three = [today subarrayWithRange:NSMakeRange(0, 3)];
+      NSArray<ArcItem*>* two = [today subarrayWithRange:NSMakeRange(3, 2)];
+      ArcItem* shownBefore = w.shownItem;
+      [w selectSidebarItems:three];
+      BOOL selected = w.selectedSidebarItems.count == 3 && w.shownItem == shownBefore;
+      NSString* links = [w linksForItems:three markdown:NO];
+      BOOL linksOK = [links isEqualToString:@"https://example.org/multi-1\nhttps://example.org/multi-2\nhttps://example.org/multi-3"];
+      BOOL md = [[w linksForItems:three markdown:YES] componentsSeparatedByString:@"](https://example.org/multi-"].count == 4;
+      ArcItem* folder = [w newFolderWithItems:three];
+      BOOL folderOK = folder.children.count == 3 && [w.currentSpace.pinned.children containsObject:folder] &&
+                      [folder.children.firstObject.pinnedURL isEqualToString:@"https://example.org/multi-1"];
+      NSUInteger archivedBefore = w.archivedTabs.count;
+      [w archiveItems:two];
+      BOOL archived = w.archivedTabs.count == archivedBefore + 2 && ![w.currentSpace.unpinned.children containsObject:two[0]] &&
+                      ![w.currentSpace.unpinned.children containsObject:two[1]];
+      std::printf("SELFTEST-MULTI selected=%d links=%d markdown=%d folder=%d archived=%d\n", selected, linksOK, md,
+                  folderOK, archived);
+    });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 34 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
