@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-23 done, 15 partial, 42 not started or out of scope, of 80 items.
+23 done, 16 partial, 41 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -27,7 +27,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [x] Multiple Spaces with switcher
 - [x] Separate profile per Space (cookies, logins)
 - [x] Create / delete / reorder Spaces
-- [ ] Space themes: colours, gradients, icons/emoji (Space style editor) (missing)
+- [ ] Space themes: colours, gradients, icons/emoji (Space style editor) (partial: per-Space colour or two-colour gradient with intensity, preset palettes, emoji icon; grain and per-Space light/dark missing)
 - [ ] Swipe / Ctrl+number to switch Spaces (partial: Ctrl+1-9 and Cmd+Opt+arrows done; trackpad swipe missing)
 - [ ] Create/rename Profiles, assign Space to Profile (missing)
 - [ ] Show/hide Space header, search Spaces (missing)

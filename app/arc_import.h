@@ -29,6 +29,11 @@
 @property(nonatomic, strong) ArcItem* pinned;
 @property(nonatomic, strong) ArcItem* unpinned;
 @property(nonatomic, strong) ArcItem* favorites;  // Arc "topApps": shared by all Spaces on the same profile
+// Space theme: 1-2 hex colours ("#RRGGBB") blended top to bottom over the sidebar, how strongly (0-1), and an
+// optional emoji shown before the name. Empty = the plain system sidebar.
+@property(nonatomic, copy) NSArray<NSString*>* themeColors;
+@property(nonatomic) double themeIntensity;
+@property(nonatomic, copy) NSString* iconEmoji;
 - (NSArray<ArcItem*>*)allTabs;  // depth-first: favorites, pinned, Today
 @end
 

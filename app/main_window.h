@@ -130,6 +130,13 @@ NSString* CleanLinkURL(NSString* url);
 // same command (Cmd+Opt+Shift+F) leaves it; full screen is the standard macOS one (Ctrl+Cmd+F).
 @property(nonatomic, readonly) BOOL focusMode;
 - (IBAction)toggleFocusMode:(id)sender;
+// Space themes (Arc: Edit Theme Color, Change Space Icon). nil/empty colours = no theme.
+- (void)setTheme:(NSArray<NSString*>*)colors intensity:(double)intensity forSpace:(ArcSpace*)space;
+- (void)setIcon:(NSString*)emoji forSpace:(ArcSpace*)space;
+- (void)switchToSpace:(ArcSpace*)space;
+- (IBAction)editThemeColor:(id)sender;
+- (IBAction)changeSpaceIcon:(id)sender;
+@property(nonatomic, readonly) NSView* themeView;  // the tint layer over the sidebar (for tests)
 // Clear Browsing Data: history and cookies from `since` on (nil = all time) in every Space's profile;
 // the HTTP cache is always cleared in full (Chromium has no time range for it).
 - (void)clearBrowsingDataSince:(NSDate*)since history:(BOOL)history cookies:(BOOL)cookies cache:(BOOL)cache
