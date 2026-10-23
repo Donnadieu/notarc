@@ -4,6 +4,7 @@
 
 #include <cstdio>
 #include <string>
+#include <vector>
 
 #import "app/arc_import.h"
 #import "app/main_window.h"
@@ -312,7 +313,13 @@
         [self runBasicsTestWhenReady:attempt + 1];
       });
     else {
-      std::printf("SELFTEST-BASICS tabNeverLoaded=1 live=%d loading=%d url=%s\n", [w hasLiveBrowser], [w isLoading], [w currentURL].UTF8String);
+      std::printf("SELFTEST-BASICS tabNeverLoaded=1 live=%d loading=%d url=%s itemURL=%s\n", [w hasLiveBrowser], [w isLoading],
+                  [w currentURL].UTF8String, w.shownItem.url.UTF8String ?: "-");
+      // Diagnostic: does an explicit load recover the stuck tab?
+      [w navigateCurrentTab:@"https://example.com"];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        std::printf("SELFTEST-STUCKDIAG afterReload loading=%d url=%s\n", [w isLoading], [w currentURL].UTF8String);
+      });
       [self runRemainingSelfTestActions];
     }
     return;
@@ -620,6 +627,21 @@
       [w setIcon:@"" forSpace:sp];
       std::printf("SELFTEST-THEME shown=%d colors=%d icon=%d saved=%d perSpace=%d cleared=%d\n", shown, colors, icon, saved,
                   perSpace, cleared && sp.iconEmoji == nil);
+    });
+    // Hover card on a sidebar tab.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 54 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openInNewTab:@"https://www.example.com/hover?x=1"];
+      ArcItem* t = w.shownItem;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        NSArray* lines = [w showHoverCardForItem:t];
+        BOOL shown = w.hoverCardShown;
+        BOOL host = [lines containsObject:@"example.com"];
+        BOOL url = [lines.lastObject hasPrefix:@"https://www.example.com/hover"];
+        BOOL state = [lines[2] hasPrefix:@"Showing now"];
+        [w hideHoverCard];
+        std::printf("SELFTEST-HOVER shown=%d host=%d url=%d state=%d hidden=%d\n", shown, host, url, state, !w.hoverCardShown);
+      });
     });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 34 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -941,6 +963,19 @@ int main(int argc, char* argv[]) {
       return 0;
     }
   }
+
+  // Self-test runs use a throwaway in-memory key for Chromium's cookie encryption instead of the
+  // "Chromium Safe Storage" Keychain item, so repeated test runs never show Keychain prompts.
+  std::vector<char*> args(argv, argv + argc);
+  static char mockKeychain[] = "--use-mock-keychain";
+  for (int i = 1; i < argc; ++i)
+    if (std::string(argv[i]) == "--selftest" || std::string(argv[i]) == "--selftest-reload") {
+      args.push_back(mockKeychain);
+      break;
+    }
+  args.push_back(nullptr);
+  argc = static_cast<int>(args.size()) - 1;
+  argv = args.data();
 
   CefScopedLibraryLoader library_loader;
   if (!library_loader.LoadInMain()) return 1;
