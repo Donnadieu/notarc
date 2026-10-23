@@ -5,6 +5,7 @@
 #include <string>
 
 #include "include/cef_client.h"
+#include "include/cef_context_menu_handler.h"
 #include "include/cef_find_handler.h"
 #include "include/cef_focus_handler.h"
 #include "include/cef_request_handler.h"
@@ -15,7 +16,8 @@ class BrowserClient : public CefClient,
                       public CefLoadHandler,
                       public CefFindHandler,
                       public CefFocusHandler,
-                      public CefRequestHandler {
+                      public CefRequestHandler,
+                      public CefContextMenuHandler {
  public:
   using TitleCallback = std::function<void(int browser_id, const std::string& title)>;
   using UrlCallback = std::function<void(int browser_id, const std::string& url)>;
@@ -28,6 +30,16 @@ class BrowserClient : public CefClient,
   CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
   CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+  CefRefPtr<CefContextMenuHandler> GetContextMenuHandler() override { return this; }
+
+  // Right-clicking a link adds NotArc's link actions on top of Chromium's menu.
+  enum LinkCommand { kLinkNewTab = 0, kLinkBackgroundTab, kLinkSplit, kLinkPeek, kLinkLittle, kLinkCopyMarkdown, kLinkCount };
+  using LinkMenuCallback = std::function<void(int browser_id, int command, const std::string& url, const std::string& text)>;
+  void set_link_menu_callback(LinkMenuCallback cb) { on_link_menu_ = std::move(cb); }
+  void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                           CefRefPtr<CefContextMenuParams> params, CefRefPtr<CefMenuModel> model) override;
+  bool OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                            CefRefPtr<CefContextMenuParams> params, int command_id, EventFlags event_flags) override;
 
   // Asked before a user-initiated main-frame navigation; returning true cancels it (the window
   // shows the link somewhere else instead, e.g. Peek).
@@ -85,6 +97,7 @@ class BrowserClient : public CefClient,
   FocusCallback on_focus_;
   NavigationFilter navigation_filter_;
   OpenCallback on_open_;
+  LinkMenuCallback on_link_menu_;
   int open_browsers_ = 0;
   bool quit_when_empty_ = false;
 

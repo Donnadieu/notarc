@@ -86,3 +86,26 @@ bool BrowserClient::OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFr
   if (!on_open_ || !IsTabOrWindowDisposition(target_disposition)) return false;  // NEW_POPUP stays a popup
   return on_open_(browser->GetIdentifier(), target_url.ToString(), target_disposition, user_gesture);
 }
+
+void BrowserClient::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                        CefRefPtr<CefContextMenuParams> params, CefRefPtr<CefMenuModel> model) {
+  CEF_REQUIRE_UI_THREAD();
+  if (!on_link_menu_ || params->GetLinkUrl().empty()) return;
+  static const char* kTitles[kLinkCount] = {"Open Link in New Tab",   "Open Link in Background Tab",
+                                            "Open Link in Split View", "Open Link in Peek",
+                                            "Open Link in Little Window", "Copy Link as Markdown"};
+  int at = 0;
+  for (int i = 0; i < kLinkCount; ++i) model->InsertItemAt(at++, MENU_ID_USER_FIRST + i, kTitles[i]);
+  model->InsertSeparatorAt(at);
+}
+
+bool BrowserClient::OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                         CefRefPtr<CefContextMenuParams> params, int command_id,
+                                         EventFlags event_flags) {
+  CEF_REQUIRE_UI_THREAD();
+  int command = command_id - MENU_ID_USER_FIRST;
+  if (!on_link_menu_ || command < 0 || command >= kLinkCount) return false;
+  on_link_menu_(browser->GetIdentifier(), command, params->GetLinkUrl().ToString(),
+                params->GetSelectionText().ToString());
+  return true;
+}

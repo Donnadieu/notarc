@@ -79,7 +79,8 @@ NSString* ResolveCommandBarInput(NSString* input) {
 
 static BOOL Contains(ArcItem* root, ArcItem* target);
 
-@interface MainWindowController () <NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate>
+@interface MainWindowController () <NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate,
+                                    NSMenuDelegate>
 @end
 
 // The gap between two split panes; dragging it resizes them.
@@ -205,6 +206,8 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   _outline.delegate = self;
   [_outline registerForDraggedTypes:@[ kSidebarItemPasteboardType ]];
   [_outline setDraggingSourceOperationMask:NSDragOperationMove forLocal:YES];
+  _outline.menu = [[NSMenu alloc] initWithTitle:@"Sidebar"];
+  _outline.menu.delegate = self;
   scroll.documentView = _outline;
   [sidebar addSubview:scroll];
 
@@ -359,6 +362,10 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
         [weakSelf browser:browserId title:nil url:[NSString stringWithUTF8String:url.c_str()]];
       });
   _client->set_focus_callback([weakSelf](int browserId) { [weakSelf paneFocused:browserId]; });
+  _client->set_link_menu_callback([weakSelf](int browserId, int command, const std::string& url, const std::string&) {
+    NSString* target = [NSString stringWithUTF8String:url.c_str()];
+    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf handleLinkCommand:command url:target fromBrowser:browserId]; });
+  });
   _client->set_open_callback([weakSelf](int browserId, const std::string& url, int disposition, bool gesture) -> bool {
     MainWindowController* strong = weakSelf;
     if (!strong) return false;
@@ -1285,6 +1292,243 @@ static ArcItem* NewSection(NSString* title) {
 // Arc closes Peek when you click outside it.
 - (void)windowDidBecomeKey:(NSNotification*)note {
   if (note.object == self.window && _peek) [_peek.window close];
+}
+
+#pragma mark Context menus
+
+- (void)handleLinkCommand:(int)command url:(NSString*)url fromBrowser:(int)browserId {
+  if (!url.length) return;
+  switch (command) {
+    case BrowserClient::kLinkNewTab: [self openInNewTab:url]; break;
+    case BrowserClient::kLinkBackgroundTab: [self openInNewTab:url background:YES]; break;
+    case BrowserClient::kLinkSplit: {
+      ArcItem* from = [self itemForBrowser:browserId];
+      if (from && from != _shown) [self showItem:from];
+      [self openInSplit:url horizontal:NO before:NO];
+      break;
+    }
+    case BrowserClient::kLinkPeek: [self openPeek:url]; break;
+    case BrowserClient::kLinkLittle: [self openLittleWindow:url]; break;
+    case BrowserClient::kLinkCopyMarkdown: {
+      [NSPasteboard.generalPasteboard clearContents];
+      [NSPasteboard.generalPasteboard setString:[NSString stringWithFormat:@"[%@](%@)", url, url]
+                                        forType:NSPasteboardTypeString];
+      break;
+    }
+  }
+}
+
+- (void)menuNeedsUpdate:(NSMenu*)menu {
+  if (menu != _outline.menu) return;
+  [menu removeAllItems];
+  ArcItem* item = _outline.clickedRow >= 0 ? [_outline itemAtRow:_outline.clickedRow] : nil;
+  NSMenu* built = item ? [self sidebarMenuForItem:item] : nil;
+  for (NSMenuItem* mi in [built.itemArray copy]) {
+    [built removeItem:mi];
+    [menu addItem:mi];
+  }
+}
+
+- (NSMenuItem*)menuItem:(NSString*)title action:(SEL)action item:(ArcItem*)item {
+  NSMenuItem* mi = [[NSMenuItem alloc] initWithTitle:title action:action keyEquivalent:@""];
+  mi.target = self;
+  mi.representedObject = item;
+  return mi;
+}
+
+- (NSMenu*)sidebarMenuForItem:(ArcItem*)item {
+  NSMenu* m = [[NSMenu alloc] initWithTitle:@"Sidebar"];
+  if (!item || item.isSection) return m;
+  ArcItem* section = [self sectionContaining:item];
+  BOOL isToday = section == _space.unpinned, isPinned = section == _space.pinned;
+  BOOL isTab = item.url.length > 0;
+  if (isTab || item.isSplit) [m addItem:[self menuItem:@"Open" action:@selector(menuOpen:) item:item]];
+  if (isTab) {
+    [m addItem:[self menuItem:@"Open in Split View" action:@selector(menuOpenInSplit:) item:item]];
+    [m addItem:[self menuItem:@"Open in Little Window" action:@selector(menuOpenLittle:) item:item]];
+    [m addItem:[NSMenuItem separatorItem]];
+    [m addItem:[self menuItem:@"Copy URL" action:@selector(menuCopyURL:) item:item]];
+    [m addItem:[self menuItem:@"Copy URL as Markdown" action:@selector(menuCopyMarkdown:) item:item]];
+  }
+  [m addItem:[NSMenuItem separatorItem]];
+  if (isTab || item.isFolder) [m addItem:[self menuItem:@"Rename..." action:@selector(menuRename:) item:item]];
+  if (isTab) [m addItem:[self menuItem:@"Duplicate" action:@selector(menuDuplicate:) item:item]];
+  if (isToday) [m addItem:[self menuItem:@"Pin" action:@selector(menuTogglePin:) item:item]];
+  if (isPinned && [_space.pinned.children containsObject:item])
+    [m addItem:[self menuItem:@"Unpin" action:@selector(menuTogglePin:) item:item]];
+  if ((isToday || isPinned) && _spaces.count > 1) {
+    NSMenuItem* move = [[NSMenuItem alloc] initWithTitle:@"Move to" action:nil keyEquivalent:@""];
+    NSMenu* sub = [[NSMenu alloc] initWithTitle:@"Move to"];
+    for (ArcSpace* sp in _spaces) {
+      if (sp == _space) continue;
+      for (int pinned = 0; pinned < 2; ++pinned) {
+        NSMenuItem* mi = [self menuItem:[NSString stringWithFormat:@"%@ in %@", pinned ? @"Pinned" : @"Today", sp.title]
+                                 action:@selector(menuMoveToSpace:) item:item];
+        mi.representedObject = @[ item, sp, @(pinned) ];
+        [sub addItem:mi];
+      }
+    }
+    move.submenu = sub;
+    [m addItem:move];
+  }
+  if (isToday && [_space.unpinned.children containsObject:item]) {
+    [m addItem:[NSMenuItem separatorItem]];
+    [m addItem:[self menuItem:@"Archive Other Tabs" action:@selector(menuArchiveOthers:) item:item]];
+    [m addItem:[self menuItem:@"Archive Tabs Above" action:@selector(menuArchiveAbove:) item:item]];
+    [m addItem:[self menuItem:@"Archive Tabs Below" action:@selector(menuArchiveBelow:) item:item]];
+  }
+  if (isTab) {
+    [m addItem:[NSMenuItem separatorItem]];
+    [m addItem:[self menuItem:isToday ? @"Archive Tab" : @"Close Tab" action:@selector(menuClose:) item:item]];
+  }
+  return m;
+}
+
+- (void)menuOpen:(NSMenuItem*)sender {
+  ArcItem* item = sender.representedObject;
+  [self showItem:item.isSplit ? item.children.firstObject : item];
+}
+- (void)menuOpenInSplit:(NSMenuItem*)sender {
+  ArcItem* item = sender.representedObject;
+  if (!_shown || item == _shown) return;
+  [self openInSplit:item.url horizontal:NO before:NO];
+}
+- (void)menuOpenLittle:(NSMenuItem*)sender { [self openLittleWindow:((ArcItem*)sender.representedObject).url]; }
+- (void)menuCopyURL:(NSMenuItem*)sender {
+  [NSPasteboard.generalPasteboard clearContents];
+  [NSPasteboard.generalPasteboard setString:((ArcItem*)sender.representedObject).url forType:NSPasteboardTypeString];
+}
+- (void)menuCopyMarkdown:(NSMenuItem*)sender {
+  ArcItem* item = sender.representedObject;
+  NSString* title = [item.displayTitle stringByReplacingOccurrencesOfString:@"]" withString:@"\\]"];
+  [NSPasteboard.generalPasteboard clearContents];
+  [NSPasteboard.generalPasteboard setString:[NSString stringWithFormat:@"[%@](%@)", title, item.url]
+                                    forType:NSPasteboardTypeString];
+}
+- (void)menuRename:(NSMenuItem*)sender {
+  ArcItem* item = sender.representedObject;
+  NSString* name = [self askForSpaceName:@"Rename" initial:item.displayTitle];
+  if (name.length) [self renameItem:item to:name];
+}
+- (void)menuDuplicate:(NSMenuItem*)sender { [self duplicateItem:sender.representedObject]; }
+- (void)menuTogglePin:(NSMenuItem*)sender {
+  ArcItem* item = sender.representedObject;
+  if ([self sectionContaining:item] == _space.unpinned)
+    [self moveItem:item toParent:_space.pinned index:_space.pinned.children.count];
+  else
+    [self moveItem:item toParent:_space.unpinned index:0];
+}
+- (void)menuMoveToSpace:(NSMenuItem*)sender {
+  NSArray* args = sender.representedObject;
+  [self moveItem:args[0] toSpace:args[1] pinned:[args[2] boolValue]];
+}
+- (void)menuArchiveOthers:(NSMenuItem*)sender { [self archiveTodayTabsRelativeTo:sender.representedObject mode:0]; }
+- (void)menuArchiveAbove:(NSMenuItem*)sender { [self archiveTodayTabsRelativeTo:sender.representedObject mode:1]; }
+- (void)menuArchiveBelow:(NSMenuItem*)sender { [self archiveTodayTabsRelativeTo:sender.representedObject mode:2]; }
+- (void)menuClose:(NSMenuItem*)sender {
+  ArcItem* item = sender.representedObject;
+  if (item != _shown) [self showItem:item];
+  [self closeCurrentTab];
+}
+
+// A user rename overrides the page title in the sidebar (Arc: "Rename Current Tab").
+- (void)renameItem:(ArcItem*)item to:(NSString*)title {
+  if (!item || !title.length) return;
+  item.title = title;
+  item.liveTitle = nil;
+  [_outline reloadItem:item];
+  [self scheduleSave];
+}
+
+// The copy goes right below the original in Today (a pinned tab's copy goes to the top of Today).
+- (ArcItem*)duplicateItem:(ArcItem*)item {
+  if (!item.url.length || !_space) return nil;
+  ArcItem* copy = [ArcItem new];
+  copy.itemID = NSUUID.UUID.UUIDString;
+  copy.url = [self itemCurrentURL:item];
+  copy.liveTitle = item.liveTitle;
+  copy.title = item.title;
+  copy.children = [NSMutableArray array];
+  ArcItem* parent = [self parentOfItem:item];
+  if (parent.isSplit) {
+    item = parent;
+    parent = [self parentOfItem:parent];
+  }
+  if ([self sectionContaining:item] == _space.unpinned && parent)
+    [parent.children insertObject:copy atIndex:[parent.children indexOfObject:item] + 1];
+  else
+    [_space.unpinned.children insertObject:copy atIndex:0];
+  [_outline reloadData];
+  for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
+  [self scheduleSave];
+  [self showItem:copy];
+  return copy;
+}
+
+- (NSString*)itemCurrentURL:(ArcItem*)item {
+  auto it = _browsers.find(item.browserId);
+  if (it == _browsers.end()) return item.url;
+  std::string url = it->second->GetMainFrame()->GetURL().ToString();
+  return url.empty() ? item.url : [NSString stringWithUTF8String:url.c_str()];
+}
+
+- (NSUInteger)archiveTodayTabsRelativeTo:(ArcItem*)item mode:(int)mode {
+  NSMutableArray<ArcItem*>* today = _space.unpinned.children;
+  NSUInteger index = [today indexOfObject:item];
+  if (index == NSNotFound) return 0;
+  NSMutableArray<ArcItem*>* victims = [NSMutableArray array];
+  for (NSUInteger i = 0; i < today.count; ++i) {
+    ArcItem* t = today[i];
+    if (t == item || t.isFolder) continue;
+    if ((mode == 1 && i > index) || (mode == 2 && i < index)) continue;
+    [victims addObject:t];
+  }
+  for (ArcItem* t in victims) {
+    NSArray<ArcItem*>* tabs = t.isSplit ? [t.children copy] : @[ t ];
+    for (ArcItem* tab in tabs) {
+      [self archiveItem:tab space:_space reason:@"manual"];
+      [self unloadItem:tab];
+    }
+    [today removeObject:t];
+  }
+  [_outline reloadItem:_space.unpinned reloadChildren:YES];
+  [self scheduleSave];
+  if (![_space.allTabs containsObject:_shown]) {
+    _shown = nil;
+    [self showItem:item.isSplit ? item.children.firstObject : item];
+  } else {
+    [self layoutPanes];
+  }
+  return victims.count;
+}
+
+// Moving to another Space changes the profile, so the tab reloads there (Arc does the same).
+- (BOOL)moveItem:(ArcItem*)item toSpace:(ArcSpace*)space pinned:(BOOL)pinned {
+  if (!item || !space || space == _space || item.isSection) return NO;
+  ArcItem* parent = [self parentOfItem:item];
+  if (parent.isSplit) [self detachFromSplit:item keep:YES];
+  BOOL removed = NO;
+  for (ArcItem* section in [self sectionsOfSpace:_space]) removed = removed || RemoveItem(section, item);
+  if (!removed) return NO;
+  NSMutableArray<ArcItem*>* stack = [NSMutableArray arrayWithObject:item];
+  while (stack.count) {
+    ArcItem* t = stack.lastObject;
+    [stack removeLastObject];
+    if (t == _shown) _shown = nil;
+    [self unloadItem:t];
+    [stack addObjectsFromArray:t.children];
+  }
+  ArcItem* target = pinned ? space.pinned : space.unpinned;
+  [target.children insertObject:item atIndex:pinned ? target.children.count : 0];
+  [_outline reloadData];
+  for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
+  [self scheduleSave];
+  if (!_shown) {
+    ArcItem* first = _space.allTabs.firstObject;
+    if (first) [self showItem:first];
+    else [self layoutPanes];
+  }
+  return YES;
 }
 
 #pragma mark Command bar and tab actions
