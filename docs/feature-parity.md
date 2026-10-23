@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-19 done, 17 partial, 44 not started or out of scope, of 80 items.
+20 done, 17 partial, 43 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -49,7 +49,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Switch between split views; share split view (missing)
 - [ ] Multiple windows, move tab to window, Move to main window (missing)
 - [ ] Incognito window (missing)
-- [ ] Full screen, focus mode (missing)
+- [x] Full screen, focus mode (Ctrl+Cmd+F full screen; Cmd+Opt+Shift+F focus mode hides sidebar and window buttons)
 
 ## Little Arc & Peek
 
