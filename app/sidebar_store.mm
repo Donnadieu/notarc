@@ -21,6 +21,7 @@ static NSDictionary* EncodeItem(ArcItem* item) {
   if (item.title.length && !item.isSection) d[@"title"] = item.title;
   if (item.liveTitle.length) d[@"savedTitle"] = item.liveTitle;
   if (item.url.length) d[@"url"] = item.url;
+  if (item.pinnedURL.length) d[@"pinnedURL"] = item.pinnedURL;
   if (item.lastActiveAt) d[@"lastActiveAt"] = @(item.lastActiveAt.timeIntervalSinceReferenceDate);
   d[@"folder"] = @(item.isFolder);
   if (item.isSplit) {
@@ -41,6 +42,7 @@ static ArcItem* DecodeItem(NSDictionary* d, int depth) {
   item.title = d[@"title"];
   item.liveTitle = d[@"savedTitle"];
   item.url = d[@"url"];
+  if ([d[@"pinnedURL"] isKindOfClass:NSString.class]) item.pinnedURL = d[@"pinnedURL"];
   if ([d[@"lastActiveAt"] isKindOfClass:NSNumber.class])
     item.lastActiveAt = [NSDate dateWithTimeIntervalSinceReferenceDate:[d[@"lastActiveAt"] doubleValue]];
   item.isFolder = [d[@"folder"] boolValue];
