@@ -127,6 +127,16 @@
 - (NSUInteger)archiveIdleLittleWindowsAt:(NSDate*)now;
 - (void)setLittleWindowLastUsed:(NSDate*)date index:(NSUInteger)index;  // tests
 
+// Context menus. Links: open in new/background tab, split, Peek, Little Window, copy as Markdown.
+// Sidebar items: the actions below, matching Arc's sidebar menu.
+- (void)handleLinkCommand:(int)command url:(NSString*)url fromBrowser:(int)browserId;
+- (NSMenu*)sidebarMenuForItem:(ArcItem*)item;
+- (void)renameItem:(ArcItem*)item to:(NSString*)title;
+- (ArcItem*)duplicateItem:(ArcItem*)item;
+// mode: 0 = other tabs, 1 = tabs above, 2 = tabs below (Today only). Returns how many were archived.
+- (NSUInteger)archiveTodayTabsRelativeTo:(ArcItem*)item mode:(int)mode;
+- (BOOL)moveItem:(ArcItem*)item toSpace:(ArcSpace*)space pinned:(BOOL)pinned;
+
 // Archive (Arc: auto-archive of Today tabs + Cmd+Shift+T style reopen).
 @property(nonatomic, copy) NSString* archivePath;
 - (NSUInteger)runAutoArchiveWithThreshold:(NSTimeInterval)threshold now:(NSDate*)now;  // returns # archived

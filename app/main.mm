@@ -7,6 +7,7 @@
 #import "app/arc_import.h"
 #import "app/main_window.h"
 #import "app/settings.h"
+#include "app/browser_client.h"
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
 #import "app/arc_cookies.h"
@@ -251,7 +252,7 @@
   if (self.selfTest) {
     [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
     if (!self.selfTestReload) [self runSelfTestActions];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 95 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       for (NSDictionary* tab in [self.window tabSnapshot])
         std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
                     [tab[@"profile"] UTF8String], [tab[@"title"] UTF8String], [tab[@"url"] UTF8String]);
@@ -426,6 +427,41 @@
                   "clearToday=%lu->%lu archivedDelta=%ld\n", hidden, shownAgain, first, second, back,
                   (unsigned long)todayBefore, (unsigned long)w.currentSpace.unpinned.children.count,
                   (long)([w archivedTabs].count - archivedBefore));
+    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 32 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openInNewTab:@"https://example.com/menu-c"];
+      [w openInNewTab:@"https://example.com/menu-b"];
+      [w openInNewTab:@"https://example.com/menu-a"];
+      NSMutableArray<ArcItem*>* today = w.currentSpace.unpinned.children;
+      ArcItem* b = today[1];
+      NSMutableArray* titles = [NSMutableArray array];
+      for (NSMenuItem* mi in [w sidebarMenuForItem:b].itemArray) if (mi.title.length) [titles addObject:mi.title];
+      BOOL menuOK = [titles containsObject:@"Rename..."] && [titles containsObject:@"Archive Tabs Below"] &&
+                    [titles containsObject:@"Move to"] && [titles containsObject:@"Pin"];
+      [w renameItem:b to:@"Renamed Tab"];
+      BOOL renamed = [b.displayTitle isEqualToString:@"Renamed Tab"];
+      ArcItem* dup = [w duplicateItem:b];
+      BOOL dupPlaced = today.count > 2 && today[2] == dup && [dup.url isEqualToString:b.url];
+      NSUInteger below = [w archiveTodayTabsRelativeTo:b mode:2];
+      BOOL belowOK = [today indexOfObject:b] == today.count - 1;
+      NSUInteger above = [w archiveTodayTabsRelativeTo:b mode:1];
+      BOOL onlyB = today.count == 1 && today.firstObject == b;
+      ArcSpace* from = w.currentSpace;
+      ArcSpace* other = nil;
+      for (ArcSpace* sp in w.spaces) if (sp != from && !other) other = sp;
+      BOOL moved = [w moveItem:b toSpace:other pinned:NO];
+      BOOL arrived = other.unpinned.children.firstObject == b && ![from.unpinned.children containsObject:b];
+      [w handleLinkCommand:BrowserClient::kLinkBackgroundTab url:@"https://example.org/ctx" fromBrowser:w.shownItem.browserId];
+      BOOL linkBg = [((ArcItem*)w.currentSpace.unpinned.children.firstObject).url isEqualToString:@"https://example.org/ctx"];
+      [w handleLinkCommand:BrowserClient::kLinkCopyMarkdown url:@"https://example.org/md" fromBrowser:0];
+      BOOL md = [[NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString]
+          isEqualToString:@"[https://example.org/md](https://example.org/md)"];
+      std::printf("SELFTEST-MENUS sidebarMenu=%d renamed=%d duplicateBelow=%d archivedBelow=%lu belowOK=%d "
+                  "archivedAbove=%lu onlyLeft=%d movedToSpace=%d arrived=%d linkBackgroundTab=%d linkMarkdown=%d\n",
+                  menuOK, renamed, dupPlaced, (unsigned long)below, belowOK, (unsigned long)above, onlyB, moved,
+                  arrived, linkBg, md);
+      [w saveSidebarNow];
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 29 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
