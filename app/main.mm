@@ -108,6 +108,9 @@
   // Peek and Little Window: move the page into the sidebar (handled by those windows only).
   [file addItemWithTitle:@"Open in Sidebar" action:@selector(openInMainWindow:) keyEquivalent:@"o"];
   [file addItemWithTitle:@"Clear Today" action:@selector(clearToday:) keyEquivalent:@"K"];
+  [file addItemWithTitle:@"Reset Pinned Tab" action:@selector(resetPinnedTab:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Replace Pinned URL with Current" action:@selector(replacePinnedURL:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Reset All Pinned Tabs" action:@selector(resetAllPinnedTabs:) keyEquivalent:@""];
   fileItem.submenu = file;
 
   NSMenuItem* viewItem = [NSMenuItem new];
@@ -455,6 +458,36 @@
     // Updater: version ordering, GitHub release parsing, and a real download + checksum + extract of
     // the published release (nothing is installed).
     // Downloads: a real small file into a temp folder, twice, so the second gets a numbered name.
+    // Pinned tabs keep their saved URL: navigate away, close (stays pinned, back to saved URL), reset, replace.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 42 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openInNewTab:@"https://example.com/pin-home"];
+      ArcItem* t = w.shownItem;
+      [w togglePin:nil];
+      BOOL pinned = [w isPinnedItem:t] && [t.pinnedURL isEqualToString:@"https://example.com/pin-home"];
+      [w navigateCurrentTab:@"https://example.org/elsewhere"];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        BOOL moved = [t.url hasPrefix:@"https://example.org/elsewhere"] && [t.pinnedURL isEqualToString:@"https://example.com/pin-home"];
+        [w showItem:t];
+        [w closeCurrentTab];
+        BOOL keptAndReset = [w isPinnedItem:t] && t.browserId == 0 && [t.url isEqualToString:@"https://example.com/pin-home"];
+        [w showItem:t];
+        [w navigateCurrentTab:@"https://example.org/new-home"];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          [w replacePinnedURLWithCurrent:t];
+          BOOL replaced = [t.pinnedURL hasPrefix:@"https://example.org/new-home"];
+          [w navigateCurrentTab:@"https://example.com/third"];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            NSUInteger reset = [w resetPinnedTabsInSpace];
+            BOOL backHome = [t.url hasPrefix:@"https://example.org/new-home"];
+            [w togglePin:nil];
+            BOOL unpinnedCleared = ![w isPinnedItem:t] && t.pinnedURL == nil;
+            std::printf("SELFTEST-PINNED pinned=%d savedKept=%d closeKeptReset=%d replaced=%d resetCount=%lu backHome=%d unpinCleared=%d\n",
+                        pinned, moved, keptAndReset, replaced, (unsigned long)reset, backHome, unpinnedCleared);
+          });
+        });
+      });
+    });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 34 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;

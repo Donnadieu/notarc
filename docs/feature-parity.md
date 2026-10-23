@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-18 done, 17 partial, 45 not started or out of scope, of 80 items.
+19 done, 17 partial, 44 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -12,7 +12,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [x] Rename tab / item
 - [ ] Duplicate tab / duplicate folder (partial: duplicate tab done; duplicate folder missing)
 - [x] Archive tab, Archive Other Tabs / Above / Below, Clear Today tabs
-- [ ] Close and Keep Pinned; reset pinned tab to its saved URL (missing)
+- [x] Close and Keep Pinned; reset pinned tab to its saved URL (also Replace Pinned URL with Current, Reset All Pinned Tabs)
 - [ ] Tidy tab titles (missing)
 - [ ] Hover previews / hover cards on sidebar items (missing)
 - [ ] Unread badge on tabs (missing)
