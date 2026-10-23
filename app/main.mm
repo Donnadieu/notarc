@@ -6,6 +6,7 @@
 
 #import "app/arc_import.h"
 #import "app/main_window.h"
+#import "app/settings.h"
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
 #import "app/arc_cookies.h"
@@ -45,6 +46,8 @@
   NSMenuItem* appItem = [NSMenuItem new];
   [bar addItem:appItem];
   NSMenu* appMenu = [NSMenu new];
+  [appMenu addItemWithTitle:@"Settings..." action:@selector(showSettings:) keyEquivalent:@","];
+  [appMenu addItem:[NSMenuItem separatorItem]];
   [appMenu addItemWithTitle:@"Quit NotArc" action:@selector(terminate:) keyEquivalent:@"q"];
   appItem.submenu = appMenu;
 
@@ -238,14 +241,17 @@
   [self.window saveSidebarNow];  // first launch: persist the import immediately
   [self.window showWindow:nil];
   [self.window createBrowsers];
-  for (NSString* url in self.pendingURLs) [self.window openLittleWindow:url];
+  for (NSString* url in self.pendingURLs) {
+    if (SettingBool(kSettingExternalLinksLittle)) [self.window openLittleWindow:url];
+    else [self.window openInNewTab:url];
+  }
   self.pendingURLs = nil;
   [NSApp activateIgnoringOtherApps:YES];
 
   if (self.selfTest) {
     [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
     if (!self.selfTestReload) [self runSelfTestActions];
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 80 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       for (NSDictionary* tab in [self.window tabSnapshot])
         std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
                     [tab[@"profile"] UTF8String], [tab[@"title"] UTF8String], [tab[@"url"] UTF8String]);
@@ -421,6 +427,36 @@
                   (unsigned long)todayBefore, (unsigned long)w.currentSpace.unpinned.children.count,
                   (long)([w archivedTabs].count - archivedBefore));
     });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 29 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSUserDefaults* d = NSUserDefaults.standardUserDefaults;
+      BOOL defaultsOK = SettingDouble(kSettingAutoArchiveHours) == 12 && SettingBool(kSettingPeekPinnedLinks) &&
+                        SettingBool(kSettingPeekShiftClick) && SettingDouble(kSettingLittleArchiveHours) == 6;
+      // Use the volatile domain so the self-test never changes the user's real settings.
+      [d setVolatileDomain:@{kSettingSearchEngine : @"duckduckgo", kSettingPeekShiftClick : @NO,
+                             kSettingPeekPinnedLinks : @NO}
+                   forName:NSArgumentDomain];
+      BOOL ddg = [ResolveCommandBarInput(@"notarc browser") hasPrefix:@"https://duckduckgo.com/?q=notarc"];
+      int shown = w.shownItem.browserId;
+      [w openInNewTab:@"https://example.com/settings-base"];
+      shown = w.shownItem.browserId;
+      NSUInteger todayBefore = w.currentSpace.unpinned.children.count;
+      BOOL shiftHandled = [w handleOpenURL:@"https://example.net/s" fromBrowser:shown disposition:CEF_WOD_NEW_WINDOW
+                               userGesture:YES];
+      BOOL shiftWentToTab = shiftHandled && ![w isPeeking];
+      [d setVolatileDomain:@{} forName:NSArgumentDomain];
+      BOOL restored = [ResolveCommandBarInput(@"x y") hasPrefix:@"https://www.google.com/"];
+      [w openLittleWindow:@"https://example.org/idle-little"];
+      NSUInteger before = [w littleWindowCount];
+      [w setLittleWindowLastUsed:[NSDate dateWithTimeIntervalSinceNow:-7 * 3600] index:before - 1];
+      NSUInteger idleClosed = [w archiveIdleLittleWindowsAt:[NSDate date]];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+        std::printf("SELFTEST-SETTINGS defaults=%d searchEngine=%d restored=%d shiftPeekOffOpensTab=%d todayDelta=%ld "
+                    "idleLittleClosed=%lu lastReason=%s\n", defaultsOK, ddg, restored, shiftWentToTab,
+                    (long)(w.currentSpace.unpinned.children.count - todayBefore), (unsigned long)idleClosed,
+                    ((ArchivedTab*)[w archivedTabs].lastObject).reason.UTF8String);
+      });
+    });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 25 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
       [w openInNewTab:@"https://example.com/split-base"];  // Favorites can't hold splits, so start from Today
@@ -496,13 +532,19 @@
 - (BOOL)applicationSupportsSecureRestorableState:(NSApplication*)app { return YES; }
 
 // Links clicked in other apps (when NotArc is the default browser) open in a Little Window.
+- (IBAction)showSettings:(id)sender {
+  [[SettingsWindowController shared] showWindow:nil];
+  [[SettingsWindowController shared].window makeKeyAndOrderFront:nil];
+}
+
 - (void)application:(NSApplication*)app openURLs:(NSArray<NSURL*>*)urls {
   for (NSURL* url in urls) {
     if (!self.window) {
       if (!self.pendingURLs) self.pendingURLs = [NSMutableArray array];
       [self.pendingURLs addObject:url.absoluteString];
     } else {
-      [self.window openLittleWindow:url.absoluteString];
+      if (SettingBool(kSettingExternalLinksLittle)) [self.window openLittleWindow:url.absoluteString];
+      else [self.window openInNewTab:url.absoluteString];
     }
   }
 }
@@ -586,6 +628,7 @@ int main(int argc, char* argv[]) {
     CefString(&settings.cache_path) = cache.UTF8String;
 
     if (!CefInitialize(main_args, settings, nullptr, nullptr)) return CefGetExitCode();
+    SettingsRegisterDefaults();
 
     AppDelegate* delegate = [AppDelegate new];
     delegate.selfTest = selfTest;

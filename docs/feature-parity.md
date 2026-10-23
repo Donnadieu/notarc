@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-8 done, 17 partial, 55 not started or out of scope, of 80 items.
+9 done, 18 partial, 53 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -36,7 +36,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 - [x] Command bar: new tab, go to URL, search (done (basic))
 - [ ] Suggestions: open tabs, history, bookmarks, actions, top domains (missing)
-- [ ] Search engine choice, search suggestions (missing)
+- [ ] Search engine choice, search suggestions (partial: engine choice done; suggestions missing)
 - [ ] Switch to a recent tab (Ctrl+Tab) (missing)
 - [ ] Back/forward, reload, find in page, zoom, print (partial: print missing)
 - [ ] Link routing rules (which Space opens which links) (missing)
@@ -53,7 +53,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 ## Little Arc & Peek
 
-- [ ] Little Arc (mini browser for external links, global hotkey) (partial: Little Window for links from other apps, Cmd+Opt+N, archived on close; system-wide hotkey missing)
+- [ ] Little Arc (mini browser for external links, global hotkey) (partial: Little Window for links from other apps (can be turned off), Cmd+Opt+N, archived on close or when idle (default 6 hours); global hotkey and modifier-click missing)
 - [ ] Open in main window / move to Space from Little Arc (partial: Open in NotArc moves to the current Space; choosing another Space missing)
 - [ ] Peek: preview links from pinned/favourite sites, email peeking (partial: links leaving a Pinned tab or Favorite's site and Shift-clicked links open in Peek; Open as Tab; email peeking and undo missing)
 
@@ -87,7 +87,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 ## Library & data
 
 - [x] Archive with search
-- [ ] Auto-archive (6h/12h/24h/7d/30d/never) (partial: fixed 12h, no settings UI)
+- [x] Auto-archive (12h/24h/7d/30d/never, in Settings)
 - [ ] Downloads list (missing)
 - [ ] History view (missing)
 - [x] Import from Arc (Spaces, tabs, archive, logins)
@@ -103,7 +103,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Set as default browser, open links from other apps (partial: registers as a browser and opens links from other apps; no in-app "make default" prompt)
 - [ ] Context menus (page, link, image, sidebar) (missing)
 - [ ] Sad tab / crash recovery, session restore (partial: sidebar restore only)
-- [ ] Settings window (all preferences) (missing)
+- [ ] Settings window (all preferences) (partial: search engine, auto-archive, Peek and Little Window link options; profiles, appearance, Max and advanced panes missing)
 - [ ] Keyboard shortcuts with user overrides (missing)
 - [ ] App icon choice, sound effects, toasts (missing)
 - [ ] PDF viewer (missing)

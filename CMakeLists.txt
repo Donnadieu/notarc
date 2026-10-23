@@ -31,6 +31,8 @@ set(APP_SRCS
   app/arc_cookies.mm
   app/little_window.h
   app/little_window.mm
+  app/settings.h
+  app/settings.mm
   app/browser_client.h
   app/browser_client.mm
   app/main_window.h
