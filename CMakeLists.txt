@@ -31,6 +31,8 @@ set(APP_SRCS
   app/history_store.mm
   app/updater.h
   app/updater.mm
+  app/downloads.h
+  app/downloads.mm
   app/arc_cookies.h
   app/arc_cookies.mm
   app/little_window.h

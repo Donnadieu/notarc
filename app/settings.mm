@@ -1,4 +1,5 @@
 #import "app/settings.h"
+#import "app/downloads.h"
 
 NSString* const kSettingAutoArchiveHours = @"autoArchiveThresholdHours";
 NSString* const kSettingSearchEngine = @"searchEngine";
@@ -52,6 +53,7 @@ static NSArray* LittleArchiveChoices() {
   NSPopUpButton* _engine;
   NSPopUpButton* _archive;
   NSPopUpButton* _littleArchive;
+  NSTextField* _folderLabel;
 }
 
 + (instancetype)shared {
@@ -94,7 +96,7 @@ static NSArray* LittleArchiveChoices() {
 }
 
 - (instancetype)init {
-  NSWindow* w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 480, 420)
+  NSWindow* w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 480, 480)
                                             styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
                                               backing:NSBackingStoreBuffered
                                                 defer:NO];
@@ -126,6 +128,14 @@ static NSArray* LittleArchiveChoices() {
     @[ [NSTextField labelWithString:@"Archive Little Windows:"], _littleArchive ],
   ]];
 
+  [DownloadManager shared];  // registers the folder default
+  _folderLabel = [NSTextField labelWithString:[NSUserDefaults.standardUserDefaults stringForKey:kSettingDownloadFolder]
+                                                  .stringByAbbreviatingWithTildeInPath ?: @""];
+  _folderLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
+  [_folderLabel.widthAnchor constraintLessThanOrEqualToConstant:260].active = YES;
+  NSButton* choose = [NSButton buttonWithTitle:@"Change..." target:self action:@selector(chooseFolder:)];
+  NSGridView* downloads = [NSGridView gridViewWithViews:@[ @[ [NSTextField labelWithString:@"Download location:"], _folderLabel, choose ] ]];
+
   NSStackView* stack = [NSStackView stackViewWithViews:@[
     [self heading:@"General"],
     general,
@@ -137,6 +147,8 @@ static NSArray* LittleArchiveChoices() {
     [self check:@"Links from other apps open in a Little Window" key:kSettingExternalLinksLittle],
     [self note:@"When off, links from other apps open as a new tab in Today."],
     little,
+    [self heading:@"Downloads"],
+    downloads,
   ]];
   stack.orientation = NSUserInterfaceLayoutOrientationVertical;
   stack.alignment = NSLayoutAttributeLeading;
@@ -155,6 +167,17 @@ static NSArray* LittleArchiveChoices() {
       [v.widthAnchor constraintEqualToConstant:420].active = YES;
   [w center];
   return self;
+}
+
+- (void)chooseFolder:(id)sender {
+  NSOpenPanel* panel = [NSOpenPanel openPanel];
+  panel.canChooseDirectories = YES;
+  panel.canChooseFiles = NO;
+  panel.canCreateDirectories = YES;
+  panel.prompt = @"Choose";
+  if ([panel runModal] != NSModalResponseOK || !panel.URL) return;
+  [NSUserDefaults.standardUserDefaults setObject:panel.URL.path forKey:kSettingDownloadFolder];
+  _folderLabel.stringValue = panel.URL.path.stringByAbbreviatingWithTildeInPath;
 }
 
 - (void)toggled:(NSButton*)sender {

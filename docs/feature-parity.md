@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-13 done, 19 partial, 48 not started or out of scope, of 80 items.
+14 done, 19 partial, 47 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -88,7 +88,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 - [x] Archive with search
 - [x] Auto-archive (6h/12h/24h/7d/30d/never, in Settings)
-- [ ] Downloads list (missing)
+- [x] Downloads list (Cmd+Shift+J: progress, filter, Open, Show in Finder, Copy, Cancel; download folder setting; quit warning)
 - [x] History view (Cmd+Y, searchable, per-Space column, Clear History)
 - [x] Import from Arc (Spaces, tabs, archive, logins)
 - [ ] Import from Chrome/Safari/other browsers, password import (missing)

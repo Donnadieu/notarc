@@ -53,6 +53,7 @@
 - (BOOL)canGoBack;                                // tests
 - (NSString*)currentURL;                          // tests
 - (BOOL)hasLiveBrowser;                           // tests: the shown tab has a web view
+- (void)startDownload:(NSString*)url;  // downloads url from the shown tab
 - (BOOL)isLoading;                                // tests: the shown tab is still loading
 
 // Split view: up to 4 tabs side by side (vertical) or stacked (horizontal) in one window.
