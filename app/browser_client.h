@@ -6,12 +6,14 @@
 
 #include "include/cef_client.h"
 #include "include/cef_find_handler.h"
+#include "include/cef_focus_handler.h"
 
 class BrowserClient : public CefClient,
                       public CefDisplayHandler,
                       public CefLifeSpanHandler,
                       public CefLoadHandler,
-                      public CefFindHandler {
+                      public CefFindHandler,
+                      public CefFocusHandler {
  public:
   using TitleCallback = std::function<void(int browser_id, const std::string& title)>;
   using UrlCallback = std::function<void(int browser_id, const std::string& url)>;
@@ -22,6 +24,12 @@ class BrowserClient : public CefClient,
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
   CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
+  CefRefPtr<CefFocusHandler> GetFocusHandler() override { return this; }
+
+  // Fires when a web view takes keyboard focus (e.g. the user clicks a split view pane).
+  using FocusCallback = std::function<void(int browser_id)>;
+  void set_focus_callback(FocusCallback cb) { on_focus_ = std::move(cb); }
+  void OnGotFocus(CefRefPtr<CefBrowser> browser) override;
 
   using FindCallback = std::function<void(int browser_id, int count, int active)>;
   void set_find_callback(FindCallback cb) { on_find_ = std::move(cb); }
@@ -51,6 +59,7 @@ class BrowserClient : public CefClient,
   TitleCallback on_title_;
   UrlCallback on_url_;
   FindCallback on_find_;
+  FocusCallback on_focus_;
   int open_browsers_ = 0;
   bool quit_when_empty_ = false;
 

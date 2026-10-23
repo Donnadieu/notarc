@@ -3,3 +3,7 @@ build/
 *.snapshot
 third_party/
 dist/
+AGENTS.md
+CLAUDE.md
+.claude/
+.env*

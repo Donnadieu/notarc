@@ -51,3 +51,8 @@ void BrowserClient::OnFindResult(CefRefPtr<CefBrowser> browser, int identifier, 
   CEF_REQUIRE_UI_THREAD();
   if (final_update && on_find_) on_find_(browser->GetIdentifier(), count, active_match_ordinal);
 }
+
+void BrowserClient::OnGotFocus(CefRefPtr<CefBrowser> browser) {
+  CEF_REQUIRE_UI_THREAD();
+  if (on_focus_) on_focus_(browser->GetIdentifier());
+}

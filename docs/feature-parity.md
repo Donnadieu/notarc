@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-6 done, 9 partial, 65 not started or out of scope, of 80 items.
+6 done, 10 partial, 64 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -45,7 +45,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 ## Split view & windows
 
-- [ ] Split view: vertical/horizontal, up to 4 panes, add/close/move panes (missing)
+- [ ] Split view: vertical/horizontal, up to 4 panes, add/close/move panes (partial: add, close and focus panes done; drag to resize, move panes and saving splits missing)
 - [ ] Switch between split views; share split view (missing)
 - [ ] Multiple windows, move tab to window, Move to main window (missing)
 - [ ] Incognito window (missing)

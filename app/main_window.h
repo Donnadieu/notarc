@@ -53,6 +53,14 @@
 - (BOOL)canGoBack;                                // tests
 - (NSString*)currentURL;                          // tests
 
+// Split view: up to 4 tabs side by side (vertical) or stacked (horizontal) in one window.
+- (IBAction)addVerticalSplit:(id)sender;    // Ctrl+Shift+=
+- (IBAction)addHorizontalSplit:(id)sender;  // Ctrl+Shift+-
+- (IBAction)closeSplitPane:(id)sender;      // Ctrl+Shift+W
+- (IBAction)focusNextPane:(id)sender;       // Ctrl+Shift+]
+- (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal;
+- (NSArray<NSValue*>*)paneFrames;  // tests: frames of the visible panes
+
 // Archive (Arc: auto-archive of Today tabs + Cmd+Shift+T style reopen).
 @property(nonatomic, copy) NSString* archivePath;
 - (NSUInteger)runAutoArchiveWithThreshold:(NSTimeInterval)threshold now:(NSDate*)now;  // returns # archived
