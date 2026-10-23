@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-20 done, 17 partial, 43 not started or out of scope, of 80 items.
+21 done, 17 partial, 42 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -92,7 +92,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [x] History view (Cmd+Y, searchable, per-Space column, Clear History)
 - [x] Import from Arc (Spaces, tabs, archive, logins)
 - [ ] Import from Chrome/Safari/other browsers, password import (missing)
-- [ ] Clear browsing data (missing)
+- [x] Clear browsing data (time range; history, cookies, cache across all Spaces; Clear Cookies and Refresh for the current site)
 - [ ] Tab thumbnails for switchers and previews (missing)
 
 ## Browser basics
