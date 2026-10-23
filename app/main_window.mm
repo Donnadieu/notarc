@@ -81,6 +81,29 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
 @interface MainWindowController () <NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate>
 @end
 
+// The gap between two split panes; dragging it resizes them.
+@interface SplitDividerView : NSView
+@property(nonatomic, weak) MainWindowController* owner;
+@property(nonatomic) NSUInteger index;
+@property(nonatomic) BOOL horizontal;
+@end
+
+@implementation SplitDividerView
+- (void)resetCursorRects {
+  [self addCursorRect:self.bounds
+               cursor:self.horizontal ? NSCursor.resizeUpDownCursor : NSCursor.resizeLeftRightCursor];
+}
+- (BOOL)acceptsFirstMouse:(NSEvent*)event { return YES; }
+- (void)mouseDown:(NSEvent*)event {}
+- (void)mouseDragged:(NSEvent*)event {
+  NSView* content = self.superview;
+  NSPoint p = [content convertPoint:event.locationInWindow fromView:nil];
+  NSRect b = content.bounds;
+  CGFloat position = self.horizontal ? (b.size.height - p.y) / b.size.height : p.x / b.size.width;
+  [self.owner moveDivider:self.index toPosition:position];
+}
+@end
+
 @implementation MainWindowController {
   NSMutableArray<ArcSpace*>* _spaces;
   ArcSpace* _space;  // currently shown Space
@@ -110,6 +133,9 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   BOOL _commandOpensSplit;
   BOOL _commandOpensLittle;
   BOOL _splitBefore;
+  BOOL _pendingSplitHorizontal;
+  ArcItem* _splitGroup;  // sidebar item of the split being shown
+  NSMutableArray<NSView*>* _dividers;
   NSMutableArray<LittleWindowController*>* _littleWindows;
   LittleWindowController* _peek;
   NSView* _sidebar;
@@ -393,8 +419,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   item.lastActiveAt = [NSDate date];
   [self ensureBrowserForItem:item];
   [self layoutPanes];
-  NSInteger row = [_outline rowForItem:item];
-  if (row >= 0) [_outline selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
+  [self selectSidebarRowFor:item];
 }
 
 - (void)openTabsForSelfTest:(NSUInteger)count {
@@ -417,7 +442,8 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
   if (!item) return;
   if (title.length) item.liveTitle = title;
   if (url.length) item.url = url;
-  [_outline reloadItem:item];
+  ArcItem* parent = [self parentOfItem:item];
+  [_outline reloadItem:parent.isSplit ? parent : item];
   [self scheduleSave];
 }
 
@@ -464,7 +490,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
 
 - (BOOL)outlineView:(NSOutlineView*)ov isItemExpandable:(id)item {
   ArcItem* a = item;
-  return a.isSection || a.isFolder;
+  return a.isSection || a.isFolder;  // a split is a single row
 }
 
 - (BOOL)outlineView:(NSOutlineView*)ov isGroupItem:(id)item {
@@ -472,7 +498,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
 }
 
 - (BOOL)outlineView:(NSOutlineView*)ov shouldSelectItem:(id)item {
-  return ((ArcItem*)item).url.length > 0;
+  return ((ArcItem*)item).url.length > 0 || ((ArcItem*)item).isSplit;
 }
 
 - (NSView*)outlineView:(NSOutlineView*)ov viewForTableColumn:(NSTableColumn*)col item:(id)item {
@@ -491,18 +517,43 @@ static BOOL Contains(ArcItem* root, ArcItem* target);
     [cell addSubview:label];
     cell.textField = label;
   }
-  cell.textField.stringValue = a.displayTitle;
+  NSString* title = a.displayTitle;
+  if (a.isSplit) {
+    NSMutableArray* names = [NSMutableArray array];
+    for (ArcItem* pane in a.children) [names addObject:pane.displayTitle];
+    title = [names componentsJoinedByString:@" | "];
+  }
+  cell.textField.stringValue = title;
   cell.textField.editable = a.isFolder;
   cell.textField.delegate = a.isFolder ? self : nil;
   cell.textField.font = a.isSection ? [NSFont boldSystemFontOfSize:11] : [NSFont systemFontOfSize:13];
   NSString* symbol = a.isSection ? nil : (a.isFolder ? @"folder" : @"globe");
+  if (a.isSplit) symbol = a.splitHorizontal ? @"rectangle.split.1x2" : @"rectangle.split.2x1";
   cell.imageView.image = symbol ? [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil] : nil;
   return cell;
 }
 
 - (void)outlineViewSelectionDidChange:(NSNotification*)notification {
-  id item = [_outline itemAtRow:_outline.selectedRow];
+  ArcItem* item = [_outline itemAtRow:_outline.selectedRow];
+  if (item.isSplit) {
+    if ([item.children containsObject:_shown]) return;
+    // Reopen the pane that was focused last.
+    ArcItem* pane = item.children.firstObject;
+    for (ArcItem* c in item.children)
+      if (c.lastActiveAt && (!pane.lastActiveAt || [c.lastActiveAt compare:pane.lastActiveAt] == NSOrderedDescending))
+        pane = c;
+    if (pane) [self showItem:pane];
+    return;
+  }
   if (item && item != _shown) [self showItem:item];
+}
+
+- (void)selectSidebarRowFor:(ArcItem*)item {
+  NSInteger row = [_outline rowForItem:item];
+  ArcItem* parent = [self parentOfItem:item];
+  if (row < 0 && parent.isSplit) row = [_outline rowForItem:parent];
+  if (row >= 0 && row != _outline.selectedRow)
+    [_outline selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
 }
 
 #pragma mark Persistence
@@ -651,19 +702,78 @@ static const CGFloat kPaneGap = 6;
   if (n == 0) return frames;
   CGFloat gap = n > 1 ? kPaneGap : 0;
   CGFloat total = (_splitHorizontal ? b.size.height : b.size.width) - gap * (n - 1);
+  NSArray<NSNumber*>* fractions = n > 1 && _splitGroup.splitFractions.count == n ? _splitGroup.splitFractions : nil;
   CGFloat each = floor(total / n);
+  CGFloat offset = 0;
   for (NSUInteger i = 0; i < n; ++i) {
-    CGFloat size = i == n - 1 ? total - each * (n - 1) : each;
-    CGFloat offset = i * (each + gap);
+    CGFloat size = fractions ? floor(total * fractions[i].doubleValue) : each;
+    if (i == n - 1) size = MAX(0, (_splitHorizontal ? b.size.height : b.size.width) - offset);  // absorb rounding
     // Horizontal splits stack top to bottom; AppKit's origin is bottom-left.
     NSRect r = _splitHorizontal ? NSMakeRect(0, b.size.height - offset - size, b.size.width, size)
                                 : NSMakeRect(offset, 0, size, b.size.height);
     [frames addObject:[NSValue valueWithRect:r]];
+    offset += size + gap;
   }
   return frames;
 }
 
+// The split on screen is the split item that contains the shown tab.
+- (void)syncSplitState {
+  ArcItem* parent = _shown ? [self parentOfItem:_shown] : nil;
+  if (parent.isSplit && parent.children.count > 1) {
+    _splitGroup = parent;
+    _splitItems = parent.children;
+    _splitHorizontal = parent.splitHorizontal;
+  } else {
+    _splitGroup = nil;
+    _splitItems = nil;
+  }
+}
+
+- (ArcItem*)splitGroupOfShown { return _splitGroup; }
+- (NSUInteger)dividerCount {
+  NSUInteger n = 0;
+  for (NSView* d in _dividers) n += !d.hidden;
+  return n;
+}
+
+- (void)layoutDividers:(NSArray<NSValue*>*)frames {
+  for (NSView* d in _dividers) [d removeFromSuperview];
+  _dividers = [NSMutableArray array];
+  for (NSUInteger i = 0; i + 1 < frames.count; ++i) {
+    NSRect a = frames[i].rectValue, b = frames[i + 1].rectValue;
+    NSRect r = _splitHorizontal ? NSMakeRect(0, NSMaxY(b), _content.bounds.size.width, NSMinY(a) - NSMaxY(b))
+                                : NSMakeRect(NSMaxX(a), 0, NSMinX(b) - NSMaxX(a), _content.bounds.size.height);
+    SplitDividerView* d = [[SplitDividerView alloc] initWithFrame:r];
+    d.owner = self;
+    d.index = i;
+    d.horizontal = _splitHorizontal;
+    [_content addSubview:d positioned:NSWindowAbove relativeTo:nil];
+    [_dividers addObject:d];
+  }
+}
+
+// Moves the boundary between pane index and index+1; each pane keeps at least 10%.
+- (void)moveDivider:(NSUInteger)index toPosition:(CGFloat)position {
+  NSUInteger n = _splitItems.count;
+  if (!_splitGroup || index + 1 >= n) return;
+  NSMutableArray<NSNumber*>* f = [NSMutableArray array];
+  if (_splitGroup.splitFractions.count == n) [f addObjectsFromArray:_splitGroup.splitFractions];
+  else for (NSUInteger i = 0; i < n; ++i) [f addObject:@(1.0 / n)];
+  double before = 0;
+  for (NSUInteger i = 0; i < index; ++i) before += f[i].doubleValue;
+  double pair = f[index].doubleValue + f[index + 1].doubleValue;
+  double left = MIN(MAX(position - before, 0.1), pair - 0.1);
+  if (pair < 0.2) return;
+  f[index] = @(left);
+  f[index + 1] = @(pair - left);
+  _splitGroup.splitFractions = f;
+  [self layoutPanes];
+  [self scheduleSave];
+}
+
 - (void)layoutPanes {
+  [self syncSplitState];
   NSArray<ArcItem*>* panes = [self visiblePanes];
   for (ArcItem* pane in panes) [self ensureBrowserForItem:pane];
   NSArray<NSValue*>* frames = [self framesForPaneCount:panes.count];
@@ -681,6 +791,7 @@ static const CGFloat kPaneGap = 6;
     view.hidden = !visible;
     kv.second->GetHost()->WasHidden(!visible);
   }
+  [self layoutDividers:panes.count > 1 ? frames : @[]];
 }
 
 - (NSArray<NSValue*>*)paneFrames {
@@ -697,14 +808,47 @@ static const CGFloat kPaneGap = 6;
   if (_splitItems.count > 1) [self layoutPanes];
 }
 
+// Wraps the tab in a split item at its place in the sidebar (Favorites can't hold splits).
+- (ArcItem*)ensureSplitGroupFor:(ArcItem*)item {
+  ArcItem* parent = [self parentOfItem:item];
+  if (parent.isSplit) return parent;
+  if (!parent || parent == _space.favorites) return nil;
+  ArcItem* group = [ArcItem new];
+  group.itemID = NSUUID.UUID.UUIDString;
+  group.isSplit = YES;
+  group.children = [NSMutableArray arrayWithObject:item];
+  parent.children[[parent.children indexOfObject:item]] = group;
+  return group;
+}
+
+// Takes a tab out of its split. keep: put it back in the sidebar right after the split (Arc's
+// "Separate from Split View"); otherwise the caller removes it. A split left with one tab dissolves.
+- (void)detachFromSplit:(ArcItem*)item keep:(BOOL)keep {
+  ArcItem* group = [self parentOfItem:item];
+  if (!group.isSplit) return;
+  ArcItem* holder = [self parentOfItem:group];
+  NSUInteger at = [holder.children indexOfObject:group];
+  [group.children removeObject:item];
+  group.splitFractions = nil;
+  if (keep && holder) [holder.children insertObject:item atIndex:at + 1];
+  if (group.children.count < 2 && holder) {
+    if (group.children.count == 1) holder.children[at] = group.children.firstObject;
+    else [holder.children removeObjectAtIndex:at];
+  }
+  [_outline reloadData];
+  for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
+  [self syncSplitState];
+  [self scheduleSave];
+}
+
 - (void)paneFocused:(int)browserId {
   ArcItem* item = [self itemForBrowser:browserId];
   if (!item || item == _shown || ![_splitItems containsObject:item]) return;
   _shown.lastActiveAt = [NSDate date];
   _shown = item;
   item.lastActiveAt = [NSDate date];
-  NSInteger row = [_outline rowForItem:item];
-  if (row >= 0) [_outline selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
+  [self syncSplitState];
+  [self selectSidebarRowFor:item];
 }
 
 - (void)beginSplit:(BOOL)horizontal {
@@ -714,7 +858,7 @@ static const CGFloat kPaneGap = 6;
   }
   _commandOpensLittle = NO;
   _splitBefore = NO;
-  _splitHorizontal = horizontal;
+  _pendingSplitHorizontal = horizontal;
   _commandOpensSplit = YES;
   [self showCommandBarForNewTab:YES];
 }
@@ -732,17 +876,23 @@ static const CGFloat kPaneGap = 6;
 - (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal before:(BOOL)before {
   NSString* url = ResolveCommandBarInput(input);
   if (!url || !_space || !_shown) return;
-  if (![_splitItems containsObject:_shown]) _splitItems = [NSMutableArray arrayWithObject:_shown];
+  [self syncSplitState];
   if (_splitItems.count >= 4) return;
-  _splitHorizontal = horizontal;
+  ArcItem* group = [self ensureSplitGroupFor:_shown];
+  if (!group) {
+    NSBeep();
+    return;
+  }
+  group.splitHorizontal = horizontal;
+  group.splitFractions = nil;
   ArcItem* tab = [ArcItem new];
   tab.itemID = NSUUID.UUID.UUIDString;
   tab.url = url;
   tab.children = [NSMutableArray array];
-  [_space.unpinned.children insertObject:tab atIndex:0];
-  [_outline reloadItem:_space.unpinned reloadChildren:YES];
-  NSUInteger at = [_splitItems indexOfObject:_shown] + (before ? 0 : 1);
-  [_splitItems insertObject:tab atIndex:at];
+  NSUInteger at = [group.children indexOfObject:_shown] + (before ? 0 : 1);
+  [group.children insertObject:tab atIndex:at];
+  [_outline reloadData];
+  for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
   [self scheduleSave];
   [self showItem:tab];
 }
@@ -758,18 +908,21 @@ static const CGFloat kPaneGap = 6;
   _splitBefore = YES;
 }
 - (IBAction)flipSplitLayout:(id)sender {
-  if (_splitItems.count < 2) return;
-  _splitHorizontal = !_splitHorizontal;
+  if (!_splitGroup) return;
+  _splitGroup.splitHorizontal = !_splitGroup.splitHorizontal;
+  [_outline reloadItem:_splitGroup];
   [self layoutPanes];
+  [self scheduleSave];
 }
 
 // Removes the focused pane from the split; its tab stays in the sidebar.
 - (IBAction)closeSplitPane:(id)sender {
   if (![_splitItems containsObject:_shown]) return;
   NSUInteger index = [_splitItems indexOfObject:_shown];
-  [_splitItems removeObjectAtIndex:index];
-  ArcItem* next = _splitItems[MIN(index, _splitItems.count - 1)];
-  if (_splitItems.count < 2) _splitItems = nil;
+  NSArray<ArcItem*>* rest = [_splitItems filteredArrayUsingPredicate:
+      [NSPredicate predicateWithBlock:^BOOL(ArcItem* t, NSDictionary*) { return t != self->_shown; }]];
+  ArcItem* next = rest[MIN(index, rest.count - 1)];
+  [self detachFromSplit:_shown keep:YES];
   [self showItem:next];
 }
 
@@ -976,10 +1129,8 @@ static ArcItem* NewSection(NSString* title) {
   }
   for (ArcItem* item in owned) {
     [self archiveItem:item space:space reason:@"spaceDeleted"];
-    [_splitItems removeObject:item];
     [self unloadItem:item];
   }
-  if (_splitItems.count < 2) _splitItems = nil;
   [_spaces removeObjectAtIndex:index];
   if (space == _space) {
     _space = nil;
@@ -1084,13 +1235,20 @@ static ArcItem* NewSection(NSString* title) {
 - (IBAction)clearToday:(id)sender {
   for (ArcItem* item in [_space.unpinned.children copy]) {
     if (item.isFolder) continue;
+    if (item.isSplit) {
+      for (ArcItem* pane in item.children) {
+        [self archiveItem:pane space:_space reason:@"manual"];
+        [self unloadItem:pane];
+        if (pane == _shown) _shown = nil;
+      }
+      [_space.unpinned.children removeObject:item];
+      continue;
+    }
     [self archiveItem:item space:_space reason:@"manual"];
-    [_splitItems removeObject:item];
     [self unloadItem:item];
     [_space.unpinned.children removeObject:item];
     if (item == _shown) _shown = nil;
   }
-  if (_splitItems.count < 2) _splitItems = nil;
   [_outline reloadItem:_space.unpinned reloadChildren:YES];
   [self scheduleSave];
   if (!_shown) {
@@ -1164,7 +1322,7 @@ static ArcItem* NewSection(NSString* title) {
     NSString* text = _commandField.stringValue;
     [self hideCommandBar];
     if (_commandOpensLittle) [self openLittleWindow:text];
-    else if (_commandOpensSplit) [self openInSplit:text horizontal:_splitHorizontal before:_splitBefore];
+    else if (_commandOpensSplit) [self openInSplit:text horizontal:_pendingSplitHorizontal before:_splitBefore];
     else if (_commandOpensNewTab) [self openInNewTab:text];
     else [self navigateCurrentTab:text];
     _commandOpensSplit = NO;
@@ -1284,10 +1442,8 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target) {
   NSArray<ArcItem*>* tabs = _space.allTabs;
   NSUInteger index = [tabs indexOfObject:item];
   BOOL isToday = Contains(_space.unpinned, item);
-  if ([_splitItems containsObject:item]) {
-    [_splitItems removeObject:item];
-    if (_splitItems.count < 2) _splitItems = nil;
-  }
+  // A closed pinned pane stays pinned (unloaded) next to its split; a Today pane is archived.
+  if ([self parentOfItem:item].isSplit) [self detachFromSplit:item keep:!isToday];
   if (isToday) [self archiveItem:item space:_space reason:@"manual"];  // Arc archives closed Today tabs
   [self unloadItem:item];
   // Pinned tabs and Favorites stay in the sidebar (Arc just unloads them); Today tabs are removed.
@@ -1361,10 +1517,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
   [_outline reloadData];
   for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
   if (parent.isFolder) [_outline expandItem:parent];
-  if (_shown) {
-    NSInteger row = [_outline rowForItem:_shown];
-    if (row >= 0) [_outline selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
-  }
+  if (_shown) [self selectSidebarRowFor:_shown];
   [self scheduleSave];
   return YES;
 }
@@ -1391,7 +1544,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
 
 // Arc's Cmd+D: Today tab -> bottom of Pinned; pinned tab (or one in a pinned folder) -> top of Today.
 - (IBAction)togglePin:(id)sender {
-  ArcItem* item = _shown;
+  ArcItem* item = _splitGroup ?: _shown;  // pinning a split pins the whole split
   if (!item) return;
   ArcItem* section = [self sectionContaining:item];
   if (section == _space.unpinned)
