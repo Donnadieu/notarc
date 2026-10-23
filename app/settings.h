@@ -9,6 +9,11 @@ extern NSString* const kSettingSearchEngine;           // "google" | "duckduckgo
 extern NSString* const kSettingPeekPinnedLinks;        // BOOL, default YES
 extern NSString* const kSettingPeekShiftClick;         // BOOL, default YES
 extern NSString* const kSettingExternalLinksLittle;    // BOOL, default YES (NO = open as a Today tab)
+// Self-test runs call SettingsUseMemoryOnly() so SettingSetBool never writes the user's real preferences.
+void SettingsUseMemoryOnly(void);
+void SettingSetBool(NSString* key, BOOL value);
+extern NSString* const kSettingShowToolbar;            // BOOL, default NO: address bar with the full URL above pages
+extern NSString* const kSettingShowSpaceHeader;        // BOOL, default YES: Space picker at the top of the sidebar
 extern NSString* const kSettingLittleArchiveHours;     // double; 0 = never. Default 6.
 
 void SettingsRegisterDefaults(void);

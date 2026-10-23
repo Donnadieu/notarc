@@ -159,6 +159,14 @@ NSString* CleanLinkURL(NSString* url);
 - (ArcItem*)newNestedFolderIn:(ArcItem*)folder;
 // Closing a Peek without opening it as a tab offers "Undo" (toast for 6 s, and Edit > Undo / Cmd+Z).
 - (IBAction)reopenClosedPeek:(id)sender;
+// View > Show Toolbar: back/forward/reload and the full address above the page (Enter goes to what you type).
+// View > Hide Space Header: hides the Space picker at the top of the sidebar. Both are remembered.
+- (IBAction)toggleToolbar:(id)sender;
+- (IBAction)toggleSpaceHeader:(id)sender;
+@property(nonatomic, readonly) BOOL toolbarShown;
+@property(nonatomic, readonly) BOOL spaceHeaderShown;
+@property(nonatomic, readonly) NSString* toolbarAddress;  // what the address field shows
+- (void)submitToolbarAddress:(NSString*)text;            // tests: same as typing it and pressing Enter
 @property(nonatomic, readonly) NSString* lastClosedPeekURL;
 @property(nonatomic, readonly) BOOL peekToastShown;
 // Session restore: each Space reopens on the tab it last showed. After a crash (restoreOpenTabs set
