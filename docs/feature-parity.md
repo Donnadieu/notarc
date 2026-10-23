@@ -87,7 +87,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 ## Library & data
 
 - [x] Archive with search
-- [x] Auto-archive (12h/24h/7d/30d/never, in Settings)
+- [x] Auto-archive (6h/12h/24h/7d/30d/never, in Settings)
 - [ ] Downloads list (missing)
 - [ ] History view (missing)
 - [x] Import from Arc (Spaces, tabs, archive, logins)
