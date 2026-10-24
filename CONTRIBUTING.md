@@ -33,26 +33,39 @@ NotArc is Objective-C++ (AppKit for the window and sidebar) on top of CEF (Chrom
 | File | What it does |
 |---|---|
 | `app/main.mm` | App startup, menus and keyboard shortcuts, the self-test |
-| `app/main_window.mm` | Main window: sidebar, Spaces, tabs, command bar, split view, Peek, archive |
-| `app/browser_client.mm` | CEF callbacks (titles, loading, find, focus, links and popups) |
+| `app/main_window.mm` | Main window: sidebar, Spaces, tabs, command bar and suggestions, split view, Peek, toolbar, themes, hover cards, media bar, crash and site prompts, Site Settings |
+| `app/browser_client.mm` | CEF callbacks (titles, loading, find, focus, links and popups, downloads, media, renderer crashes, permissions, links to other apps) |
 | `app/little_window.mm` | Little Window (also used for Peek) |
-| `app/sidebar_store.mm`, `app/archive_store.mm` | Saving the sidebar and archive as JSON |
+| `app/sidebar_store.mm`, `app/archive_store.mm` | Saving the sidebar and archive as JSON; the crash marker for session restore |
+| `app/history_store.mm`, `app/archive_window.mm` | History and the History/Archive windows |
+| `app/downloads.mm` | Downloads list and window |
+| `app/settings.mm` | Settings and the Settings window |
+| `app/updater.mm` | Update check, download, SHA-256 check and install |
 | `app/arc_import.mm`, `app/arc_cookies.mm` | One-time import of a user's Arc sidebar, archive and logins |
 | `docs/arc-data-format.md` | The files in a user's Arc data folder that the importer reads |
 
 ## Testing
 
-Run `build/Release/NotArc.app/Contents/MacOS/NotArc --selftest`. It drives the app (new tabs, split view, Peek,
-Spaces, shortcuts and more) using separate test data, prints `SELFTEST-...` lines and quits. Add a check there for
-the feature you build, and paste the relevant lines into your pull request. Also try the feature by hand.
+Run `build/Release/NotArc.app/Contents/MacOS/NotArc --selftest`. It takes about three minutes, drives the app
+(tabs, split view, Peek, Spaces, shortcuts, command bar, downloads, permissions and more), prints `SELFTEST-...` lines
+and quits. Every value should be 1 (or the expected count); a `0` means a check failed.
+
+The self-test is isolated from your own browsing: it uses separate "SelfTest" profiles and sidebar files, keeps
+setting changes in memory only, uses a throwaway key instead of the Keychain (so no Keychain prompts), and a fake
+camera and microphone. Keep it that way when you add checks.
+
+Add a check for the feature you build. Timed checks run side by side, so show your own tab with `showItem:` before
+asserting. Paste the relevant lines into your pull request, and try the feature by hand too.
 
 Changing the updater? Also run `scripts/test-update.sh`: it updates a throwaway copy of the app from the latest
 GitHub release and checks the copy was replaced. It never touches /Applications.
+
+Changing saving, launching or quitting? Also run `scripts/test-session-restore.sh`. It crashes a self-test copy on
+purpose (SIGKILL) and checks that the next launch reopens the open tabs. It only uses the self-test files.
 
 ## Pull requests
 
 - Branch from `main`; pull requests are squash-merged.
 - Describe what changed, how it matches Arc, and how you tested it.
-- Update `docs/feature-parity.md` if your change completes or advances an item.
-
-If you change saving, launching or quitting, also run `./scripts/test-session-restore.sh`. It crashes a self-test copy on purpose (SIGKILL) and checks that the next launch reopens the open tabs. It only uses the self-test files.
+- Update `docs/feature-parity.md` if your change completes or advances an item, and add a line to `CHANGELOG.md`
+  for user-visible changes.
