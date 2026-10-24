@@ -128,6 +128,8 @@
   [view addItemWithTitle:@"Show Toolbar" action:@selector(toggleToolbar:) keyEquivalent:@"s"]
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Hide Space Header" action:@selector(toggleSpaceHeader:) keyEquivalent:@""];
+  [view addItemWithTitle:@"Site Settings..." action:@selector(showSiteSettings:) keyEquivalent:@"i"]
+      .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Reset Site Permissions" action:@selector(resetSitePermissions:) keyEquivalent:@""];
   [view addItemWithTitle:@"Mute / Unmute Tab" action:@selector(toggleMuteCurrentTab:) keyEquivalent:@"m"]
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
@@ -971,6 +973,34 @@
           BOOL stayed = [t.url hasSuffix:@"dummy.pdf"];
           BOOL viewer = [title hasPrefix:@"pdf:application/pdf"];
           std::printf("SELFTEST-PDF viewer=%d notDownloaded=%d stayed=%d title=%s\n", viewer, notDownloaded, stayed, title.UTF8String);
+        });
+      });
+    });
+    // Site settings popover: rows reflect remembered answers; changing one is stored; clear cookies works from it.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openInNewTab:@"https://example.org/site-settings"];
+      ArcItem* t = w.shownItem;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w showItem:t];
+        [w resetSitePermissions:nil];
+        [w setSitePermission:@"camera" value:@NO forOrigin:@"https://example.org"];
+        [w showSiteSettings:nil];
+        BOOL shown = w.siteSettingsShown;
+        NSArray* rows = w.siteSettingsRows;
+        BOOL rowsOK = [rows containsObject:@"camera=block"] && [rows containsObject:@"microphone=ask"] &&
+                      [rows containsObject:@"secure=1"];
+        [w setSitePermission:@"location" value:@YES forOrigin:@"https://example.org"];
+        BOOL stored = [[w sitePermissionsForOrigin:@"https://example.org"][@"location"] boolValue] &&
+                      [w.siteSettingsRows containsObject:@"location=allow"];
+        [w setSitePermission:@"location" value:nil forOrigin:@"https://example.org"];
+        BOOL backToAsk = [w.siteSettingsRows containsObject:@"location=ask"];
+        [w showSiteSettings:nil];  // toggles closed (animated)
+        [w resetSitePermissions:nil];
+        BOOL cleared = [w sitePermissionsForOrigin:@"https://example.org"].count == 0;
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          std::printf("SELFTEST-SITESETTINGS shown=%d rows=%d stored=%d backToAsk=%d closed=%d reset=%d\n", shown, rowsOK, stored,
+                      backToAsk, !w.siteSettingsShown, cleared);
         });
       });
     });

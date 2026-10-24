@@ -213,6 +213,8 @@ static const NSUInteger kMaxSuggestions = 8;
   NSView* _toolbar;
   NSMutableArray<NSDictionary*>* _sitePrompts;  // queue; first one is showing
   NSAlert* _siteAlert;
+  NSPopover* _sitePopover;
+  NSString* _siteSettingsOrigin;
   NSTextField* _address;
   NSTimer* _toastTimer;
   NSString* _lastClosedPeekURL;
@@ -1142,6 +1144,121 @@ static NSString* OriginKey(NSString* origin) {
        {CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS, CEF_CONTENT_SETTING_TYPE_GEOLOCATION, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC,
         CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA, CEF_CONTENT_SETTING_TYPE_CLIPBOARD_READ_WRITE})
     ctx->SetContentSetting(o, o, type, CEF_CONTENT_SETTING_VALUE_DEFAULT);
+}
+
+static NSArray<NSArray*>* SiteSettingRows() {
+  return @[
+    @[ @"camera", @"Camera", @(CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA) ],
+    @[ @"microphone", @"Microphone", @(CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC) ],
+    @[ @"location", @"Location", @(CEF_CONTENT_SETTING_TYPE_GEOLOCATION) ],
+    @[ @"notifications", @"Notifications", @(CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS) ],
+    @[ @"clipboard", @"Clipboard", @(CEF_CONTENT_SETTING_TYPE_CLIPBOARD_READ_WRITE) ],
+  ];
+}
+
+- (void)setSitePermission:(NSString*)name value:(NSNumber*)allow forOrigin:(NSString*)origin {
+  NSString* key = OriginKey(origin);
+  NSMutableDictionary* all = [SettingObject(kSettingSitePermissions) mutableCopy] ?: [NSMutableDictionary dictionary];
+  NSMutableDictionary* site = [all[key] mutableCopy] ?: [NSMutableDictionary dictionary];
+  if (allow) site[name] = allow;
+  else [site removeObjectForKey:name];
+  if (site.count) all[key] = site;
+  else [all removeObjectForKey:key];
+  SettingSetObject(kSettingSitePermissions, all);
+  // Keep Chromium's own stored answer in step, so an earlier grant can't bypass a new Block.
+  auto it = _browsers.find(_shown.browserId);
+  if (it == _browsers.end()) return;
+  for (NSArray* r in SiteSettingRows())
+    if ([r[0] isEqualToString:name]) {
+      CefString o([key stringByAppendingString:@"/"].UTF8String);
+      it->second->GetHost()->GetRequestContext()->SetContentSetting(
+          o, o, (cef_content_setting_types_t)[r[2] intValue],
+          !allow ? CEF_CONTENT_SETTING_VALUE_DEFAULT : (allow.boolValue ? CEF_CONTENT_SETTING_VALUE_ALLOW : CEF_CONTENT_SETTING_VALUE_BLOCK));
+    }
+}
+
+- (BOOL)siteSettingsShown { return _sitePopover.isShown; }
+
+- (NSArray<NSString*>*)siteSettingsRows {
+  if (!_siteSettingsOrigin) return @[];
+  NSDictionary* saved = [self sitePermissionsForOrigin:_siteSettingsOrigin];
+  NSMutableArray* out = [NSMutableArray array];
+  for (NSArray* r in SiteSettingRows()) {
+    NSNumber* v = saved[r[0]];
+    [out addObject:[NSString stringWithFormat:@"%@=%@", r[0], !v ? @"ask" : (v.boolValue ? @"allow" : @"block")]];
+  }
+  [out addObject:[NSString stringWithFormat:@"secure=%d", [_siteSettingsOrigin hasPrefix:@"https://"]]];
+  return out;
+}
+
+- (IBAction)showSiteSettings:(id)sender {
+  if (_sitePopover.isShown) {
+    [_sitePopover close];
+    return;
+  }
+  NSString* url = _shown.url;
+  NSURL* u = url.length ? [NSURL URLWithString:url] : nil;
+  if (!u.host.length) {
+    NSBeep();
+    return;
+  }
+  _siteSettingsOrigin = OriginKey(url);
+  BOOL secure = [u.scheme isEqualToString:@"https"];
+  NSTextField* host = [NSTextField labelWithString:[u.host hasPrefix:@"www."] ? [u.host substringFromIndex:4] : u.host];
+  host.font = [NSFont boldSystemFontOfSize:14];
+  NSImageView* lock = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:secure ? @"lock.fill" : @"exclamationmark.triangle"
+                                                             accessibilityDescription:nil]];
+  lock.contentTintColor = secure ? NSColor.secondaryLabelColor : NSColor.systemOrangeColor;
+  NSTextField* sec = [NSTextField labelWithString:secure ? @"Connection is secure" : @"Connection is not secure"];
+  sec.textColor = NSColor.secondaryLabelColor;
+  sec.font = [NSFont systemFontOfSize:11];
+  NSMutableArray* views = [NSMutableArray arrayWithObjects:host, [NSStackView stackViewWithViews:@[ lock, sec ]], nil];
+  NSDictionary* saved = [self sitePermissionsForOrigin:_siteSettingsOrigin];
+  for (NSArray* r in SiteSettingRows()) {
+    NSTextField* label = [NSTextField labelWithString:r[1]];
+    [label.widthAnchor constraintEqualToConstant:110].active = YES;
+    NSPopUpButton* pop = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+    [pop addItemsWithTitles:@[ @"Ask", @"Allow", @"Block" ]];
+    NSNumber* v = saved[r[0]];
+    [pop selectItemAtIndex:!v ? 0 : (v.boolValue ? 1 : 2)];
+    pop.identifier = r[0];
+    pop.target = self;
+    pop.action = @selector(sitePermissionChosen:);
+    [views addObject:[NSStackView stackViewWithViews:@[ label, pop ]]];
+  }
+  NSButton* clear = [NSButton buttonWithTitle:@"Clear Cookies and Refresh" target:self action:@selector(siteSettingsClearCookies:)];
+  NSButton* reset = [NSButton buttonWithTitle:@"Reset Permissions" target:self action:@selector(siteSettingsReset:)];
+  [views addObject:[NSStackView stackViewWithViews:@[ clear, reset ]]];
+  NSStackView* stack = [NSStackView stackViewWithViews:views];
+  stack.orientation = NSUserInterfaceLayoutOrientationVertical;
+  stack.alignment = NSLayoutAttributeLeading;
+  stack.spacing = 8;
+  stack.edgeInsets = NSEdgeInsetsMake(14, 16, 14, 16);
+  NSViewController* vc = [NSViewController new];
+  vc.view = stack;
+  stack.frame = NSMakeRect(0, 0, stack.fittingSize.width, stack.fittingSize.height);
+  _sitePopover = [NSPopover new];
+  _sitePopover.behavior = NSPopoverBehaviorTransient;
+  _sitePopover.contentViewController = vc;
+  // Anchor: the address field when the toolbar is shown, else the top-left of the page.
+  NSView* anchor = _toolbar.hidden ? _content : _address;
+  NSRect r = _toolbar.hidden ? NSMakeRect(8, NSMaxY(_content.bounds) - 4, 1, 1) : NSMakeRect(8, 0, 20, _address.bounds.size.height);
+  [_sitePopover showRelativeToRect:r ofView:anchor preferredEdge:_toolbar.hidden ? NSRectEdgeMinY : NSRectEdgeMaxY];
+}
+
+- (void)sitePermissionChosen:(NSPopUpButton*)pop {
+  NSInteger i = pop.indexOfSelectedItem;
+  [self setSitePermission:pop.identifier value:i == 0 ? nil : @(i == 1) forOrigin:_siteSettingsOrigin];
+}
+
+- (void)siteSettingsClearCookies:(id)sender {
+  [_sitePopover close];
+  [self clearCookiesAndRefresh:nil];
+}
+
+- (void)siteSettingsReset:(id)sender {
+  [_sitePopover close];
+  [self resetSitePermissions:nil];
 }
 
 - (void)showCrashedViewFor:(ArcItem*)item status:(int)status {

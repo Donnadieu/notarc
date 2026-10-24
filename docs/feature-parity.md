@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-35 done, 13 partial, 32 not started or out of scope, of 80 items.
+36 done, 13 partial, 31 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -71,7 +71,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Boosts: custom CSS/JS per site, zap elements, boost editor (missing)
 - [ ] Translate page (missing)
 - [ ] Ad blocking / content blocking (missing)
-- [ ] Site control center (per-site permissions, clear cookies and refresh) (missing)
+- [x] Site control center (per-site permissions, clear cookies and refresh) (View > Site Settings, Cmd+Shift+I: connection security, Ask/Allow/Block for camera, mic, location, notifications, clipboard; Clear Cookies and Refresh; Reset Permissions)
 
 ## Live content
 
