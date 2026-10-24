@@ -294,6 +294,11 @@
   if (crashedLastTime) std::fprintf(stderr, "NotArc didn't quit cleanly last time; reopening open tabs\n");
   self.window.restoreOpenTabs = crashedLastTime;
   [self.window saveSidebarNow];  // first launch: persist the import immediately
+  if (self.selfTest) {
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    self.window.window.alphaValue = 0.01;
+    self.window.window.ignoresMouseEvents = YES;
+  }
   [self.window showWindow:nil];
   [self.window createBrowsers];
   for (NSString* url in self.pendingURLs) {
@@ -301,9 +306,18 @@
     else [self.window openInNewTab:url];
   }
   self.pendingURLs = nil;
-  [NSApp activateIgnoringOtherApps:YES];
+  if (!self.selfTest) [NSApp activateIgnoringOtherApps:YES];
 
   if (self.selfTest) {
+    // Hidden run: no Dock icon, never activates, every window 1% opaque (invisible, but not "occluded", so media still plays) and click-through,
+    // so a test never shows up on screen or takes focus. Chromium is told not to throttle hidden windows.
+    [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
+    [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer*) {
+      for (NSWindow* win in NSApp.windows) {
+        if (win.alphaValue > 0.011) win.alphaValue = 0.01;
+        win.ignoresMouseEvents = YES;
+      }
+    }];
     [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
     if (!self.selfTestReload) [self runSelfTestActions];
     if (self.selfTestReload) {
@@ -343,11 +357,6 @@
     else {
       std::printf("SELFTEST-BASICS tabNeverLoaded=1 live=%d loading=%d url=%s itemURL=%s\n", [w hasLiveBrowser], [w isLoading],
                   [w currentURL].UTF8String, w.shownItem.url.UTF8String ?: "-");
-      // Diagnostic: does an explicit load recover the stuck tab?
-      [w navigateCurrentTab:@"https://example.com"];
-      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        std::printf("SELFTEST-STUCKDIAG afterReload loading=%d url=%s\n", [w isLoading], [w currentURL].UTF8String);
-      });
       [self runRemainingSelfTestActions];
     }
     return;
@@ -692,8 +701,9 @@
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Warc-retain-cycles"  // broken by check = nil
         check = ^{
+          if (w.shownItem != m) [w showItem:m];  // a hidden test window plays only the shown tab promptly
           [w pollMediaNow];
-          if (!m.mediaPlaying && ++waits < 24) {
+          if (!m.mediaPlaying && ++waits < 60) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), check);
             return;
           }
@@ -1331,11 +1341,21 @@ int main(int argc, char* argv[]) {
   static char mockKeychain[] = "--use-mock-keychain";
   static char autoplay[] = "--autoplay-policy=no-user-gesture-required";  // media test plays without a click
   static char fakeDevices[] = "--use-fake-device-for-media-stream";  // site-prompt test never touches a real mic
+  static char noOcclusion[] = "--disable-backgrounding-occluded-windows";  // hidden test windows still render
+  static char noBackground[] = "--disable-renderer-backgrounding";
+  static char noMediaSuspend[] = "--disable-background-media-suspend";  // media test plays in the hidden window
+  static char noTimerThrottle[] = "--disable-background-timer-throttling";
+  static char noMacOcclusion[] = "--disable-features=MacWebContentsOcclusion";  // pages in hidden test windows stay "visible"
   for (int i = 1; i < argc; ++i)
     if (std::string(argv[i]) == "--selftest" || std::string(argv[i]) == "--selftest-reload") {
       args.push_back(mockKeychain);
       args.push_back(autoplay);
       args.push_back(fakeDevices);
+      args.push_back(noOcclusion);
+      args.push_back(noBackground);
+      args.push_back(noMediaSuspend);
+      args.push_back(noTimerThrottle);
+      args.push_back(noMacOcclusion);
       break;
     }
   args.push_back(nullptr);
