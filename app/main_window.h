@@ -168,6 +168,12 @@ NSString* CleanLinkURL(NSString* url);
 @property(nonatomic, readonly) NSString* pendingSitePrompt;  // tests: kind:origin of the sheet showing, or nil
 - (void)answerSitePrompt:(BOOL)allow remember:(BOOL)remember;  // tests: same as clicking the sheet
 - (IBAction)resetSitePermissions:(id)sender;
+// View > Site Settings (Cmd+Shift+I): popover for the current site with its connection security, a row per
+// common permission (Ask / Allow / Block), Clear Cookies and Refresh, and Reset Permissions.
+- (IBAction)showSiteSettings:(id)sender;
+@property(nonatomic, readonly) BOOL siteSettingsShown;
+- (NSArray<NSString*>*)siteSettingsRows;  // tests: "name=ask|allow|block" for each row, then "secure=0|1"
+- (void)setSitePermission:(NSString*)name value:(NSNumber*)allow forOrigin:(NSString*)origin;  // nil = ask
 - (NSDictionary*)sitePermissionsForOrigin:(NSString*)origin;
 // Command bar suggestions. Each is @{kind, title, subtitle, key} plus the object it acts on; kinds:
 // "go" (typed text), "tab" (switch to an open/pinned tab in any Space), "space", "history", "action" (menu
