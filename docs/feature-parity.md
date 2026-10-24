@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-34 done, 13 partial, 33 not started or out of scope, of 80 items.
+35 done, 13 partial, 32 not started or out of scope, of 80 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
@@ -106,7 +106,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 - [ ] Settings window (all preferences) (partial: search engine, auto-archive, Peek and Little Window link options; profiles, appearance, Max and advanced panes missing)
 - [ ] Keyboard shortcuts with user overrides (missing)
 - [ ] App icon choice, sound effects, toasts (missing)
-- [ ] PDF viewer (missing)
+- [x] PDF viewer (Chromium's built-in viewer: PDFs open in the tab with zoom, search, print and download)
 - [ ] AppleScript support for windows and tabs (missing)
 - [ ] Two-finger swipe back/forward and overscroll (missing)
 - [ ] Web notifications, permission prompts, external app (protocol) dialogs (partial: sheets for camera, mic, location, notifications and other permissions, plus "Open <App>?" for links to other apps; "Remember for this site"; View > Reset Site Permissions; showing web notifications in macOS Notification Center not verified)

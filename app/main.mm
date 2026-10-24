@@ -956,6 +956,24 @@
         });
       });
     });
+    // PDFs open in the built-in viewer (not downloaded).
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 80 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSUInteger downloadsBefore = [DownloadManager shared].entries.count;
+      [w openInNewTab:@"https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf"];
+      ArcItem* t = w.shownItem;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 6 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w showItem:t];
+        [w runJS:@"document.title = 'pdf:' + document.contentType + ':' + document.querySelectorAll('embed,iframe').length" inItem:t];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          NSString* title = t.liveTitle ?: @"-";
+          BOOL notDownloaded = [DownloadManager shared].entries.count == downloadsBefore;
+          BOOL stayed = [t.url hasSuffix:@"dummy.pdf"];
+          BOOL viewer = [title hasPrefix:@"pdf:application/pdf"];
+          std::printf("SELFTEST-PDF viewer=%d notDownloaded=%d stayed=%d title=%s\n", viewer, notDownloaded, stayed, title.UTF8String);
+        });
+      });
+    });
     // Paste and Go, Ctrl+Tab to the recent tab, Cmd+9 = last tab.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 34 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
