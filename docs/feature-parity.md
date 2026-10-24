@@ -2,7 +2,8 @@
 
 36 done, 13 partial, 31 not started or out of scope, of 80 items.
 
-Arc behaviour NotArc needs to match. Each item is implemented from scratch.
+Arc behaviour NotArc needs to match. Each item is implemented from scratch. Status as of NotArc 0.11.0; see
+[CHANGELOG.md](../CHANGELOG.md) for what each release added.
 
 ## Sidebar & tabs
 
@@ -34,7 +35,7 @@ Arc behaviour NotArc needs to match. Each item is implemented from scratch.
 
 ## Command bar & navigation
 
-- [x] Command bar: new tab, go to URL, search (done (basic))
+- [x] Command bar: new tab, go to URL, search (Cmd+T new tab, Cmd+L current tab)
 - [x] Suggestions: open tabs, history, bookmarks, actions, top domains (open and pinned tabs in every Space, Spaces, history, menu actions, top sites when empty; arrow keys + Enter)
 - [ ] Search engine choice, search suggestions (partial: engine choice done; suggestions missing)
 - [x] Switch to a recent tab (Ctrl+Tab)
