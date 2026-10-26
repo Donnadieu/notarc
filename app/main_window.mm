@@ -170,10 +170,15 @@ static BOOL IsDark(NSView* v) {
 @interface SidebarRowView : NSTableRowView
 @property(nonatomic) BOOL hovered;
 @property(nonatomic) BOOL multi;
+@property(nonatomic) BOOL pressed;
+@property(nonatomic) BOOL separatorAbove;  // Arc's hairline between Pinned and Today
 @end
 @implementation SidebarRowView
 - (NSColor*)fill {
   BOOL dark = IsDark(self);
+  if (self.pressed)  // Arc: TabCellBackgroundPressed
+    return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.065]
+                : [NSColor colorWithSRGBRed:0.055 green:0.059 blue:0.063 alpha:0.065];
   if (self.selected && self.multi)
     return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.10] : [NSColor colorWithWhite:0 alpha:0.10];
   if (self.selected) return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.20] : [NSColor colorWithWhite:1 alpha:0.85];
@@ -201,13 +206,19 @@ static BOOL IsDark(NSView* v) {
 }
 // The row view includes the 2 pt gap between rows; the pill itself is 36 pt, as in Arc.
 - (NSRect)pillRect { return NSInsetRect(self.bounds, 0, (self.bounds.size.height - kRowHeight) / 2); }
-- (void)drawBackgroundInRect:(NSRect)r { if (!self.selected) [self drawPill]; }
+- (void)drawBackgroundInRect:(NSRect)r {
+  if (self.separatorAbove) {  // Arc: SidebarSeparator, 15% white (dark) / black (light)
+    [(IsDark(self) ? [NSColor colorWithWhite:1 alpha:0.15] : [NSColor colorWithWhite:0 alpha:0.15]) setFill];
+    NSRectFill(NSMakeRect(10, self.flipped ? 0 : self.bounds.size.height - 1, self.bounds.size.width - 20, 1));
+  }
+  if (!self.selected) [self drawPill];
+}
 - (void)drawSelectionInRect:(NSRect)r { [self drawPill]; }
 - (BOOL)isEmphasized { return NO; }
 - (NSString*)styleDescription {  // tests
   NSColor* c = [[self fill] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
-  return [NSString stringWithFormat:@"h=%.0f r=%.0f sel=%d hover=%d alpha=%.2f", [self pillRect].size.height, kRowRadius,
-                                    self.selected, self.hovered, c ? c.alphaComponent : 0];
+  return [NSString stringWithFormat:@"h=%.0f r=%.0f sel=%d hover=%d pressed=%d sep=%d alpha=%.2f", [self pillRect].size.height, kRowRadius,
+                                    self.selected, self.hovered, self.pressed, self.separatorAbove, c ? c.alphaComponent : 0];
 }
 @end
 
@@ -215,6 +226,18 @@ static BOOL IsDark(NSView* v) {
 @interface SidebarOutlineView : NSOutlineView
 @end
 @implementation SidebarOutlineView
+// Arc has no disclosure triangles: folders show their own chevron and toggle on click.
+- (NSRect)frameOfOutlineCellAtRow:(NSInteger)row { return NSZeroRect; }
+- (void)mouseDown:(NSEvent*)e {
+  NSInteger row = [self rowAtPoint:[self convertPoint:e.locationInWindow fromView:nil]];
+  SidebarRowView* rv = row >= 0 ? (SidebarRowView*)[self rowViewAtRow:row makeIfNecessary:NO] : nil;
+  if (![rv isKindOfClass:SidebarRowView.class]) rv = nil;
+  rv.pressed = YES;
+  rv.needsDisplay = YES;
+  [super mouseDown:e];  // tracks until mouse up
+  rv.pressed = NO;
+  rv.needsDisplay = YES;
+}
 - (NSRect)frameOfCellAtColumn:(NSInteger)column row:(NSInteger)row {
   NSRect f = [super frameOfCellAtColumn:column row:row];
   if ([self levelForRow:row] >= 1) {
@@ -450,6 +473,8 @@ static BOOL IsDark(NSView* v) {
   _outline.allowsMultipleSelection = YES;
   _outline.dataSource = self;
   _outline.delegate = self;
+  _outline.target = self;
+  _outline.action = @selector(sidebarClicked:);
   [_outline registerForDraggedTypes:@[ kSidebarItemPasteboardType ]];
   [_outline addTrackingArea:[[NSTrackingArea alloc]
                                 initWithRect:NSZeroRect
@@ -1038,7 +1063,9 @@ NSString* CleanLinkURL(NSString* url) {
     rv.identifier = @"row";
   }
   rv.hovered = NO;
+  rv.pressed = NO;
   rv.multi = ov.selectedRowIndexes.count > 1;
+  rv.separatorAbove = item == _space.unpinned && _space.pinned.children.count > 0;
   return rv;
 }
 
@@ -1056,6 +1083,31 @@ NSString* CleanLinkURL(NSString* url) {
     if (s.hovered != h) { s.hovered = h; s.needsDisplay = YES; }
   }];
 }
+- (void)pressSidebarItem:(ArcItem*)item down:(BOOL)down {  // tests
+  NSInteger row = [_outline rowForItem:item];
+  SidebarRowView* rv = row >= 0 ? (SidebarRowView*)[_outline rowViewAtRow:row makeIfNecessary:YES] : nil;
+  if ([rv isKindOfClass:SidebarRowView.class]) rv.pressed = down;
+}
+// Single click on a folder opens or closes it, as in Arc.
+- (void)sidebarClicked:(id)sender {
+  NSInteger row = _outline.clickedRow;
+  ArcItem* a = row >= 0 ? [_outline itemAtRow:row] : nil;
+  if (a.isFolder) [self toggleFolder:a];
+}
+- (void)toggleFolder:(ArcItem*)folder {
+  if ([_outline isItemExpanded:folder]) [_outline collapseItem:folder];
+  else [_outline expandItem:folder];
+  [_outline reloadItem:folder];  // chevron direction
+}
+- (BOOL)folderExpanded:(ArcItem*)folder { return [_outline isItemExpanded:folder]; }
+- (NSString*)folderChevronForItem:(ArcItem*)folder {  // tests: "right" / "down" / ""
+  NSInteger row = [_outline rowForItem:folder];
+  NSTableCellView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
+  NSImageView* chev = [cell viewWithTag:77];
+  if (!chev || chev.hidden) return @"";
+  return [chev.image.accessibilityDescription isEqualToString:@"Collapse"] ? @"down" : @"right";
+}
+- (BOOL)stockDisclosureShown { return !NSIsEmptyRect([_outline frameOfOutlineCellAtRow:0]); }  // tests
 - (void)hoverSidebarItem:(ArcItem*)item { [self setSidebarHoverRow:item ? [_outline rowForItem:item] : -1]; }  // tests
 
 - (BOOL)outlineView:(NSOutlineView*)ov shouldSelectItem:(id)item {
@@ -1078,6 +1130,19 @@ NSString* CleanLinkURL(NSString* url) {
     label.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin | NSViewMaxYMargin;
     [cell addSubview:label];
     cell.textField = label;
+    NSImageView* chev = [[NSImageView alloc] initWithFrame:NSMakeRect(col.width - 24, 12, 12, 12)];
+    chev.tag = 77;
+    chev.autoresizingMask = NSViewMinXMargin | NSViewMinYMargin | NSViewMaxYMargin;
+    chev.contentTintColor = NSColor.tertiaryLabelColor;
+    chev.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:9 weight:NSFontWeightSemibold];
+    [cell addSubview:chev];
+  }
+  NSImageView* chev = [cell viewWithTag:77];
+  chev.hidden = !a.isFolder;
+  if (a.isFolder) {
+    BOOL open = [ov isItemExpanded:a];
+    chev.image = [NSImage imageWithSystemSymbolName:open ? @"chevron.down" : @"chevron.right"
+                           accessibilityDescription:open ? @"Collapse" : @"Expand"];
   }
   NSString* title = a.displayTitle;
   if (a.isSplit) {
@@ -1095,7 +1160,7 @@ NSString* CleanLinkURL(NSString* url) {
   lf.origin.x = a.isSection ? 10 : 34;
   lf.size.width = cell.bounds.size.width - lf.origin.x - 8;
   cell.textField.frame = lf;
-  NSString* symbol = a.isSection ? nil : (a.isFolder ? @"folder" : @"globe");
+  NSString* symbol = a.isSection ? nil : (a.isFolder ? ([ov isItemExpanded:a] ? @"folder.fill" : @"folder") : @"globe");
   if (a.isSplit) symbol = a.splitHorizontal ? @"rectangle.split.1x2" : @"rectangle.split.2x1";
   if (a.crashed) symbol = @"exclamationmark.triangle";
   else if (a.audioMuted) symbol = @"speaker.slash.fill";
