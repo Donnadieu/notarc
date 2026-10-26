@@ -3,7 +3,7 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.13.0
 - Boosts: customise any site (View > Boost This Site..., Cmd+Opt+B): tint its colours, change the font, text size
   and case, zap elements you don't want (View > Zap Element), and add your own CSS and JavaScript. Boosts are saved
   on your Mac and apply to the site and its subdomains every time a page loads; turn one off from the View menu.
