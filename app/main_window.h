@@ -239,6 +239,8 @@ NSString* CleanLinkURL(NSString* url);
 - (NSString*)folderChevronForItem:(ArcItem*)folder;       // tests
 - (BOOL)stockDisclosureShown;                             // tests
 - (NSString*)commandBarStyle;
+- (void)setColorScheme:(NSString*)scheme forSpace:(ArcSpace*)space;  // nil/"auto", "light", "dark"
+- (BOOL)sidebarIsDark;                       // tests
 - (NSString*)lastSpaceSlide;   // tests
 - (NSUInteger)cardPopCount;    // tests
 - (void)showCommandBarForNewTab:(BOOL)newTab;
