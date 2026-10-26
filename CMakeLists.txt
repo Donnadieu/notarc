@@ -28,6 +28,8 @@ set(APP_SRCS
   app/boost_store.mm
   app/easel.h
   app/easel.mm
+  app/live_folder.h
+  app/live_folder.mm
   app/archive_store.mm
   app/archive_window.h
   app/archive_window.mm

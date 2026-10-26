@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-40 done, 19 partial, 28 not started or out of scope, of 87 items.
+40 done, 20 partial, 27 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -86,7 +86,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 
 ## Live content
 
-- [ ] Live Folders (GitHub PRs/issues, RSS etc. as auto-updating folders) (missing) (#55)
+- [ ] Live Folders (GitHub PRs/issues, RSS etc. as auto-updating folders) (partial: + menu > New Live Folder... from an RSS/Atom feed or a public GitHub repository's open pull requests or issues; refreshes every 15 minutes and on demand, keeps open tabs, adds new entries and drops old ones; Remove from Live Folder keeps an entry from coming back; saved with the sidebar. Missing: Arc's automatic GitHub folder for your own PRs (needs a GitHub sign-in), YouTube and other sources, unread badges) (#55)
 - [ ] Calendar integration: next meeting, meeting link (missing) (#56)
 - [ ] Notion / Slack / Gmail integrations in Favorites (missing) (#57)
 

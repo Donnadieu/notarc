@@ -27,6 +27,12 @@ static NSDictionary* EncodeItem(ArcItem* item) {
   d[@"folder"] = @(item.isFolder);
   if (item.noteID.length) d[@"note"] = item.noteID;
   if (item.easelID.length) d[@"easel"] = item.easelID;
+  if (item.liveKind.length && item.liveSource.length) {
+    NSMutableDictionary* live = [@{@"kind" : item.liveKind, @"source" : item.liveSource} mutableCopy];
+    if (item.liveRefreshedAt) live[@"refreshed"] = @(item.liveRefreshedAt.timeIntervalSinceReferenceDate);
+    if (item.liveDismissed.count) live[@"dismissed"] = item.liveDismissed;
+    d[@"live"] = live;
+  }
   if (item.isSplit) {
     d[@"split"] = @YES;
     d[@"horizontal"] = @(item.splitHorizontal);
@@ -53,6 +59,16 @@ static ArcItem* DecodeItem(NSDictionary* d, int depth) {
   item.isSplit = [d[@"split"] boolValue];
   if ([d[@"note"] isKindOfClass:NSString.class]) item.noteID = d[@"note"];
   if ([d[@"easel"] isKindOfClass:NSString.class] && [d[@"easel"] rangeOfString:@"/"].location == NSNotFound) item.easelID = d[@"easel"];
+  NSDictionary* live = [d[@"live"] isKindOfClass:NSDictionary.class] ? d[@"live"] : nil;
+  if ([live[@"kind"] isKindOfClass:NSString.class] && [live[@"source"] isKindOfClass:NSString.class] && item.isFolder) {
+    item.liveKind = live[@"kind"];
+    item.liveSource = live[@"source"];
+    if ([live[@"refreshed"] isKindOfClass:NSNumber.class])
+      item.liveRefreshedAt = [NSDate dateWithTimeIntervalSinceReferenceDate:[live[@"refreshed"] doubleValue]];
+    item.liveDismissed = [NSMutableArray array];
+    if ([live[@"dismissed"] isKindOfClass:NSArray.class])
+      for (id u in live[@"dismissed"]) if ([u isKindOfClass:NSString.class]) [item.liveDismissed addObject:u];
+  }
   item.splitHorizontal = [d[@"horizontal"] boolValue];
   if ([d[@"fractions"] isKindOfClass:NSArray.class]) item.splitFractions = d[@"fractions"];
   item.children = [NSMutableArray array];
