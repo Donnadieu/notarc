@@ -7,6 +7,7 @@
 #import "app/arc_cookies.h"
 #import "app/little_window.h"
 #import "app/settings.h"
+#import "app/boost_store.h"
 
 #include <cstdio>
 #include <atomic>
@@ -391,6 +392,11 @@ static BOOL IsDark(NSView* v) {
   NSView* _spaceHeader;            // Arc's Space title row: icon + name, "..." menu
   NSTextField* _spaceHeaderTitle;
   NSString* _lastSpaceSlide;   // tests: "left" / "right" / "none"
+  NSMutableArray<Boost*>* _boosts;
+  NSPanel* _boostPanel;
+  Boost* _boostEditing;
+  NSMutableDictionary<NSString*, NSControl*>* _boostControls;
+  int _zapBrowser;
   NSUInteger _cardPops;        // tests
 }
 
@@ -938,6 +944,12 @@ NSString* CleanLinkURL(NSString* url) {
   _mediaTimer = [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer*) { [weakSelf pollMediaNow]; }];
   _client->set_renderer_callback([weakSelf](int browserId, int kind, int status) {
     [weakSelf browser:browserId rendererEvent:kind status:status];
+  });
+  _client->set_load_end_callback([weakSelf](int browserId, const std::string& url) {
+    [weakSelf applyBoostToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
+  });
+  _client->set_zap_callback([weakSelf](int browserId, const std::string& selector) {
+    [weakSelf handleZapSelector:[NSString stringWithUTF8String:selector.c_str()] browser:browserId];
   });
   _client->set_permission_callback([weakSelf](int browserId, int requestId, const std::string& origin, uint32_t perms) {
     [weakSelf browser:browserId permissionRequest:requestId origin:[NSString stringWithUTF8String:origin.c_str()]
@@ -2398,9 +2410,13 @@ static NSString* SiteOf(NSString* url) {
   [self hideToast];
   NSTextField* label = [NSTextField labelWithString:text];
   label.textColor = NSColor.whiteColor;
-  NSButton* b = [NSButton buttonWithTitle:action target:self action:selector];
-  b.bezelStyle = NSBezelStyleRounded;
-  NSStackView* stack = [NSStackView stackViewWithViews:@[ label, b ]];
+  NSMutableArray* views = [NSMutableArray arrayWithObject:label];
+  if (action.length) {
+    NSButton* b = [NSButton buttonWithTitle:action target:self action:selector];
+    b.bezelStyle = NSBezelStyleRounded;
+    [views addObject:b];
+  }
+  NSStackView* stack = [NSStackView stackViewWithViews:views];
   stack.edgeInsets = NSEdgeInsetsMake(6, 14, 6, 8);
   stack.spacing = 10;
   stack.wantsLayer = YES;
@@ -2584,6 +2600,273 @@ static ArcItem* NewSection(NSString* title) {
 }
 
 // Theme editor: preset palettes or two custom colours, plus intensity. Changes preview live; Cancel reverts.
+// MARK: Boosts (Arc: per-site colour, font, text size, case, zaps, custom CSS/JS). Stored in Boosts.json.
+- (NSMutableArray<Boost*>*)boostList {
+  if (!_boosts) _boosts = BoostStoreLoad(BoostStorePath(self.selfTestProfiles));
+  return _boosts;
+}
+- (Boost*)boostForURL:(NSString*)url {
+  Boost* best = nil;
+  for (Boost* b in [self boostList])
+    if ([b matchesURL:url] && (!best || b.host.length > best.host.length)) best = b;  // most specific host wins
+  return best;
+}
+- (void)saveBoosts { BoostStoreSave([self boostList], BoostStorePath(self.selfTestProfiles)); }
+- (void)applyBoostToBrowser:(int)browserId url:(NSString*)url {
+  auto it = _browsers.find(browserId);
+  if (it == _browsers.end()) return;
+  Boost* b = [self boostForURL:url];
+  static NSMutableSet* boosted;  // browsers that had a Boost, so removing one also cleans the page
+  if (!boosted) boosted = [NSMutableSet set];
+  if (!b && ![boosted containsObject:@(browserId)]) return;
+  if (b) [boosted addObject:@(browserId)]; else [boosted removeObject:@(browserId)];
+  CefRefPtr<CefFrame> f = it->second->GetMainFrame();
+  f->ExecuteJavaScript(BoostApplyScript(b).UTF8String, f->GetURL(), 0);
+}
+- (void)applyBoostsEverywhere {
+  for (auto& kv : _browsers) [self applyBoostToBrowser:kv.first url:[NSString stringWithUTF8String:kv.second->GetMainFrame()->GetURL().ToString().c_str()]];
+  [self updateBoostIndicator];
+}
+- (Boost*)boostForCurrentSiteCreate:(BOOL)create {
+  NSString* url = [self currentURL];
+  NSString* host = BoostHostForURL(url);
+  if (!host) return nil;
+  for (Boost* b in [self boostList]) if ([b.host isEqualToString:host]) return b;
+  if (!create) return [self boostForURL:url];
+  Boost* b = [Boost new];
+  b.host = host;
+  [[self boostList] addObject:b];
+  [self saveBoosts];
+  return b;
+}
+- (void)boostChanged {
+  [self saveBoosts];
+  [self applyBoostsEverywhere];
+}
+- (void)updateBoostIndicator {
+  Boost* b = [self boostForURL:[self currentURL]];
+  NSString* tip = b ? (b.enabled ? @"Boost on" : @"Boost off") : nil;
+  _addressPill.toolTip = tip;
+}
+
+// Tests / scripting.
+- (Boost*)setBoostForHost:(NSString*)host configure:(void (^)(Boost*))configure {
+  Boost* b = nil;
+  for (Boost* x in [self boostList]) if ([x.host isEqualToString:host]) b = x;
+  if (!b) { b = [Boost new]; b.host = host; [[self boostList] addObject:b]; }
+  if (configure) configure(b);
+  [self boostChanged];
+  return b;
+}
+- (void)deleteBoostForHost:(NSString*)host {
+  NSMutableArray* list = [self boostList];
+  for (Boost* b in [list copy]) if ([b.host isEqualToString:host]) [list removeObject:b];
+  [self boostChanged];
+}
+- (NSUInteger)savedBoostCount { return BoostStoreLoad(BoostStorePath(self.selfTestProfiles)).count; }
+
+- (IBAction)zapElements:(id)sender {
+  auto it = _browsers.find(_shown.browserId);
+  if (!_shown || it == _browsers.end() || !BoostHostForURL([self currentURL])) { NSBeep(); return; }
+  _zapBrowser = _shown.browserId;
+  CefRefPtr<CefFrame> f = it->second->GetMainFrame();
+  f->ExecuteJavaScript(BoostZapModeScript().UTF8String, f->GetURL(), 0);
+  [self showToast:@"Click an element to zap it. Esc to cancel." action:nil selector:nil];
+}
+- (void)handleZapSelector:(NSString*)selector browser:(int)browserId {
+  if (!selector.length) return;  // cancelled
+  ArcItem* item = [self itemForBrowserId:browserId];
+  NSString* host = BoostHostForURL(item.url);
+  if (!host) return;
+  Boost* b = nil;
+  for (Boost* x in [self boostList]) if ([x.host isEqualToString:host]) b = x;
+  if (!b) { b = [Boost new]; b.host = host; [[self boostList] addObject:b]; }
+  b.enabled = YES;
+  if (![b.zaps containsObject:selector]) [b.zaps addObject:selector];
+  [self boostChanged];
+  [self refreshBoostPanel];
+}
+- (IBAction)toggleBoost:(id)sender {
+  Boost* b = [self boostForCurrentSiteCreate:NO];
+  if (!b) { NSBeep(); return; }
+  b.enabled = !b.enabled;
+  [self boostChanged];
+  [self refreshBoostPanel];
+}
+
+// Editor: a floating panel, live preview on every change, like Arc's Boost editor shelf.
+- (IBAction)editBoost:(id)sender {
+  Boost* b = [self boostForCurrentSiteCreate:YES];
+  if (!b) { NSBeep(); return; }
+  _boostEditing = b;
+  if (!_boostPanel) [self buildBoostPanel];
+  [self refreshBoostPanel];
+  NSRect wf = self.window.frame;
+  [_boostPanel setFrameTopLeftPoint:NSMakePoint(NSMaxX(wf) - _boostPanel.frame.size.width - 24, NSMaxY(wf) - 60)];
+  if (!self.selfTestProfiles) [_boostPanel orderFront:nil];
+}
+- (void)buildBoostPanel {
+  _boostControls = [NSMutableDictionary dictionary];
+  _boostPanel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 300, 470)
+                                           styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                                                     NSWindowStyleMaskUtilityWindow | NSWindowStyleMaskHUDWindow
+                                             backing:NSBackingStoreBuffered defer:YES];
+  _boostPanel.floatingPanel = YES;
+  _boostPanel.releasedWhenClosed = NO;
+  _boostPanel.hidesOnDeactivate = YES;
+  NSView* v = _boostPanel.contentView;
+  __block CGFloat y = 438;
+  void (^label)(NSString*) = ^(NSString* t) {
+    NSTextField* l = [NSTextField labelWithString:t];
+    l.font = [NSFont systemFontOfSize:11 weight:NSFontWeightSemibold];
+    l.textColor = NSColor.secondaryLabelColor;
+    l.frame = NSMakeRect(14, y, 272, 16);
+    [v addSubview:l];
+    y -= 26;
+  };
+  NSButton* on = [NSButton checkboxWithTitle:@"Boost on" target:self action:@selector(boostControlChanged:)];
+  on.frame = NSMakeRect(14, y, 140, 20);
+  _boostControls[@"enabled"] = on;
+  [v addSubview:on];
+  y -= 32;
+  label(@"COLOR");
+  NSButton* useColor = [NSButton checkboxWithTitle:@"" target:self action:@selector(boostControlChanged:)];
+  useColor.frame = NSMakeRect(14, y, 22, 20);
+  _boostControls[@"useColor"] = useColor;
+  [v addSubview:useColor];
+  NSSlider* hue = [NSSlider sliderWithValue:220 minValue:0 maxValue:359 target:self action:@selector(boostControlChanged:)];
+  hue.frame = NSMakeRect(40, y, 246, 20);
+  hue.continuous = YES;
+  _boostControls[@"hue"] = hue;
+  [v addSubview:hue];
+  y -= 26;
+  NSSlider* strength = [NSSlider sliderWithValue:0.6 minValue:0.1 maxValue:1 target:self action:@selector(boostControlChanged:)];
+  strength.frame = NSMakeRect(40, y, 246, 20);
+  strength.continuous = YES;
+  _boostControls[@"strength"] = strength;
+  [v addSubview:strength];
+  y -= 34;
+  label(@"FONT");
+  NSPopUpButton* font = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(12, y, 276, 24) pullsDown:NO];
+  [font addItemsWithTitles:@[ @"Page Font", @"System", @"Georgia", @"Helvetica Neue", @"Avenir Next", @"Menlo",
+                              @"Times New Roman", @"Futura", @"Baskerville", @"Gill Sans" ]];
+  font.target = self;
+  font.action = @selector(boostControlChanged:);
+  _boostControls[@"font"] = font;
+  [v addSubview:font];
+  y -= 34;
+  NSSegmentedControl* zoom = [NSSegmentedControl segmentedControlWithLabels:@[ @"90%", @"100%", @"110%", @"125%", @"150%" ]
+                                                               trackingMode:NSSegmentSwitchTrackingSelectOne
+                                                                     target:self action:@selector(boostControlChanged:)];
+  zoom.frame = NSMakeRect(12, y, 276, 24);
+  _boostControls[@"zoom"] = zoom;
+  [v addSubview:zoom];
+  y -= 32;
+  NSSegmentedControl* tcase = [NSSegmentedControl segmentedControlWithLabels:@[ @"Aa", @"AA", @"aa" ]
+                                                                trackingMode:NSSegmentSwitchTrackingSelectOne
+                                                                      target:self action:@selector(boostControlChanged:)];
+  tcase.frame = NSMakeRect(12, y, 140, 24);
+  _boostControls[@"case"] = tcase;
+  [v addSubview:tcase];
+  y -= 38;
+  label(@"ZAPS");
+  NSButton* zap = [NSButton buttonWithTitle:@"Zap Element" target:self action:@selector(zapElements:)];
+  zap.frame = NSMakeRect(10, y - 2, 130, 28);
+  [v addSubview:zap];
+  NSButton* clear = [NSButton buttonWithTitle:@"Clear Zaps" target:self action:@selector(clearZaps:)];
+  clear.frame = NSMakeRect(150, y - 2, 130, 28);
+  _boostControls[@"clearZaps"] = clear;
+  [v addSubview:clear];
+  y -= 40;
+  label(@"CODE");
+  NSButton* code = [NSButton buttonWithTitle:@"Edit CSS…" target:self action:@selector(editBoostCSS:)];
+  code.frame = NSMakeRect(10, y - 2, 130, 28);
+  [v addSubview:code];
+  NSButton* js = [NSButton buttonWithTitle:@"Edit JavaScript…" target:self action:@selector(editBoostJS:)];
+  js.frame = NSMakeRect(150, y - 2, 130, 28);
+  [v addSubview:js];
+  y -= 44;
+  NSButton* del = [NSButton buttonWithTitle:@"Delete Boost" target:self action:@selector(deleteCurrentBoost:)];
+  del.frame = NSMakeRect(10, 12, 130, 28);
+  del.contentTintColor = NSColor.systemRedColor;
+  [v addSubview:del];
+}
+- (void)refreshBoostPanel {
+  if (!_boostPanel || !_boostEditing) return;
+  Boost* b = _boostEditing;
+  _boostPanel.title = [NSString stringWithFormat:@"Boost: %@", b.host];
+  ((NSButton*)_boostControls[@"enabled"]).state = b.enabled;
+  ((NSButton*)_boostControls[@"useColor"]).state = b.hue >= 0;
+  if (b.hue >= 0) ((NSSlider*)_boostControls[@"hue"]).doubleValue = b.hue;
+  ((NSSlider*)_boostControls[@"strength"]).doubleValue = b.colorStrength;
+  NSPopUpButton* font = (NSPopUpButton*)_boostControls[@"font"];
+  if (b.font.length && [font itemWithTitle:b.font]) [font selectItemWithTitle:b.font]; else [font selectItemAtIndex:0];
+  NSArray* zooms = @[ @0.9, @1.0, @1.1, @1.25, @1.5 ];
+  NSUInteger zi = 1;
+  for (NSUInteger i = 0; i < zooms.count; i++) if (fabs([zooms[i] doubleValue] - b.textZoom) < 0.01) zi = i;
+  ((NSSegmentedControl*)_boostControls[@"zoom"]).selectedSegment = (NSInteger)zi;
+  ((NSSegmentedControl*)_boostControls[@"case"]).selectedSegment =
+      [b.textTransform isEqualToString:@"uppercase"] ? 1 : [b.textTransform isEqualToString:@"lowercase"] ? 2 : 0;
+  ((NSButton*)_boostControls[@"clearZaps"]).title = [NSString stringWithFormat:@"Clear Zaps (%lu)", (unsigned long)b.zaps.count];
+}
+- (void)boostControlChanged:(id)sender {
+  Boost* b = _boostEditing;
+  if (!b) return;
+  b.enabled = ((NSButton*)_boostControls[@"enabled"]).state == NSControlStateValueOn;
+  if (sender == _boostControls[@"hue"]) ((NSButton*)_boostControls[@"useColor"]).state = NSControlStateValueOn;
+  BOOL useColor = ((NSButton*)_boostControls[@"useColor"]).state == NSControlStateValueOn;
+  b.hue = useColor ? ((NSSlider*)_boostControls[@"hue"]).doubleValue : -1;
+  b.colorStrength = ((NSSlider*)_boostControls[@"strength"]).doubleValue;
+  NSPopUpButton* font = (NSPopUpButton*)_boostControls[@"font"];
+  b.font = font.indexOfSelectedItem <= 0 ? nil : ([font.titleOfSelectedItem isEqualToString:@"System"] ? @"-apple-system" : font.titleOfSelectedItem);
+  NSArray* zooms = @[ @0.9, @1.0, @1.1, @1.25, @1.5 ];
+  NSInteger zi = ((NSSegmentedControl*)_boostControls[@"zoom"]).selectedSegment;
+  b.textZoom = zi >= 0 ? [zooms[(NSUInteger)zi] doubleValue] : 1;
+  NSInteger ci = ((NSSegmentedControl*)_boostControls[@"case"]).selectedSegment;
+  b.textTransform = ci == 1 ? @"uppercase" : ci == 2 ? @"lowercase" : nil;
+  [self boostChanged];
+}
+- (IBAction)clearZaps:(id)sender {
+  [_boostEditing.zaps removeAllObjects];
+  [self boostChanged];
+  [self refreshBoostPanel];
+}
+- (void)editBoostCode:(BOOL)js {
+  Boost* b = _boostEditing ?: [self boostForCurrentSiteCreate:YES];
+  if (!b) return;
+  NSAlert* a = [NSAlert new];
+  a.messageText = js ? [NSString stringWithFormat:@"JavaScript for %@", b.host] : [NSString stringWithFormat:@"CSS for %@", b.host];
+  a.informativeText = js ? @"Runs on every page of this site after it loads." : @"Added to every page of this site.";
+  NSScrollView* sv = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 420, 220)];
+  sv.hasVerticalScroller = YES;
+  NSTextView* tv = [[NSTextView alloc] initWithFrame:sv.bounds];
+  tv.font = [NSFont monospacedSystemFontOfSize:12 weight:NSFontWeightRegular];
+  tv.automaticQuoteSubstitutionEnabled = NO;
+  tv.automaticDashSubstitutionEnabled = NO;
+  tv.string = (js ? b.js : b.css) ?: @"";
+  sv.documentView = tv;
+  a.accessoryView = sv;
+  [a addButtonWithTitle:@"Save"];
+  [a addButtonWithTitle:@"Cancel"];
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r != NSAlertFirstButtonReturn) return;
+    if (js) b.js = tv.string; else b.css = tv.string;
+    b.enabled = YES;
+    [self boostChanged];
+    [self refreshBoostPanel];
+  }];
+}
+- (IBAction)editBoostCSS:(id)sender { [self editBoostCode:NO]; }
+- (IBAction)editBoostJS:(id)sender { [self editBoostCode:YES]; }
+- (IBAction)deleteCurrentBoost:(id)sender {
+  Boost* b = _boostEditing ?: [self boostForCurrentSiteCreate:NO];
+  if (!b) return;
+  [[self boostList] removeObject:b];
+  _boostEditing = nil;
+  [_boostPanel orderOut:nil];
+  [self boostChanged];
+}
+
 - (IBAction)editThemeColor:(id)sender {
   ArcSpace* space = _space;
   if (!space) return;

@@ -24,6 +24,8 @@ set(APP_SRCS
   app/sidebar_store.h
   app/sidebar_store.mm
   app/archive_store.h
+  app/boost_store.h
+  app/boost_store.mm
   app/archive_store.mm
   app/archive_window.h
   app/archive_window.mm
