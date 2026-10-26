@@ -479,6 +479,13 @@
       BOOL moved = [w.spaces indexOfObject:made] == idx - 1;
       [w selectSpaceAtIndex:0];
       BOOL selectFirst = w.currentSpace == w.spaces.firstObject;
+      // Arc's bottom bar: one icon per Space, current marked; clicking an icon switches.
+      NSArray<NSString*>* icons = w.spaceBarIcons;
+      BOOL barCount = icons.count == w.spaces.count;
+      BOOL barMarked = [icons[0] hasPrefix:@"*"];
+      [w clickSpaceBarIcon:[w.spaces indexOfObject:made]];
+      BOOL barClick = w.currentSpace == made && [w.spaceBarIcons[[w.spaces indexOfObject:made]] hasPrefix:@"*"];
+      std::printf("SELFTEST-SPACEBAR icons=%d current=%d click=%d\n", barCount, barMarked, barClick);
       [w selectSpaceAtIndex:[w.spaces indexOfObject:made]];
       NSUInteger archivedBefore = [w archivedTabs].count;
       BOOL deleted = [w deleteSpace:made];
@@ -792,6 +799,9 @@
                 return;
               }
               if (w.shownItem != c) [w showItem:c];  // Chromium only watches visible pages for hangs
+              // If the reload finished after the first injection, that busy loop ran in the replaced page: start it again.
+              if (tries % 5 == 0 && !w.isLoading)
+                [w runJS:@"setTimeout(function(){var t=Date.now();while(Date.now()-t<90000){}},50)" inItem:c];
               [w sendKeyToItem:c];
               dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), poke);
             };

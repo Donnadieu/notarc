@@ -12,6 +12,8 @@ or later. From 0.5.0 on, NotArc updates itself.
 - Arc-style sidebar rows: 36 pt rounded pills with Arc's selected, hover and multi-select colours (and a soft
   shadow on the selected tab in light mode); Pinned and Today headers are plain labels and tabs under them aren't
   indented.
+- Arc's bottom bar: Archive at the left, one icon per Space (its emoji, or a dot) to switch Spaces, and a "+"
+  menu for New Tab, New Folder and New Space. Hidden with only one Space, as in Arc.
 - New "Look and feel" section on the parity checklist.
 - The self-test runs hidden and never takes focus.
 
