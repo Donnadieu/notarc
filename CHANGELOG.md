@@ -9,6 +9,9 @@ or later. From 0.5.0 on, NotArc updates itself.
   the page edge to edge.
 - Arc's sidebar top: sidebar toggle, back, forward and reload beside the window buttons, and a 36 pt address pill
   showing the site, with Copy URL and Site Settings buttons. Click the pill to open the command bar.
+- Arc-style sidebar rows: 36 pt rounded pills with Arc's selected, hover and multi-select colours (and a soft
+  shadow on the selected tab in light mode); Pinned and Today headers are plain labels and tabs under them aren't
+  indented.
 - New "Look and feel" section on the parity checklist.
 - The self-test runs hidden and never takes focus.
 
