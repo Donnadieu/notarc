@@ -63,6 +63,17 @@ GitHub release and checks the copy was replaced. It never touches /Applications.
 Changing saving, launching or quitting? Also run `scripts/test-session-restore.sh`. It crashes a self-test copy on
 purpose (SIGKILL) and checks that the next launch reopens the open tabs. It only uses the self-test files.
 
+## Issues
+
+Every missing or partial Arc feature has an issue labelled `parity`, linked to its line in
+`docs/feature-parity.md`.
+
+- Before starting, comment on the issue (or ask to be assigned) so two people don't build the same thing. Check the
+  comments first: someone may already be on it.
+- Put `Closes #N` in your pull request when it finishes the item, so the issue closes on merge. If it only finishes
+  part of it, use `Part of #N` and say in the issue what is still missing.
+- The checklist and the issues must agree: a `[x]` line has a closed issue, an unchecked line has an open one.
+
 ## Pull requests
 
 - Branch from `main`; pull requests are squash-merged.
