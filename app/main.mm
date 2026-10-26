@@ -552,6 +552,12 @@
       NSRect wb = w.window.contentView.bounds, cf = w.pageCardFrame;
       BOOL cardOK = !before && !w.toolbarShown && cf.origin.x == 273 && cf.origin.y == 9 &&
                     NSMaxX(wb) - NSMaxX(cf) == 9 && NSMaxY(wb) - NSMaxY(cf) == 10 && w.pageCardRadius == 8;
+      // Arc sidebar top: 36 pt address pill, 8 pt from the left, 46 pt below the window top, showing the site.
+      NSRect pf = w.sidebarAddressFrame;
+      NSString* host = [NSURL URLWithString:w.currentURL].host ?: @"";
+      if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
+      BOOL pillOK = pf.origin.x == 8 && pf.size.height == 36 && NSMaxY(wb) - NSMaxY(pf) == 46 && host.length &&
+                    [w.sidebarAddressText isEqualToString:host];
       [w toggleFocusMode:nil];
       NSRect ff = w.pageCardFrame;
       BOOL fullInFocus = NSEqualRects(ff, wb) && w.pageCardRadius == 0;
@@ -560,8 +566,8 @@
       BOOL out = !w.focusMode && w.sidebarHidden == before && ![w.window standardWindowButton:NSWindowCloseButton].hidden;
       BOOL fsCapable = (w.window.collectionBehavior & NSWindowCollectionBehaviorFullScreenNone) == 0;
       BOOL cardBack = NSEqualRects(w.pageCardFrame, cf);
-      std::printf("SELFTEST-FOCUS focus=%d restored=%d fullScreenAllowed=%d card=%d fullInFocus=%d cardBack=%d\n", inFocus, out,
-                  fsCapable, cardOK, fullInFocus, cardBack);
+      std::printf("SELFTEST-FOCUS focus=%d restored=%d fullScreenAllowed=%d card=%d fullInFocus=%d cardBack=%d addressPill=%d\n",
+                  inFocus, out, fsCapable, cardOK, fullInFocus, cardBack, pillOK);
     });
     // Clear Cookies and Refresh (this site only), then Clear Browsing Data (last hour).
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 46 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
