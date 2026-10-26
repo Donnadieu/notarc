@@ -8,6 +8,8 @@
 #import "app/little_window.h"
 #import "app/settings.h"
 #import "app/boost_store.h"
+#import "app/easel.h"
+#include "include/cef_devtools_message_observer.h"
 
 #include <cstdio>
 #include <atomic>
@@ -315,6 +317,21 @@ static BOOL IsDark(NSView* v) {
 }
 @end
 
+// Results of DevTools methods (used for page captures: Page.captureScreenshot).
+class DevToolsResults : public CefDevToolsMessageObserver {
+ public:
+  std::map<int, std::function<void(bool, const std::string&)>> pending;
+  void OnDevToolsMethodResult(CefRefPtr<CefBrowser>, int message_id, bool success, const void* result,
+                              size_t result_size) override {
+    auto it = pending.find(message_id);
+    if (it == pending.end()) return;
+    auto cb = it->second;
+    pending.erase(it);
+    cb(success, std::string(static_cast<const char*>(result), result_size));
+  }
+  IMPLEMENT_REFCOUNTING(DevToolsResults);
+};
+
 @implementation MainWindowController {
   NSMutableArray<ArcSpace*>* _spaces;
   ArcSpace* _space;  // currently shown Space
@@ -389,6 +406,12 @@ static BOOL IsDark(NSView* v) {
   NSTextView* _noteText;
   ArcItem* _noteItem;         // note currently in the editor
   NSTimer* _noteSaveTimer;
+  EaselView* _easelView;      // Easel canvas, shown in the page card
+  NSScrollView* _easelScroll;
+  ArcItem* _easelItem;
+  CefRefPtr<DevToolsResults> _devtoolsResults;
+  std::map<int, CefRefPtr<CefRegistration>> _devtoolsRegs;
+  int _devtoolsNextId;
   NSButton* _boostButton;   // Arc: Boost indicator in the address pill
   NSString* _boostIndicator; // tests: "on" / "off" / "none"
   NSTextField* _addressPillText;
@@ -995,7 +1018,7 @@ NSString* CleanLinkURL(NSString* url) {
 
 // Web views are created lazily, the first time a tab is opened (Arc does the same).
 - (void)ensureBrowserForItem:(ArcItem*)item {
-  if (item.noteID) return;  // notes are native, no web view
+  if (item.noteID || item.easelID) return;  // notes and easels are native, no web view
   if (item.browserId || !item.url.length || !_client || !_content) return;
   ArcSpace* space = [self spaceOwningItem:item];
   CefRefPtr<CefRequestContext> context = [self contextForSpace:space];
@@ -1230,7 +1253,7 @@ NSString* CleanLinkURL(NSString* url) {
   lf.origin.x = a.isSection ? 10 : 34;
   lf.size.width = cell.bounds.size.width - lf.origin.x - 8;
   cell.textField.frame = lf;
-  NSString* symbol = a.isSection ? nil : (a.isFolder ? ([ov isItemExpanded:a] ? @"folder.fill" : @"folder") : (a.noteID ? @"note.text" : @"globe"));
+  NSString* symbol = a.isSection ? nil : (a.isFolder ? ([ov isItemExpanded:a] ? @"folder.fill" : @"folder") : (a.noteID ? @"note.text" : (a.easelID ? @"scribble.variable" : @"globe")));
   if (a.isSplit) symbol = a.splitHorizontal ? @"rectangle.split.1x2" : @"rectangle.split.2x1";
   if (a.crashed) symbol = @"exclamationmark.triangle";
   else if (a.audioMuted) symbol = @"speaker.slash.fill";
@@ -2113,6 +2136,137 @@ static const CGFloat kPaneGap = 6;
   }
   [self layoutDividers:panes.count > 1 ? frames : @[]];
   [self layoutNoteEditor];
+  [self layoutEasel];
+}
+
+// MARK: Easels (Arc: easel). A canvas of page captures and text boxes, saved locally per easel.
+- (NSString*)easelsDirectory {
+  NSString* support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
+      stringByAppendingPathComponent:@"NotArc"];
+  return [support stringByAppendingPathComponent:self.selfTestProfiles ? @"SelfTestEasels" : @"Easels"];
+}
+- (void)layoutEasel {
+  ArcItem* e = _shown.easelID ? _shown : nil;
+  if (e != _easelItem) {
+    [_easelView save];
+    _easelItem = e;
+    if (e) {
+      if (!_easelScroll) {
+        _easelScroll = [[NSScrollView alloc] initWithFrame:_content.bounds];
+        _easelScroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        _easelScroll.hasVerticalScroller = YES;
+        _easelScroll.hasHorizontalScroller = YES;
+        _easelScroll.autohidesScrollers = YES;
+        _easelView = [[EaselView alloc] initWithFrame:_easelScroll.bounds];
+        _easelView.delegate = (id<EaselViewDelegate>)self;
+        _easelScroll.documentView = _easelView;
+      }
+      [_easelView loadFromDirectory:[[self easelsDirectory] stringByAppendingPathComponent:e.easelID]];
+    }
+  }
+  _easelScroll.hidden = !e;
+  if (e) {
+    _easelScroll.frame = _content.bounds;
+    [_content addSubview:_easelScroll positioned:NSWindowAbove relativeTo:nil];
+    [_easelView updateSize];
+  }
+}
+- (void)easelDidChange:(EaselView*)easel {
+  // An easel is named from its first text box, like a note from its first line.
+  NSString* t = nil;
+  for (EaselObject* o in easel.objects)
+    if ([o.kind isEqualToString:@"text"] && o.text.length) { t = o.text; break; }
+  if (_easelItem && !(t == _easelItem.liveTitle || [t isEqualToString:_easelItem.liveTitle])) {
+    _easelItem.liveTitle = t;
+    [_outline reloadItem:_easelItem];
+    [self scheduleSave];
+  }
+}
+- (void)easel:(EaselView*)easel openLink:(NSString*)url { [self openInNewTab:url]; }
+- (ArcItem*)createEaselWithID:(NSString*)easelID {
+  if (!_space) return nil;
+  ArcItem* n = [ArcItem new];
+  n.itemID = NSUUID.UUID.UUIDString;
+  n.easelID = easelID ?: NSUUID.UUID.UUIDString;
+  n.url = [@"notarc://easel/" stringByAppendingString:n.easelID];
+  n.children = [NSMutableArray array];
+  n.lastActiveAt = [NSDate date];
+  [_space.unpinned.children insertObject:n atIndex:0];
+  [_outline reloadItem:_space.unpinned reloadChildren:YES];
+  [self scheduleSave];
+  [self showItem:n];
+  if (easelID) [self easelDidChange:_easelView];  // reopened: title from its first text box
+  return n;
+}
+- (IBAction)newEasel:(id)sender { [self createEaselWithID:nil]; }
+- (IBAction)addEaselText:(id)sender {
+  if (!_easelItem) { NSBeep(); return; }
+  EaselObject* o = [_easelView addText:@"" at:NSMakePoint(-1, -1)];
+  (void)o;
+  for (NSView* v in _easelView.subviews)
+    for (NSView* sub in v.subviews)
+      if ([sub isKindOfClass:NSTextField.class] && [(NSTextField*)sub stringValue].length == 0) [self.window makeFirstResponder:sub];
+}
+// The most recently used easel in this Space, for captures (Arc adds captures to an easel).
+- (ArcItem*)recentEasel {
+  ArcItem* best = nil;
+  NSMutableArray* stack = [NSMutableArray arrayWithObjects:_space.pinned ?: [ArcItem new], _space.unpinned ?: [ArcItem new], nil];
+  while (stack.count) {
+    ArcItem* it = stack.lastObject;
+    [stack removeLastObject];
+    if (it.easelID && (!best || [it.lastActiveAt compare:best.lastActiveAt ?: NSDate.distantPast] == NSOrderedDescending)) best = it;
+    if (it.children) [stack addObjectsFromArray:it.children];
+  }
+  return best;
+}
+// Page capture (Arc: Capture, Cmd+Shift+2): the visible page as a PNG, added to the most recent easel.
+- (void)capturePage:(ArcItem*)page done:(void (^)(NSData* png))done {
+  auto it = _browsers.find(page.browserId);
+  if (it == _browsers.end()) { if (done) done(nil); return; }
+  CefRefPtr<CefBrowser> b = it->second;
+  if (!_devtoolsResults) _devtoolsResults = new DevToolsResults();
+  if (!_devtoolsRegs.count(page.browserId)) _devtoolsRegs[page.browserId] = b->GetHost()->AddDevToolsMessageObserver(_devtoolsResults);
+  int mid = 100000 + (++_devtoolsNextId);
+  void (^cb)(NSData*) = [done copy];
+  _devtoolsResults->pending[mid] = [cb](bool ok, const std::string& json) {
+    NSData* png = nil;
+    if (ok) {
+      NSData* d = [NSData dataWithBytes:json.data() length:json.size()];
+      NSDictionary* r = [NSJSONSerialization JSONObjectWithData:d options:0 error:nil];
+      if ([r isKindOfClass:NSDictionary.class] && [r[@"data"] isKindOfClass:NSString.class])
+        png = [[NSData alloc] initWithBase64EncodedString:r[@"data"] options:0];
+    }
+    if (cb) cb(png);
+  };
+  CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
+  params->SetString("format", "png");
+  b->GetHost()->ExecuteDevToolsMethod(mid, "Page.captureScreenshot", params);
+}
+- (IBAction)captureToEasel:(id)sender {
+  ArcItem* page = _shown;
+  if (!page || page.noteID || page.easelID) { NSBeep(); return; }
+  NSString* link = [self itemCurrentURL:page];
+  __weak MainWindowController* weakSelf = self;
+  [self capturePage:page done:^(NSData* png) {
+    MainWindowController* me = weakSelf;
+    if (!me || !png) { NSBeep(); return; }
+    ArcItem* easel = [me recentEasel];
+    if (easel) [me showItem:easel]; else easel = [me createEaselWithID:nil];
+    [me->_easelView addImagePNG:png link:link];
+    if (!me.selfTestProfiles) [me showToast:@"Captured to Easel" action:nil selector:nil];
+  }];
+}
+// Tests.
+- (EaselView*)easelView { return _easelScroll.hidden ? nil : _easelView; }
+- (void)captureShownPageToEasel:(void (^)(BOOL))done {
+  ArcItem* page = _shown;
+  NSString* link = [self itemCurrentURL:page];
+  [self capturePage:page done:^(NSData* png) {
+    ArcItem* easel = [self recentEasel];
+    if (easel) [self showItem:easel]; else [self createEaselWithID:nil];
+    BOOL ok = [self->_easelView addImagePNG:png link:link] != nil;
+    if (done) done(ok);
+  }];
 }
 
 // MARK: Notes (Arc: NoteDocument). Rich text in the page card, saved as RTF next to the sidebar file.
@@ -2625,6 +2779,7 @@ static ArcItem* NewSection(NSString* title) {
   [m addItemWithTitle:@"New Tab" action:@selector(newTab:) keyEquivalent:@""].target = self;
   [m addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@""].target = self;
   [m addItemWithTitle:@"New Note" action:@selector(newNote:) keyEquivalent:@""].target = self;
+  [m addItemWithTitle:@"New Easel" action:@selector(newEasel:) keyEquivalent:@""].target = self;
   [m addItem:NSMenuItem.separatorItem];
   [m addItemWithTitle:@"New Space..." action:@selector(newSpace:) keyEquivalent:@""].target = self;
   [m popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, sender.bounds.size.height + 4) inView:sender];
@@ -3333,6 +3488,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   NSString* host = [NSURL URLWithString:url].host ?: url;
   if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
   if (_shown.noteID) host = @"Note";
+  if (_shown.easelID) host = @"Easel";
   _addressPillText.stringValue = host ?: @"";
   _addressPill.toolTip = url;
   [self updateBoostIndicator];
@@ -4275,6 +4431,11 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
 
 // Arc puts new tabs at the top of the current Space's Today section.
 - (void)openInNewTab:(NSString*)input {
+  if ([input hasPrefix:@"notarc://easel/"]) {  // an easel reopened from the archive
+    NSString* eid = [input substringFromIndex:@"notarc://easel/".length];
+    if (eid.length && [eid rangeOfString:@"/"].location == NSNotFound) [self createEaselWithID:eid];
+    return;
+  }
   if ([input hasPrefix:@"notarc://note/"]) {  // a note reopened from the archive
     [self createNoteWithID:[input substringFromIndex:@"notarc://note/".length]];
     return;

@@ -9,6 +9,7 @@
 #import "app/arc_import.h"
 #import "app/main_window.h"
 #import "app/boost_store.h"
+#import "app/easel.h"
 #import "app/settings.h"
 #include "app/browser_client.h"
 #import "app/history_store.h"
@@ -120,6 +121,10 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@""];
   [file addItemWithTitle:@"New Note" action:@selector(newNote:) keyEquivalent:@"n"].keyEquivalentModifierMask =
       NSEventModifierFlagCommand | NSEventModifierFlagControl;
+  [file addItemWithTitle:@"New Easel" action:@selector(newEasel:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Capture to Easel" action:@selector(captureToEasel:) keyEquivalent:@"2"].keyEquivalentModifierMask =
+      NSEventModifierFlagCommand | NSEventModifierFlagShift;
+  [file addItemWithTitle:@"Add Text to Easel" action:@selector(addEaselText:) keyEquivalent:@""];
   NSMenuItem* littleItem = [file addItemWithTitle:@"New Little Window" action:@selector(newLittleWindow:)
                                     keyEquivalent:@"n"];
   littleItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
@@ -1176,6 +1181,49 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           });
           });
         });
+      });
+    });
+    // Easels: capturing a page adds a PNG card (with its link) to a new easel, text boxes can be added and moved,
+    // everything is saved and reloads when switching back, deleting works, and closing/reopening restores it.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openInNewTab:@"https://example.org/easel-src"];
+      ArcItem* src = w.shownItem;
+      WaitUntil(^{ if (w.shownItem != src) [w showItem:src]; return (BOOL)(src.liveTitle.length && ![w isLoading]); }, 20, ^{
+        [w captureShownPageToEasel:^(BOOL captured) {
+          ArcItem* easel = w.shownItem;
+          EaselView* ev = [w easelView];
+          BOOL shown = easel.easelID != nil && ev != nil && easel.browserId == 0;
+          EaselObject* img = ev.objects.firstObject;
+          BOOL image = img && [img.kind isEqualToString:@"image"] &&
+                       [[NSFileManager defaultManager] fileExistsAtPath:[ev.directory stringByAppendingPathComponent:img.image]] &&
+                       [img.link hasPrefix:@"https://example.org/easel-src"] && img.frame.size.width > 100;
+          EaselObject* txt = [ev addText:@"Trip ideas" at:NSMakePoint(40, 600)];
+          [ev moveObject:txt by:NSMakeSize(30, 10)];
+          [ev save];
+          [w easelDidChange:ev];
+          BOOL titled = [easel.displayTitle isEqualToString:@"Trip ideas"];
+          [w showItem:src];
+          BOOL hidden = [w easelView] == nil;
+          [w showItem:easel];
+          EaselView* ev2 = [w easelView];
+          BOOL reloaded = ev2.objects.count == 2 && [ev2.objects[1].text isEqualToString:@"Trip ideas"] &&
+                          NSEqualPoints(ev2.objects[1].frame.origin, NSMakePoint(70, 610));
+          [ev2 selectObject:ev2.objects[1]];
+          [ev2 deleteSelected];
+          [ev2 addText:@"Trip ideas" at:NSMakePoint(40, 600)];
+          BOOL deleted = ev2.objects.count == 2;
+          NSString* url = easel.url;
+          [w closeTab:nil];
+          [w openInNewTab:url];
+          ArcItem* back = w.shownItem;
+          BOOL reopened = back.easelID && [w easelView].objects.count == 2 && [back.displayTitle isEqualToString:@"Trip ideas"];
+          [w closeTab:nil];
+          [w showItem:src];
+          [w closeTab:nil];
+          std::printf("SELFTEST-EASEL captured=%d shown=%d image=%d titled=%d hiddenForTabs=%d reloaded=%d deleted=%d reopened=%d\n",
+                      captured, shown, image, titled, hidden, reloaded, deleted, reopened);
+        }];
       });
     });
     // Notes: a new note shows the editor (no web view), typing names it from its first line and saves rich text,
