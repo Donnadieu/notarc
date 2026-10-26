@@ -548,12 +548,20 @@
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 44 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
       BOOL before = w.sidebarHidden;
+      // Arc layout: 273 pt sidebar, page card inset 10 top / 9 right / 9 bottom, radius 8; full window in focus mode.
+      NSRect wb = w.window.contentView.bounds, cf = w.pageCardFrame;
+      BOOL cardOK = !before && !w.toolbarShown && cf.origin.x == 273 && cf.origin.y == 9 &&
+                    NSMaxX(wb) - NSMaxX(cf) == 9 && NSMaxY(wb) - NSMaxY(cf) == 10 && w.pageCardRadius == 8;
       [w toggleFocusMode:nil];
+      NSRect ff = w.pageCardFrame;
+      BOOL fullInFocus = NSEqualRects(ff, wb) && w.pageCardRadius == 0;
       BOOL inFocus = w.focusMode && w.sidebarHidden && [w.window standardWindowButton:NSWindowCloseButton].hidden;
       [w toggleFocusMode:nil];
       BOOL out = !w.focusMode && w.sidebarHidden == before && ![w.window standardWindowButton:NSWindowCloseButton].hidden;
       BOOL fsCapable = (w.window.collectionBehavior & NSWindowCollectionBehaviorFullScreenNone) == 0;
-      std::printf("SELFTEST-FOCUS focus=%d restored=%d fullScreenAllowed=%d\n", inFocus, out, fsCapable);
+      BOOL cardBack = NSEqualRects(w.pageCardFrame, cf);
+      std::printf("SELFTEST-FOCUS focus=%d restored=%d fullScreenAllowed=%d card=%d fullInFocus=%d cardBack=%d\n", inFocus, out,
+                  fsCapable, cardOK, fullInFocus, cardBack);
     });
     // Clear Cookies and Refresh (this site only), then Clear Browsing Data (last hour).
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 46 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
