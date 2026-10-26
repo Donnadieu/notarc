@@ -7,6 +7,8 @@ or later. From 0.5.0 on, NotArc updates itself.
 - Arc's window look: no title bar, the page sits in a rounded card inset on the Space colour, and the Space theme
   colours the whole window frame. The sidebar is 273 pt wide, as in Arc. Hiding the sidebar or Focus Mode shows
   the page edge to edge.
+- Arc's sidebar top: sidebar toggle, back, forward and reload beside the window buttons, and a 36 pt address pill
+  showing the site, with Copy URL and Site Settings buttons. Click the pill to open the command bar.
 - New "Look and feel" section on the parity checklist.
 - The self-test runs hidden and never takes focus.
 

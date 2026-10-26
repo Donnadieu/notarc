@@ -227,6 +227,8 @@ NSString* CleanLinkURL(NSString* url);
 - (BOOL)sidebarHidden;   // tests
 - (NSRect)pageCardFrame;   // tests: the rounded page card, in window content coordinates
 - (CGFloat)pageCardRadius;
+- (NSString*)sidebarAddressText;   // tests: the site shown in the sidebar address pill
+- (NSRect)sidebarAddressFrame;    // tests: pill frame in window coordinates
 - (ArcItem*)shownItem;   // tests
 
 // Little Windows not focused for the "Archive Little Windows" setting are closed (and archived).

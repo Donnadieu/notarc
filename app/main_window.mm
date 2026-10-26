@@ -131,6 +131,35 @@ static const NSUInteger kMaxSuggestions = 8;
 @end
 
 // The gap between two split panes; dragging it resizes them.
+// Arc's sidebar pill (address bar): translucent white over the Space colour in dark mode, dark tint in light mode
+// (Arc colour catalogue: SidebarItemBackground / SidebarItemHoveredBackground). Click opens the command bar.
+@interface SidebarPillView : NSView
+@property(nonatomic, copy) void (^onClick)(void);
+@property(nonatomic) BOOL hovered;
+@end
+@implementation SidebarPillView
+- (BOOL)wantsUpdateLayer { return YES; }
+- (void)updateLayer {
+  BOOL dark = [self.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
+              NSAppearanceNameDarkAqua;
+  NSColor* c = dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:self.hovered ? 0.20 : 0.15]
+                    : [NSColor colorWithSRGBRed:0.055 green:0.059 blue:0.063 alpha:self.hovered ? 0.10 : 0.05];
+  self.layer.backgroundColor = c.CGColor;
+  self.layer.cornerRadius = 10;
+}
+- (void)updateTrackingAreas {
+  [super updateTrackingAreas];
+  for (NSTrackingArea* t in self.trackingAreas) [self removeTrackingArea:t];
+  [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                     options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow |
+                                                             NSTrackingInVisibleRect
+                                                       owner:self userInfo:nil]];
+}
+- (void)mouseEntered:(NSEvent*)e { self.hovered = YES; self.needsDisplay = YES; }
+- (void)mouseExited:(NSEvent*)e { self.hovered = NO; self.needsDisplay = YES; }
+- (void)mouseUp:(NSEvent*)e { if (self.onClick) self.onClick(); }
+@end
+
 @interface SplitDividerView : NSView
 @property(nonatomic, weak) MainWindowController* owner;
 @property(nonatomic) NSUInteger index;
@@ -221,6 +250,9 @@ static const NSUInteger kMaxSuggestions = 8;
   NSTimer* _toastTimer;
   NSString* _lastClosedPeekURL;
   NSView* _sidebar;
+  SidebarPillView* _addressPill;
+  NSTextField* _addressPillText;
+  NSView* _sidebarNav;
 }
 
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID {
@@ -296,7 +328,7 @@ static const NSUInteger kMaxSuggestions = 8;
   [sidebar addSubview:_mediaBar];
 
   _spacePicker = [[NSPopUpButton alloc]
-      initWithFrame:NSMakeRect(8, bounds.size.height - 72, kSidebarWidth - 16, 26) pullsDown:NO];
+      initWithFrame:NSMakeRect(8, bounds.size.height - 120, kSidebarWidth - 16, 26) pullsDown:NO];
   _spacePicker.autoresizingMask = NSViewMinYMargin;
   [self rebuildSpacePicker];
   _spacePicker.target = self;
@@ -304,7 +336,7 @@ static const NSUInteger kMaxSuggestions = 8;
   [sidebar addSubview:_spacePicker];
 
   NSScrollView* scroll = [[NSScrollView alloc]
-      initWithFrame:NSMakeRect(4, 8, kSidebarWidth - 8, bounds.size.height - 84)];
+      initWithFrame:NSMakeRect(4, 8, kSidebarWidth - 8, bounds.size.height - 132)];
   scroll.autoresizingMask = NSViewHeightSizable;
   scroll.drawsBackground = NO;
   scroll.hasVerticalScroller = YES;
@@ -335,6 +367,46 @@ static const NSUInteger kMaxSuggestions = 8;
   _outline.menu.delegate = self;
   scroll.documentView = _outline;
   [sidebar addSubview:scroll];
+
+  // Sidebar top, as in Arc: window buttons, then sidebar toggle; back, forward, reload at the right; then the
+  // 36 pt address pill (8 pt from each side, 46 pt from the top) with copy-link and site-settings buttons.
+  _sidebarNav = [[NSView alloc] initWithFrame:NSMakeRect(0, bounds.size.height - 28, kSidebarWidth, 28)];
+  _sidebarNav.autoresizingMask = NSViewMinYMargin;
+  NSArray* nav = @[ @[ @"sidebar.left", @"toggleSidebar:", @78 ], @[ @"arrow.left", @"goBack:", @(kSidebarWidth - 8 - 3 * 28) ],
+                    @[ @"arrow.right", @"goForward:", @(kSidebarWidth - 8 - 2 * 28) ],
+                    @[ @"arrow.clockwise", @"reloadPage:", @(kSidebarWidth - 8 - 28) ] ];
+  for (NSArray* n in nav) {
+    NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:n[0] accessibilityDescription:nil]
+                                     target:self action:NSSelectorFromString(n[1])];
+    b.bordered = NO;
+    b.contentTintColor = NSColor.secondaryLabelColor;
+    b.frame = NSMakeRect([n[2] doubleValue], 1, 26, 26);
+    [_sidebarNav addSubview:b];
+  }
+  [sidebar addSubview:_sidebarNav];
+  _addressPill = [[SidebarPillView alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 82, kSidebarWidth - 17, 36)];
+  _addressPill.wantsLayer = YES;
+  _addressPill.autoresizingMask = NSViewMinYMargin;
+  __weak MainWindowController* weakSelf = self;
+  _addressPill.onClick = ^{ [weakSelf openLocation:nil]; };
+  _addressPillText = [NSTextField labelWithString:@""];
+  _addressPillText.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
+  _addressPillText.lineBreakMode = NSLineBreakByTruncatingTail;
+  _addressPillText.frame = NSMakeRect(12, 9, _addressPill.bounds.size.width - 12 - 60, 18);
+  [_addressPill addSubview:_addressPillText];
+  NSArray* pillButtons = @[ @[ @"link", @"copyCurrentURL:", @"Copy URL" ], @[ @"slider.horizontal.3", @"showSiteSettings:", @"Site Settings" ] ];
+  CGFloat px = _addressPill.bounds.size.width - 6 - 2 * 26;
+  for (NSArray* n in pillButtons) {
+    NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:n[0] accessibilityDescription:n[2]]
+                                     target:self action:NSSelectorFromString(n[1])];
+    b.bordered = NO;
+    b.toolTip = n[2];
+    b.contentTintColor = NSColor.secondaryLabelColor;
+    b.frame = NSMakeRect(px, 5, 26, 26);
+    [_addressPill addSubview:b];
+    px += 26;
+  }
+  [sidebar addSubview:_addressPill];
 
   _content = [[NSView alloc] initWithFrame:NSMakeRect(kSidebarWidth, 0,
                                                       bounds.size.width - kSidebarWidth,
@@ -2391,7 +2463,20 @@ static ArcItem* NewSection(NSString* title) {
 - (BOOL)toolbarShown { return !_toolbar.hidden; }
 - (NSString*)toolbarAddress { return _address.stringValue; }
 
+- (NSString*)sidebarAddressText { return _addressPillText.stringValue; }
+- (NSRect)sidebarAddressFrame { return [_addressPill convertRect:_addressPill.bounds toView:nil]; }
+
+// Arc shows just the site (host without "www.") in the sidebar pill; the full address is in the command bar.
+- (void)updateSidebarAddress {
+  NSString* url = _shown ? ([self itemCurrentURL:_shown] ?: @"") : @"";
+  NSString* host = [NSURL URLWithString:url].host ?: url;
+  if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
+  _addressPillText.stringValue = host ?: @"";
+  _addressPill.toolTip = url;
+}
+
 - (void)updateToolbarAddress {
+  [self updateSidebarAddress];
   if (_toolbar.hidden || _address.currentEditor) return;  // don't overwrite what the user is typing
   _address.stringValue = _shown ? ([self itemCurrentURL:_shown] ?: @"") : @"";
 }
