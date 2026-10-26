@@ -25,6 +25,7 @@ static NSDictionary* EncodeItem(ArcItem* item) {
   if (item.browserId) d[@"open"] = @YES;
   if (item.lastActiveAt) d[@"lastActiveAt"] = @(item.lastActiveAt.timeIntervalSinceReferenceDate);
   d[@"folder"] = @(item.isFolder);
+  if (item.noteID.length) d[@"note"] = item.noteID;
   if (item.isSplit) {
     d[@"split"] = @YES;
     d[@"horizontal"] = @(item.splitHorizontal);
@@ -49,6 +50,7 @@ static ArcItem* DecodeItem(NSDictionary* d, int depth) {
   item.wasOpen = [d[@"open"] boolValue];
   item.isFolder = [d[@"folder"] boolValue];
   item.isSplit = [d[@"split"] boolValue];
+  if ([d[@"note"] isKindOfClass:NSString.class]) item.noteID = d[@"note"];
   item.splitHorizontal = [d[@"horizontal"] boolValue];
   if ([d[@"fractions"] isKindOfClass:NSArray.class]) item.splitFractions = d[@"fractions"];
   item.children = [NSMutableArray array];

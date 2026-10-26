@@ -385,6 +385,10 @@ static BOOL IsDark(NSView* v) {
   NSString* _lastClosedPeekURL;
   NSView* _sidebar;
   SidebarPillView* _addressPill;
+  NSScrollView* _noteScroll;  // Notes editor, shown in the page card
+  NSTextView* _noteText;
+  ArcItem* _noteItem;         // note currently in the editor
+  NSTimer* _noteSaveTimer;
   NSButton* _boostButton;   // Arc: Boost indicator in the address pill
   NSString* _boostIndicator; // tests: "on" / "off" / "none"
   NSTextField* _addressPillText;
@@ -991,6 +995,7 @@ NSString* CleanLinkURL(NSString* url) {
 
 // Web views are created lazily, the first time a tab is opened (Arc does the same).
 - (void)ensureBrowserForItem:(ArcItem*)item {
+  if (item.noteID) return;  // notes are native, no web view
   if (item.browserId || !item.url.length || !_client || !_content) return;
   ArcSpace* space = [self spaceOwningItem:item];
   CefRefPtr<CefRequestContext> context = [self contextForSpace:space];
@@ -1225,7 +1230,7 @@ NSString* CleanLinkURL(NSString* url) {
   lf.origin.x = a.isSection ? 10 : 34;
   lf.size.width = cell.bounds.size.width - lf.origin.x - 8;
   cell.textField.frame = lf;
-  NSString* symbol = a.isSection ? nil : (a.isFolder ? ([ov isItemExpanded:a] ? @"folder.fill" : @"folder") : @"globe");
+  NSString* symbol = a.isSection ? nil : (a.isFolder ? ([ov isItemExpanded:a] ? @"folder.fill" : @"folder") : (a.noteID ? @"note.text" : @"globe"));
   if (a.isSplit) symbol = a.splitHorizontal ? @"rectangle.split.1x2" : @"rectangle.split.2x1";
   if (a.crashed) symbol = @"exclamationmark.triangle";
   else if (a.audioMuted) symbol = @"speaker.slash.fill";
@@ -2107,6 +2112,125 @@ static const CGFloat kPaneGap = 6;
     kv.second->GetHost()->WasHidden(!visible);
   }
   [self layoutDividers:panes.count > 1 ? frames : @[]];
+  [self layoutNoteEditor];
+}
+
+// MARK: Notes (Arc: NoteDocument). Rich text in the page card, saved as RTF next to the sidebar file.
+- (NSString*)notesDirectory {
+  NSString* support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
+      stringByAppendingPathComponent:@"NotArc"];
+  return [support stringByAppendingPathComponent:self.selfTestProfiles ? @"SelfTestNotes" : @"Notes"];
+}
+- (NSString*)notePathFor:(ArcItem*)note { return [[self notesDirectory] stringByAppendingPathComponent:[note.noteID stringByAppendingString:@".rtf"]]; }
+- (NSAttributedString*)loadNote:(ArcItem*)note {
+  NSData* d = [NSData dataWithContentsOfFile:[self notePathFor:note]];
+  NSAttributedString* a = d ? [[NSAttributedString alloc] initWithRTF:d documentAttributes:nil] : nil;
+  return a ?: [[NSAttributedString alloc] initWithString:@""];
+}
+- (void)saveNoteNow {
+  [_noteSaveTimer invalidate];
+  _noteSaveTimer = nil;
+  if (!_noteItem || !_noteText) return;
+  NSAttributedString* a = _noteText.textStorage;
+  NSData* rtf = [a RTFFromRange:NSMakeRange(0, a.length) documentAttributes:@{NSDocumentTypeDocumentAttribute : NSRTFTextDocumentType}];
+  [[NSFileManager defaultManager] createDirectoryAtPath:[self notesDirectory] withIntermediateDirectories:YES attributes:nil error:nil];
+  [rtf writeToFile:[self notePathFor:_noteItem] atomically:YES];
+}
+- (void)layoutNoteEditor {
+  ArcItem* note = _shown.noteID ? _shown : nil;
+  if (note != _noteItem) {
+    [self saveNoteNow];
+    _noteItem = note;
+    if (note) {
+      if (!_noteScroll) [self buildNoteEditor];
+      [_noteText.textStorage setAttributedString:[self loadNote:note]];
+      _noteText.typingAttributes = [self noteBodyAttributes];
+    }
+  }
+  _noteScroll.hidden = !note;
+  if (note) {
+    _noteScroll.frame = _content.bounds;
+    [_content addSubview:_noteScroll positioned:NSWindowAbove relativeTo:nil];
+    if (!self.selfTestProfiles) [self.window makeFirstResponder:_noteText];
+  }
+}
+- (NSDictionary*)noteBodyAttributes {
+  return @{NSFontAttributeName : [NSFont systemFontOfSize:15], NSForegroundColorAttributeName : NSColor.textColor};
+}
+- (void)buildNoteEditor {
+  _noteScroll = [[NSScrollView alloc] initWithFrame:_content.bounds];
+  _noteScroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  _noteScroll.hasVerticalScroller = YES;
+  _noteScroll.drawsBackground = YES;
+  _noteScroll.backgroundColor = NSColor.textBackgroundColor;
+  _noteText = [[NSTextView alloc] initWithFrame:_noteScroll.bounds];
+  _noteText.autoresizingMask = NSViewWidthSizable;
+  _noteText.richText = YES;
+  _noteText.allowsUndo = YES;
+  _noteText.usesFontPanel = YES;
+  _noteText.usesRuler = NO;
+  _noteText.importsGraphics = YES;
+  _noteText.automaticLinkDetectionEnabled = YES;
+  _noteText.textContainerInset = NSMakeSize(56, 40);  // Arc's notes are a centred page with generous margins
+  _noteText.delegate = (id<NSTextViewDelegate>)self;
+  _noteScroll.documentView = _noteText;
+}
+- (void)textDidChange:(NSNotification*)n {
+  if (n.object != _noteText || !_noteItem) return;
+  // The first line is the note's title in the sidebar, as in Arc.
+  NSString* first = [[_noteText.string componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] firstObject];
+  first = [first stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+  NSString* t = first.length ? (first.length > 80 ? [first substringToIndex:80] : first) : nil;
+  if (![t isEqualToString:_noteItem.liveTitle] && !(t == nil && _noteItem.liveTitle == nil)) {
+    _noteItem.liveTitle = t;
+    [_outline reloadItem:_noteItem];
+    [self scheduleSave];
+  }
+  [_noteSaveTimer invalidate];
+  __weak MainWindowController* weakSelf = self;
+  _noteSaveTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:NO block:^(NSTimer*) { [weakSelf saveNoteNow]; }];
+}
+- (ArcItem*)createNoteWithID:(NSString*)noteID {
+  if (!_space) return nil;
+  ArcItem* n = [ArcItem new];
+  n.itemID = NSUUID.UUID.UUIDString;
+  n.noteID = noteID ?: NSUUID.UUID.UUIDString;
+  n.url = [@"notarc://note/" stringByAppendingString:n.noteID];
+  n.children = [NSMutableArray array];
+  n.lastActiveAt = [NSDate date];
+  [_space.unpinned.children insertObject:n atIndex:0];  // Arc puts new notes at the top of Today
+  [_outline reloadItem:_space.unpinned reloadChildren:YES];
+  [self scheduleSave];
+  if (noteID) {  // reopened from the archive: title from its first line
+    NSString* s = [self loadNote:n].string;
+    NSString* first = [[s componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] firstObject];
+    if (first.length) n.liveTitle = first;
+  }
+  [self showItem:n];
+  return n;
+}
+- (IBAction)newNote:(id)sender { [self createNoteWithID:nil]; }
+// Tests.
+- (void)typeInNote:(NSString*)text {
+  if (!_noteText || !_noteItem) return;
+  [_noteText setSelectedRange:NSMakeRange(_noteText.string.length, 0)];
+  [_noteText insertText:text replacementRange:_noteText.selectedRange];
+}
+- (NSString*)noteEditorText { return _noteScroll.hidden ? nil : _noteText.string; }
+- (NSString*)savedNoteText:(ArcItem*)note { [self saveNoteNow]; return [self loadNote:note].string; }
+- (BOOL)noteRangeIsBold:(ArcItem*)note range:(NSRange)r {  // tests: reads the saved file
+  NSAttributedString* a = [self loadNote:note];
+  if (NSMaxRange(r) > a.length) return NO;
+  NSFont* f = [a attribute:NSFontAttributeName atIndex:r.location effectiveRange:nil];
+  return (f.fontDescriptor.symbolicTraits & NSFontDescriptorTraitBold) != 0;
+}
+- (void)makeNoteRangeBold:(NSRange)r {  // tests: what Format > Bold does to a selection
+  if (NSMaxRange(r) > _noteText.textStorage.length) return;
+  NSFont* f = [_noteText.textStorage attribute:NSFontAttributeName atIndex:r.location effectiveRange:nil] ?: [NSFont systemFontOfSize:15];
+  NSFont* b = [[NSFontManager sharedFontManager] convertFont:f toHaveTrait:NSBoldFontMask];
+  [_noteText shouldChangeTextInRange:r replacementString:nil];
+  [_noteText.textStorage addAttribute:NSFontAttributeName value:b range:r];
+  [_noteText didChangeText];
 }
 
 - (NSArray<NSValue*>*)paneFrames {
@@ -2500,6 +2624,7 @@ static ArcItem* NewSection(NSString* title) {
   NSMenu* m = [[NSMenu alloc] initWithTitle:@"New"];
   [m addItemWithTitle:@"New Tab" action:@selector(newTab:) keyEquivalent:@""].target = self;
   [m addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@""].target = self;
+  [m addItemWithTitle:@"New Note" action:@selector(newNote:) keyEquivalent:@""].target = self;
   [m addItem:NSMenuItem.separatorItem];
   [m addItemWithTitle:@"New Space..." action:@selector(newSpace:) keyEquivalent:@""].target = self;
   [m popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, sender.bounds.size.height + 4) inView:sender];
@@ -3207,6 +3332,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   NSString* url = _shown ? ([self itemCurrentURL:_shown] ?: @"") : @"";
   NSString* host = [NSURL URLWithString:url].host ?: url;
   if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
+  if (_shown.noteID) host = @"Note";
   _addressPillText.stringValue = host ?: @"";
   _addressPill.toolTip = url;
   [self updateBoostIndicator];
@@ -4149,6 +4275,10 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
 
 // Arc puts new tabs at the top of the current Space's Today section.
 - (void)openInNewTab:(NSString*)input {
+  if ([input hasPrefix:@"notarc://note/"]) {  // a note reopened from the archive
+    [self createNoteWithID:[input substringFromIndex:@"notarc://note/".length]];
+    return;
+  }
   NSString* url = ResolveCommandBarInput(input);
   if (!url || !_space) return;
   ArcItem* tab = [ArcItem new];
