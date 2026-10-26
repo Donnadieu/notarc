@@ -492,6 +492,17 @@
                     [menu containsObject:@"Delete Space..."];
       std::printf("SELFTEST-SPACEBAR icons=%d current=%d click=%d header=%d menu=%d\n", barCount, barMarked, barClick, header,
                   menuOK);
+      // Arc motion: switching to a later Space slides in from the right, an earlier one from the left; the page pops.
+      BOOL reduce = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
+      NSUInteger madeIdx = [w.spaces indexOfObject:made];
+      NSUInteger popsBefore = w.cardPopCount;
+      [w selectSpaceAtIndex:0];
+      NSString* back = w.lastSpaceSlide;
+      [w selectSpaceAtIndex:madeIdx];
+      NSString* fwd = w.lastSpaceSlide;
+      BOOL slide = reduce ? [back isEqualToString:@"none"] : ([back isEqualToString:@"left"] && [fwd isEqualToString:@"right"]);
+      BOOL pop = reduce || w.cardPopCount > popsBefore;
+      std::printf("SELFTEST-MOTION slide=%d pop=%d reduceMotion=%d\n", slide, pop, reduce);
       [w selectSpaceAtIndex:[w.spaces indexOfObject:made]];
       NSUInteger archivedBefore = [w archivedTabs].count;
       BOOL deleted = [w deleteSpace:made];
