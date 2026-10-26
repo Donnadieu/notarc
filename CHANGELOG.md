@@ -4,6 +4,9 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Boosts: customise any site (View > Boost This Site..., Cmd+Opt+B): tint its colours, change the font, text size
+  and case, zap elements you don't want (View > Zap Element), and add your own CSS and JavaScript. Boosts are saved
+  on your Mac and apply to the site and its subdomains every time a page loads; turn one off from the View menu.
 - Light and dark: each Space can follow macOS or be set to Light or Dark (Space menu > Appearance), and the
   sidebar, rows, pills and command bar switch to Arc's light or dark colours with it.
 - Arc motion: the sidebar slides sideways when you switch Spaces (from the right for the next Space, from the left

@@ -126,10 +126,19 @@ void BrowserClient::OnDownloadUpdated(CefRefPtr<CefBrowser> browser, CefRefPtr<C
   DownloadsUpdated(download_item, callback);
 }
 
+void BrowserClient::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int) {
+  if (frame->IsMain() && on_load_end_) on_load_end_(browser->GetIdentifier(), frame->GetURL().ToString());
+}
+
 bool BrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t, const CefString& message,
                                      const CefString&, int) {
   static const std::string kPrefix = "__notarc_media__:";
+  static const std::string kZap = "__notarc_zap__:";
   std::string m = message.ToString();
+  if (m.compare(0, kZap.size(), kZap) == 0) {
+    if (on_zap_) on_zap_(browser->GetIdentifier(), m.substr(kZap.size()));
+    return true;
+  }
   if (m.compare(0, kPrefix.size(), kPrefix) != 0) return false;
   std::string rest = m.substr(kPrefix.size());
   size_t bar = rest.find('|');

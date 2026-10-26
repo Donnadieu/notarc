@@ -8,6 +8,7 @@
 
 #import "app/arc_import.h"
 #import "app/main_window.h"
+#import "app/boost_store.h"
 #import "app/settings.h"
 #include "app/browser_client.h"
 #import "app/history_store.h"
@@ -139,6 +140,12 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [view addItemWithTitle:@"Site Settings..." action:@selector(showSiteSettings:) keyEquivalent:@"i"]
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Reset Site Permissions" action:@selector(resetSitePermissions:) keyEquivalent:@""];
+  [view addItem:[NSMenuItem separatorItem]];
+  [view addItemWithTitle:@"Boost This Site..." action:@selector(editBoost:) keyEquivalent:@"b"]
+      .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  [view addItemWithTitle:@"Zap Element" action:@selector(zapElements:) keyEquivalent:@""];
+  [view addItemWithTitle:@"Turn Boost On/Off" action:@selector(toggleBoost:) keyEquivalent:@""];
+  [view addItem:[NSMenuItem separatorItem]];
   [view addItemWithTitle:@"Mute / Unmute Tab" action:@selector(toggleMuteCurrentTab:) keyEquivalent:@"m"]
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Focus Mode" action:@selector(toggleFocusMode:) keyEquivalent:@"F"]
@@ -1088,6 +1095,48 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           BOOL stayed = [t.url hasSuffix:@"dummy.pdf"];
           BOOL viewer = [title hasPrefix:@"pdf:application/pdf"];
           std::printf("SELFTEST-PDF viewer=%d notDownloaded=%d stayed=%d title=%s\n", viewer, notDownloaded, stayed, title.UTF8String);
+        });
+      });
+    });
+    // Boosts: a Boost for example.org applies on page load (colour overlay, zap, case, custom CSS and JS), a zap
+    // picked in the page is added, turning it off removes it from the page, and it's saved.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w deleteBoostForHost:@"example.org"];
+      [w setBoostForHost:@"example.org" configure:^(Boost* b) {
+        b.enabled = YES;
+        b.hue = 200;
+        b.textTransform = @"uppercase";
+        [b.zaps removeAllObjects];
+        [b.zaps addObject:@"p"];
+        b.css = @"body{outline:3px solid rgb(1, 2, 3)}";
+        b.js = @"document.documentElement.dataset.boostJs='ran'";
+      }];
+      [w openInNewTab:@"https://example.org/boost-test"];
+      ArcItem* t = w.shownItem;
+      NSString* probe = @"try{document.title='boost:'+[getComputedStyle(document.querySelector('p')).display,"
+                         "getComputedStyle(document.body).textTransform,getComputedStyle(document.body).outlineColor,"
+                         "document.documentElement.dataset.boostJs||'-',!!document.getElementById('__notarc_boost__'),"
+                         "getComputedStyle(document.documentElement,'::after').mixBlendMode].join('|')}catch(e){document.title='boost:ERR '+e}";
+      WaitUntil(^{ if (w.shownItem != t) [w showItem:t]; return (BOOL)(t.liveTitle.length && ![w isLoading]); }, 20, ^{
+        [w runJS:probe inItem:t];
+        WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"boost:"]; }, 5, ^{
+          NSString* on = t.liveTitle;
+          BOOL applied = [on isEqualToString:@"boost:none|uppercase|rgb(1, 2, 3)|ran|true|hue"];
+          [w handleZapSelector:@"a:nth-of-type(1)" browser:t.browserId];
+          Boost* b = [w boostForURL:@"https://example.org/x"];
+          BOOL zapAdded = [b.zaps containsObject:@"a:nth-of-type(1)"];
+          BOOL sub = [w boostForURL:@"https://docs.example.org/"] == b && [w boostForURL:@"https://example.com/"] == nil;
+          [w setBoostForHost:@"example.org" configure:^(Boost* x) { x.enabled = NO; }];
+          [w runJS:@"document.title='off:'+!!document.getElementById('__notarc_boost__')+'|'+getComputedStyle(document.querySelector('p')).display" inItem:t];
+          WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"off:"]; }, 5, ^{
+            BOOL off = [t.liveTitle isEqualToString:@"off:false|block"];
+            BOOL saved = w.savedBoostCount == 1;
+            if (!applied || !off) std::printf("SELFTEST-BOOST-DEBUG on=[%s] off=[%s]\n", on.UTF8String, t.liveTitle.UTF8String);
+            [w deleteBoostForHost:@"example.org"];
+            std::printf("SELFTEST-BOOST applied=%d zapAdded=%d subdomain=%d off=%d saved=%d deleted=%d\n", applied, zapAdded,
+                        sub, off, saved, w.savedBoostCount == 0);
+          });
         });
       });
     });

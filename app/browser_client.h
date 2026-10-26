@@ -130,6 +130,12 @@ class BrowserClient : public CefClient,
   // passed here instead (state: "playing", "paused" or "none").
   using MediaCallback = std::function<void(int browser_id, const std::string& state, const std::string& title)>;
   void set_media_callback(MediaCallback cb) { on_media_ = std::move(cb); }
+  // Boosts: "__notarc_zap__:<selector>" console lines, and main-frame load end (to apply Boosts).
+  using ZapCallback = std::function<void(int browser_id, const std::string& selector)>;
+  void set_zap_callback(ZapCallback cb) { on_zap_ = std::move(cb); }
+  using LoadEndCallback = std::function<void(int browser_id, const std::string& url)>;
+  void set_load_end_callback(LoadEndCallback cb) { on_load_end_ = std::move(cb); }
+  void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override;
   bool OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t level, const CefString& message,
                         const CefString& source, int line) override;
 
@@ -157,6 +163,8 @@ class BrowserClient : public CefClient,
   OpenCallback on_open_;
   LinkMenuCallback on_link_menu_;
   MediaCallback on_media_;
+  ZapCallback on_zap_;
+  LoadEndCallback on_load_end_;
   RendererCallback on_renderer_;
   std::map<int, CefRefPtr<CefUnresponsiveProcessCallback>> hung_;
   PermissionCallback on_permission_;
