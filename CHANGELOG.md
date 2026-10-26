@@ -4,6 +4,9 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Live Folders: the + menu > New Live Folder... makes a folder that fills itself from an RSS or Atom feed, or from a
+  GitHub repository's open pull requests (or issues, with /issues). It refreshes every 15 minutes (or Refresh Live
+  Folder); tabs you've opened stay put, and Remove from Live Folder keeps an entry from coming back.
 - Easels: File > New Easel or the + menu adds a canvas to Today. File > Capture to Easel (Cmd+Shift+2) drops a
   picture of the page you're on into your latest easel, linked back to the page (double-click it to open). Double-click
   the canvas to add text; drag things around; Delete removes them. Easels are saved on your Mac and archive like tabs.

@@ -251,6 +251,12 @@ NSString* CleanLinkURL(NSString* url);
 - (void)handleZapSelector:(NSString*)selector browser:(int)browserId;               // tests
 - (NSUInteger)savedBoostCount;                                                      // tests
 - (IBAction)shuffleBoost:(id)sender;
+// Live Folders
+- (IBAction)newLiveFolder:(id)sender;
+- (ArcItem*)createLiveFolderKind:(NSString*)kind source:(NSString*)source title:(NSString*)title;
+- (void)refreshLiveFolder:(ArcItem*)folder done:(void (^)(BOOL ok))done;
+- (BOOL)dismissLiveFolderTab:(ArcItem*)item;
+- (void)deleteSidebarItem:(ArcItem*)item;  // tests
 // Easels
 - (IBAction)newEasel:(id)sender;
 - (IBAction)captureToEasel:(id)sender;

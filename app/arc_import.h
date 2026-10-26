@@ -19,6 +19,13 @@
 @property(nonatomic, copy) NSString* noteID;
 // Easels (Arc: easel): a canvas of captures and text in Easels/<easelID>/; url is "notarc://easel/<easelID>".
 @property(nonatomic, copy) NSString* easelID;
+// Live Folders (Arc: LiveFolderDataSource): a folder whose tabs come from a feed. liveKind is "feed",
+// "github-prs" or "github-issues"; liveSource the feed URL or "owner/repo". Tabs the user closes stay gone.
+@property(nonatomic, copy) NSString* liveKind;
+@property(nonatomic, copy) NSString* liveSource;
+@property(nonatomic, strong) NSDate* liveRefreshedAt;
+@property(nonatomic, strong) NSMutableArray<NSString*>* liveDismissed;
+@property(nonatomic, copy) NSString* liveError;  // last refresh error (not saved)
 @property(nonatomic) BOOL splitHorizontal;                       // stacked instead of side by side
 @property(nonatomic, copy) NSArray<NSNumber*>* splitFractions;   // pane sizes summing to 1; nil = equal
 @property(nonatomic, strong) NSMutableArray<ArcItem*>* children;
