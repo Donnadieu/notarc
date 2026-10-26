@@ -318,6 +318,8 @@ static BOOL IsDark(NSView* v) {
   SidebarPillView* _addressPill;
   NSTextField* _addressPillText;
   NSView* _sidebarNav;
+  NSView* _spaceBar;        // Arc's bottom bar: archive, Space icons, "+"
+  NSStackView* _spaceIcons;
 }
 
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID {
@@ -370,7 +372,7 @@ static BOOL IsDark(NSView* v) {
   [root addSubview:_themeView];
   [root addSubview:sidebar];
 
-  _mediaBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 6, kSidebarWidth - 16, 34)];
+  _mediaBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 44, kSidebarWidth - 16, 34)];
   _mediaBar.wantsLayer = YES;
   _mediaBar.layer.cornerRadius = 8;
   _mediaBar.layer.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.08].CGColor;
@@ -401,7 +403,7 @@ static BOOL IsDark(NSView* v) {
   [sidebar addSubview:_spacePicker];
 
   NSScrollView* scroll = [[NSScrollView alloc]
-      initWithFrame:NSMakeRect(8, 8, kSidebarWidth - 17, bounds.size.height - 132)];
+      initWithFrame:NSMakeRect(8, 42, kSidebarWidth - 17, bounds.size.height - 166)];
   scroll.autoresizingMask = NSViewHeightSizable;
   scroll.drawsBackground = NO;
   scroll.hasVerticalScroller = YES;
@@ -478,6 +480,30 @@ static BOOL IsDark(NSView* v) {
     px += 26;
   }
   [sidebar addSubview:_addressPill];
+
+  // Bottom bar, as in Arc: archive (Library) at the left, one icon per Space in the middle, "+" menu at the right.
+  _spaceBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 6, kSidebarWidth - 17, 30)];
+  NSButton* lib = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"archivebox" accessibilityDescription:@"Archive"]
+                                     target:self action:@selector(showArchive:)];
+  lib.bordered = NO;
+  lib.toolTip = @"Archive";
+  lib.contentTintColor = NSColor.secondaryLabelColor;
+  lib.frame = NSMakeRect(0, 2, 26, 26);
+  [_spaceBar addSubview:lib];
+  NSButton* plus = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"plus" accessibilityDescription:@"New"]
+                                      target:self action:@selector(showNewMenu:)];
+  plus.bordered = NO;
+  plus.toolTip = @"New Tab, Folder or Space";
+  plus.contentTintColor = NSColor.secondaryLabelColor;
+  plus.frame = NSMakeRect(_spaceBar.bounds.size.width - 26, 2, 26, 26);
+  [_spaceBar addSubview:plus];
+  _spaceIcons = [NSStackView stackViewWithViews:@[]];
+  _spaceIcons.orientation = NSUserInterfaceLayoutOrientationHorizontal;
+  _spaceIcons.spacing = 2;
+  _spaceIcons.distribution = NSStackViewDistributionGravityAreas;
+  _spaceIcons.frame = NSMakeRect(30, 0, _spaceBar.bounds.size.width - 60, 30);
+  [_spaceBar addSubview:_spaceIcons];
+  [sidebar addSubview:_spaceBar];
 
   _content = [[NSView alloc] initWithFrame:NSMakeRect(kSidebarWidth, 0,
                                                       bounds.size.width - kSidebarWidth,
@@ -1119,7 +1145,7 @@ static NSString* const kMediaResumeJS =
   if (_mediaBar.hidden == !show) return;
   _mediaBar.hidden = !show;
   NSRect f = _sidebarScroll.frame;
-  CGFloat bottom = show ? 46 : 8;
+  CGFloat bottom = show ? 82 : 42;
   f.size.height += f.origin.y - bottom;
   f.origin.y = bottom;
   _sidebarScroll.frame = f;
@@ -2275,8 +2301,55 @@ static ArcItem* NewSection(NSString* title) {
   return section;
 }
 
+// One button per Space: its emoji, or a dot (filled for the current Space) when it has none, as in Arc.
+- (void)rebuildSpaceBar {
+  for (NSView* v in [_spaceIcons.views copy]) [_spaceIcons removeView:v];
+  NSUInteger i = 0;
+  for (ArcSpace* sp in _spaces) {
+    BOOL current = sp == _space;
+    NSButton* b;
+    if (sp.iconEmoji.length) {
+      b = [NSButton buttonWithTitle:sp.iconEmoji target:self action:@selector(spaceIconClicked:)];
+      b.font = [NSFont systemFontOfSize:current ? 15 : 13];
+      b.alphaValue = current ? 1 : 0.55;
+    } else {
+      b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:current ? @"circle.fill" : @"circle"
+                                                 accessibilityDescription:sp.title]
+                             target:self action:@selector(spaceIconClicked:)];
+      b.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:8 weight:NSFontWeightRegular];
+      b.contentTintColor = current ? NSColor.labelColor : NSColor.tertiaryLabelColor;
+    }
+    b.bordered = NO;
+    b.tag = (NSInteger)i++;
+    b.toolTip = sp.title ?: @"Space";
+    [b.widthAnchor constraintEqualToConstant:24].active = YES;
+    [_spaceIcons addView:b inGravity:NSStackViewGravityCenter];
+  }
+  // Arc hides the switcher when there's only one Space.
+  _spaceIcons.hidden = _spaces.count < 2;
+}
+- (void)spaceIconClicked:(NSButton*)sender { [self selectSpaceAtIndex:(NSUInteger)sender.tag]; }
+- (NSArray<NSString*>*)spaceBarIcons {  // tests: "*Title" for the current Space
+  NSMutableArray* out = [NSMutableArray array];
+  for (NSButton* b in _spaceIcons.views)
+    [out addObject:[NSString stringWithFormat:@"%@%@", b.tag == (NSInteger)[_spaces indexOfObject:_space] ? @"*" : @"", b.toolTip]];
+  return out;
+}
+- (void)clickSpaceBarIcon:(NSUInteger)index {  // tests
+  if (index < _spaceIcons.views.count) [(NSButton*)_spaceIcons.views[index] performClick:nil];
+}
+- (IBAction)showNewMenu:(NSButton*)sender {
+  NSMenu* m = [[NSMenu alloc] initWithTitle:@"New"];
+  [m addItemWithTitle:@"New Tab" action:@selector(newTab:) keyEquivalent:@""].target = self;
+  [m addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@""].target = self;
+  [m addItem:NSMenuItem.separatorItem];
+  [m addItemWithTitle:@"New Space..." action:@selector(newSpace:) keyEquivalent:@""].target = self;
+  [m popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, sender.bounds.size.height + 4) inView:sender];
+}
+
 - (void)rebuildSpacePicker {
   [self applyTheme];
+  [self rebuildSpaceBar];
   [_spacePicker removeAllItems];
   for (ArcSpace* s in _spaces) {
     [_spacePicker addItemWithTitle:s.iconEmoji.length ? [NSString stringWithFormat:@"%@  %@", s.iconEmoji, s.title ?: @"Space"]
@@ -2409,6 +2482,7 @@ static ArcItem* NewSection(NSString* title) {
   [_spacePicker selectItemAtIndex:[_spaces indexOfObject:space]];
   [self reloadSidebar];
   [self applyTheme];
+  [self rebuildSpaceBar];
   [self scheduleSave];
   ArcItem* first = [self lastShownInSpace:_space];
   if (first) [self showItem:first];
