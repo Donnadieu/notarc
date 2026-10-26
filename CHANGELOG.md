@@ -4,6 +4,8 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Arc motion: the sidebar slides sideways when you switch Spaces (from the right for the next Space, from the left
+  for the previous one), and the page card pops in when you change tabs. Both turn off with Reduce Motion.
 - Arc-style command bar: a rounded translucent card, Arc's text colours, the selected suggestion as an Arc-blue
   pill, an icon for each kind of suggestion, and a hairline under the field.
 
