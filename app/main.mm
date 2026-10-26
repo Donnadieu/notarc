@@ -787,7 +787,13 @@
           dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
             [w showItem:c];
             BOOL back = !c.crashed && [w.currentURL hasPrefix:@"https://example.net"];
-            [w runJS:@"setTimeout(function(){var t=Date.now();while(Date.now()-t<90000){}},50)" inItem:c];
+            // The freeze starts inside the page's own key/click handler, so the input Chromium is waiting on is the one
+            // that hangs: exactly what the hang monitor detects, independent of reload or timer timing.
+            NSString* freezeJS = @"if(!window.__notarcFreeze){window.__notarcFreeze=1;var f=function(){"
+                                  "if(window.__notarcFrozen)return;window.__notarcFrozen=1;"
+                                  "var t=Date.now();while(Date.now()-t<90000){}};"
+                                  "addEventListener('keydown',f,true);addEventListener('mousedown',f,true);}";
+            [w runJS:freezeJS inItem:c];
             __block int tries = 0;
             __block void (^poke)(void);
 #pragma clang diagnostic push
@@ -805,9 +811,7 @@
                 return;
               }
               if (w.shownItem != c) [w showItem:c];  // Chromium only watches visible pages for hangs
-              // If the reload finished after the first injection, that busy loop ran in the replaced page: start it again.
-              if (tries % 5 == 0 && !w.isLoading)
-                [w runJS:@"setTimeout(function(){var t=Date.now();while(Date.now()-t<90000){}},50)" inItem:c];
+              [w runJS:freezeJS inItem:c];  // no-op once installed; re-installs if the page was replaced
               [w sendKeyToItem:c];
               dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), poke);
             };
