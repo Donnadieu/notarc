@@ -10,6 +10,7 @@
 #import "app/main_window.h"
 #import "app/boost_store.h"
 #import "app/easel.h"
+#import "app/live_folder.h"
 #import "app/settings.h"
 #include "app/browser_client.h"
 #import "app/history_store.h"
@@ -1181,6 +1182,63 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           });
           });
         });
+      });
+    });
+    // Live Folders: a feed (local RSS file, so no network) fills the folder; a refresh adds new entries, drops ones that
+    // left the feed and keeps a closed one from coming back; tabs can't be dragged in; GitHub/Atom parsing and input
+    // parsing work; it's saved with the sidebar.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 130 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSString* feed = [NSTemporaryDirectory() stringByAppendingPathComponent:@"notarc-selftest-feed.xml"];
+      NSString* (^rss)(NSArray*) = ^(NSArray* ids) {
+        NSMutableString* x = [NSMutableString stringWithString:@"<?xml version=\"1.0\"?><rss version=\"2.0\"><channel><title>T</title>"];
+        for (NSString* i in ids)
+          [x appendFormat:@"<item><title><![CDATA[Post %@]]></title><link>https://example.org/post/%@</link></item>", i, i];
+        [x appendString:@"</channel></rss>"];
+        return (NSString*)x;
+      };
+      [rss(@[ @"a", @"b", @"c" ]) writeToFile:feed atomically:YES encoding:NSUTF8StringEncoding error:nil];
+      ArcItem* f = [w createLiveFolderKind:@"feed" source:[NSURL fileURLWithPath:feed].absoluteString title:@"Test Feed"];
+      WaitUntil(^{ return (BOOL)(f.children.count == 3); }, 10, ^{
+        BOOL filled = f.children.count == 3 && [f.children[0].displayTitle isEqualToString:@"Post a"] &&
+                      [f.children[2].url isEqualToString:@"https://example.org/post/c"];
+        ArcItem* keep = f.children[1];
+        [w dismissLiveFolderTab:f.children[0]];  // close "a"
+        [rss(@[ @"d", @"a", @"b" ]) writeToFile:feed atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [w refreshLiveFolder:f done:^(BOOL ok) {
+          NSMutableArray* urls = [NSMutableArray array];
+          for (ArcItem* c in f.children) [urls addObject:c.url.lastPathComponent];
+          BOOL merged = ok && [[urls componentsJoinedByString:@","] isEqualToString:@"d,b"] && f.children[1] == keep;
+          [w openInNewTab:@"https://example.org/not-in-feed"];
+          ArcItem* tab = w.shownItem;
+          BOOL noDrop = ![w moveItem:tab toParent:f index:0];
+          [w closeTab:nil];
+          NSArray* gh = LiveFolderParse(@"github-prs",
+              [@"[{\"html_url\":\"https://github.com/o/r/pull/7\",\"title\":\"Fix\",\"number\":7}]" dataUsingEncoding:NSUTF8StringEncoding], 25);
+          NSArray* ghIssues = LiveFolderParse(@"github-issues",
+              [@"[{\"html_url\":\"https://github.com/o/r/pull/7\",\"title\":\"PR\",\"pull_request\":{}},{\"html_url\":\"https://github.com/o/r/issues/8\",\"title\":\"Bug\",\"number\":8}]"
+                  dataUsingEncoding:NSUTF8StringEncoding], 25);
+          NSArray* atom = LiveFolderParse(@"feed",
+              [@"<feed xmlns=\"http://www.w3.org/2005/Atom\"><entry><title>E</title><link rel=\"alternate\" href=\"https://example.org/e\"/></entry></feed>"
+                  dataUsingEncoding:NSUTF8StringEncoding], 25);
+          BOOL parse = gh.count == 1 && [((LiveFolderEntry*)gh[0]).title isEqualToString:@"#7 Fix"] && ghIssues.count == 1 &&
+                       [((LiveFolderEntry*)ghIssues[0]).title isEqualToString:@"#8 Bug"] && atom.count == 1 && [((LiveFolderEntry*)atom[0]).url isEqualToString:@"https://example.org/e"];
+          NSDictionary* in1 = LiveFolderSourceFromInput(@"https://github.com/Donnadieu/notarc/pulls", NO);
+          NSDictionary* in2 = LiveFolderSourceFromInput(@"github.com/Donnadieu/notarc/issues", NO);
+          NSDictionary* in3 = LiveFolderSourceFromInput(@"example.com/feed.xml", NO);
+          BOOL input = [in1[@"kind"] isEqualToString:@"github-prs"] && [in1[@"source"] isEqualToString:@"Donnadieu/notarc"] &&
+                       [in2[@"kind"] isEqualToString:@"github-issues"] && [in3[@"source"] isEqualToString:@"https://example.com/feed.xml"] &&
+                       LiveFolderSourceFromInput(@"javascript:alert(1)", NO) == nil;
+          NSString* json = [NSString stringWithContentsOfFile:SidebarStorePath(YES) encoding:NSUTF8StringEncoding error:nil];
+          [w saveSidebarNow];
+          json = [NSString stringWithContentsOfFile:SidebarStorePath(YES) encoding:NSUTF8StringEncoding error:nil];
+          BOOL saved = [json containsString:@"notarc-selftest-feed.xml"] && [json containsString:@"dismissed"];
+          if (!merged) std::printf("SELFTEST-LIVEFOLDER-DEBUG urls=%s\n", [urls componentsJoinedByString:@","].UTF8String);
+          [w deleteSidebarItem:f];
+          [[NSFileManager defaultManager] removeItemAtPath:feed error:nil];
+          std::printf("SELFTEST-LIVEFOLDER filled=%d merged=%d noDrop=%d parse=%d input=%d saved=%d\n", filled, merged, noDrop,
+                      parse, input, saved);
+        }];
       });
     });
     // Easels: capturing a page adds a PNG card (with its link) to a new easel, text boxes can be added and moved,

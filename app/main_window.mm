@@ -9,6 +9,7 @@
 #import "app/settings.h"
 #import "app/boost_store.h"
 #import "app/easel.h"
+#import "app/live_folder.h"
 #include "include/cef_devtools_message_observer.h"
 
 #include <cstdio>
@@ -316,6 +317,8 @@ static BOOL IsDark(NSView* v) {
   [self.owner moveDivider:self.index toPosition:position];
 }
 @end
+
+static BOOL RemoveItem(ArcItem* parent, ArcItem* target);
 
 // Results of DevTools methods (used for page captures: Page.captureScreenshot).
 class DevToolsResults : public CefDevToolsMessageObserver {
@@ -1253,7 +1256,7 @@ NSString* CleanLinkURL(NSString* url) {
   lf.origin.x = a.isSection ? 10 : 34;
   lf.size.width = cell.bounds.size.width - lf.origin.x - 8;
   cell.textField.frame = lf;
-  NSString* symbol = a.isSection ? nil : (a.isFolder ? ([ov isItemExpanded:a] ? @"folder.fill" : @"folder") : (a.noteID ? @"note.text" : (a.easelID ? @"scribble.variable" : @"globe")));
+  NSString* symbol = a.isSection ? nil : (a.isFolder ? (a.liveKind ? @"dot.radiowaves.up.forward" : ([ov isItemExpanded:a] ? @"folder.fill" : @"folder")) : (a.noteID ? @"note.text" : (a.easelID ? @"scribble.variable" : @"globe")));
   if (a.isSplit) symbol = a.splitHorizontal ? @"rectangle.split.1x2" : @"rectangle.split.2x1";
   if (a.crashed) symbol = @"exclamationmark.triangle";
   else if (a.audioMuted) symbol = @"speaker.slash.fill";
@@ -2780,6 +2783,7 @@ static ArcItem* NewSection(NSString* title) {
   [m addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@""].target = self;
   [m addItemWithTitle:@"New Note" action:@selector(newNote:) keyEquivalent:@""].target = self;
   [m addItemWithTitle:@"New Easel" action:@selector(newEasel:) keyEquivalent:@""].target = self;
+  [m addItemWithTitle:@"New Live Folder..." action:@selector(newLiveFolder:) keyEquivalent:@""].target = self;
   [m addItem:NSMenuItem.separatorItem];
   [m addItemWithTitle:@"New Space..." action:@selector(newSpace:) keyEquivalent:@""].target = self;
   [m popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, sender.bounds.size.height + 4) inView:sender];
@@ -3888,7 +3892,10 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   }
   [m addItem:[NSMenuItem separatorItem]];
   if (isTab || item.isFolder) [m addItem:[self menuItem:@"Rename..." action:@selector(menuRename:) item:item]];
-  if (item.isFolder) [m addItem:[self menuItem:@"New Nested Folder" action:@selector(menuNewNestedFolder:) item:item]];
+  if (item.liveKind) [m addItem:[self menuItem:@"Refresh Live Folder" action:@selector(menuRefreshLive:) item:item]];
+  if ([self parentOfItem:item].liveKind)  // Arc: liveFolderChildItemManuallyDeleted
+    [m addItem:[self menuItem:@"Remove from Live Folder" action:@selector(menuDismissLive:) item:item]];
+  if (item.isFolder && !item.liveKind) [m addItem:[self menuItem:@"New Nested Folder" action:@selector(menuNewNestedFolder:) item:item]];
   if (isTab || (!item.url.length && !item.isSection && !item.isSplit))
     [m addItem:[self menuItem:@"Duplicate" action:@selector(menuDuplicate:) item:item]];
   if (isToday) [m addItem:[self menuItem:@"Pin" action:@selector(menuTogglePin:) item:item]];
@@ -4636,6 +4643,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
 - (BOOL)moveItem:(ArcItem*)item toParent:(ArcItem*)parent index:(NSInteger)index {
   if (!item || !parent || item.isSection) return NO;
   if (!(parent.isSection || parent.isFolder)) return NO;
+  if (parent.liveKind) return NO;  // a Live Folder's tabs come from its feed
   if (Contains(item, parent)) return NO;  // a folder can't go inside itself
   ArcItem* oldParent = [self parentOfItem:item];
   if (!oldParent || ![self sectionContaining:parent]) return NO;  // both must be in the current Space
@@ -4648,6 +4656,143 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
   for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
   if (parent.isFolder) [_outline expandItem:parent];
   if (_shown) [self selectSidebarRowFor:_shown];
+  [self scheduleSave];
+  return YES;
+}
+
+#pragma mark Live Folders
+
+static const NSUInteger kLiveFolderMaxItems = 25;
+static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
+
+- (ArcItem*)createLiveFolderKind:(NSString*)kind source:(NSString*)source title:(NSString*)title {
+  if (!_space || !kind.length || !source.length) return nil;
+  ArcItem* f = [self createFolderNamed:title.length ? title : source];
+  f.liveKind = kind;
+  f.liveSource = source;
+  f.liveDismissed = [NSMutableArray array];
+  [_outline reloadItem:f];
+  [self refreshLiveFolder:f done:nil];
+  return f;
+}
+- (IBAction)newLiveFolder:(id)sender {
+  NSAlert* alert = [NSAlert new];
+  alert.messageText = @"New Live Folder";
+  alert.informativeText = @"Enter a feed address (RSS or Atom), or a GitHub repository like github.com/owner/repo for its open "
+                          "pull requests. Add /issues for its issues instead. The folder keeps itself up to date.";
+  [alert addButtonWithTitle:@"Create"];
+  [alert addButtonWithTitle:@"Cancel"];
+  NSTextField* field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 24)];
+  field.placeholderString = @"github.com/owner/repo or https://example.com/feed.xml";
+  NSString* cur = _shown && !_shown.noteID && !_shown.easelID ? [self itemCurrentURL:_shown] : nil;
+  if ([cur hasPrefix:@"https://github.com/"]) field.stringValue = cur;
+  alert.accessoryView = field;
+  alert.window.initialFirstResponder = field;
+  if ([alert runModal] != NSAlertFirstButtonReturn) return;
+  NSDictionary* src = LiveFolderSourceFromInput(field.stringValue, NO);
+  if (!src) { NSBeep(); return; }
+  NSString* kind = src[@"kind"], *source = src[@"source"];
+  NSString* title = [kind isEqualToString:@"feed"] ? ([NSURL URLWithString:source].host ?: source)
+                    : [NSString stringWithFormat:@"%@ %@", source.lastPathComponent,
+                                                 [kind isEqualToString:@"github-prs"] ? @"Pull Requests" : @"Issues"];
+  [self createLiveFolderKind:kind source:source title:title];
+}
+- (void)menuRefreshLive:(NSMenuItem*)mi { [self refreshLiveFolder:mi.representedObject done:nil]; }
+- (void)menuDismissLive:(NSMenuItem*)mi {
+  BOOL wasShown = mi.representedObject == _shown;
+  [self dismissLiveFolderTab:mi.representedObject];
+  if (wasShown) [self layoutPanes];
+}
+- (void)collectLiveFolders:(ArcItem*)item into:(NSMutableArray*)out {
+  if (item.liveKind) [out addObject:item];
+  for (ArcItem* c in item.children) [self collectLiveFolders:c into:out];
+}
+- (void)refreshStaleLiveFolders {
+  NSMutableArray* all = [NSMutableArray array];
+  for (ArcSpace* sp in _spaces) {
+    [self collectLiveFolders:sp.pinned into:all];
+    [self collectLiveFolders:sp.unpinned into:all];
+  }
+  for (ArcItem* f in all)
+    if (!f.liveRefreshedAt || -f.liveRefreshedAt.timeIntervalSinceNow > kLiveFolderRefreshInterval) [self refreshLiveFolder:f done:nil];
+}
+// Merge fetched entries into the folder: keep tabs still in the feed (and their pages), add new ones in feed
+// order, drop ones that left the feed. Entries the user closed are remembered and not added back.
+- (void)applyLiveEntries:(NSArray<LiveFolderEntry*>*)entries toFolder:(ArcItem*)f {
+  NSMutableDictionary<NSString*, ArcItem*>* existing = [NSMutableDictionary dictionary];
+  for (ArcItem* c in f.children) {
+    NSString* key = c.pinnedURL ?: c.url;
+    if (key) existing[key] = c;
+  }
+  NSMutableArray<ArcItem*>* next = [NSMutableArray array];
+  NSMutableSet* seen = [NSMutableSet set];
+  for (LiveFolderEntry* e in entries) {
+    if ([seen containsObject:e.url] || [f.liveDismissed containsObject:e.url]) continue;
+    [seen addObject:e.url];
+    ArcItem* c = existing[e.url];
+    if (!c) {
+      c = [ArcItem new];
+      c.itemID = NSUUID.UUID.UUIDString;
+      c.url = e.url;
+      c.pinnedURL = e.url;  // like a pinned tab: closing it returns it to the feed's address
+      c.children = [NSMutableArray array];
+    }
+    c.title = e.title;
+    [next addObject:c];
+  }
+  for (ArcItem* c in f.children)
+    if (![next containsObject:c]) {
+      if (c == _shown) continue;  // never pull the page you're reading out from under you
+      [self unloadItem:c];
+    }
+  for (ArcItem* c in f.children)
+    if (c == _shown && ![next containsObject:c]) [next addObject:c];
+  // Dismissed entries that left the feed don't need remembering.
+  NSMutableSet* inFeed = [NSMutableSet set];
+  for (LiveFolderEntry* e in entries) [inFeed addObject:e.url];
+  [f.liveDismissed filterUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString* u, NSDictionary*) { return [inFeed containsObject:u]; }]];
+  f.children = next;
+}
+- (void)refreshLiveFolder:(ArcItem*)f done:(void (^)(BOOL ok))done {
+  if (!f.liveKind) { if (done) done(NO); return; }
+  __weak MainWindowController* weakSelf = self;
+  f.liveRefreshedAt = [NSDate date];  // also throttles retries after an error
+  LiveFolderFetch(f.liveKind, f.liveSource, kLiveFolderMaxItems, ^(NSArray<LiveFolderEntry*>* entries, NSString* error) {
+    MainWindowController* me = weakSelf;
+    if (!me) return;
+    f.liveError = error;
+    if (entries) [me applyLiveEntries:entries toFolder:f];
+    if ([me spaceOwningItem:f] == me->_space) {
+      [me->_outline reloadItem:f reloadChildren:YES];
+      if (me->_shown) [me selectSidebarRowFor:me->_shown];
+    }
+    [me scheduleSave];
+    if (done) done(entries != nil);
+  });
+}
+// Removes an item (and its tabs) from the current Space without archiving (tests and Live Folder cleanup).
+- (void)deleteSidebarItem:(ArcItem*)item {
+  if (!item || item.isSection) return;
+  for (ArcItem* t in [self tabsIn:@[ item ]]) {
+    if (t == _shown) _shown = nil;
+    [self unloadItem:t];
+  }
+  for (ArcItem* section in [self sectionsOfSpace:_space])
+    if (RemoveItem(section, item)) break;
+  [_outline reloadData];
+  for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
+  [self scheduleSave];
+}
+// Closing a Live Folder tab removes it and keeps it from coming back on the next refresh.
+- (BOOL)dismissLiveFolderTab:(ArcItem*)item {
+  ArcItem* parent = [self parentOfItem:item];
+  if (!parent.liveKind) return NO;
+  NSString* key = item.pinnedURL ?: item.url;
+  if (key && ![parent.liveDismissed containsObject:key]) [parent.liveDismissed addObject:key];
+  [self unloadItem:item];
+  [parent.children removeObject:item];
+  if (item == _shown) _shown = nil;
+  [_outline reloadItem:parent reloadChildren:YES];
   [self scheduleSave];
   return YES;
 }
@@ -4859,6 +5004,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
   _archiveTimer = [NSTimer scheduledTimerWithTimeInterval:60 repeats:YES block:^(NSTimer* t) {
     [weakSelf runAutoArchiveWithThreshold:AutoArchiveThreshold() now:[NSDate date]];
     [weakSelf archiveIdleLittleWindowsAt:[NSDate date]];
+    [weakSelf refreshStaleLiveFolders];
   }];
 }
 
