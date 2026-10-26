@@ -485,7 +485,13 @@
       BOOL barMarked = [icons[0] hasPrefix:@"*"];
       [w clickSpaceBarIcon:[w.spaces indexOfObject:made]];
       BOOL barClick = w.currentSpace == made && [w.spaceBarIcons[[w.spaces indexOfObject:made]] hasPrefix:@"*"];
-      std::printf("SELFTEST-SPACEBAR icons=%d current=%d click=%d\n", barCount, barMarked, barClick);
+      // Arc's Space title row: shows the current Space's name (renamed above) and has the Space menu.
+      BOOL header = [w.spaceHeaderText hasSuffix:@"SelfTest Renamed"];
+      NSArray* menu = w.spaceMenuTitles;
+      BOOL menuOK = [menu containsObject:@"Rename Space..."] && [menu containsObject:@"Edit Theme Color..."] &&
+                    [menu containsObject:@"Delete Space..."];
+      std::printf("SELFTEST-SPACEBAR icons=%d current=%d click=%d header=%d menu=%d\n", barCount, barMarked, barClick, header,
+                  menuOK);
       [w selectSpaceAtIndex:[w.spaces indexOfObject:made]];
       NSUInteger archivedBefore = [w archivedTabs].count;
       BOOL deleted = [w deleteSpace:made];
