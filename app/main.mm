@@ -54,6 +54,14 @@
 @property(nonatomic, strong) NSMutableArray<NSString*>* pendingURLs;  // links that arrived before the window
 @end
 
+// Self-test: poll a condition every 0.25 s instead of a fixed wait, then continue (also on timeout).
+static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void)) {
+  if (cond() || timeoutSec <= 0) { then(); return; }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    WaitUntil(cond, timeoutSec - 0.25, then);
+  });
+}
+
 @implementation AppDelegate
 
 - (void)buildMenu {
@@ -362,23 +370,24 @@
     return;
   }
   [w navigateCurrentTab:@"https://www.iana.org/help/example-domains"];
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+  // Wait for the second page to commit (network speed varies) instead of a fixed 5 s.
+  WaitUntil(^{ return (BOOL)([w canGoBack] && ![w isLoading]); }, 20, ^{
     BOOL couldGoBack = [w canGoBack];
     [w goBack:nil];
     [w zoomIn:nil];
     [w zoomIn:nil];
     std::printf("SELFTEST-BASICS canGoBack=%d zoomAfter2In=%.1f\n", couldGoBack, [w currentZoomLevel]);
     [w actualSize:nil];
-  });
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 6 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-    std::printf("SELFTEST-BASICS afterBack=%s zoomReset=%.1f\n", [w currentURL].UTF8String, [w currentZoomLevel]);
-    [w findText:@"domain" forward:YES];
-  });
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-    [w copyCurrentURLAsMarkdown:nil];
-    std::printf("SELFTEST-BASICS findDomainCount=%d markdown=%s\n", w.lastFindCount,
-                [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString].UTF8String);
-    [self runRemainingSelfTestActions];
+    WaitUntil(^{ return (BOOL)([[w currentURL] hasPrefix:@"https://example.com"] && ![w isLoading]); }, 15, ^{
+      std::printf("SELFTEST-BASICS afterBack=%s zoomReset=%.1f\n", [w currentURL].UTF8String, [w currentZoomLevel]);
+      [w findText:@"domain" forward:YES];
+      WaitUntil(^{ return (BOOL)(w.lastFindCount > 0); }, 5, ^{
+        [w copyCurrentURLAsMarkdown:nil];
+        std::printf("SELFTEST-BASICS findDomainCount=%d markdown=%s\n", w.lastFindCount,
+                    [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString].UTF8String);
+        [self runRemainingSelfTestActions];
+      });
+    });
   });
 }
 
@@ -1030,21 +1039,21 @@
         [w showItem:t];
         [w resetSitePermissions:nil];  // the SelfTest profile keeps Chromium's answers between runs
         [w runJS:@"Notification.requestPermission().then(r => document.title = 'n1:' + r)" inItem:t];
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        WaitUntil(^{ if (w.shownItem != t) [w showItem:t]; return (BOOL)(w.pendingSitePrompt.length > 0); }, 10, ^{
           firstPrompt = w.pendingSitePrompt;
           [w answerSitePrompt:YES remember:YES];
-          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"n1:"]; }, 5, ^{
             NSString* t1 = t.liveTitle;
             BOOL remembered = [[w sitePermissionsForOrigin:@"https://example.org"][@"notifications"] boolValue];
             [w runJS:@"document.title='mic:start'; navigator.mediaDevices.getUserMedia({audio:true}).then(() => document.title='mic:yes', e => document.title='mic:' + e.name)"
               inItem:t];
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            WaitUntil(^{ if (w.shownItem != t) [w showItem:t]; return (BOOL)[w.pendingSitePrompt hasPrefix:@"microphone:"]; }, 10, ^{
               micPrompt = w.pendingSitePrompt;
               [w answerSitePrompt:NO remember:NO];
-              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+              WaitUntil(^{ return (BOOL)([t.liveTitle hasPrefix:@"mic:"] && ![t.liveTitle isEqualToString:@"mic:start"]); }, 5, ^{
                 NSString* t2 = t.liveTitle;
                 [w runJS:@"location.href = 'mailto:selftest@example.com'" inItem:t];
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                WaitUntil(^{ if (w.shownItem != t) [w showItem:t]; return (BOOL)[w.pendingSitePrompt hasPrefix:@"open:"]; }, 10, ^{
                   mailPrompt = w.pendingSitePrompt;
                   [w answerSitePrompt:NO remember:NO];
                   [w showItem:t];
