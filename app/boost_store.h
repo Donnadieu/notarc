@@ -28,5 +28,6 @@ NSString* BoostHostForURL(NSString* url);
 // JavaScript that applies (or, when boost is nil/disabled, removes) a Boost in the page. Idempotent.
 NSString* BoostApplyScript(Boost* boost);
 // JavaScript for Zap mode: highlights the element under the mouse; a click reports its selector through
-// console.log("__notarc_zap__:<selector>"); Escape reports "__notarc_zap__:" (cancel).
+// console.log("__notarc_zap__:<selector>"); Option-click zaps all related elements (same tag and classes);
+// Escape reports "__notarc_zap__:" (cancel). window.__notarcZapSel(el, related) is exposed for tests.
 NSString* BoostZapModeScript(void);

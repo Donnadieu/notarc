@@ -79,7 +79,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [ ] Capture: area, full page, portrait mode; save/copy screenshot (missing) (#48)
 - [ ] Easel (canvas of captures, text, live web clips) (missing) (#49)
 - [ ] Notes (rich-text documents in the sidebar) (missing) (#50)
-- [ ] Boosts: custom CSS/JS per site, zap elements, boost editor (partial: per-site Boosts saved locally and applied on every page load, including subdomains: colour tint, font, text size, upper/lower case, zaps, custom CSS and JavaScript; editor panel; Zap mode; on/off. Missing: Arc's editor look and colour wheel, a Boost indicator in the address pill, "Zap all related elements", shuffle; sharing is out of scope) (#51)
+- [ ] Boosts: custom CSS/JS per site, zap elements, boost editor (partial: per-site Boosts saved locally and applied on every page load, including subdomains: colour tint, font, text size, upper/lower case, zaps (Option-click zaps all related elements), custom CSS and JavaScript; editor panel with Shuffle; Boost indicator in the address pill; on/off. Missing: Arc's editor look and colour wheel; sharing is out of scope) (#51)
 - [ ] Translate page (missing) (#52)
 - [ ] Ad blocking / content blocking (missing) (#53)
 - [x] Site control center (per-site permissions, clear cookies and refresh) (View > Site Settings, Cmd+Shift+I: connection security, Ask/Allow/Block for camera, mic, location, notifications, clipboard; Clear Cookies and Refresh; Reset Permissions) (#54)

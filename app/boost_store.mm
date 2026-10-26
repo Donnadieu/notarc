@@ -126,11 +126,15 @@ NSString* BoostZapModeScript(void) {
           "if(e.id&&/^[A-Za-z][\\w-]*$/.test(e.id)){p.unshift('#'+e.id);break;}"
           "var i=1,s=e;while((s=s.previousElementSibling))if(s.tagName===e.tagName)i++;"
           "p.unshift(t+':nth-of-type('+i+')');e=e.parentElement;}return p.join(' > ');}"
+          // Arc's "Zap all related elements": same tag and classes anywhere, or siblings of the same kind.
+          "function rel(e){var c=[].slice.call(e.classList).filter(function(x){return /^[A-Za-z_-][\\w-]*$/.test(x)});"
+          "if(c.length)return e.tagName.toLowerCase()+'.'+c.join('.');var s=sel(e);return s.replace(/:nth-of-type\\(\\d+\\)$/,'');}"
+          "window.__notarcZapSel=function(e,related){return related?rel(e):sel(e)};"
           "function mv(ev){cur=ev.target;var r=cur.getBoundingClientRect();"
           "box.style.left=r.left+'px';box.style.top=r.top+'px';box.style.width=r.width+'px';box.style.height=r.height+'px';}"
           "function end(){removeEventListener('mousemove',mv,true);removeEventListener('click',ck,true);"
           "removeEventListener('keydown',kd,true);box.remove();window.__notarcZap=0;}"
-          "function ck(ev){ev.preventDefault();ev.stopPropagation();var s=cur?sel(cur):'';end();console.log('__notarc_zap__:'+s);}"
+          "function ck(ev){ev.preventDefault();ev.stopPropagation();var s=cur?(ev.altKey?rel(cur):sel(cur)):'';end();console.log('__notarc_zap__:'+s);}"
           "function kd(ev){if(ev.key==='Escape'){end();console.log('__notarc_zap__:');}}"
           "addEventListener('mousemove',mv,true);addEventListener('click',ck,true);addEventListener('keydown',kd,true);})();";
 }

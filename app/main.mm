@@ -1127,15 +1127,30 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           Boost* b = [w boostForURL:@"https://example.org/x"];
           BOOL zapAdded = [b.zaps containsObject:@"a:nth-of-type(1)"];
           BOOL sub = [w boostForURL:@"https://docs.example.org/"] == b && [w boostForURL:@"https://example.com/"] == nil;
+          NSString* indOn = w.boostIndicatorState;
+          // Zap all related: the selector Option-click picks covers every element with the same tag and classes.
+          [w runJS:@"(function(){var d=document.createElement('div');d.id='zrel';"
+                    "d.innerHTML='<span class=\\'ad x\\'>1</span><b>k</b><span class=\\'ad x\\'>2</span>';document.body.appendChild(d);})()"
+            inItem:t];
+          [w runJS:BoostZapModeScript() inItem:t];
+          [w runJS:@"document.title='rel:'+window.__notarcZapSel(document.querySelectorAll('span.ad')[1],true);"
+                    "document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape'}))" inItem:t];
+          __block BOOL related = NO;
+          WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"rel:"]; }, 5, ^{
+            related = [t.liveTitle isEqualToString:@"rel:span.ad.x"];
+            if (!related) std::printf("SELFTEST-BOOST-DEBUG rel=[%s]\n", t.liveTitle.UTF8String);
           [w setBoostForHost:@"example.org" configure:^(Boost* x) { x.enabled = NO; }];
           [w runJS:@"document.title='off:'+!!document.getElementById('__notarc_boost__')+'|'+getComputedStyle(document.querySelector('p')).display" inItem:t];
           WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"off:"]; }, 5, ^{
             BOOL off = [t.liveTitle isEqualToString:@"off:false|block"];
+            NSString* indOff = w.boostIndicatorState;
             BOOL saved = w.savedBoostCount == 1;
             if (!applied || !off) std::printf("SELFTEST-BOOST-DEBUG on=[%s] off=[%s]\n", on.UTF8String, t.liveTitle.UTF8String);
             [w deleteBoostForHost:@"example.org"];
-            std::printf("SELFTEST-BOOST applied=%d zapAdded=%d subdomain=%d off=%d saved=%d deleted=%d\n", applied, zapAdded,
-                        sub, off, saved, w.savedBoostCount == 0);
+            std::printf("SELFTEST-BOOST applied=%d zapAdded=%d subdomain=%d off=%d saved=%d deleted=%d related=%d "
+                        "indicatorOn=%d indicatorOff=%d\n", applied, zapAdded, sub, off, saved, w.savedBoostCount == 0, related,
+                        [indOn isEqualToString:@"on"], [indOff isEqualToString:@"off"]);
+          });
           });
         });
       });
