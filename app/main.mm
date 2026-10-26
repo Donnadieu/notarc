@@ -558,6 +558,18 @@
       if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
       BOOL pillOK = pf.origin.x == 8 && pf.size.height == 36 && NSMaxY(wb) - NSMaxY(pf) == 46 && host.length &&
                     [w.sidebarAddressText isEqualToString:host];
+      // Arc sidebar rows: 36 pt pills, radius 8; selected 20% white (dark) / 85% white (light), hover lighter.
+      ArcItem* shownTab = w.shownItem;
+      ArcItem* otherTab = nil;
+      for (ArcItem* t in w.currentSpace.allTabs) if (t != shownTab && t.url.length && !t.isSplit) { otherTab = t; break; }
+      NSString* selStyle = shownTab ? [w sidebarRowStyleForItem:shownTab] : @"";
+      [w hoverSidebarItem:otherTab];
+      NSString* hovStyle = otherTab ? [w sidebarRowStyleForItem:otherTab] : @"";
+      [w hoverSidebarItem:nil];
+      NSString* offStyle = otherTab ? [w sidebarRowStyleForItem:otherTab] : @"";
+      BOOL rowsOK = [selStyle hasPrefix:@"h=36 r=8 sel=1"] && [hovStyle containsString:@"hover=1"] &&
+                    [offStyle hasSuffix:@"alpha=0.00"];
+      if (!rowsOK) std::printf("SELFTEST-ROWS-DEBUG sel=[%s] hov=[%s] off=[%s]\n", selStyle.UTF8String, hovStyle.UTF8String, offStyle.UTF8String);
       [w toggleFocusMode:nil];
       NSRect ff = w.pageCardFrame;
       BOOL fullInFocus = NSEqualRects(ff, wb) && w.pageCardRadius == 0;
@@ -566,8 +578,8 @@
       BOOL out = !w.focusMode && w.sidebarHidden == before && ![w.window standardWindowButton:NSWindowCloseButton].hidden;
       BOOL fsCapable = (w.window.collectionBehavior & NSWindowCollectionBehaviorFullScreenNone) == 0;
       BOOL cardBack = NSEqualRects(w.pageCardFrame, cf);
-      std::printf("SELFTEST-FOCUS focus=%d restored=%d fullScreenAllowed=%d card=%d fullInFocus=%d cardBack=%d addressPill=%d\n",
-                  inFocus, out, fsCapable, cardOK, fullInFocus, cardBack, pillOK);
+      std::printf("SELFTEST-FOCUS focus=%d restored=%d fullScreenAllowed=%d card=%d fullInFocus=%d cardBack=%d addressPill=%d rows=%d\n",
+                  inFocus, out, fsCapable, cardOK, fullInFocus, cardBack, pillOK, rowsOK);
     });
     // Clear Cookies and Refresh (this site only), then Clear Browsing Data (last hour).
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 46 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{

@@ -160,6 +160,71 @@ static const NSUInteger kMaxSuggestions = 8;
 - (void)mouseUp:(NSEvent*)e { if (self.onClick) self.onClick(); }
 @end
 
+// Arc's sidebar rows: 36 pt rounded pills with Arc's selected / hovered / multi-selected colours
+// (Arc colour catalogue: TabCellBackgroundCurrent, ...PreviousHovered, ...Mutiselected; light mode adds a shadow).
+constexpr CGFloat kRowHeight = 36, kSectionRowHeight = 26, kRowRadius = 8;
+static BOOL IsDark(NSView* v) {
+  return [v.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
+         NSAppearanceNameDarkAqua;
+}
+@interface SidebarRowView : NSTableRowView
+@property(nonatomic) BOOL hovered;
+@property(nonatomic) BOOL multi;
+@end
+@implementation SidebarRowView
+- (NSColor*)fill {
+  BOOL dark = IsDark(self);
+  if (self.selected && self.multi)
+    return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.10] : [NSColor colorWithWhite:0 alpha:0.10];
+  if (self.selected) return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.20] : [NSColor colorWithWhite:1 alpha:0.85];
+  if (self.hovered) return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.12] : [NSColor colorWithWhite:1 alpha:0.50];
+  return nil;
+}
+- (void)drawPill {
+  NSColor* c = [self fill];
+  if (!c) return;
+  NSBezierPath* path = [NSBezierPath bezierPathWithRoundedRect:[self pillRect] xRadius:kRowRadius yRadius:kRowRadius];
+  if (self.selected && !self.multi && !IsDark(self)) {
+    [NSGraphicsContext saveGraphicsState];
+    NSShadow* sh = [NSShadow new];
+    sh.shadowColor = [NSColor colorWithWhite:0 alpha:0.20];
+    sh.shadowBlurRadius = 2;
+    sh.shadowOffset = NSMakeSize(0, -1);
+    [sh set];
+    [c setFill];
+    [path fill];
+    [NSGraphicsContext restoreGraphicsState];
+    return;
+  }
+  [c setFill];
+  [path fill];
+}
+// The row view includes the 2 pt gap between rows; the pill itself is 36 pt, as in Arc.
+- (NSRect)pillRect { return NSInsetRect(self.bounds, 0, (self.bounds.size.height - kRowHeight) / 2); }
+- (void)drawBackgroundInRect:(NSRect)r { if (!self.selected) [self drawPill]; }
+- (void)drawSelectionInRect:(NSRect)r { [self drawPill]; }
+- (BOOL)isEmphasized { return NO; }
+- (NSString*)styleDescription {  // tests
+  NSColor* c = [[self fill] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+  return [NSString stringWithFormat:@"h=%.0f r=%.0f sel=%d hover=%d alpha=%.2f", [self pillRect].size.height, kRowRadius,
+                                    self.selected, self.hovered, c ? c.alphaComponent : 0];
+}
+@end
+
+// Arc doesn't indent top-level tabs under the Pinned/Today headers; only folder contents are indented.
+@interface SidebarOutlineView : NSOutlineView
+@end
+@implementation SidebarOutlineView
+- (NSRect)frameOfCellAtColumn:(NSInteger)column row:(NSInteger)row {
+  NSRect f = [super frameOfCellAtColumn:column row:row];
+  if ([self levelForRow:row] >= 1) {
+    f.origin.x -= self.indentationPerLevel;
+    f.size.width += self.indentationPerLevel;
+  }
+  return f;
+}
+@end
+
 @interface SplitDividerView : NSView
 @property(nonatomic, weak) MainWindowController* owner;
 @property(nonatomic) NSUInteger index;
@@ -336,21 +401,27 @@ static const NSUInteger kMaxSuggestions = 8;
   [sidebar addSubview:_spacePicker];
 
   NSScrollView* scroll = [[NSScrollView alloc]
-      initWithFrame:NSMakeRect(4, 8, kSidebarWidth - 8, bounds.size.height - 132)];
+      initWithFrame:NSMakeRect(8, 8, kSidebarWidth - 17, bounds.size.height - 132)];
   scroll.autoresizingMask = NSViewHeightSizable;
   scroll.drawsBackground = NO;
   scroll.hasVerticalScroller = YES;
+  scroll.scrollerStyle = NSScrollerStyleOverlay;
+  scroll.automaticallyAdjustsContentInsets = NO;
   _sidebarScroll = scroll;
 
-  _outline = [[NSOutlineView alloc] initWithFrame:scroll.bounds];
+  _outline = [[SidebarOutlineView alloc] initWithFrame:scroll.bounds];
   NSTableColumn* col = [[NSTableColumn alloc] initWithIdentifier:@"item"];
-  col.width = kSidebarWidth - 24;
+  col.width = kSidebarWidth - 17;
+  col.resizingMask = NSTableColumnAutoresizingMask;
   [_outline addTableColumn:col];
   _outline.outlineTableColumn = col;
   _outline.headerView = nil;
   _outline.backgroundColor = NSColor.clearColor;
-  _outline.rowHeight = 28;
-  _outline.style = NSTableViewStyleSourceList;
+  _outline.rowHeight = kRowHeight;
+  _outline.style = NSTableViewStylePlain;
+  _outline.intercellSpacing = NSMakeSize(0, 2);
+  _outline.indentationPerLevel = 14;
+  _outline.columnAutoresizingStyle = NSTableViewUniformColumnAutoresizingStyle;
   _outline.floatsGroupRows = NO;
   _outline.allowsMultipleSelection = YES;
   _outline.dataSource = self;
@@ -905,8 +976,39 @@ NSString* CleanLinkURL(NSString* url) {
 }
 
 - (BOOL)outlineView:(NSOutlineView*)ov isGroupItem:(id)item {
-  return ((ArcItem*)item).isSection;
+  return NO;  // Arc's section headers are plain rows, not floating group rows
 }
+
+- (CGFloat)outlineView:(NSOutlineView*)ov heightOfRowByItem:(id)item {
+  return ((ArcItem*)item).isSection ? kSectionRowHeight : kRowHeight;
+}
+
+- (NSTableRowView*)outlineView:(NSOutlineView*)ov rowViewForItem:(id)item {
+  SidebarRowView* rv = [ov makeViewWithIdentifier:@"row" owner:self];
+  if (!rv) {
+    rv = [SidebarRowView new];
+    rv.identifier = @"row";
+  }
+  rv.hovered = NO;
+  rv.multi = ov.selectedRowIndexes.count > 1;
+  return rv;
+}
+
+- (NSString*)sidebarRowStyleForItem:(ArcItem*)item {
+  NSInteger row = [_outline rowForItem:item];
+  if (row < 0) return @"";
+  SidebarRowView* rv = (SidebarRowView*)[_outline rowViewAtRow:row makeIfNecessary:YES];
+  return [rv isKindOfClass:SidebarRowView.class] ? [rv styleDescription] : @"";
+}
+- (void)setSidebarHoverRow:(NSInteger)row {
+  [_outline enumerateAvailableRowViewsUsingBlock:^(NSTableRowView* rv, NSInteger r) {
+    if (![rv isKindOfClass:SidebarRowView.class]) return;
+    SidebarRowView* s = (SidebarRowView*)rv;
+    BOOL h = r == row && ![(ArcItem*)[self->_outline itemAtRow:r] isSection];
+    if (s.hovered != h) { s.hovered = h; s.needsDisplay = YES; }
+  }];
+}
+- (void)hoverSidebarItem:(ArcItem*)item { [self setSidebarHoverRow:item ? [_outline rowForItem:item] : -1]; }  // tests
 
 - (BOOL)outlineView:(NSOutlineView*)ov shouldSelectItem:(id)item {
   return ((ArcItem*)item).url.length > 0 || ((ArcItem*)item).isSplit;
@@ -916,15 +1018,16 @@ NSString* CleanLinkURL(NSString* url) {
   ArcItem* a = item;
   NSTableCellView* cell = [ov makeViewWithIdentifier:@"cell" owner:self];
   if (!cell) {
-    cell = [[NSTableCellView alloc] initWithFrame:NSMakeRect(0, 0, col.width, 28)];
+    cell = [[NSTableCellView alloc] initWithFrame:NSMakeRect(0, 0, col.width, kRowHeight)];
     cell.identifier = @"cell";
-    NSImageView* icon = [[NSImageView alloc] initWithFrame:NSMakeRect(2, 6, 16, 16)];
+    NSImageView* icon = [[NSImageView alloc] initWithFrame:NSMakeRect(10, 10, 16, 16)];
+    icon.autoresizingMask = NSViewMinYMargin | NSViewMaxYMargin;
     [cell addSubview:icon];
     cell.imageView = icon;
     NSTextField* label = [NSTextField labelWithString:@""];
     label.lineBreakMode = NSLineBreakByTruncatingTail;
-    label.frame = NSMakeRect(24, 5, col.width - 28, 18);
-    label.autoresizingMask = NSViewWidthSizable;
+    label.frame = NSMakeRect(34, 9, col.width - 42, 18);
+    label.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin | NSViewMaxYMargin;
     [cell addSubview:label];
     cell.textField = label;
   }
@@ -937,7 +1040,13 @@ NSString* CleanLinkURL(NSString* url) {
   cell.textField.stringValue = title;
   cell.textField.editable = a.isFolder;
   cell.textField.delegate = a.isFolder ? self : nil;
-  cell.textField.font = a.isSection ? [NSFont boldSystemFontOfSize:11] : [NSFont systemFontOfSize:13];
+  cell.textField.font = a.isSection ? [NSFont systemFontOfSize:11 weight:NSFontWeightSemibold]
+                                    : [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
+  cell.textField.textColor = a.isSection ? NSColor.secondaryLabelColor : NSColor.labelColor;
+  NSRect lf = cell.textField.frame;
+  lf.origin.x = a.isSection ? 10 : 34;
+  lf.size.width = cell.bounds.size.width - lf.origin.x - 8;
+  cell.textField.frame = lf;
   NSString* symbol = a.isSection ? nil : (a.isFolder ? @"folder" : @"globe");
   if (a.isSplit) symbol = a.splitHorizontal ? @"rectangle.split.1x2" : @"rectangle.split.2x1";
   if (a.crashed) symbol = @"exclamationmark.triangle";
@@ -1474,6 +1583,7 @@ static NSString* RelativeAgo(NSDate* d) {
 - (void)mouseMoved:(NSEvent*)event {
   NSPoint p = [_outline convertPoint:event.locationInWindow fromView:nil];
   NSInteger row = [_outline rowAtPoint:p];
+  [self setSidebarHoverRow:row];
   ArcItem* item = row >= 0 ? [_outline itemAtRow:row] : nil;
   if (!item.url.length || item.isSection) item = nil;
   if (item == _hoverItem) return;
@@ -1490,6 +1600,7 @@ static NSString* RelativeAgo(NSDate* d) {
 }
 
 - (void)mouseExited:(NSEvent*)event {
+  [self setSidebarHoverRow:-1];
   _hoverItem = nil;
   [_hoverTimer invalidate];
   _hoverTimer = nil;
@@ -1546,6 +1657,13 @@ static NSString* RelativeAgo(NSDate* d) {
 }
 
 - (void)outlineViewSelectionDidChange:(NSNotification*)notification {
+  BOOL multi = _outline.selectedRowIndexes.count > 1;
+  [_outline enumerateAvailableRowViewsUsingBlock:^(NSTableRowView* rv, NSInteger r) {
+    if ([rv isKindOfClass:SidebarRowView.class] && ((SidebarRowView*)rv).multi != multi) {
+      ((SidebarRowView*)rv).multi = multi;
+      rv.needsDisplay = YES;
+    }
+  }];
   [self hideHoverCard];
   if (_outline.selectedRowIndexes.count > 1) return;  // multi-select only marks rows; it doesn't switch tabs
   ArcItem* item = [_outline itemAtRow:_outline.selectedRow];
