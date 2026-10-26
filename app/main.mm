@@ -368,16 +368,23 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       // Phase 2 (run by scripts/test-session-restore.sh): report what came back, then quit cleanly.
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         MainWindowController* w = self.window;
-        std::printf("SELFTEST-RESTORE crashedLastTime=%d restored=%lu live=%lu shown=%s\n", crashedLastTime,
-                    (unsigned long)w.restoredTabCount, (unsigned long)w.liveTabCount, w.shownItem.url.UTF8String ?: "-");
-        std::fflush(stdout);
-        [NSApp terminate:nil];
+        [w testCookieNamesForURL:@"https://example.org/" done:^(NSArray<NSString*>* names) {
+          std::printf("SELFTEST-RESTORE crashedLastTime=%d restored=%lu live=%lu shown=%s sessionLogin=%d savedLogin=%d\n",
+                      crashedLastTime, (unsigned long)w.restoredTabCount, (unsigned long)w.liveTabCount,
+                      w.shownItem.url.UTF8String ?: "-", [names containsObject:@"notarc_session_login"],
+                      [names containsObject:@"notarc_saved_login"]);
+          std::fflush(stdout);
+          [NSApp terminate:nil];
+        }];
       });
     }
     if (!self.selfTestReload)
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 165 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         [self.window openInNewTab:@"https://example.org/session-restore-marker"];
         [self.window saveSidebarNow];
+        // Logins must survive a restart: one session-only and one dated cookie, checked by the reload phase.
+        [self.window setTestCookie:@"notarc_session_login" value:@"1" url:@"https://example.org/" session:YES done:nil];
+        [self.window setTestCookie:@"notarc_saved_login" value:@"1" url:@"https://example.org/" session:NO done:nil];
       });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 170 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       for (NSDictionary* tab in [self.window tabSnapshot])
@@ -1709,6 +1716,8 @@ int main(int argc, char* argv[]) {
     [[NSFileManager defaultManager] createDirectoryAtPath:cache withIntermediateDirectories:YES attributes:nil error:nil];
     CefString(&settings.root_cache_path) = support.UTF8String;
     CefString(&settings.cache_path) = cache.UTF8String;
+    // Keep session-only logins across restarts, as Arc and Chrome do with "continue where you left off".
+    settings.persist_session_cookies = true;
 
     if (!CefInitialize(main_args, settings, nullptr, nullptr)) return CefGetExitCode();
     SettingsRegisterDefaults();
