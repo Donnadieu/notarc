@@ -27,7 +27,9 @@
 static NSPasteboardType const kSidebarItemPasteboardType = @"io.github.donnadieu.notarc.sidebar-item";
 
 namespace {
-constexpr CGFloat kSidebarWidth = 260;
+constexpr CGFloat kSidebarWidth = 273;  // Arc's default (StorableWindows.json sidebarWidth)
+// The page sits in a rounded card on the Space colour, as in Arc (measured from Arc 1.169):
+constexpr CGFloat kCardInsetTop = 10, kCardInsetSide = 9, kCardInsetBottom = 9, kCardRadius = 8;
 
 // Chrome-style request contexts initialise asynchronously; browsers created before that fail.
 class SpaceContextHandler : public CefRequestContextHandler {
@@ -248,15 +250,17 @@ static const NSUInteger kMaxSuggestions = 8;
   NSView* root = self.window.contentView;
   NSRect bounds = root.bounds;
 
-  NSVisualEffectView* sidebar = [[NSVisualEffectView alloc]
-      initWithFrame:NSMakeRect(0, 0, kSidebarWidth, bounds.size.height)];
-  sidebar.material = NSVisualEffectMaterialSidebar;
-  sidebar.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+  // Window frame: one backdrop behind the sidebar and around the page card, tinted by the Space theme.
+  NSVisualEffectView* frameView = [[NSVisualEffectView alloc] initWithFrame:bounds];
+  frameView.material = NSVisualEffectMaterialSidebar;
+  frameView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+  frameView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  [root addSubview:frameView];
+  NSView* sidebar = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, kSidebarWidth, bounds.size.height)];
   sidebar.autoresizingMask = NSViewHeightSizable;
-  [root addSubview:sidebar];
   _sidebar = sidebar;
-  // Space theme tint: a gradient over the sidebar material, under every control.
-  _themeView = [[NSView alloc] initWithFrame:sidebar.bounds];
+  // Space theme tint: a gradient over the whole frame, under every control.
+  _themeView = [[NSView alloc] initWithFrame:bounds];
   _themeView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   _themeView.wantsLayer = YES;
   _themeGradient = [CAGradientLayer layer];
@@ -266,7 +270,8 @@ static const NSUInteger kMaxSuggestions = 8;
   _themeGradient.endPoint = CGPointMake(0.5, 0);
   [_themeView.layer addSublayer:_themeGradient];
   _themeView.hidden = YES;
-  [sidebar addSubview:_themeView];
+  [root addSubview:_themeView];
+  [root addSubview:sidebar];
 
   _mediaBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 6, kSidebarWidth - 16, 34)];
   _mediaBar.wantsLayer = YES;
@@ -336,6 +341,8 @@ static const NSUInteger kMaxSuggestions = 8;
                                                       bounds.size.height)];
   _content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   _content.wantsLayer = YES;
+  _content.layer.cornerRadius = kCardRadius;
+  _content.layer.masksToBounds = YES;
   [root addSubview:_content];
 
   _toolbar = [[NSView alloc] initWithFrame:NSMakeRect(kSidebarWidth, bounds.size.height - kToolbarHeight,
@@ -2367,7 +2374,12 @@ static ArcItem* NewSection(NSString* title) {
     bx += 28;
   }
   _address.frame = NSMakeRect(bx + 6, 7, _toolbar.bounds.size.width - bx - 16, 24);
-  _content.frame = NSMakeRect(x, 0, b.size.width - x, b.size.height - top);
+  // Card insets; with no sidebar (and in focus mode) the page fills the window, as in Arc.
+  BOOL card = !_sidebar.hidden;
+  CGFloat left = card ? 0 : 0, right = card ? kCardInsetSide : 0, bottom = card ? kCardInsetBottom : 0;
+  CGFloat topInset = card && !bar ? kCardInsetTop : 0;
+  _content.layer.cornerRadius = card ? kCardRadius : 0;
+  _content.frame = NSMakeRect(x + left, bottom, b.size.width - x - left - right, b.size.height - top - topInset - bottom);
   [self updateToolbarAddress];
   [self layoutPanes];
 }
@@ -2410,6 +2422,8 @@ static ArcItem* NewSection(NSString* title) {
 
 
 - (BOOL)sidebarHidden { return _sidebar.hidden; }
+- (NSRect)pageCardFrame { return _content.frame; }
+- (CGFloat)pageCardRadius { return _content.layer.cornerRadius; }
 
 - (IBAction)toggleFocusMode:(id)sender {
   _focusMode = !_focusMode;

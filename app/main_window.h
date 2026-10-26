@@ -225,6 +225,8 @@ NSString* CleanLinkURL(NSString* url);
 - (IBAction)focusPaneFromMenu:(NSMenuItem*)sender;  // tag = index
 - (void)selectTabAtIndex:(NSUInteger)index;
 - (BOOL)sidebarHidden;   // tests
+- (NSRect)pageCardFrame;   // tests: the rounded page card, in window content coordinates
+- (CGFloat)pageCardRadius;
 - (ArcItem*)shownItem;   // tests
 
 // Little Windows not focused for the "Archive Little Windows" setting are closed (and archived).
