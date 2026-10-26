@@ -390,6 +390,8 @@ static BOOL IsDark(NSView* v) {
   NSStackView* _spaceIcons;
   NSView* _spaceHeader;            // Arc's Space title row: icon + name, "..." menu
   NSTextField* _spaceHeaderTitle;
+  NSString* _lastSpaceSlide;   // tests: "left" / "right" / "none"
+  NSUInteger _cardPops;        // tests
 }
 
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID {
@@ -1002,6 +1004,7 @@ NSString* CleanLinkURL(NSString* url) {
 
 - (void)showItem:(ArcItem*)item {
   if (!item.url.length) return;
+  if (item != _shown && _shown) [self popPageCard];
   _shown.lastActiveAt = [NSDate date];  // the tab we leave was active until now
   _shown = item;
   ArcSpace* owner = [self spaceOwningItem:item];
@@ -2632,8 +2635,44 @@ static ArcItem* NewSection(NSString* title) {
   if ([a runModal] == NSAlertFirstButtonReturn) [self setIcon:f.stringValue forSpace:space];
 }
 
+// Arc slides the sidebar sideways when switching Spaces (next Space comes in from the right), and the page card
+// "pops" (a quick scale-in) when its contents change. Both are skipped when Reduce Motion is on.
+static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion; }
+- (void)slideSidebarFromRight:(BOOL)fromRight {
+  _lastSpaceSlide = ReduceMotion() ? @"none" : (fromRight ? @"right" : @"left");
+  if (ReduceMotion()) return;
+  _sidebarScroll.wantsLayer = YES;
+  CATransition* t = [CATransition animation];
+  t.type = kCATransitionPush;
+  t.subtype = fromRight ? kCATransitionFromRight : kCATransitionFromLeft;
+  t.duration = 0.22;
+  t.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+  [_sidebarScroll.layer addAnimation:t forKey:@"spaceSlide"];
+  [_spaceHeader.layer ?: (_spaceHeader.wantsLayer = YES, _spaceHeader.layer) addAnimation:[t copy] forKey:@"spaceSlide"];
+}
+- (void)popPageCard {
+  if (ReduceMotion() || _sidebar.hidden) return;
+  ++_cardPops;
+  CABasicAnimation* a = [CABasicAnimation animationWithKeyPath:@"opacity"];
+  a.fromValue = @0.85;
+  a.toValue = @1.0;
+  a.duration = 0.18;
+  [_content.layer addAnimation:a forKey:@"pop"];
+  CASpringAnimation* sc = [CASpringAnimation animationWithKeyPath:@"transform.scale"];
+  sc.fromValue = @0.985;
+  sc.toValue = @1.0;
+  sc.damping = 18;
+  sc.stiffness = 300;
+  sc.duration = sc.settlingDuration;
+  [_content.layer addAnimation:sc forKey:@"popScale"];
+}
+- (NSString*)lastSpaceSlide { return _lastSpaceSlide ?: @""; }
+- (NSUInteger)cardPopCount { return _cardPops; }
+
 - (void)switchToSpace:(ArcSpace*)space {
   if (!space || space == _space) return;
+  NSUInteger from = _space ? [_spaces indexOfObject:_space] : 0, to = [_spaces indexOfObject:space];
+  [self slideSidebarFromRight:to > from];
   _space = space;
   _splitItems = nil;
   [_spacePicker selectItemAtIndex:[_spaces indexOfObject:space]];
