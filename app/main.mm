@@ -118,6 +118,8 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItem:[NSMenuItem separatorItem]];
   [file addItemWithTitle:@"Pin / Unpin Tab" action:@selector(togglePin:) keyEquivalent:@"d"];
   [file addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@""];
+  [file addItemWithTitle:@"New Note" action:@selector(newNote:) keyEquivalent:@"n"].keyEquivalentModifierMask =
+      NSEventModifierFlagCommand | NSEventModifierFlagControl;
   NSMenuItem* littleItem = [file addItemWithTitle:@"New Little Window" action:@selector(newLittleWindow:)
                                     keyEquivalent:@"n"];
   littleItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
@@ -129,6 +131,27 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"Replace Pinned URL with Current" action:@selector(replacePinnedURL:) keyEquivalent:@""];
   [file addItemWithTitle:@"Reset All Pinned Tabs" action:@selector(resetAllPinnedTabs:) keyEquivalent:@""];
   fileItem.submenu = file;
+
+  // Format (Notes): bold, italic, underline, fonts and lists come from AppKit's text system.
+  NSMenuItem* formatItem = [NSMenuItem new];
+  [bar addItem:formatItem];
+  NSMenu* format = [[NSMenu alloc] initWithTitle:@"Format"];
+  NSFontManager* fm = [NSFontManager sharedFontManager];
+  NSMenuItem* bold = [format addItemWithTitle:@"Bold" action:@selector(addFontTrait:) keyEquivalent:@"b"];
+  bold.tag = NSBoldFontMask; bold.target = fm;
+  NSMenuItem* italic = [format addItemWithTitle:@"Italic" action:@selector(addFontTrait:) keyEquivalent:@"i"];
+  italic.tag = NSItalicFontMask; italic.target = fm;
+  [format addItemWithTitle:@"Underline" action:@selector(underline:) keyEquivalent:@"u"];
+  [format addItem:[NSMenuItem separatorItem]];
+  [format addItemWithTitle:@"Bigger" action:@selector(modifyFont:) keyEquivalent:@"+"].tag = NSSizeUpFontAction;
+  format.itemArray.lastObject.target = fm;
+  [format addItemWithTitle:@"Smaller" action:@selector(modifyFont:) keyEquivalent:@"-"].tag = NSSizeDownFontAction;
+  format.itemArray.lastObject.target = fm;
+  format.itemArray.lastObject.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
+  format.itemArray[format.itemArray.count - 2].keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
+  [format addItemWithTitle:@"Show Fonts" action:@selector(orderFrontFontPanel:) keyEquivalent:@""].target = fm;  // Cmd+T is New Tab
+  [format addItemWithTitle:@"Lists..." action:@selector(orderFrontListPanel:) keyEquivalent:@""];
+  formatItem.submenu = format;
 
   NSMenuItem* viewItem = [NSMenuItem new];
   [bar addItem:viewItem];
@@ -1154,6 +1177,33 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           });
         });
       });
+    });
+    // Notes: a new note shows the editor (no web view), typing names it from its first line and saves rich text,
+    // switching away and back reloads it, closing archives it and reopening from the archive brings the text back.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 110 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      ArcItem* note = [w createNoteWithID:nil];
+      BOOL editor = w.shownItem == note && [w noteEditorText] != nil && note.browserId == 0;
+      [w typeInNote:@"Groceries\nmilk and eggs"];
+      [w makeNoteRangeBold:NSMakeRange(0, 9)];
+      BOOL titled = [note.displayTitle isEqualToString:@"Groceries"];
+      BOOL saved = [[w savedNoteText:note] isEqualToString:@"Groceries\nmilk and eggs"];
+      BOOL bold = [w noteRangeIsBold:note range:NSMakeRange(0, 9)] && ![w noteRangeIsBold:note range:NSMakeRange(10, 4)];
+      [w openInNewTab:@"https://example.org/after-note"];
+      BOOL hidden = [w noteEditorText] == nil;
+      [w showItem:note];
+      BOOL reloaded = [[w noteEditorText] isEqualToString:@"Groceries\nmilk and eggs"];
+      NSString* noteURL = note.url;
+      [w closeTab:nil];
+      BOOL archived = NO;
+      for (ArchivedTab* a in [w archivedTabs]) if ([a.url isEqualToString:noteURL]) archived = YES;
+      [w openInNewTab:noteURL];
+      ArcItem* back = w.shownItem;
+      BOOL reopened = back.noteID && [[w noteEditorText] isEqualToString:@"Groceries\nmilk and eggs"] &&
+                      [back.displayTitle isEqualToString:@"Groceries"];
+      [w closeTab:nil];
+      std::printf("SELFTEST-NOTES editor=%d titled=%d saved=%d bold=%d hiddenForTabs=%d reloaded=%d archived=%d reopened=%d\n",
+                  editor, titled, saved, bold, hidden, reloaded, archived, reopened);
     });
     // Site settings popover: rows reflect remembered answers; changing one is stored; clear cookies works from it.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
