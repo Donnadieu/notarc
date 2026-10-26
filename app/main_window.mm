@@ -2405,6 +2405,8 @@ static NSString* SiteOf(NSString* url) {
   stack.spacing = 10;
   stack.wantsLayer = YES;
   stack.layer.cornerRadius = 10;
+  // Arc's toasts are dark in both appearances.
+  stack.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
   stack.layer.backgroundColor = [NSColor colorWithWhite:0.1 alpha:0.9].CGColor;
   NSSize sz = stack.fittingSize;
   NSRect c = _content.frame;
@@ -2494,6 +2496,17 @@ static ArcItem* NewSection(NSString* title) {
                         @[ @"Delete Space...", @"deleteCurrentSpace:" ] ]) {
     if ([e[0] isEqualToString:@"-"]) { [m addItem:NSMenuItem.separatorItem]; continue; }
     [m addItemWithTitle:e[0] action:NSSelectorFromString(e[1]) keyEquivalent:@""].target = self;
+    if ([e[1] isEqualToString:@"changeSpaceIcon:"]) {
+      NSMenuItem* ap = [m addItemWithTitle:@"Appearance" action:nil keyEquivalent:@""];
+      ap.submenu = [[NSMenu alloc] initWithTitle:@"Appearance"];
+      for (NSArray* o in @[ @[ @"Automatic", @"auto" ], @[ @"Light", @"light" ], @[ @"Dark", @"dark" ] ]) {
+        NSMenuItem* i = [ap.submenu addItemWithTitle:o[0] action:@selector(setSpaceAppearance:) keyEquivalent:@""];
+        i.target = self;
+        i.representedObject = o[1];
+        NSString* cur = _space.colorScheme ?: @"auto";
+        i.state = [cur isEqualToString:o[1]] ? NSControlStateValueOn : NSControlStateValueOff;
+      }
+    }
   }
   return m;
 }
@@ -2519,7 +2532,29 @@ static ArcItem* NewSection(NSString* title) {
   if (_space) [_spacePicker selectItemAtIndex:[_spaces indexOfObject:_space]];
 }
 
+// Arc lets each Space follow the system or force Light/Dark. Every Arc colour in NotArc is resolved from the view's
+// effective appearance, so setting the window's appearance switches the sidebar, rows, pills and command bar together.
+- (void)applyColorScheme {
+  NSString* cs = _space.colorScheme;
+  NSAppearance* ap = [cs isEqualToString:@"light"]  ? [NSAppearance appearanceNamed:NSAppearanceNameAqua]
+                     : [cs isEqualToString:@"dark"] ? [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]
+                                                    : nil;
+  if (self.window.appearance != ap && ![self.window.appearance.name isEqualToString:ap.name]) {
+    self.window.appearance = ap;
+    _commandBar.appearance = ap;
+    [_outline enumerateAvailableRowViewsUsingBlock:^(NSTableRowView* rv, NSInteger r) { rv.needsDisplay = YES; }];
+  }
+}
+- (void)setColorScheme:(NSString*)scheme forSpace:(ArcSpace*)space {
+  space.colorScheme = [scheme isEqualToString:@"light"] || [scheme isEqualToString:@"dark"] ? scheme : nil;
+  if (space == _space) [self applyColorScheme];
+  [self scheduleSave];
+}
+- (IBAction)setSpaceAppearance:(NSMenuItem*)sender { [self setColorScheme:sender.representedObject forSpace:_space]; }
+- (BOOL)sidebarIsDark { return IsDark(_sidebarScroll); }  // tests
+
 - (void)applyTheme {
+  [self applyColorScheme];
   NSMutableArray* cg = [NSMutableArray array];
   for (NSString* hex in _space.themeColors)
     if (NSColor* c = ColorFromHex(hex)) [cg addObject:(id)c.CGColor];

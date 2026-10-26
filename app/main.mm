@@ -503,6 +503,23 @@
       BOOL slide = reduce ? [back isEqualToString:@"none"] : ([back isEqualToString:@"left"] && [fwd isEqualToString:@"right"]);
       BOOL pop = reduce || w.cardPopCount > popsBefore;
       std::printf("SELFTEST-MOTION slide=%d pop=%d reduceMotion=%d\n", slide, pop, reduce);
+      // Arc per-Space appearance: Light/Dark switch the sidebar rows to Arc's light/dark values; Automatic follows macOS.
+      {
+        ArcSpace* sp = w.currentSpace;
+        ArcItem* sel = w.shownItem;
+        [w setColorScheme:@"light" forSpace:sp];
+        [w.window displayIfNeeded];
+        BOOL light = !w.sidebarIsDark && [[w sidebarRowStyleForItem:sel] containsString:@"alpha=0.85"];
+        [w setColorScheme:@"dark" forSpace:sp];
+        [w.window displayIfNeeded];
+        BOOL dark = w.sidebarIsDark && [[w sidebarRowStyleForItem:sel] containsString:@"alpha=0.20"];
+        [w setColorScheme:nil forSpace:sp];
+        BOOL autoOK = w.window.appearance == nil && sp.colorScheme == nil;
+        BOOL menu = [w.spaceMenuTitles containsObject:@"Appearance"];
+        if (!(light && dark)) std::printf("SELFTEST-APPEARANCE-DEBUG sel=%s style=[%s]\n", sel.url.UTF8String ?: "nil",
+                                           [w sidebarRowStyleForItem:sel].UTF8String);
+        std::printf("SELFTEST-APPEARANCE light=%d dark=%d auto=%d menu=%d\n", light, dark, autoOK, menu);
+      }
       [w selectSpaceAtIndex:[w.spaces indexOfObject:made]];
       NSUInteger archivedBefore = [w archivedTabs].count;
       BOOL deleted = [w deleteSpace:made];
