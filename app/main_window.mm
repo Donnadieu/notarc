@@ -320,6 +320,8 @@ static BOOL IsDark(NSView* v) {
   NSView* _sidebarNav;
   NSView* _spaceBar;        // Arc's bottom bar: archive, Space icons, "+"
   NSStackView* _spaceIcons;
+  NSView* _spaceHeader;            // Arc's Space title row: icon + name, "..." menu
+  NSTextField* _spaceHeaderTitle;
 }
 
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID {
@@ -400,7 +402,27 @@ static BOOL IsDark(NSView* v) {
   [self rebuildSpacePicker];
   _spacePicker.target = self;
   _spacePicker.action = @selector(spaceChanged:);
-  [sidebar addSubview:_spacePicker];
+  // The pop-up stays as the Space list model; Arc shows a plain title row instead of a drop-down.
+  _spaceHeader = [[NSView alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 122, kSidebarWidth - 17, 30)];
+  _spaceHeader.autoresizingMask = NSViewMinYMargin;
+  _spaceHeaderTitle = [NSTextField labelWithString:@""];
+  _spaceHeaderTitle.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
+  _spaceHeaderTitle.textColor = NSColor.secondaryLabelColor;
+  _spaceHeaderTitle.lineBreakMode = NSLineBreakByTruncatingTail;
+  _spaceHeaderTitle.frame = NSMakeRect(10, 6, _spaceHeader.bounds.size.width - 48, 18);
+  [_spaceHeader addSubview:_spaceHeaderTitle];
+  NSButton* more = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"ellipsis" accessibilityDescription:@"Space menu"]
+                                      target:self action:@selector(showSpaceMenu:)];
+  more.bordered = NO;
+  more.toolTip = @"Space options";
+  more.contentTintColor = NSColor.secondaryLabelColor;
+  more.frame = NSMakeRect(_spaceHeader.bounds.size.width - 30, 2, 26, 26);
+  [_spaceHeader addSubview:more];
+  NSClickGestureRecognizer* rename = [[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(renameCurrentSpace:)];
+  rename.numberOfClicksRequired = 2;  // double-click the name to rename, as in Arc
+  [_spaceHeaderTitle addGestureRecognizer:rename];
+  [sidebar addSubview:_spaceHeader];
+  [self updateSpaceHeader];
 
   NSScrollView* scroll = [[NSScrollView alloc]
       initWithFrame:NSMakeRect(8, 42, kSidebarWidth - 17, bounds.size.height - 166)];
@@ -2347,9 +2369,34 @@ static ArcItem* NewSection(NSString* title) {
   [m popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, sender.bounds.size.height + 4) inView:sender];
 }
 
+- (void)updateSpaceHeader {
+  NSString* name = _space.title ?: @"Space";
+  _spaceHeaderTitle.stringValue = _space.iconEmoji.length ? [NSString stringWithFormat:@"%@  %@", _space.iconEmoji, name] : name;
+}
+- (NSString*)spaceHeaderText { return _spaceHeaderTitle.stringValue; }  // tests
+- (NSMenu*)spaceMenu {
+  NSMenu* m = [[NSMenu alloc] initWithTitle:@"Space"];
+  for (NSArray* e in @[ @[ @"Rename Space...", @"renameCurrentSpace:" ], @[ @"Edit Theme Color...", @"editThemeColor:" ],
+                        @[ @"Change Space Icon...", @"changeSpaceIcon:" ], @[ @"-", @"" ], @[ @"New Space...", @"newSpace:" ],
+                        @[ @"Delete Space...", @"deleteCurrentSpace:" ] ]) {
+    if ([e[0] isEqualToString:@"-"]) { [m addItem:NSMenuItem.separatorItem]; continue; }
+    [m addItemWithTitle:e[0] action:NSSelectorFromString(e[1]) keyEquivalent:@""].target = self;
+  }
+  return m;
+}
+- (NSArray<NSString*>*)spaceMenuTitles {  // tests
+  NSMutableArray* out = [NSMutableArray array];
+  for (NSMenuItem* i in [self spaceMenu].itemArray) if (!i.isSeparatorItem) [out addObject:i.title];
+  return out;
+}
+- (IBAction)showSpaceMenu:(NSButton*)sender {
+  [[self spaceMenu] popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, sender.bounds.size.height + 4) inView:sender];
+}
+
 - (void)rebuildSpacePicker {
   [self applyTheme];
   [self rebuildSpaceBar];
+  [self updateSpaceHeader];
   [_spacePicker removeAllItems];
   for (ArcSpace* s in _spaces) {
     [_spacePicker addItemWithTitle:s.iconEmoji.length ? [NSString stringWithFormat:@"%@  %@", s.iconEmoji, s.title ?: @"Space"]
@@ -2483,6 +2530,7 @@ static ArcItem* NewSection(NSString* title) {
   [self reloadSidebar];
   [self applyTheme];
   [self rebuildSpaceBar];
+  [self updateSpaceHeader];
   [self scheduleSave];
   ArcItem* first = [self lastShownInSpace:_space];
   if (first) [self showItem:first];
@@ -2688,10 +2736,10 @@ static ArcItem* NewSection(NSString* title) {
   SettingSetBool(kSettingShowSpaceHeader, show);
   [self applySpaceHeader:show];
 }
-- (BOOL)spaceHeaderShown { return !_spacePicker.hidden; }
+- (BOOL)spaceHeaderShown { return !_spaceHeader.hidden; }
 - (void)applySpaceHeader:(BOOL)show {
-  if (_spacePicker.hidden == !show) return;
-  _spacePicker.hidden = !show;
+  if (_spaceHeader.hidden == !show) return;
+  _spaceHeader.hidden = !show;
   NSRect f = _sidebarScroll.frame;
   f.size.height += show ? -34 : 34;
   _sidebarScroll.frame = f;

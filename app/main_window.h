@@ -232,7 +232,9 @@ NSString* CleanLinkURL(NSString* url);
 - (NSString*)sidebarRowStyleForItem:(ArcItem*)item;  // tests: "h=36 r=8 sel=1 hover=0 alpha=0.20"
 - (void)hoverSidebarItem:(ArcItem*)item;
 - (NSArray<NSString*>*)spaceBarIcons;   // tests: one per Space, "*" marks the current one
-- (void)clickSpaceBarIcon:(NSUInteger)index;              // tests: show the hover state on a row (nil clears)    // tests: pill frame in window coordinates
+- (void)clickSpaceBarIcon:(NSUInteger)index;
+- (NSString*)spaceHeaderText;               // tests: Space title row text
+- (NSArray<NSString*>*)spaceMenuTitles;     // tests: the Space "..." menu              // tests: show the hover state on a row (nil clears)    // tests: pill frame in window coordinates
 - (ArcItem*)shownItem;   // tests
 
 // Little Windows not focused for the "Archive Little Windows" setting are closed (and archived).
