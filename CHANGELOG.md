@@ -3,7 +3,7 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.14.0
 - Notes: File > New Note (Cmd+Ctrl+N) or the + menu adds a rich-text note to the top of Today. It is named from
   its first line, saved on your Mac as you type, and archived when closed like a tab. Format menu: bold, italic,
   underline, size, fonts and lists.
