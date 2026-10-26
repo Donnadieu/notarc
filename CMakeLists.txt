@@ -26,6 +26,8 @@ set(APP_SRCS
   app/archive_store.h
   app/boost_store.h
   app/boost_store.mm
+  app/easel.h
+  app/easel.mm
   app/archive_store.mm
   app/archive_window.h
   app/archive_window.mm

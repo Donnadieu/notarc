@@ -22,6 +22,7 @@ static NSArray<NSDictionary*>* Values(id list) {
   if (self.liveTitle.length) return self.liveTitle;
   if (self.title.length) return self.title;
   if (self.noteID) return @"Untitled Note";
+  if (self.easelID) return @"Untitled Easel";
   return self.url ?: @"Untitled";
 }
 @end

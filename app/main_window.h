@@ -11,6 +11,7 @@
 NSString* CleanLinkURL(NSString* url);
 
 @class Boost;
+@class EaselView;
 @interface MainWindowController : NSWindowController <NSWindowDelegate>
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID;
 // Self-test: Space profiles live in separate "SelfTest Space ..." folders and Arc cookies are not imported,
@@ -250,6 +251,14 @@ NSString* CleanLinkURL(NSString* url);
 - (void)handleZapSelector:(NSString*)selector browser:(int)browserId;               // tests
 - (NSUInteger)savedBoostCount;                                                      // tests
 - (IBAction)shuffleBoost:(id)sender;
+// Easels
+- (IBAction)newEasel:(id)sender;
+- (IBAction)captureToEasel:(id)sender;
+- (IBAction)addEaselText:(id)sender;
+- (void)easelDidChange:(EaselView*)easel;
+- (ArcItem*)createEaselWithID:(NSString*)easelID;
+- (EaselView*)easelView;                                  // tests: nil when hidden
+- (void)captureShownPageToEasel:(void (^)(BOOL ok))done;  // tests
 // Notes
 - (IBAction)newNote:(id)sender;
 - (ArcItem*)createNoteWithID:(NSString*)noteID;
