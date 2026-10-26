@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-39 done, 16 partial, 32 not started or out of scope, of 87 items.
+40 done, 16 partial, 31 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -13,7 +13,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [x] Space switcher icons at the bottom of the sidebar, archive button and "+" menu (#125)
 - [ ] Space-switch slide and page card pop animations (partial: sidebar slides left/right when switching Spaces, page card pops when the tab changes, both off with Reduce Motion; durations and curves estimated, to match against a recording of Arc) (#126)
 - [ ] Command bar styling (Arc's colours, row layout, selected row) (partial: rounded translucent card, Arc's text colours, selected row as an Arc-blue pill, icon per row, hairline under the field; exact row layout to confirm against a screenshot of Arc's command bar) (#127)
-- [ ] Light and dark appearance matching Arc's colour catalogue (#128)
+- [x] Light and dark appearance: Arc's light and dark colours everywhere, following macOS or set per Space (#128)
 
 ## Sidebar & tabs
 

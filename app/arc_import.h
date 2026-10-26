@@ -40,6 +40,7 @@
 @property(nonatomic, copy) NSArray<NSString*>* themeColors;
 @property(nonatomic) double themeIntensity;
 @property(nonatomic, copy) NSString* iconEmoji;
+@property(nonatomic, copy) NSString* colorScheme;  // Arc per-Space appearance: nil/"auto", "light", "dark"
 - (NSArray<ArcItem*>*)allTabs;  // depth-first: favorites, pinned, Today
 @end
 
