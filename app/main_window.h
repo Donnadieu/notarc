@@ -249,6 +249,8 @@ NSString* CleanLinkURL(NSString* url);
 - (void)deleteBoostForHost:(NSString*)host;                                        // tests
 - (void)handleZapSelector:(NSString*)selector browser:(int)browserId;               // tests
 - (NSUInteger)savedBoostCount;                                                      // tests
+- (IBAction)shuffleBoost:(id)sender;
+- (NSString*)boostIndicatorState;                                                   // tests: on/off/none
 - (void)setColorScheme:(NSString*)scheme forSpace:(ArcSpace*)space;  // nil/"auto", "light", "dark"
 - (BOOL)sidebarIsDark;                       // tests
 - (NSString*)lastSpaceSlide;   // tests

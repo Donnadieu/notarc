@@ -385,6 +385,8 @@ static BOOL IsDark(NSView* v) {
   NSString* _lastClosedPeekURL;
   NSView* _sidebar;
   SidebarPillView* _addressPill;
+  NSButton* _boostButton;   // Arc: Boost indicator in the address pill
+  NSString* _boostIndicator; // tests: "on" / "off" / "none"
   NSTextField* _addressPillText;
   NSView* _sidebarNav;
   NSView* _spaceBar;        // Arc's bottom bar: archive, Space icons, "+"
@@ -567,8 +569,10 @@ static BOOL IsDark(NSView* v) {
   _addressPillText.lineBreakMode = NSLineBreakByTruncatingTail;
   _addressPillText.frame = NSMakeRect(12, 9, _addressPill.bounds.size.width - 12 - 60, 18);
   [_addressPill addSubview:_addressPillText];
-  NSArray* pillButtons = @[ @[ @"link", @"copyCurrentURL:", @"Copy URL" ], @[ @"slider.horizontal.3", @"showSiteSettings:", @"Site Settings" ] ];
-  CGFloat px = _addressPill.bounds.size.width - 6 - 2 * 26;
+  NSArray* pillButtons = @[ @[ @"paintbrush.pointed", @"editBoost:", @"Boost This Site" ], @[ @"link", @"copyCurrentURL:", @"Copy URL" ],
+                            @[ @"slider.horizontal.3", @"showSiteSettings:", @"Site Settings" ] ];
+  _addressPillText.frame = NSMakeRect(12, 9, _addressPill.bounds.size.width - 12 - 86, 18);
+  CGFloat px = _addressPill.bounds.size.width - 6 - 3 * 26;
   for (NSArray* n in pillButtons) {
     NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:n[0] accessibilityDescription:n[2]]
                                      target:self action:NSSelectorFromString(n[1])];
@@ -576,6 +580,7 @@ static BOOL IsDark(NSView* v) {
     b.toolTip = n[2];
     b.contentTintColor = NSColor.secondaryLabelColor;
     b.frame = NSMakeRect(px, 5, 26, 26);
+    if ([n[1] isEqualToString:@"editBoost:"]) _boostButton = b;
     [_addressPill addSubview:b];
     px += 26;
   }
@@ -2643,10 +2648,31 @@ static ArcItem* NewSection(NSString* title) {
   [self saveBoosts];
   [self applyBoostsEverywhere];
 }
+// Like Arc: the Boost button is filled and tinted when this site has an active Boost.
 - (void)updateBoostIndicator {
-  Boost* b = [self boostForURL:[self currentURL]];
-  NSString* tip = b ? (b.enabled ? @"Boost on" : @"Boost off") : nil;
-  _addressPill.toolTip = tip;
+  Boost* b = _shown ? [self boostForURL:[self itemCurrentURL:_shown]] : nil;
+  BOOL on = b && b.enabled;
+  _boostButton.image = [NSImage imageWithSystemSymbolName:on ? @"paintbrush.pointed.fill" : @"paintbrush.pointed"
+                                 accessibilityDescription:@"Boost This Site"];
+  _boostButton.contentTintColor = on ? (b.hue >= 0 ? [NSColor colorWithHue:fmod(b.hue, 360) / 360 saturation:0.75 brightness:0.95 alpha:1]
+                                                    : NSColor.controlAccentColor)
+                                     : NSColor.secondaryLabelColor;
+  _boostButton.toolTip = on ? @"Boost on: edit Boost" : (b ? @"Boost off: edit Boost" : @"Boost This Site");
+  _boostIndicator = on ? @"on" : (b ? @"off" : @"none");
+}
+- (NSString*)boostIndicatorState { return _boostIndicator ?: @"none"; }  // tests
+// Arc's shuffle: a random colour and font for the site.
+- (IBAction)shuffleBoost:(id)sender {
+  Boost* b = _boostEditing ?: [self boostForCurrentSiteCreate:YES];
+  if (!b) { NSBeep(); return; }
+  NSArray* fonts = @[ @"Georgia", @"Helvetica Neue", @"Avenir Next", @"Menlo", @"Futura", @"Baskerville", @"Gill Sans" ];
+  double old = b.hue;
+  do { b.hue = arc4random_uniform(360); } while (fabs(b.hue - old) < 30);
+  b.colorStrength = 0.5 + arc4random_uniform(40) / 100.0;
+  b.font = fonts[arc4random_uniform((uint32_t)fonts.count)];
+  b.enabled = YES;
+  [self boostChanged];
+  [self refreshBoostPanel];
 }
 
 // Tests / scripting.
@@ -2671,7 +2697,7 @@ static ArcItem* NewSection(NSString* title) {
   _zapBrowser = _shown.browserId;
   CefRefPtr<CefFrame> f = it->second->GetMainFrame();
   f->ExecuteJavaScript(BoostZapModeScript().UTF8String, f->GetURL(), 0);
-  [self showToast:@"Click an element to zap it. Esc to cancel." action:nil selector:nil];
+  [self showToast:@"Click an element to zap it, Option-click to zap all like it. Esc cancels." action:nil selector:nil];
 }
 - (void)handleZapSelector:(NSString*)selector browser:(int)browserId {
   if (!selector.length) return;  // cancelled
@@ -2786,6 +2812,9 @@ static ArcItem* NewSection(NSString* title) {
   js.frame = NSMakeRect(150, y - 2, 130, 28);
   [v addSubview:js];
   y -= 44;
+  NSButton* shuffle = [NSButton buttonWithTitle:@"Shuffle" target:self action:@selector(shuffleBoost:)];
+  shuffle.frame = NSMakeRect(150, 12, 130, 28);
+  [v addSubview:shuffle];
   NSButton* del = [NSButton buttonWithTitle:@"Delete Boost" target:self action:@selector(deleteCurrentBoost:)];
   del.frame = NSMakeRect(10, 12, 130, 28);
   del.contentTintColor = NSColor.systemRedColor;
@@ -3180,6 +3209,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
   _addressPillText.stringValue = host ?: @"";
   _addressPill.toolTip = url;
+  [self updateBoostIndicator];
 }
 
 - (void)updateToolbarAddress {
