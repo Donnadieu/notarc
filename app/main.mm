@@ -852,6 +852,20 @@
       for (ArcItem* f in back.pinned.children)
         if ([f.itemID isEqualToString:folder.itemID]) nestedSaved = [f.children.firstObject.itemID isEqualToString:nested.itemID] && f.children.firstObject.isFolder;
       std::printf("SELFTEST-NESTED created=%d saved=%d\n", nestedOK, nestedSaved);
+      // Arc folder rows: own chevron (no stock triangle), toggles open/closed; pressed fill; Pinned/Today separator.
+      BOOL wasOpen = [w folderExpanded:folder];
+      NSString* chev1 = [w folderChevronForItem:folder];
+      [w toggleFolder:folder];
+      NSString* chev2 = [w folderChevronForItem:folder];
+      BOOL toggled = [w folderExpanded:folder] != wasOpen && ![chev1 isEqualToString:chev2] && chev1.length && chev2.length;
+      [w toggleFolder:folder];
+      ArcItem* anyTab = w.currentSpace.unpinned.children.firstObject;
+      [w pressSidebarItem:anyTab down:YES];
+      BOOL pressed = [[w sidebarRowStyleForItem:anyTab] containsString:@"pressed=1"];
+      [w pressSidebarItem:anyTab down:NO];
+      BOOL sep = [[w sidebarRowStyleForItem:w.currentSpace.unpinned] containsString:@"sep=1"];
+      std::printf("SELFTEST-FOLDERROWS noTriangle=%d chevronToggles=%d pressed=%d separator=%d\n", !w.stockDisclosureShown,
+                  toggled, pressed, sep);
       std::printf("SELFTEST-MULTI selected=%d links=%d markdown=%d folder=%d archived=%d\n", selected, linksOK, md,
                   folderOK, archived);
     });
