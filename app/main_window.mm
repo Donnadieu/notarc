@@ -838,6 +838,7 @@ NSString* CleanLinkURL(NSString* url) {
   [[NSFileManager defaultManager] createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
   CefRequestContextSettings settings;
   CefString(&settings.cache_path) = path.UTF8String;
+  settings.persist_session_cookies = true;  // session-only logins survive a restart (Arc does the same)
   __weak MainWindowController* weakSelf = self;
   NSString* profile = space.profileDirectory;
   CefRefPtr<CefRequestContext> ctx = CefRequestContext::CreateContext(
@@ -4770,6 +4771,62 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
     if (done) done(entries != nil);
   });
 }
+// Tests: write a cookie into the current Space's profile and flush it to disk; read cookie names for a URL.
+- (void)setTestCookie:(NSString*)name value:(NSString*)value url:(NSString*)url session:(BOOL)session done:(void (^)(BOOL))done {
+  CefRefPtr<CefRequestContext> ctx = [self contextForSpace:_space];
+  auto mgr = ctx ? ctx->GetCookieManager(nullptr) : nullptr;
+  if (!mgr) { if (done) done(NO); return; }
+  CefCookie c;
+  CefString(&c.name) = name.UTF8String;
+  CefString(&c.value) = value.UTF8String;
+  CefString(&c.path) = "/";
+  c.secure = true;
+  c.has_expires = !session;
+  if (!session) {
+    CefTime t;
+    t.SetDoubleT([NSDate dateWithTimeIntervalSinceNow:86400 * 30].timeIntervalSince1970);
+    cef_time_to_basetime(&t, &c.expires);
+  }
+  void (^cb)(BOOL) = [done copy];
+  class SetCB : public CefSetCookieCallback {
+   public:
+    explicit SetCB(CefRefPtr<CefCookieManager> m, void (^b)(BOOL)) : m_(m), b_(b) {}
+    void OnComplete(bool ok) override {
+      m_->FlushStore(nullptr);
+      void (^b)(BOOL) = b_;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ if (b) b(ok); });
+    }
+   private:
+    CefRefPtr<CefCookieManager> m_;
+    void (^b_)(BOOL);
+    IMPLEMENT_REFCOUNTING(SetCB);
+  };
+  if (!mgr->SetCookie(url.UTF8String, c, new SetCB(mgr, cb)) && cb) cb(NO);
+}
+- (void)testCookieNamesForURL:(NSString*)url done:(void (^)(NSArray<NSString*>*))done {
+  CefRefPtr<CefRequestContext> ctx = [self contextForSpace:_space];
+  auto mgr = ctx ? ctx->GetCookieManager(nullptr) : nullptr;
+  if (!mgr) { done(@[]); return; }
+  class NameVisitor : public CefCookieVisitor {
+   public:
+    explicit NameVisitor(void (^b)(NSArray*)) : b_(b), names_([NSMutableArray array]) {}
+    ~NameVisitor() override {
+      NSArray* n = [names_ copy];
+      void (^b)(NSArray*) = b_;
+      dispatch_async(dispatch_get_main_queue(), ^{ b(n); });
+    }
+    bool Visit(const CefCookie& c, int, int, bool&) override {
+      [names_ addObject:[NSString stringWithUTF8String:CefString(&c.name).ToString().c_str()]];
+      return true;
+    }
+   private:
+    void (^b_)(NSArray*);
+    NSMutableArray* names_;
+    IMPLEMENT_REFCOUNTING(NameVisitor);
+  };
+  if (!mgr->VisitUrlCookies(url.UTF8String, false, new NameVisitor([done copy]))) done(@[]);
+}
+
 // Removes an item (and its tabs) from the current Space without archiving (tests and Live Folder cleanup).
 - (void)deleteSidebarItem:(ArcItem*)item {
   if (!item || item.isSection) return;

@@ -4,6 +4,7 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Logins now survive quitting and reopening NotArc, including sites that sign you in only for the session.
 - Live Folders: the + menu > New Live Folder... makes a folder that fills itself from an RSS or Atom feed, or from a
   GitHub repository's open pull requests (or issues, with /issues). It refreshes every 15 minutes (or Refresh Live
   Folder); tabs you've opened stay put, and Remove from Live Folder keeps an entry from coming back.

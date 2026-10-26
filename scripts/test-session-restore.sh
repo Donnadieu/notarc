@@ -17,7 +17,7 @@ perl -e 'alarm 90; exec @ARGV' "$APP" --selftest-reload > "$LOG/restore.log" 2>&
 LINE=$(grep SELFTEST-RESTORE "$LOG/restore.log")
 echo "$LINE"
 if echo "$LINE" | grep -q "crashedLastTime=1" && echo "$LINE" | grep -q "shown=https://example.org/session-restore-marker" &&
-   ! echo "$LINE" | grep -q "restored=0 "; then
+   ! echo "$LINE" | grep -q "restored=0 " && echo "$LINE" | grep -q "sessionLogin=1 savedLogin=1"; then
   echo "SESSION-RESTORE OK"
 else
   echo "SESSION-RESTORE FAILED (logs in $LOG)"; exit 1
