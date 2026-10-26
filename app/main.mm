@@ -979,8 +979,16 @@
         NSArray* after2 = [w commandSuggestionsFor:@"suggest"];
         BOOL learned = after2.count > 1 && [((ArcItem*)after2[1][@"item"]).url containsString:@"suggest-beta"];
         (void)after;
-        std::printf("SELFTEST-SUGGEST goFirst=%d tab=%d space=%d action=%d history=%d topSites=%d switched=%d learned=%d\n",
-                    first, tab, space, action, history, top, switched, learned);
+        // Arc command bar look: selected row in Arc blue (2A2EC1) as a pill, icons per row, hairline, placeholder.
+        [w showCommandBarForNewTab:YES];
+        NSString* style = w.commandBarStyle;
+        [w hideCommandBar];
+        BOOL styled = [style containsString:@"sel=292EC1"] && [style containsString:@"rowClass=CommandRowView"] &&
+                      [style containsString:@"divider=1"] && [style containsString:@"placeholder=Search or Enter URL..."] &&
+                      [style containsString:@"cell=NSTableCellView"];
+        if (!styled) std::printf("SELFTEST-CMDSTYLE-DEBUG %s\n", style.UTF8String);
+        std::printf("SELFTEST-SUGGEST goFirst=%d tab=%d space=%d action=%d history=%d topSites=%d switched=%d learned=%d "
+                    "styled=%d\n", first, tab, space, action, history, top, switched, learned, styled);
       });
     });
     // Site prompts: notification permission asked once, remembered; mic denied (never reaches macOS);
