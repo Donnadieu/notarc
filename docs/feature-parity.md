@@ -1,9 +1,18 @@
 # Feature parity with Arc 1.169
 
-36 done, 13 partial, 31 not started or out of scope, of 80 items.
+36 done, 14 partial, 37 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Status as of NotArc 0.11.0; see
 [CHANGELOG.md](../CHANGELOG.md) for what each release added.
+
+## Look and feel
+- [ ] Window frame: no title bar, page as a rounded card inset on the Space colour, 273 pt sidebar (partial: inset and radius measured from screenshots; confirm with on-screen measurement)
+- [ ] Sidebar top: window buttons, sidebar toggle, back/forward/reload, address pill with site buttons
+- [ ] Sidebar rows: Arc-style tab, folder and section rows with Arc's hover, selected and pressed colours
+- [ ] Space switcher icons at the bottom of the sidebar, archive button and "+" menu
+- [ ] Space-switch slide animation and page-card pop animation
+- [ ] Command bar styling (Arc's colours, row layout, selected row)
+- [ ] Light and dark appearance matching Arc's colour catalogue
 
 ## Sidebar & tabs
 

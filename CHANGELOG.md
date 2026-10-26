@@ -3,6 +3,13 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- Arc's window look: no title bar, the page sits in a rounded card inset on the Space colour, and the Space theme
+  colours the whole window frame. The sidebar is 273 pt wide, as in Arc. Hiding the sidebar or Focus Mode shows
+  the page edge to edge.
+- New "Look and feel" section on the parity checklist.
+- The self-test runs hidden and never takes focus.
+
 ## 0.11.0
 - Site prompts: NotArc asks before a site uses your camera, microphone, location, notifications, clipboard and more,
   with "Remember for this site". Links that open other apps (email, Zoom, ...) ask "Open <App>?" first.
