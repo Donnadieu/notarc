@@ -233,6 +233,11 @@ NSString* CleanLinkURL(NSString* url);
 - (void)hoverSidebarItem:(ArcItem*)item;
 - (NSArray<NSString*>*)spaceBarIcons;   // tests: one per Space, "*" marks the current one
 - (void)clickSpaceBarIcon:(NSUInteger)index;
+- (void)pressSidebarItem:(ArcItem*)item down:(BOOL)down;  // tests
+- (void)toggleFolder:(ArcItem*)folder;
+- (BOOL)folderExpanded:(ArcItem*)folder;
+- (NSString*)folderChevronForItem:(ArcItem*)folder;       // tests
+- (BOOL)stockDisclosureShown;                             // tests
 - (NSString*)spaceHeaderText;               // tests: Space title row text
 - (NSArray<NSString*>*)spaceMenuTitles;     // tests: the Space "..." menu              // tests: show the hover state on a row (nil clears)    // tests: pill frame in window coordinates
 - (ArcItem*)shownItem;   // tests

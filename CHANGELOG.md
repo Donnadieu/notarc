@@ -16,6 +16,8 @@ or later. From 0.5.0 on, NotArc updates itself.
   menu for New Tab, New Folder and New Space. Hidden with only one Space, as in Arc.
 - Arc's Space title row replaces the Space drop-down: the Space's icon and name (double-click to rename) and a
   "..." menu with Rename, Edit Theme Color, Change Space Icon, New Space and Delete Space.
+- Folders open and close with a single click and show a chevron instead of the macOS triangle; rows darken while
+  pressed; a hairline separates Pinned from Today, as in Arc.
 - New "Look and feel" section on the parity checklist.
 - The self-test runs hidden and never takes focus.
 
