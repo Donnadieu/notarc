@@ -10,6 +10,7 @@
 // URL with tracking parameters (utm_*, fbclid, gclid, ...) removed; other parameters keep their order.
 NSString* CleanLinkURL(NSString* url);
 
+@class Boost;
 @interface MainWindowController : NSWindowController <NSWindowDelegate>
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID;
 // Self-test: Space profiles live in separate "SelfTest Space ..." folders and Arc cookies are not imported,
@@ -239,6 +240,15 @@ NSString* CleanLinkURL(NSString* url);
 - (NSString*)folderChevronForItem:(ArcItem*)folder;       // tests
 - (BOOL)stockDisclosureShown;                             // tests
 - (NSString*)commandBarStyle;
+// Boosts
+- (IBAction)editBoost:(id)sender;
+- (IBAction)zapElements:(id)sender;
+- (IBAction)toggleBoost:(id)sender;
+- (Boost*)boostForURL:(NSString*)url;
+- (Boost*)setBoostForHost:(NSString*)host configure:(void (^)(Boost* b))configure;  // tests
+- (void)deleteBoostForHost:(NSString*)host;                                        // tests
+- (void)handleZapSelector:(NSString*)selector browser:(int)browserId;               // tests
+- (NSUInteger)savedBoostCount;                                                      // tests
 - (void)setColorScheme:(NSString*)scheme forSpace:(ArcSpace*)space;  // nil/"auto", "light", "dark"
 - (BOOL)sidebarIsDark;                       // tests
 - (NSString*)lastSpaceSlide;   // tests

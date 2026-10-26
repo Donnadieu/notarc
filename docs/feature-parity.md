@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-40 done, 16 partial, 31 not started or out of scope, of 87 items.
+40 done, 17 partial, 30 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -79,7 +79,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [ ] Capture: area, full page, portrait mode; save/copy screenshot (missing) (#48)
 - [ ] Easel (canvas of captures, text, live web clips) (missing) (#49)
 - [ ] Notes (rich-text documents in the sidebar) (missing) (#50)
-- [ ] Boosts: custom CSS/JS per site, zap elements, boost editor (missing) (#51)
+- [ ] Boosts: custom CSS/JS per site, zap elements, boost editor (partial: per-site Boosts saved locally and applied on every page load, including subdomains: colour tint, font, text size, upper/lower case, zaps, custom CSS and JavaScript; editor panel; Zap mode; on/off. Missing: Arc's editor look and colour wheel, a Boost indicator in the address pill, "Zap all related elements", shuffle; sharing is out of scope) (#51)
 - [ ] Translate page (missing) (#52)
 - [ ] Ad blocking / content blocking (missing) (#53)
 - [x] Site control center (per-site permissions, clear cookies and refresh) (View > Site Settings, Cmd+Shift+I: connection security, Ask/Allow/Block for camera, mic, location, notifications, clipboard; Clear Cookies and Refresh; Reset Permissions) (#54)
