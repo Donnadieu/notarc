@@ -14,6 +14,9 @@
 @property(nonatomic) BOOL isSection;  // the Pinned / Today root of a Space
 // A split view shown as one sidebar item; its children are the panes, in order.
 @property(nonatomic) BOOL isSplit;
+// Notes (Arc: NoteDocument): a rich-text document shown in the page card instead of a web page.
+// Its text is saved in Notes/<noteID>.rtf; url is "notarc://note/<noteID>".
+@property(nonatomic, copy) NSString* noteID;
 @property(nonatomic) BOOL splitHorizontal;                       // stacked instead of side by side
 @property(nonatomic, copy) NSArray<NSNumber*>* splitFractions;   // pane sizes summing to 1; nil = equal
 @property(nonatomic, strong) NSMutableArray<ArcItem*>* children;

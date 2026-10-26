@@ -250,6 +250,14 @@ NSString* CleanLinkURL(NSString* url);
 - (void)handleZapSelector:(NSString*)selector browser:(int)browserId;               // tests
 - (NSUInteger)savedBoostCount;                                                      // tests
 - (IBAction)shuffleBoost:(id)sender;
+// Notes
+- (IBAction)newNote:(id)sender;
+- (ArcItem*)createNoteWithID:(NSString*)noteID;
+- (void)typeInNote:(NSString*)text;                   // tests
+- (NSString*)noteEditorText;                          // tests: nil when the editor is hidden
+- (NSString*)savedNoteText:(ArcItem*)note;            // tests
+- (void)makeNoteRangeBold:(NSRange)r;                 // tests
+- (BOOL)noteRangeIsBold:(ArcItem*)note range:(NSRange)r;  // tests
 - (NSString*)boostIndicatorState;                                                   // tests: on/off/none
 - (void)setColorScheme:(NSString*)scheme forSpace:(ArcSpace*)space;  // nil/"auto", "light", "dark"
 - (BOOL)sidebarIsDark;                       // tests
