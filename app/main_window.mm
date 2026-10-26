@@ -105,24 +105,68 @@ static const CGFloat kSuggestionRow = 34;
 static const NSUInteger kMaxSuggestions = 8;
 
 // Data source for the command bar's suggestion list (kept separate from the sidebar's outline delegate).
+// Arc: HoveredAndKeyboardSelectedBackground (0.161, 0.18, 0.757), a rounded pill.
+static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 green:0.18 blue:0.757 alpha:1]; }
+@interface CommandRowView : NSTableRowView
+@end
+@implementation CommandRowView
+- (void)drawSelectionInRect:(NSRect)r {
+  [CommandSelectedColor() setFill];
+  [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 0, 1) xRadius:8 yRadius:8] fill];
+}
+- (BOOL)isEmphasized { return YES; }
+@end
+
 @interface CommandSuggestionList : NSObject <NSTableViewDataSource, NSTableViewDelegate>
 @property(nonatomic, copy) NSArray<NSDictionary*>* items;
 @end
 @implementation CommandSuggestionList
 - (NSInteger)numberOfRowsInTableView:(NSTableView*)t { return (NSInteger)self.items.count; }
-- (id)tableView:(NSTableView*)t objectValueForTableColumn:(NSTableColumn*)c row:(NSInteger)row {
+// Arc's command bar rows (colour catalogue): primary text 80%, secondary 33%, selected row in Arc blue with white
+// text, an icon per kind. View-based so the selected row can be drawn as a rounded pill.
+- (NSView*)tableView:(NSTableView*)t viewForTableColumn:(NSTableColumn*)c row:(NSInteger)row {
   NSDictionary* s = self.items[row];
-  static NSDictionary* kinds = @{ @"go" : @"↩", @"tab" : @"Switch to Tab", @"space" : @"Space", @"history" : @"History",
+  NSTableCellView* cell = [t makeViewWithIdentifier:@"cmd" owner:nil];
+  if (!cell) {
+    cell = [[NSTableCellView alloc] initWithFrame:NSMakeRect(0, 0, c.width, kSuggestionRow - 2)];
+    cell.identifier = @"cmd";
+    NSImageView* icon = [[NSImageView alloc] initWithFrame:NSMakeRect(12, 8, 16, 16)];
+    icon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:13 weight:NSFontWeightRegular];
+    [cell addSubview:icon];
+    cell.imageView = icon;
+    NSTextField* title = [NSTextField labelWithString:@""];
+    title.lineBreakMode = NSLineBreakByTruncatingTail;
+    title.frame = NSMakeRect(38, 7, c.width - 50, 18);
+    title.autoresizingMask = NSViewWidthSizable;
+    [cell addSubview:title];
+    cell.textField = title;
+  }
+  static NSDictionary* kinds = @{ @"go" : @"Go", @"tab" : @"Switch to Tab", @"space" : @"Space", @"history" : @"History",
                                   @"action" : @"Action", @"site" : @"Top Site" };
+  static NSDictionary* icons = @{ @"go" : @"magnifyingglass", @"tab" : @"square.on.square", @"space" : @"square.stack",
+                                  @"history" : @"clock", @"action" : @"command", @"site" : @"globe" };
+  BOOL sel = [t.selectedRowIndexes containsIndex:(NSUInteger)row];
+  NSColor* primary = sel ? NSColor.whiteColor : [NSColor.labelColor colorWithAlphaComponent:0.80];
+  NSColor* secondary = sel ? [NSColor colorWithWhite:1 alpha:0.70] : [NSColor.labelColor colorWithAlphaComponent:0.33];
   NSMutableAttributedString* a = [[NSMutableAttributedString alloc]
       initWithString:s[@"title"] ?: @""
-          attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:14], NSForegroundColorAttributeName : NSColor.labelColor}];
-  NSString* sub = [s[@"subtitle"] length] ? [@"   " stringByAppendingString:s[@"subtitle"]] : @"";
-  [a appendAttributedString:[[NSAttributedString alloc]
-                                initWithString:[sub stringByAppendingFormat:@"   · %@", kinds[s[@"kind"]] ?: @""]
-                                    attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:11],
-                                                 NSForegroundColorAttributeName : NSColor.secondaryLabelColor}]];
-  return a;
+          attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:14 weight:NSFontWeightMedium], NSForegroundColorAttributeName : primary}];
+  NSString* sub = [s[@"subtitle"] length] ? [@"  —  " stringByAppendingString:s[@"subtitle"]] : @"";
+  NSString* kind = kinds[s[@"kind"]];
+  if (kind.length) sub = [sub stringByAppendingFormat:@"  ·  %@", kind];
+  [a appendAttributedString:[[NSAttributedString alloc] initWithString:sub
+                                                            attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:12],
+                                                                         NSForegroundColorAttributeName : secondary}]];
+  cell.textField.attributedStringValue = a;
+  cell.imageView.image = [NSImage imageWithSystemSymbolName:icons[s[@"kind"]] ?: @"globe" accessibilityDescription:nil];
+  cell.imageView.contentTintColor = sel ? NSColor.whiteColor : secondary;
+  return cell;
+}
+- (NSTableRowView*)tableView:(NSTableView*)t rowViewForRow:(NSInteger)row { return [CommandRowView new]; }
+- (void)tableViewSelectionDidChange:(NSNotification*)n {
+  NSTableView* t = n.object;
+  [t reloadDataForRowIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, (NSUInteger)t.numberOfRows)]
+               columnIndexes:[NSIndexSet indexSetWithIndex:0]];
 }
 @end
 
@@ -287,6 +331,7 @@ static BOOL IsDark(NSView* v) {
   NSTableView* _suggestionTable;
   NSScrollView* _suggestionScroll;
   CommandSuggestionList* _suggestionList;
+  NSBox* _commandDivider;
   NSTextField* _commandField;
   BOOL _commandOpensNewTab;
   BOOL _saveScheduled;
@@ -3413,6 +3458,23 @@ static ArcItem* NewSection(NSString* title) {
     _commandBar.titlebarAppearsTransparent = YES;
     _commandBar.titleVisibility = NSWindowTitleHidden;
     _commandBar.movable = NO;
+    _commandBar.backgroundColor = NSColor.clearColor;
+    _commandBar.opaque = NO;
+    _commandBar.hasShadow = YES;
+    // Rounded translucent card, as in Arc, with a hairline (CommandBarHairlineDividerColor) under the field.
+    NSVisualEffectView* card = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0, 0, 640, 52)];
+    card.material = NSVisualEffectMaterialPopover;
+    card.state = NSVisualEffectStateActive;
+    card.wantsLayer = YES;
+    card.layer.cornerRadius = 12;
+    card.layer.masksToBounds = YES;
+    card.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [_commandBar.contentView addSubview:card];
+    _commandDivider = [[NSBox alloc] initWithFrame:NSMakeRect(0, 0, 640, 1)];
+    _commandDivider.boxType = NSBoxCustom;
+    _commandDivider.borderWidth = 0;
+    _commandDivider.fillColor = [NSColor.labelColor colorWithAlphaComponent:0.10];
+    [_commandBar.contentView addSubview:_commandDivider];
     _commandField = [[NSTextField alloc] initWithFrame:NSMakeRect(12, 10, 616, 32)];
     _commandField.font = [NSFont systemFontOfSize:18];
     _commandField.bezeled = NO;
@@ -3428,6 +3490,8 @@ static ArcItem* NewSection(NSString* title) {
     _suggestionTable.headerView = nil;
     _suggestionTable.rowHeight = kSuggestionRow - 2;
     _suggestionTable.backgroundColor = NSColor.clearColor;
+    _suggestionTable.style = NSTableViewStylePlain;
+    _suggestionTable.intercellSpacing = NSMakeSize(0, 2);
     _suggestionTable.dataSource = _suggestionList;
     _suggestionTable.delegate = _suggestionList;
     _suggestionTable.target = self;
@@ -3438,7 +3502,7 @@ static ArcItem* NewSection(NSString* title) {
     _suggestionScroll.drawsBackground = NO;
     [_commandBar.contentView addSubview:_suggestionScroll];
   }
-  _commandField.placeholderString = newTab ? @"Search or enter URL (new tab)" : @"Search or enter URL";
+  _commandField.placeholderString = @"Search or Enter URL...";
   _commandField.stringValue = (!newTab && _shown.url) ? _shown.url : @"";
   [self refreshSuggestions];
   [self.window addChildWindow:_commandBar ordered:NSWindowAbove];
@@ -3448,6 +3512,14 @@ static ArcItem* NewSection(NSString* title) {
 }
 
 // Lays the panel out for the current suggestions: field on top, list below, top edge fixed.
+- (NSString*)commandBarStyle {  // tests
+  NSColor* c = [CommandSelectedColor() colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+  NSTableRowView* rv = _suggestionTable.numberOfRows ? [_suggestionTable rowViewAtRow:0 makeIfNecessary:YES] : nil;
+  return [NSString stringWithFormat:@"sel=%02X%02X%02X rowClass=%@ divider=%d placeholder=%@ cell=%@", (int)lround(c.redComponent * 255),
+                                    (int)lround(c.greenComponent * 255), (int)lround(c.blueComponent * 255),
+                                    NSStringFromClass(rv.class), !_commandDivider.hidden, _commandField.placeholderString,
+                                    NSStringFromClass([[_suggestionTable viewAtColumn:0 row:0 makeIfNecessary:YES] class])];
+}
 - (void)refreshSuggestions {
   _suggestionList.items = [self commandSuggestionsFor:_commandField.stringValue];
   [_suggestionTable reloadData];
@@ -3459,6 +3531,8 @@ static ArcItem* NewSection(NSString* title) {
   _commandField.frame = NSMakeRect(12, h - 42, 616, 32);
   _suggestionScroll.frame = NSMakeRect(6, 4, 628, listH);
   _suggestionScroll.hidden = listH == 0;
+  _commandDivider.frame = NSMakeRect(0, h - 52, 640, 1);
+  _commandDivider.hidden = listH == 0;
 }
 
 static NSString* HostOf(NSString* url) {

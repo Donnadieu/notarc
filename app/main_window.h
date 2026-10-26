@@ -238,6 +238,9 @@ NSString* CleanLinkURL(NSString* url);
 - (BOOL)folderExpanded:(ArcItem*)folder;
 - (NSString*)folderChevronForItem:(ArcItem*)folder;       // tests
 - (BOOL)stockDisclosureShown;                             // tests
+- (NSString*)commandBarStyle;
+- (void)showCommandBarForNewTab:(BOOL)newTab;
+- (void)hideCommandBar;               // tests
 - (NSString*)spaceHeaderText;               // tests: Space title row text
 - (NSArray<NSString*>*)spaceMenuTitles;     // tests: the Space "..." menu              // tests: show the hover state on a row (nil clears)    // tests: pill frame in window coordinates
 - (ArcItem*)shownItem;   // tests
