@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-42 done, 21 partial, 24 not started or out of scope, of 87 items.
+42 done, 22 partial, 23 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -50,7 +50,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [ ] Search engine choice, search suggestions (partial: engine choice done; suggestions missing) (#31)
 - [x] Switch to a recent tab (Ctrl+Tab) (#32)
 - [x] Back/forward, reload, find in page, zoom, print (#33)
-- [ ] Link routing rules (which Space opens which links) (missing) (#34)
+- [ ] Link routing rules (which Space opens which links) (partial: Arc's rules imported and applied to links from other apps, by URL (contains, exact, starts with, domain, regex) and by source app, to a Space or a Little Window; no rule editor yet) (#34)
 - [x] Command bar ranking that learns from what you pick (#35)
 - [x] Paste and Go (Edit menu) (#36)
 

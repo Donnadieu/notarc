@@ -4,6 +4,7 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Air Traffic Control: links opened from other apps follow your Arc link rules (by URL or by the app they came from) into the right Space or a Little Window. Your rules come over from Arc on first launch.
 - Two-finger swipe on the trackpad goes back or forward, with an arrow at the page edge, following the macOS "Swipe between pages" setting.
 - Unread badges on Favorites: a red count on the tile when the site puts one in its title (Gmail, Slack, LinkedIn, X, Outlook). Right-click a Favorite > Show Unread Badge turns it off for that tab.
 
