@@ -555,6 +555,8 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   NSPopUpButton* _spacePicker;
   NSOutlineView* _outline;
   NSView* _content;
+  id _swipeMonitor;           // two-finger swipe back/forward (#77)
+  NSView* _swipeArrow;
   CefRefPtr<BrowserClient> _client;
   std::map<int, CefRefPtr<CefBrowser>> _browsers;
   NSMutableDictionary<NSNumber*, ChromePageHost*>* _chromePages;  // browser id -> Chrome-style page (#66)
@@ -1239,7 +1241,70 @@ NSString* CleanLinkURL(NSString* url) {
 }
 
 // Must run after CefInitialize, on the main (CEF UI) thread.
+// Two-finger swipe back/forward, as in Arc and Safari: a horizontal trackpad swipe that starts over the page
+// tracks with an arrow at the page edge and navigates when released past the threshold. Follows the macOS
+// "Swipe between pages" setting. Returns -1 back, 1 forward, 0 not a swipe (tests use this directly).
+NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL began) {
+  if (!precise || !began) return 0;
+  if (fabs(dx) < 2 || fabs(dx) < fabs(dy) * 2) return 0;  // mostly horizontal
+  return dx > 0 ? -1 : 1;  // fingers moving right = back (natural scrolling direction of history)
+}
+
+- (BOOL)swipeNavigationInstalled { return _swipeMonitor != nil; }
+
+- (void)installSwipeNavigation {
+  if (_swipeMonitor) return;
+  __weak MainWindowController* weakSelf = self;
+  _swipeMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel handler:^NSEvent*(NSEvent* e) {
+    return [weakSelf handleSwipeScroll:e] ? nil : e;
+  }];
+}
+
+- (BOOL)handleSwipeScroll:(NSEvent*)e {
+  if (e.window != self.window || !NSEvent.isSwipeTrackingFromScrollEventsEnabled || !_content) return NO;
+  if (!NSPointInRect([_content convertPoint:e.locationInWindow fromView:nil], _content.bounds)) return NO;
+  NSInteger dir = SwipeDirectionForScroll(e.scrollingDeltaX, e.scrollingDeltaY, e.hasPreciseScrollingDeltas,
+                                          e.phase == NSEventPhaseBegan);
+  if (!dir || (dir < 0 && ![self canGoBack]) || (dir > 0 && !([self currentBrowser] && [self currentBrowser]->CanGoForward()))) return NO;
+  NSView* arrow = [self swipeArrow:dir];
+  __block BOOL done = NO;
+  [e trackSwipeEventWithOptions:NSEventSwipeTrackingLockDirection
+       dampenAmountThresholdMin:dir < 0 ? 0 : -1
+                            max:dir < 0 ? 1 : 0
+                   usingHandler:^(CGFloat amount, NSEventPhase phase, BOOL complete, BOOL* stop) {
+                     CGFloat a = fmin(1, fabs(amount));
+                     arrow.alphaValue = a;
+                     NSRect f = arrow.frame;
+                     f.origin.x = dir < 0 ? -36 + 56 * a : self->_content.bounds.size.width - 20 - 56 * a;
+                     arrow.frame = f;
+                     if (phase == NSEventPhaseEnded && !done && fabs(amount) >= 0.5) {
+                       done = YES;
+                       dir < 0 ? [self goBack:nil] : [self goForward:nil];
+                     }
+                     if (complete) [arrow removeFromSuperview];
+                   }];
+  return YES;
+}
+
+- (NSView*)swipeArrow:(NSInteger)dir {
+  [_swipeArrow removeFromSuperview];
+  CGFloat s = 36, y = round(NSMidY(_content.bounds) - s / 2);
+  NSImageView* v = [[NSImageView alloc] initWithFrame:NSMakeRect(dir < 0 ? -s : _content.bounds.size.width, y, s, s)];
+  v.image = [NSImage imageWithSystemSymbolName:dir < 0 ? @"arrow.left" : @"arrow.right" accessibilityDescription:nil];
+  v.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:15 weight:NSFontWeightSemibold];
+  v.contentTintColor = NSColor.whiteColor;
+  v.wantsLayer = YES;
+  v.layer.backgroundColor = [NSColor colorWithWhite:0 alpha:0.55].CGColor;
+  v.layer.cornerRadius = s / 2;
+  v.alphaValue = 0;
+  v.autoresizingMask = NSViewMinYMargin | NSViewMaxYMargin | (dir < 0 ? NSViewMaxXMargin : NSViewMinXMargin);
+  [_content addSubview:v positioned:NSWindowAbove relativeTo:nil];
+  _swipeArrow = v;
+  return v;
+}
+
 - (void)createBrowsers {
+  [self installSwipeNavigation];
   __weak MainWindowController* weakSelf = self;
   _client = new BrowserClient(
       [weakSelf](int browserId, const std::string& title) {
@@ -6021,6 +6086,8 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   [self saveSidebarNow];
   [_content removeFromSuperview];
   _content = nil;
+  if (_swipeMonitor) [NSEvent removeMonitor:_swipeMonitor];
+  _swipeMonitor = nil;
   _browsers.clear();
   if (!_client || _client->open_browser_count() == 0) CefQuitMessageLoop();
 }

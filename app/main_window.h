@@ -12,7 +12,8 @@ NSString* CleanLinkURL(NSString* url);
 
 @class Boost;
 @class EaselView;
-NSInteger UnreadCountFromTitle(NSString* title);  // "Inbox (12)" -> 12
+NSInteger UnreadCountFromTitle(NSString* title);
+NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL began);  // -1 back, 1 forward, 0 none  // "Inbox (12)" -> 12
 
 @interface MainWindowController : NSWindowController <NSWindowDelegate>
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID;
@@ -298,6 +299,7 @@ NSInteger UnreadCountFromTitle(NSString* title);  // "Inbox (12)" -> 12
 - (BOOL)defaultThemeShown;                   // tests: Arc's default indigo is behind an unthemed Space
 - (NSArray<NSString*>*)favoriteTileTitles;   // tests
 - (NSMenu*)sidebarMenuForItem:(ArcItem*)item;  // tests
+- (BOOL)swipeNavigationInstalled;  // tests
 - (NSRect)favoritesGridFrame;                // tests
 - (NSRect)spaceHeaderFrame;                  // tests
 - (NSString*)lastSpaceSlide;   // tests
