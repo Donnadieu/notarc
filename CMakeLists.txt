@@ -47,6 +47,8 @@ set(APP_SRCS
   app/settings.mm
   app/browser_client.h
   app/browser_client.mm
+  app/scripting.h
+  app/scripting.mm
   app/shortcuts.h
   app/shortcuts.mm
   app/bookmark_import.h
@@ -79,6 +81,9 @@ target_link_libraries(${APP_NAME} libcef_dll_wrapper ${CEF_STANDARD_LIBS} sqlite
 set_target_properties(${APP_NAME} PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/app/Info.plist.in)
 COPY_MAC_FRAMEWORK("${APP_NAME}" "${CEF_BINARY_DIR}" "${APP_BUNDLE}")
+# AppleScript dictionary (#76).
+add_custom_command(TARGET ${APP_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/app/NotArc.sdef" "${APP_BUNDLE}/Contents/Resources/NotArc.sdef")
 
 # CEF needs one helper bundle per process type (renderer, GPU, ...).
 foreach(_suffix_list ${CEF_HELPER_APP_SUFFIXES})
