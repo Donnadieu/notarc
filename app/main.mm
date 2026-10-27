@@ -8,6 +8,7 @@
 
 #import "app/arc_import.h"
 #import "app/main_window.h"
+#import "app/little_window.h"
 #import "app/arc_extensions.h"
 #import "app/link_routing.h"
 #import "app/link_routing_editor.h"
@@ -137,6 +138,8 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"Capture to Easel" action:@selector(captureToEasel:) keyEquivalent:@"2"].keyEquivalentModifierMask =
       NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [file addItemWithTitle:@"Add Text to Easel" action:@selector(addEaselText:) keyEquivalent:@""];
+  [file addItemWithTitle:@"New Incognito Window" action:@selector(newIncognitoWindow:) keyEquivalent:@"n"].keyEquivalentModifierMask =
+      NSEventModifierFlagCommand | NSEventModifierFlagShift;
   NSMenuItem* littleItem = [file addItemWithTitle:@"New Little Window" action:@selector(newLittleWindow:)
                                     keyEquivalent:@"n"];
   littleItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
@@ -512,6 +515,30 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       [w openLittleWindow:@"https://example.com/little-moved"];
       [w openLittleWindow:@"https://example.org/little-closed"];
       std::printf("SELFTEST-LITTLE open=%lu\n", (unsigned long)[w littleWindowCount]);
+      {  // Incognito: in-memory profile, nothing in History or the Archive, wiped when the last window closes.
+        NSUInteger histBefore = [w historyVisits].count, archBefore = [w archivedTabs].count;
+        [w openIncognitoWindow:@"https://example.com/incognito-selftest"];
+        WaitUntil(^{ return (BOOL)([w incognitoWindowCount] == 1); }, 10, ^{
+          BOOL inMemory = ![w incognitoContextIsOnDisk];
+          LittleWindowController* iw = nil;
+          for (NSWindow* win in NSApp.windows)
+            if ([win.windowController isKindOfClass:LittleWindowController.class] && ((LittleWindowController*)win.windowController).incognito)
+              iw = win.windowController;
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            BOOL dark = [iw.window.appearance.name isEqualToString:NSAppearanceNameDarkAqua];
+            [iw openInMainWindow:nil];  // must not move into a Space
+            BOOL stayed = iw.window.isVisible || [w incognitoWindowCount] == 1;
+            [iw.window close];
+            BOOL wiped = [w incognitoWindowCount] == 0 && !w.incognitoContextIsOnDisk;
+            (void)histBefore; (void)archBefore;  // other tests add visits meanwhile; look for this page only
+            BOOL noTrace = YES;
+            for (ArchivedTab* h in [w historyVisits]) if ([h.url containsString:@"incognito-selftest"]) noTrace = NO;
+            for (ArchivedTab* h in [w archivedTabs]) if ([h.url containsString:@"incognito-selftest"]) noTrace = NO;
+            std::printf("SELFTEST-INCOGNITO opened=1 inMemory=%d dark=%d noMove=%d wiped=%d noTrace=%d\n", inMemory, dark,
+                        stayed, wiped, noTrace);
+          });
+        });
+      }
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 18 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;

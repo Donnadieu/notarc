@@ -28,5 +28,8 @@ typedef void (^LittleWindowMoveToSpace)(NSString* url, NSUInteger spaceIndex);
 - (void)presentAsPeekOver:(NSWindow*)parent;
 @property(nonatomic, readonly) NSString* currentURL;
 @property(nonatomic, readonly) NSString* pageTitle;
+// Incognito (#40): dark window, nothing saved (in-memory profile), no history, no archive, can't move into a Space.
+- (void)makeIncognito;
+@property(nonatomic, readonly) BOOL incognito;
 @property(nonatomic, strong) NSDate* lastUsedAt;  // last time the window was focused; drives idle archiving
 @end
