@@ -3,6 +3,7 @@
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
 #import "app/archive_window.h"
+#import "app/arc_history.h"
 #import "app/history_store.h"
 #import "app/arc_cookies.h"
 #import "app/little_window.h"
@@ -2594,6 +2595,34 @@ static const CGFloat kPaneGap = 6;
   return n;
 }
 - (IBAction)newEasel:(id)sender { [self createEaselWithID:nil]; }
+
+// Arc's history, per profile, into NotArc's History (Cmd+Y), tagged with the Space that uses that profile.
+// Read-only on Arc's side; history isn't encrypted, so no Keychain access.
+- (NSUInteger)importArcHistory {
+  HistoryStore* store = [self historyStore];
+  if (!store) return 0;
+  NSMutableArray<ArchivedTab*>* all = [NSMutableArray array];
+  NSMutableSet* done = [NSMutableSet set];
+  for (ArcSpace* s in _spaces) {
+    NSString* p = s.profileDirectory.length ? s.profileDirectory : @"Default";
+    if ([done containsObject:p]) continue;
+    [done addObject:p];
+    NSError* error = nil;
+    NSArray* visits = ArcReadHistory(self.arcHistoryOverride[p] ?: ArcHistoryDBPath(p), s.title, 20000, &error);
+    if (visits) [all addObjectsFromArray:visits];
+    else if (error) std::fprintf(stderr, "Arc history import skipped for %s: %s\n", p.UTF8String, error.localizedDescription.UTF8String);
+  }
+  return [store mergeVisits:all];
+}
+
+- (IBAction)importArcHistoryFromMenu:(id)sender {
+  NSUInteger n = [self importArcHistory];
+  NSAlert* a = [NSAlert new];
+  a.messageText = n ? @"History imported from Arc" : @"No new history to import";
+  a.informativeText = n ? [NSString stringWithFormat:@"%lu visits added. Open History with Cmd+Y.", (unsigned long)n]
+                        : @"Everything from Arc is already here.";
+  [a beginSheetModalForWindow:self.window completionHandler:nil];
+}
 - (IBAction)addEaselText:(id)sender {
   if (!_easelItem) { NSBeep(); return; }
   EaselObject* o = [_easelView addText:@"" at:NSMakePoint(-1, -1)];

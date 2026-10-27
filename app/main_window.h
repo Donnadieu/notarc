@@ -118,6 +118,7 @@ NSString* CleanLinkURL(NSString* url);
 - (BOOL)deleteSpace:(ArcSpace*)space;
 // Profiles (Arc: each Space belongs to a browser profile with its own logins, history and Favorites).
 // Keyed by profile folder ("Profile 4"); names come from Arc on first launch and are saved in Profiles.json.
+- (NSUInteger)importArcHistory;  // File > Import History from Arc: each Space's Arc profile history; returns visits added
 - (NSArray<NSString*>*)profileDirectories;            // in display order
 - (NSString*)nameOfProfile:(NSString*)profileDirectory;
 - (NSString*)createProfileNamed:(NSString*)name;      // returns the new profile folder
@@ -315,6 +316,7 @@ NSString* CleanLinkURL(NSString* url);
 
 // Archive (Arc: auto-archive of Today tabs + Cmd+Shift+T style reopen).
 @property(nonatomic, copy) NSString* archivePath;
+@property(nonatomic, copy) NSDictionary<NSString*, NSString*>* arcHistoryOverride;  // tests: profile -> fake History DB
 @property(nonatomic, copy) NSString* historyPath;  // set before the first page loads
 - (IBAction)showHistory:(id)sender;
 - (IBAction)clearHistory:(id)sender;

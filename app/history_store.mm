@@ -74,6 +74,25 @@ static BOOL Recordable(NSString* url) {
   [self saveNow];
 }
 
+- (NSUInteger)mergeVisits:(NSArray<ArchivedTab*>*)visits {
+  NSMutableSet* seen = [NSMutableSet set];
+  for (ArchivedTab* v in _visits) [seen addObject:[NSString stringWithFormat:@"%.0f %@", v.archivedAt.timeIntervalSince1970, v.url]];
+  NSUInteger added = 0;
+  for (ArchivedTab* v in visits) {
+    if (!Recordable(v.url) || !v.archivedAt) continue;
+    NSString* key = [NSString stringWithFormat:@"%.0f %@", v.archivedAt.timeIntervalSince1970, v.url];
+    if ([seen containsObject:key]) continue;
+    [seen addObject:key];
+    [_visits addObject:v];
+    ++added;
+  }
+  if (!added) return 0;
+  [_visits sortUsingComparator:^NSComparisonResult(ArchivedTab* a, ArchivedTab* b) { return [a.archivedAt compare:b.archivedAt]; }];
+  if (_visits.count > kMaxVisits) [_visits removeObjectsInRange:NSMakeRange(0, _visits.count - kMaxVisits)];
+  [self saveNow];
+  return added;
+}
+
 - (void)scheduleSave {
   if (_saveQueued) return;
   _saveQueued = YES;
