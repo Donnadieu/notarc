@@ -16,6 +16,7 @@ id SettingObject(NSString* key);
 void SettingSetObject(NSString* key, id value);
 extern NSString* const kSettingCommandPicks;
 extern NSString* const kSettingSitePermissions;        // dictionary: origin -> {permission name -> YES/NO}           // dictionary: suggestion key -> times picked (ranking)
+extern NSString* const kSettingAutoPiP;                // BOOL, default YES: a playing video pops out when you leave its tab (#46)
 extern NSString* const kSettingShowToolbar;            // BOOL, default NO: address bar with the full URL above pages
 extern NSString* const kSettingShowSpaceHeader;        // BOOL, default YES: Space picker at the top of the sidebar
 extern NSString* const kSettingLittleArchiveHours;     // double; 0 = never. Default 6.
