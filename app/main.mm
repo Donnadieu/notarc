@@ -9,6 +9,7 @@
 #import "app/arc_import.h"
 #import "app/main_window.h"
 #import "app/arc_extensions.h"
+#import "app/link_routing.h"
 #import "app/chrome_page.h"
 #include <sqlite3.h>
 #import "app/boost_store.h"
@@ -58,6 +59,7 @@
 @property(nonatomic) BOOL selfTest;
 @property(nonatomic) BOOL selfTestReload;  // phase 2: reopen the saved store, no actions
 @property(nonatomic, copy) NSString* snapshotPath;  // --sidebar-snapshot=<png>: hidden run that renders the sidebar and quits
+@property(nonatomic, copy) NSString* pendingSource;
 @property(nonatomic, strong) NSMutableArray<NSString*>* pendingURLs;  // links that arrived before the window
 @end
 
@@ -330,6 +332,8 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   self.window.storePath = storePath;
   self.window.archivePath = ArchiveStorePath(self.selfTest);
   self.window.historyPath = HistoryStorePath(self.selfTest);
+  self.window.linkRoutingPath = LinkRoutingPath(self.selfTest);
+  if (self.selfTest) [[NSFileManager defaultManager] removeItemAtPath:self.window.linkRoutingPath error:nil];
   if (!self.selfTest) [[Updater shared] scheduleDailyChecks];
   if (self.selfTest) [[NSFileManager defaultManager] removeItemAtPath:self.window.historyPath error:nil];
   if (self.selfTest && !self.selfTestReload)
@@ -353,10 +357,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   }
   [self.window showWindow:nil];
   [self.window createBrowsers];
-  for (NSString* url in self.pendingURLs) {
-    if (SettingBool(kSettingExternalLinksLittle)) [self.window openLittleWindow:url];
-    else [self.window openInNewTab:url];
-  }
+  for (NSString* url in self.pendingURLs) [self.window routeExternalLink:url sourceApp:self.pendingSource];
   self.pendingURLs = nil;
   if (!self.selfTest) [NSApp activateIgnoringOtherApps:YES];
   if (!self.selfTest) [self.window offerArcImportIfFirstLaunch];  // never in hidden test runs
@@ -726,6 +727,47 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                      SwipeDirectionForScroll(3, 10, YES, YES) == 0 && SwipeDirectionForScroll(12, 0, NO, YES) == 0 &&
                      SwipeDirectionForScroll(12, 0, YES, NO) == 0;
         std::printf("SELFTEST-SWIPE direction=%d installed=%d\n", swipe, w.swipeNavigationInstalled);
+        {  // Air Traffic Control: Arc's rule format, every match type, source-app rules.
+          NSString* f = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-arc-linkrouting.json"];
+          [@"{\"version\":1,\"defaultDestination\":{\"littleArc\":{\"_0\":{\"mostRecent\":{}}}},\"rules\":["
+            "{\"destination\":{\"space\":{\"_0\":{\"mostRecent\":{}}}},\"id\":\"A\",\"sourceComponents\":[{\"componentType\":"
+            "{\"urlMatch\":{\"_0\":{\"contains\":{}},\"_1\":\"meet.google.com\"}},\"id\":\"B\"}]},"
+            "{\"destination\":{\"space\":{\"_0\":{\"specific\":{\"_0\":\"S2\"}}}},\"id\":\"C\",\"sourceComponents\":[{\"componentType\":"
+            "{\"application\":{\"_0\":\"com.tinyspeck.slackmacgap\"}},\"id\":\"D\"}]}]}"
+              writeToFile:f atomically:YES encoding:NSUTF8StringEncoding error:nil];
+          LinkRouting* lr = [LinkRouting fromArcFile:f];
+          LinkRule* meet = [lr ruleForURL:@"https://meet.google.com/abc-defg-hij" sourceApp:@"com.apple.mail"];
+          LinkRule* slack = [lr ruleForURL:@"https://example.com/" sourceApp:@"com.tinyspeck.slackmacgap"];
+          BOOL arc = lr.rules.count == 2 && [lr.defaultDestination isEqualToString:@"little"] && [meet.destination isEqualToString:@"space"] &&
+                     !meet.spaceID && [slack.spaceID isEqualToString:@"S2"] && ![lr ruleForURL:@"https://example.com/" sourceApp:@"com.apple.mail"];
+          LinkRule* r = [LinkRule new];
+          BOOL types = YES;
+          r.matchType = @"domain"; r.pattern = @"github.com";
+          types = types && LinkRuleMatchesURL(r, @"https://gist.github.com/x") && !LinkRuleMatchesURL(r, @"https://notgithub.com/");
+          r.matchType = @"startsWith"; r.pattern = @"docs.google.com/spreadsheets";
+          types = types && LinkRuleMatchesURL(r, @"https://docs.google.com/spreadsheets/d/1") && !LinkRuleMatchesURL(r, @"https://docs.google.com/document/d/1");
+          r.matchType = @"exact"; r.pattern = @"example.com";
+          types = types && LinkRuleMatchesURL(r, @"https://www.example.com/") && !LinkRuleMatchesURL(r, @"https://example.com/a");
+          r.matchType = @"regex"; r.pattern = @"/pull/\\d+$";
+          types = types && LinkRuleMatchesURL(r, @"https://github.com/a/b/pull/12") && !LinkRuleMatchesURL(r, @"https://github.com/a/b/issues/12");
+          NSString* saved = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-linkrouting-roundtrip.json"];
+          [lr saveTo:saved];
+          LinkRouting* back = [LinkRouting loadFrom:saved];
+          BOOL roundTrip = back.rules.count == 2 && [[back ruleForURL:@"https://x.y/" sourceApp:@"com.tinyspeck.slackmacgap"].spaceID isEqualToString:@"S2"];
+          // Route a link through the window: a rule for "routed.example" to the current Space opens a Today tab there.
+          LinkRule* mine = [LinkRule new];
+          mine.matchType = @"contains"; mine.pattern = @"routed.example"; mine.destination = @"space";
+          LinkRouting* live = [LinkRouting new];
+          live.rules = @[ mine ];
+          live.defaultDestination = @"little";
+          [live saveTo:w.linkRoutingPath];
+          NSString* went = [w routeExternalLink:@"https://routed.example/selftest" sourceApp:nil];
+          BOOL routed = [went isEqualToString:w.currentSpace.title] &&
+                        [w.currentSpace.unpinned.children.firstObject.url hasPrefix:@"https://routed.example/"];
+          std::printf("SELFTEST-LINKROUTING arcFormat=%d matchTypes=%d roundTrip=%d routed=%d\n", arc, types, roundTrip, routed);
+          [[NSFileManager defaultManager] removeItemAtPath:f error:nil];
+          [[NSFileManager defaultManager] removeItemAtPath:saved error:nil];
+        }
       }
       std::printf("SELFTEST-SIDEBARLOOK grid=%d defaultTheme=%d\n", gridOK,
                   w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown);
@@ -1703,14 +1745,23 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [[SettingsWindowController shared].window makeKeyAndOrderFront:nil];
 }
 
+// The app a link came from (Air Traffic Control can route by source app), from the open-URL Apple event.
+static NSString* SourceAppOfCurrentEvent() {
+  NSAppleEventDescriptor* ev = NSAppleEventManager.sharedAppleEventManager.currentAppleEvent;
+  NSAppleEventDescriptor* pidDesc = [[ev attributeDescriptorForKeyword:keySenderPIDAttr] coerceToDescriptorType:typeSInt32];
+  pid_t pid = pidDesc ? (pid_t)pidDesc.int32Value : 0;
+  return pid > 0 ? [NSRunningApplication runningApplicationWithProcessIdentifier:pid].bundleIdentifier : nil;
+}
+
 - (void)application:(NSApplication*)app openURLs:(NSArray<NSURL*>*)urls {
+  NSString* source = SourceAppOfCurrentEvent();
   for (NSURL* url in urls) {
     if (!self.window) {
       if (!self.pendingURLs) self.pendingURLs = [NSMutableArray array];
       [self.pendingURLs addObject:url.absoluteString];
+      if (source) self.pendingSource = source;
     } else {
-      if (SettingBool(kSettingExternalLinksLittle)) [self.window openLittleWindow:url.absoluteString];
-      else [self.window openInNewTab:url.absoluteString];
+      [self.window routeExternalLink:url.absoluteString sourceApp:source];
     }
   }
 }

@@ -6,6 +6,7 @@
 #import "app/arc_history.h"
 #import "app/chrome_page.h"
 #import "app/arc_extensions.h"
+#import "app/link_routing.h"
 #import "app/history_store.h"
 #import "app/arc_cookies.h"
 #import "app/little_window.h"
@@ -1248,6 +1249,39 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   if (!precise || !began) return 0;
   if (fabs(dx) < 2 || fabs(dx) < fabs(dy) * 2) return 0;  // mostly horizontal
   return dx > 0 ? -1 : 1;  // fingers moving right = back (natural scrolling direction of history)
+}
+
+// Read on every link from another app (rare), so rule edits apply immediately.
+- (LinkRouting*)linkRouting {
+  NSString* path = self.linkRoutingPath;
+  if (!path) return nil;
+  LinkRouting* lr = [LinkRouting loadFrom:path];
+  if (!lr) {  // first launch: Arc's rules, read-only
+    lr = [LinkRouting fromArcFile:[ArcDataDirectory() stringByAppendingPathComponent:@"StorableLinkRouting.json"]];
+    if (!lr) {
+      lr = [LinkRouting new];
+      lr.rules = @[];
+      lr.defaultDestination = SettingBool(kSettingExternalLinksLittle) ? @"little" : @"space";
+    }
+    [lr saveTo:path];
+  }
+  return lr;
+}
+
+- (NSString*)routeExternalLink:(NSString*)url sourceApp:(NSString*)bundleID {
+  LinkRouting* lr = [self linkRouting];
+  LinkRule* rule = [lr ruleForURL:url sourceApp:bundleID];
+  NSString* to = rule ? rule.destination : (lr.defaultDestination ?: (SettingBool(kSettingExternalLinksLittle) ? @"little" : @"space"));
+  NSString* spaceID = rule ? rule.spaceID : lr.defaultSpaceID;
+  if ([to isEqualToString:@"little"]) {
+    [self openLittleWindow:url];
+    return @"little";
+  }
+  ArcSpace* target = _space;  // "most recent Space" = the one in front
+  for (ArcSpace* s in _spaces) if (spaceID && [s.spaceID isEqualToString:spaceID]) target = s;
+  if (target != _space) [self switchToSpace:target];
+  [self openInNewTab:url];
+  return target.title ?: @"";
 }
 
 - (BOOL)swipeNavigationInstalled { return _swipeMonitor != nil; }
