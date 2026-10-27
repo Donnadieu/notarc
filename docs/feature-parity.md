@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-45 done, 21 partial, 21 not started or out of scope, of 87 items.
+46 done, 21 partial, 20 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -115,7 +115,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [ ] Context menus (page, link, image, sidebar) (partial: sidebar menu and NotArc link actions done; image actions are Chromium defaults) (#70)
 - [x] Sad tab / crash recovery, session restore (crashed-tab Reload view; each Space reopens on its last tab; after an app crash or force-quit the open tabs are reloaded) (#71)
 - [ ] Settings window (all preferences) (partial: search engine, auto-archive, Peek and Little Window link options; profiles, appearance, Max and advanced panes missing) (#72)
-- [ ] Keyboard shortcuts with user overrides (missing) (#73)
+- [x] Keyboard shortcuts with user overrides (#73)
 - [ ] App icon choice, sound effects, toasts (missing) (#74)
 - [x] PDF viewer (Chromium's built-in viewer: PDFs open in the tab with zoom, search, print and download) (#75)
 - [ ] AppleScript support for windows and tabs (missing) (#76)
