@@ -3,7 +3,7 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.18.0
 - Automatic picture-in-picture: a video playing in the tab you leave pops out into a floating window and goes back when you return (Settings > Links checkbox, on by default). The sidebar media bar stays the mini player.
 - Self-tests: the end-of-run snapshot waits for the last page checks to finish.
 - Capture (File > Capture): Capture Area (Shift+Cmd+3, drag a box), Capture Visible Page, Capture Full Page and Capture in Portrait Mode (on a padded background in the Space's colour). Each capture is copied and saved to Downloads, with Add to Easel offered.
