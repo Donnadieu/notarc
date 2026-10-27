@@ -722,6 +722,10 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           toggle = before && hidden && !fav.hideUnreadBadge;
         }
         std::printf("SELFTEST-UNREAD parse=%d toggle=%d\n", parse, toggle);
+        BOOL swipe = SwipeDirectionForScroll(12, 1, YES, YES) == -1 && SwipeDirectionForScroll(-12, 1, YES, YES) == 1 &&
+                     SwipeDirectionForScroll(3, 10, YES, YES) == 0 && SwipeDirectionForScroll(12, 0, NO, YES) == 0 &&
+                     SwipeDirectionForScroll(12, 0, YES, NO) == 0;
+        std::printf("SELFTEST-SWIPE direction=%d installed=%d\n", swipe, w.swipeNavigationInstalled);
       }
       std::printf("SELFTEST-SIDEBARLOOK grid=%d defaultTheme=%d\n", gridOK,
                   w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown);
