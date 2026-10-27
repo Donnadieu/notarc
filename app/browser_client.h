@@ -57,6 +57,12 @@ class BrowserClient : public CefClient,
                                  cef_permission_request_result_t result) override;
 
   // Links to other apps (mailto:, zoommtg:, ...). Chromium never opens them itself; the UI asks first.
+  // Camera/microphone in use by a page (Arc's call controls, #47).
+  using CaptureCallback = std::function<void(int browser_id, bool video, bool audio)>;
+  void set_capture_callback(CaptureCallback cb) { on_capture_ = std::move(cb); }
+  void OnMediaAccessChange(CefRefPtr<CefBrowser> browser, bool has_video_access, bool has_audio_access) override {
+    if (on_capture_) on_capture_(browser->GetIdentifier(), has_video_access, has_audio_access);
+  }
   using ExternalCallback = std::function<void(int browser_id, const std::string& url)>;
   void set_external_callback(ExternalCallback cb) { on_external_ = std::move(cb); }
   CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
@@ -174,6 +180,7 @@ class BrowserClient : public CefClient,
   std::map<int, CefRefPtr<CefUnresponsiveProcessCallback>> hung_;
   PermissionCallback on_permission_;
   ExternalCallback on_external_;
+  CaptureCallback on_capture_;
   struct PendingPermission {
     CefRefPtr<CefMediaAccessCallback> media;
     uint32_t media_bits = 0;
