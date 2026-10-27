@@ -67,6 +67,8 @@
 @property(nonatomic, strong) NSMutableArray<NSString*>* pendingURLs;  // links that arrived before the window
 @end
 
+static BOOL gCrashTestDone = NO;  // self-test: the hang check finished (later page tests wait for it)
+
 // Self-test: poll a condition every 0.25 s instead of a fixed wait, then continue (also on timeout).
 static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void)) {
   if (cond() || timeoutSec <= 0) { then(); return; }
@@ -425,6 +427,44 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         }];
       });
     }
+    if (!self.selfTestReload)  // Call controls (#47): fake camera + mic only (--use-fake-device-for-media-stream).
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+       WaitUntil(^{ return gCrashTestDone; }, 40, ^{  // the hang check must have the visible tab to itself
+        MainWindowController* w = self.window;
+        [w openInNewTab:@"https://example.org/call-controls"];
+        ArcItem* t = w.shownItem;
+        [w setSitePermission:@"microphone" value:@YES forOrigin:@"https://example.org"];
+        [w setSitePermission:@"camera" value:@YES forOrigin:@"https://example.org"];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          [w runJS:@"navigator.mediaDevices.getUserMedia({audio:true,video:true}).then(s=>{window.__s=s;document.title='call:on'},"
+                   @"e=>document.title='call:'+e.name)" inItem:t];
+          WaitUntil(^{ return (BOOL)(w.callItem == t); }, 10, ^{
+            BOOL detected = w.callItem == t && t.usingMic && t.usingCamera;
+            BOOL shown = w.callControlsShown;
+            [w toggleCallMic:t];
+            [w toggleCallCamera:t];
+            [w runJS:@"setTimeout(()=>{const s=window.__s;document.title='tracks:'+(s?s.getAudioTracks()[0].enabled+','+"
+                     @"s.getVideoTracks()[0].enabled:'none')},300)" inItem:t];
+            WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"tracks:"]; }, 5, ^{
+              BOOL off = [t.liveTitle isEqualToString:@"tracks:false,false"] && t.micMuted && t.cameraOff;
+              [w toggleCallMic:t];
+              [w runJS:@"setTimeout(()=>{document.title='mic2:'+window.__s.getAudioTracks()[0].enabled},300)" inItem:t];
+              WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"mic2:"]; }, 5, ^{
+                BOOL back = [t.liveTitle isEqualToString:@"mic2:true"] && !t.micMuted;
+                [w runJS:@"window.__s.getTracks().forEach(x=>x.stop())" inItem:t];
+                WaitUntil(^{ return (BOOL)(w.callItem == nil); }, 8, ^{
+                  if (getenv("NOTARC_CALL_DEBUG")) std::printf("CALL-DEBUG %s\n", t.liveTitle.UTF8String ?: "-");
+                  std::printf("SELFTEST-CALLCONTROLS detected=%d shown=%d muted=%d unmuted=%d ended=%d\n", detected, shown, off,
+                              back, w.callItem == nil && !w.callControlsShown);
+                  [w setSitePermission:@"microphone" value:nil forOrigin:@"https://example.org"];
+                  [w setSitePermission:@"camera" value:nil forOrigin:@"https://example.org"];
+                });
+              });
+            });
+          });
+        });
+       });
+      });
     if (!self.selfTestReload)
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 165 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         [self.window openInNewTab:@"https://example.org/session-restore-marker"];
@@ -1118,6 +1158,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                 BOOL hung = w.hungItem == c;
                 [w answerHungSheet:YES];
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                  gCrashTestDone = YES;
                   std::printf("SELFTEST-CRASH crashed=%d reloaded=%d hungSheet=%d exitPage=%d sheetGone=%d\n", crashed, back,
                               hung, c.crashed, w.hungItem == nil);
                   [w reloadCrashedItem:c];

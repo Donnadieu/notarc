@@ -163,6 +163,11 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (IBAction)newIncognitoWindow:(id)sender;
 // AppleScript (#76): "select", "back", "forward", "reload", "stop", "close", or "loading" (returns it) for a tab.
 - (BOOL)scriptItem:(ArcItem*)item command:(NSString*)command;
+// Call controls (#47): the tab using the camera/mic, and the sidebar's mute / camera-off toggles.
+- (ArcItem*)callItem;
+- (void)toggleCallMic:(ArcItem*)item;
+- (void)toggleCallCamera:(ArcItem*)item;
+- (BOOL)callControlsShown;  // tests
 // Import bookmarks (#80): adds the folder to the current Space's Pinned section, like Arc. Returns NO if nil.
 - (BOOL)addImportedBookmarks:(ArcItem*)folder;
 - (IBAction)importBookmarksFromMenu:(id)sender;  // File > Import Bookmarks...
