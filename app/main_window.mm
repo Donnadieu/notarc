@@ -4,6 +4,7 @@
 #import "app/archive_store.h"
 #import "app/archive_window.h"
 #import "app/arc_history.h"
+#import "app/chrome_page.h"
 #import "app/history_store.h"
 #import "app/arc_cookies.h"
 #import "app/little_window.h"
@@ -522,6 +523,7 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   NSView* _content;
   CefRefPtr<BrowserClient> _client;
   std::map<int, CefRefPtr<CefBrowser>> _browsers;
+  NSMutableDictionary<NSNumber*, ChromePageHost*>* _chromePages;  // browser id -> Chrome-style page (#66)
   std::map<std::string, CefRefPtr<CefRequestContext>> _contexts;  // profile dir -> context
   std::set<std::string> _readyContexts;
   NSMutableDictionary<NSString*, NSMutableArray<ArcItem*>*>* _pendingTabs;  // waiting for their context
@@ -1296,6 +1298,20 @@ NSString* CleanLinkURL(NSString* url) {
     _pendingTabs[space.profileDirectory] = queue;
     return;
   }
+  if (ChromePagesEnabled()) {
+    ChromePageHost* host = [[ChromePageHost alloc] initWithClient:_client url:item.url context:context hostView:_content];
+    CefRefPtr<CefBrowser> browser = host.browser;
+    if (!browser) {
+      std::fprintf(stderr, "failed to create Chrome-style page for %s\n", item.url.UTF8String);
+      [host close];
+      return;
+    }
+    if (!_chromePages) _chromePages = [NSMutableDictionary dictionary];
+    _chromePages[@(browser->GetIdentifier())] = host;
+    item.browserId = browser->GetIdentifier();
+    _browsers[item.browserId] = browser;
+    return;
+  }
   CefWindowInfo info;
   NSRect r = _content.bounds;
   info.SetAsChild(CAST_NSVIEW_TO_CEF_WINDOW_HANDLE(_content),
@@ -1750,9 +1766,17 @@ static NSString* const kMediaResumeJS =
 
 #pragma mark Crashed and frozen pages
 
+// The view standing for a page in NotArc's layout: the page's own view, or a Chrome-style page's placeholder.
+- (NSView*)pageViewForBrowser:(CefRefPtr<CefBrowser>)browser {
+  if (!browser) return nil;
+  ChromePageHost* host = _chromePages[@(browser->GetIdentifier())];
+  if (host) return host.placeholder;
+  return CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(browser->GetHost()->GetWindowHandle());
+}
+
 - (NSView*)webViewForItem:(ArcItem*)item {
   auto it = _browsers.find(item.browserId);
-  return it == _browsers.end() ? nil : CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(it->second->GetHost()->GetWindowHandle());
+  return it == _browsers.end() ? nil : [self pageViewForBrowser:it->second];
 }
 
 - (void)browser:(int)browserId rendererEvent:(int)kind status:(int)status {
@@ -2520,7 +2544,7 @@ static const CGFloat kPaneGap = 6;
     NSUInteger index = NSNotFound;
     for (NSUInteger i = 0; i < panes.count; ++i)
       if (panes[i].browserId == kv.first) index = i;
-    NSView* view = CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(kv.second->GetHost()->GetWindowHandle());
+    NSView* view = [self pageViewForBrowser:kv.second];
     BOOL visible = index != NSNotFound;
     if (visible) {
       view.frame = frames[index].rectValue;
@@ -2816,7 +2840,7 @@ static const CGFloat kPaneGap = 6;
   for (ArcItem* pane in [self visiblePanes]) {
     auto it = _browsers.find(pane.browserId);
     if (it == _browsers.end()) continue;
-    [out addObject:[NSValue valueWithRect:CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(it->second->GetHost()->GetWindowHandle()).frame]];
+    [out addObject:[NSValue valueWithRect:[self pageViewForBrowser:it->second].frame]];
   }
   return out;
 }
@@ -5065,9 +5089,15 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target) {
 - (void)unloadItem:(ArcItem*)item {
   auto it = _browsers.find(item.browserId);
   if (it != _browsers.end()) {
-    NSView* view = CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(it->second->GetHost()->GetWindowHandle());
-    it->second->GetHost()->CloseBrowser(true);
-    [view removeFromSuperview];  // child browsers are torn down when their view goes away
+    ChromePageHost* host = _chromePages[@(it->first)];
+    if (host) {
+      [host close];
+      [_chromePages removeObjectForKey:@(it->first)];
+    } else {
+      NSView* view = CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(it->second->GetHost()->GetWindowHandle());
+      it->second->GetHost()->CloseBrowser(true);
+      [view removeFromSuperview];  // child browsers are torn down when their view goes away
+    }
     _browsers.erase(it);
   }
   item.browserId = 0;
