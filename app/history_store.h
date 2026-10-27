@@ -15,6 +15,9 @@
 - (void)clear;
 - (NSUInteger)clearSince:(NSDate*)since;  // removes visits at or after `since`; returns how many
 - (void)saveNow;
+// Adds visits from another browser, keeping time order; visits already present (same URL and second) are skipped,
+// and only the newest kMaxVisits are kept. Returns how many were added.
+- (NSUInteger)mergeVisits:(NSArray<ArchivedTab*>*)visits;
 @end
 
 NSString* HistoryStorePath(BOOL selfTest);

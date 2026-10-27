@@ -8,6 +8,7 @@
 
 #import "app/arc_import.h"
 #import "app/main_window.h"
+#include <sqlite3.h>
 #import "app/boost_store.h"
 #import "app/easel.h"
 #import "app/live_folder.h"
@@ -124,6 +125,8 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"New Note" action:@selector(newNote:) keyEquivalent:@"n"].keyEquivalentModifierMask =
       NSEventModifierFlagCommand | NSEventModifierFlagControl;
   [file addItemWithTitle:@"New Easel" action:@selector(newEasel:) keyEquivalent:@""];
+  [file addItem:NSMenuItem.separatorItem];
+  [file addItemWithTitle:@"Import History from Arc" action:@selector(importArcHistoryFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Capture to Easel" action:@selector(captureToEasel:) keyEquivalent:@"2"].keyEquivalentModifierMask =
       NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [file addItemWithTitle:@"Add Text to Easel" action:@selector(addEaselText:) keyEquivalent:@""];
@@ -1462,6 +1465,30 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       for (ArchivedTab* v in w.historyVisits) if ([v.title isEqualToString:@"Example Domain"]) titled = YES;
       [w clearHistory:nil];
       NSUInteger afterClear = w.historyVisits.count;
+      {  // Import History from Arc, against a fake Arc History DB (never Arc's real one).
+        NSString* db = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-arc-history.db"];
+        [[NSFileManager defaultManager] removeItemAtPath:db error:nil];
+        sqlite3* h = NULL;
+        sqlite3_open(db.UTF8String, &h);
+        sqlite3_exec(h,
+            "CREATE TABLE urls(id INTEGER PRIMARY KEY, url TEXT, title TEXT);"
+            "CREATE TABLE visits(id INTEGER PRIMARY KEY, url INTEGER, visit_time INTEGER, transition INTEGER);"
+            "INSERT INTO urls VALUES(1,'https://example.org/arc-1','Arc One'),(2,'https://example.org/frame','Frame'),"
+            "(3,'https://example.org/redirect-hop','Hop');"
+            "INSERT INTO visits VALUES(1,1,13300000000000000,1),(2,1,13300000060000000,0),(3,2,13300000070000000,3),"
+            "(4,3,13300000080000000,268435456);", NULL, NULL, NULL);
+        sqlite3_close(h);
+        NSMutableDictionary* o = [NSMutableDictionary dictionary];
+        for (ArcSpace* s in w.spaces) o[s.profileDirectory.length ? s.profileDirectory : @"Default"] = db;
+        w.arcHistoryOverride = o;
+        NSUInteger added = [w importArcHistory], again = [w importArcHistory];
+        NSUInteger arcRows = 0;
+        for (ArchivedTab* v in w.historyVisits) if ([v.url hasPrefix:@"https://example.org/"]) ++arcRows;
+        std::printf("SELFTEST-ARCHISTORY added=%d again0=%d onlyPages=%d\n", added == 2, again == 0, arcRows == 2);
+        w.arcHistoryOverride = nil;
+        [w clearHistory:nil];
+        [[NSFileManager defaultManager] removeItemAtPath:db error:nil];
+      }
       std::printf("SELFTEST-HISTORY visits=%lu matchExample=%lu matchNone=%lu titled=%d afterClear=%lu\n",
                   (unsigned long)visits, (unsigned long)example, (unsigned long)none, titled, (unsigned long)afterClear);
     });

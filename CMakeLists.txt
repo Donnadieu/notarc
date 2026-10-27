@@ -47,6 +47,8 @@ set(APP_SRCS
   app/settings.mm
   app/browser_client.h
   app/browser_client.mm
+  app/arc_history.h
+  app/arc_history.mm
   app/favicons.h
   app/favicons.mm
   app/main_window.h
