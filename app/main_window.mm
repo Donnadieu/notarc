@@ -1564,8 +1564,33 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   _browsers[item.browserId] = browser;
 }
 
+// Automatic picture-in-picture (#46): a video playing in the tab you leave pops out; coming back puts it back.
+// Runs with a user gesture (DevTools Runtime.evaluate) because the page itself can only open PiP from a click.
+static NSString* const kPiPEnterJS =
+    @"(()=>{if(document.pictureInPictureElement)return 'already';const v=[...document.querySelectorAll('video')]"
+    @".find(x=>!x.paused&&!x.ended&&x.readyState>1&&!x.disablePictureInPicture);if(!v)return 'none';"
+    @"return v.requestPictureInPicture().then(()=>'pip',e=>'error:'+e.name);})()";
+static NSString* const kPiPExitJS =
+    @"(()=>document.pictureInPictureElement?document.exitPictureInPicture().then(()=>'exited',e=>'error:'+e.name):'none')()";
+
+- (void)pictureInPicture:(BOOL)enter item:(ArcItem*)item done:(void (^)(NSString* result))done {
+  if (!item.browserId) { if (done) done(@"nobrowser"); return; }
+  [self devtools:item method:@"Runtime.evaluate"
+          params:@{@"expression" : enter ? kPiPEnterJS : kPiPExitJS, @"userGesture" : @YES, @"awaitPromise" : @YES,
+                   @"returnByValue" : @YES}
+            done:^(NSDictionary* r) {
+              id v = r[@"result"][@"value"];
+              NSString* res = [v isKindOfClass:NSString.class] ? v : (r ? @"error" : @"failed");
+              if (enter) item.inPictureInPicture = [res isEqualToString:@"pip"] || [res isEqualToString:@"already"];
+              else if (![res hasPrefix:@"error"]) item.inPictureInPicture = NO;
+              if (done) done(res);
+            }];
+}
+
 - (void)showItem:(ArcItem*)item {
   if (!item.url.length) return;
+  if (item != _shown && _shown.mediaPlaying && SettingBool(kSettingAutoPiP)) [self pictureInPicture:YES item:_shown done:nil];
+  if (item.inPictureInPicture && item != _shown) [self pictureInPicture:NO item:item done:nil];
   if (item != _shown && _shown) [self popPageCard];
   _shown.lastActiveAt = [NSDate date];  // the tab we leave was active until now
   _shown = item;

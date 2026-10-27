@@ -67,7 +67,8 @@
 @property(nonatomic, strong) NSMutableArray<NSString*>* pendingURLs;  // links that arrived before the window
 @end
 
-static BOOL gCrashTestDone = NO;  // self-test: the hang check finished (later page tests wait for it)
+static BOOL gCrashTestDone = NO;
+static BOOL gLateTestsDone = NO;  // self-test: the last chained page checks (call, capture, PiP) printed  // self-test: the hang check finished (later page tests wait for it)
 
 // Self-test: poll a condition every 0.25 s instead of a fixed wait, then continue (also on timeout).
 static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void)) {
@@ -499,6 +500,44 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                                 (long)f.pixelsWide, (long)f.pixelsHigh, [w webViewForItem:t].bounds.size.width);
                             [pb releaseGlobally];
                             [NSFileManager.defaultManager removeItemAtPath:dir error:nil];
+                            // Automatic PiP (#46): a playing video (canvas stream, no network) pops out when its tab is
+                            // left and goes back on return. requestPictureInPicture is stubbed so no window ever shows.
+                            [w runJS:@"(()=>{const c=document.createElement('canvas');c.width=64;c.height=36;const x=c.getContext('2d');"
+                                     @"setInterval(()=>{x.fillStyle='#'+Math.floor(Math.random()*4095).toString(16).padStart(3,'0');"
+                                     @"x.fillRect(0,0,64,36)},50);const v=document.createElement('video');"
+                                     @"v.srcObject=c.captureStream(20);v.muted=false;v.volume=0.01;document.body.appendChild(v);window.__pipLog=[];"
+                                     @"let inPip=null;Object.defineProperty(document,'pictureInPictureElement',{get:()=>inPip});"
+                                     @"HTMLVideoElement.prototype.requestPictureInPicture=function(){"
+                                     @"if(!navigator.userActivation.isActive)return Promise.reject(new DOMException('','NotAllowedError'));"
+                                     @"inPip=this;__pipLog.push('in');return Promise.resolve({})};"
+                                     @"document.exitPictureInPicture=()=>{inPip=null;__pipLog.push('out');return Promise.resolve()};"
+                                     @"v.play().then(()=>document.title='video:on')})()" inItem:t];
+                            WaitUntil(^{ [w pollMediaNow]; return (BOOL)([t.liveTitle isEqualToString:@"video:on"] && t.mediaPlaying); }, 10, ^{
+                              BOOL playing = t.mediaPlaying;
+                              [w openInNewTab:@"https://example.com/pip-other"];
+                              ArcItem* other = w.shownItem;
+                              WaitUntil(^{ return t.inPictureInPicture; }, 5, ^{
+                                BOOL popped = t.inPictureInPicture;
+                                [w showItem:t];
+                                WaitUntil(^{ return (BOOL)!t.inPictureInPicture; }, 5, ^{
+                                  BOOL back = !t.inPictureInPicture;
+                                  [w runJS:@"document.title='piplog:'+__pipLog.join(',')" inItem:t];
+                                  WaitUntil(^{ return [t.liveTitle hasPrefix:@"piplog:"]; }, 5, ^{
+                                    BOOL log = [t.liveTitle isEqualToString:@"piplog:in,out"];
+                                    SettingSetObject(kSettingAutoPiP, @NO);
+                                    [w showItem:other];
+                                    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                                      BOOL offRespected = !t.inPictureInPicture;
+                                      SettingSetObject(kSettingAutoPiP, nil);
+                                      if (!log) std::printf("PIP-DEBUG %s\n", t.liveTitle.UTF8String);
+                                      gLateTestsDone = YES;
+                                      std::printf("SELFTEST-AUTOPIP playing=%d popped=%d back=%d gesture=%d settingOff=%d\n", playing,
+                                                  popped, back, log, offRespected);
+                                    });
+                                  });
+                                });
+                              });
+                            });
                           }];
                         }];
                       }];
@@ -520,11 +559,13 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         [self.window setTestCookie:@"notarc_saved_login" value:@"1" url:@"https://example.org/" session:NO done:nil];
       });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 170 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+     WaitUntil(^{ return (BOOL)(gLateTestsDone || self.selfTestReload); }, 30, ^{
       for (NSDictionary* tab in [self.window tabSnapshot])
         std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
                     [tab[@"profile"] UTF8String], [tab[@"title"] UTF8String], [tab[@"url"] UTF8String]);
       std::fflush(stdout);
       [self.window closeAllBrowsers];
+     });
     });
   }
 }

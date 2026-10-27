@@ -8,6 +8,7 @@ NSString* const kSettingPeekShiftClick = @"peekShiftClick";
 NSString* const kSettingExternalLinksLittle = @"externalLinksOpenInLittleWindow";
 NSString* const kSettingLittleArchiveHours = @"littleWindowArchiveHours";
 NSString* const kSettingShowToolbar = @"showToolbar";
+NSString* const kSettingAutoPiP = @"autoPictureInPicture";
 NSString* const kSettingCommandPicks = @"commandBarPicks";
 NSString* const kSettingSitePermissions = @"sitePermissions";
 NSString* const kSettingShowSpaceHeader = @"showSpaceHeader";
@@ -21,6 +22,7 @@ void SettingsRegisterDefaults(void) {
     kSettingExternalLinksLittle : @YES,
     kSettingLittleArchiveHours : @6,
     kSettingShowToolbar : @NO,
+    kSettingAutoPiP : @YES,
     kSettingShowSpaceHeader : @YES,
   }];
 }
@@ -167,6 +169,7 @@ static NSArray* LittleArchiveChoices() {
     [self check:@"Open a Peek window when clicking on links to other sites" key:kSettingPeekPinnedLinks],
     [self note:@"Only affects Pinned tabs and Favorites."],
     [self check:@"Open a Peek window when clicking on links with Shift held" key:kSettingPeekShiftClick],
+    [self check:@"Automatically open picture-in-picture when leaving a tab with a playing video" key:kSettingAutoPiP],
     [NSButton buttonWithTitle:@"Air Traffic Control..." target:nil action:@selector(showAirTrafficControl:)],
     [self note:@"Rules that send links from other apps to a Space or a Little Window. Your Arc rules come over on first launch."],
     little,
