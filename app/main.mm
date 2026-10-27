@@ -706,6 +706,23 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       NSRect gf = w.favoritesGridFrame, hf = w.spaceHeaderFrame;
       BOOL gridOK = w.currentSpace.favorites.children.count == 0 ||
                     (gf.origin.x == 8 && NSMaxY(wb) - NSMaxY(gf) == 90 && w.favoriteTileTitles.count > 0 && NSMaxY(hf) < NSMinY(gf));
+      {  // Arc's unread badge on Favorites: count from the page title, per-tab "Show Unread Badge".
+        BOOL parse = UnreadCountFromTitle(@"Inbox (12) - me@example.com - Gmail") == 12 &&
+                     UnreadCountFromTitle(@"(3) Slack | general") == 3 && UnreadCountFromTitle(@"Mail - 5 unread") == 5 &&
+                     UnreadCountFromTitle(@"[7] Feed") == 7 && UnreadCountFromTitle(@"GitHub") == 0 &&
+                     UnreadCountFromTitle(@"Arc 1.169 release notes") == 0;
+        ArcItem* fav = w.currentSpace.favorites.children.firstObject;
+        BOOL toggle = YES;
+        if (fav.url.length) {
+          NSMenuItem* mi = [[w sidebarMenuForItem:fav] itemWithTitle:@"Show Unread Badge"];
+          BOOL before = mi && mi.state == NSControlStateValueOn;
+          [NSApp sendAction:mi.action to:mi.target from:mi];
+          BOOL hidden = fav.hideUnreadBadge && [[w sidebarMenuForItem:fav] itemWithTitle:@"Show Unread Badge"].state == NSControlStateValueOff;
+          [NSApp sendAction:mi.action to:mi.target from:mi];
+          toggle = before && hidden && !fav.hideUnreadBadge;
+        }
+        std::printf("SELFTEST-UNREAD parse=%d toggle=%d\n", parse, toggle);
+      }
       std::printf("SELFTEST-SIDEBARLOOK grid=%d defaultTheme=%d\n", gridOK,
                   w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown);
       if (!rowsOK) std::printf("SELFTEST-ROWS-DEBUG sel=[%s] hov=[%s] off=[%s]\n", selStyle.UTF8String, hovStyle.UTF8String, offStyle.UTF8String);
