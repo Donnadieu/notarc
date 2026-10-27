@@ -257,6 +257,7 @@ NSString* CleanLinkURL(NSString* url);
 - (void)refreshLiveFolder:(ArcItem*)folder done:(void (^)(BOOL ok))done;
 - (BOOL)dismissLiveFolderTab:(ArcItem*)item;
 - (void)deleteSidebarItem:(ArcItem*)item;  // tests
+- (BOOL)writeSidebarSnapshot:(NSString*)path;  // design checks
 - (void)setTestCookie:(NSString*)name value:(NSString*)value url:(NSString*)url session:(BOOL)session done:(void (^)(BOOL ok))done;  // tests
 - (void)testCookieNamesForURL:(NSString*)url done:(void (^)(NSArray<NSString*>* names))done;  // tests
 // Easels

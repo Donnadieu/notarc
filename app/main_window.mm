@@ -10,6 +10,7 @@
 #import "app/boost_store.h"
 #import "app/easel.h"
 #import "app/live_folder.h"
+#import "app/favicons.h"
 #include "include/cef_devtools_message_observer.h"
 
 #include <cstdio>
@@ -190,7 +191,7 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
 - (void)updateLayer {
   BOOL dark = [self.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
               NSAppearanceNameDarkAqua;
-  NSColor* c = dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:self.hovered ? 0.20 : 0.15]
+  NSColor* c = dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:self.hovered ? 0.15 : 0.10]
                     : [NSColor colorWithSRGBRed:0.055 green:0.059 blue:0.063 alpha:self.hovered ? 0.10 : 0.05];
   self.layer.backgroundColor = c.CGColor;
   self.layer.cornerRadius = 10;
@@ -210,7 +211,13 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
 
 // Arc's sidebar rows: 36 pt rounded pills with Arc's selected / hovered / multi-selected colours
 // (Arc colour catalogue: TabCellBackgroundCurrent, ...PreviousHovered, ...Mutiselected; light mode adds a shadow).
-constexpr CGFloat kRowHeight = 36, kSectionRowHeight = 26, kRowRadius = 8;
+constexpr CGFloat kRowHeight = 36, kRowRadius = 8;
+// Arc measurements (1x screenshot of Arc 1.169's sidebar): rows repeat every 41 pt (36 pt pill + 5 pt gap); the
+// Pinned section has no label; Today starts with a hairline 10 pt down, then the "+ New Tab" row.
+constexpr CGFloat kRowPitch = 41, kPinnedHeaderHeight = 6, kNewTabHeaderHeight = 64;
+// Arc's default (unthemed) dark Space: deep indigo, slightly lighter at the bottom; text is lavender, not white.
+static NSColor* ArcDefaultTabText() { return [NSColor colorWithSRGBRed:0xda / 255.0 green:0xd9 / 255.0 blue:0xfe / 255.0 alpha:1]; }
+
 static BOOL IsDark(NSView* v) {
   return [v.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
          NSAppearanceNameDarkAqua;
@@ -220,6 +227,7 @@ static BOOL IsDark(NSView* v) {
 @property(nonatomic) BOOL multi;
 @property(nonatomic) BOOL pressed;
 @property(nonatomic) BOOL separatorAbove;  // Arc's hairline between Pinned and Today
+@property(nonatomic) BOOL newTabRow;       // Today header: hairline, then a "+ New Tab" pill at the bottom
 @end
 @implementation SidebarRowView
 - (NSColor*)fill {
@@ -253,11 +261,18 @@ static BOOL IsDark(NSView* v) {
   [path fill];
 }
 // The row view includes the 2 pt gap between rows; the pill itself is 36 pt, as in Arc.
-- (NSRect)pillRect { return NSInsetRect(self.bounds, 0, (self.bounds.size.height - kRowHeight) / 2); }
+- (NSRect)pillRect {
+  if (self.newTabRow) {  // the bottom kRowPitch of the header row
+    CGFloat inset = (kRowPitch - kRowHeight) / 2;
+    return NSMakeRect(0, self.flipped ? self.bounds.size.height - kRowPitch + inset : inset, self.bounds.size.width, kRowHeight);
+  }
+  return NSInsetRect(self.bounds, 0, (self.bounds.size.height - kRowHeight) / 2);
+}
 - (void)drawBackgroundInRect:(NSRect)r {
   if (self.separatorAbove) {  // Arc: SidebarSeparator, 15% white (dark) / black (light)
     [(IsDark(self) ? [NSColor colorWithWhite:1 alpha:0.15] : [NSColor colorWithWhite:0 alpha:0.15]) setFill];
-    NSRectFill(NSMakeRect(10, self.flipped ? 0 : self.bounds.size.height - 1, self.bounds.size.width - 20, 1));
+    CGFloat y = self.newTabRow ? 10 : 0;
+    NSRectFill(NSMakeRect(10, self.flipped ? y : self.bounds.size.height - 1 - y, self.bounds.size.width - 20, 1));
   }
   if (!self.selected) [self drawPill];
 }
@@ -293,6 +308,168 @@ static BOOL IsDark(NSView* v) {
     f.size.width += self.indentationPerLevel;
   }
   return f;
+}
+@end
+
+
+// The window backdrop's Space tint; tells the window when light/dark changes so the default theme can follow.
+@interface ThemeBackdropView : NSView
+@property(nonatomic, copy) void (^appearanceChanged)(void);
+@end
+@implementation ThemeBackdropView
+- (void)viewDidChangeEffectiveAppearance {
+  [super viewDidChangeEffectiveAppearance];
+  if (self.appearanceChanged) self.appearanceChanged();
+}
+@end
+
+// Arc's Space title row: just the name; the "..." button appears on hover; right-click opens the Space menu.
+@interface SpaceHeaderView : NSView
+@property(nonatomic, weak) NSView* reveal;
+@property(nonatomic, copy) NSMenu* (^menuProvider)(void);
+@end
+@implementation SpaceHeaderView
+- (void)updateTrackingAreas {
+  [super updateTrackingAreas];
+  for (NSTrackingArea* t in self.trackingAreas) [self removeTrackingArea:t];
+  [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                     options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways |
+                                                             NSTrackingInVisibleRect
+                                                       owner:self userInfo:nil]];
+}
+- (void)mouseEntered:(NSEvent*)e { self.reveal.alphaValue = 1; }
+- (void)mouseExited:(NSEvent*)e { self.reveal.alphaValue = 0; }
+- (NSMenu*)menuForEvent:(NSEvent*)e { return self.menuProvider ? self.menuProvider() : nil; }
+@end
+
+@interface MainWindowController ()
+- (void)favoriteClicked:(ArcItem*)item;
+- (NSMenu*)sidebarMenuForItem:(ArcItem*)item;
+- (BOOL)acceptFavoriteDrop:(id<NSDraggingInfo>)info index:(NSUInteger)index;
+- (BOOL)canDropFavorite:(id<NSDraggingInfo>)info;
+- (NSImage*)iconImageForItem:(ArcItem*)item;
+- (ArcItem*)shownItem;
+- (BOOL)usingDefaultTheme;
+@end
+
+// Arc's Favorites: a grid of icon tiles above the Space (rows of up to 4, balanced: 6 favorites = 2 rows of 3).
+// Tiles are 47 pt tall, 8 pt apart, radius 10, 10% white; the open favorite is brighter.
+constexpr CGFloat kFavTileHeight = 47, kFavRowGap = 8, kFavColGap = 9, kFavRadius = 10;
+@interface FavoritesGridView : NSView <NSViewToolTipOwner>
+@property(nonatomic, weak) MainWindowController* owner;
+@property(nonatomic, copy) NSArray<ArcItem*>* items;
+@property(nonatomic) NSInteger hovered;
+@property(nonatomic) BOOL dropTarget;
++ (NSUInteger)rowsForCount:(NSUInteger)n;
+- (CGFloat)heightForWidth:(CGFloat)w;
+@end
+@implementation FavoritesGridView
++ (NSUInteger)rowsForCount:(NSUInteger)n { return n ? (n + 3) / 4 : 0; }
+- (instancetype)initWithFrame:(NSRect)f {
+  if ((self = [super initWithFrame:f])) {
+    _hovered = -1;
+    [self registerForDraggedTypes:@[ @"io.github.donnadieu.notarc.sidebar-item" ]];
+  }
+  return self;
+}
+- (BOOL)isFlipped { return YES; }
+- (NSUInteger)columns {
+  NSUInteger n = self.items.count, rows = [FavoritesGridView rowsForCount:n];
+  return rows ? (n + rows - 1) / rows : 0;
+}
+- (CGFloat)heightForWidth:(CGFloat)w {
+  NSUInteger rows = [FavoritesGridView rowsForCount:self.items.count];
+  return rows ? rows * kFavTileHeight + (rows - 1) * kFavRowGap : 0;
+}
+- (NSRect)tileRect:(NSUInteger)i {
+  NSUInteger cols = MAX((NSUInteger)1, [self columns]);
+  CGFloat w = (self.bounds.size.width - (cols - 1) * kFavColGap) / cols;
+  NSUInteger r = i / cols, c = i % cols;
+  return NSMakeRect(round(c * (w + kFavColGap)), r * (kFavTileHeight + kFavRowGap), round(w), kFavTileHeight);
+}
+- (NSInteger)indexAt:(NSPoint)p {
+  for (NSUInteger i = 0; i < self.items.count; ++i)
+    if (NSPointInRect(p, [self tileRect:i])) return (NSInteger)i;
+  return -1;
+}
+- (void)setItems:(NSArray<ArcItem*>*)items {
+  _items = [items copy];
+  [self removeAllToolTips];
+  for (NSUInteger i = 0; i < _items.count; ++i) [self addToolTipRect:[self tileRect:i] owner:self userData:NULL];
+  self.needsDisplay = YES;
+}
+- (void)setFrameSize:(NSSize)s {
+  [super setFrameSize:s];
+  self.items = _items;
+}
+- (NSString*)view:(NSView*)v stringForToolTip:(NSToolTipTag)tag point:(NSPoint)p userData:(void*)d {
+  NSInteger i = [self indexAt:p];
+  return i >= 0 ? self.items[(NSUInteger)i].displayTitle : @"";
+}
+- (void)drawRect:(NSRect)dirty {
+  BOOL dark = IsDark(self);
+  ArcItem* shown = [self.owner shownItem];
+  for (NSUInteger i = 0; i < self.items.count; ++i) {
+    ArcItem* it = self.items[i];
+    BOOL sel = it == shown, hov = (NSInteger)i == self.hovered;
+    CGFloat a = dark ? (sel ? 0.22 : hov ? 0.15 : 0.10) : (sel ? 0.85 : hov ? 0.6 : 0.4);
+    NSColor* fill = dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:a] : [NSColor colorWithWhite:1 alpha:a];
+    NSRect r = [self tileRect:i];
+    [fill setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:r xRadius:kFavRadius yRadius:kFavRadius] fill];
+    NSImage* icon = [self.owner iconImageForItem:it];
+    NSRect ir = NSMakeRect(round(NSMidX(r) - 8), round(NSMidY(r) - 8), 16, 16);
+    if (icon.isTemplate) {
+      NSImage* tinted = [icon copy];
+      [tinted lockFocus];
+      [(dark ? [NSColor colorWithWhite:1 alpha:0.6] : [NSColor colorWithWhite:0 alpha:0.5]) set];
+      NSRectFillUsingOperation(NSMakeRect(0, 0, tinted.size.width, tinted.size.height), NSCompositingOperationSourceAtop);
+      [tinted unlockFocus];
+      icon = tinted;
+    }
+    [icon drawInRect:ir fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:nil];
+  }
+  if (self.dropTarget) {
+    [[NSColor colorWithWhite:dark ? 1 : 0 alpha:0.25] setStroke];
+    NSBezierPath* p = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 1, 1) xRadius:kFavRadius yRadius:kFavRadius];
+    p.lineWidth = 2;
+    [p stroke];
+  }
+}
+- (void)updateTrackingAreas {
+  [super updateTrackingAreas];
+  for (NSTrackingArea* t in self.trackingAreas) [self removeTrackingArea:t];
+  [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                     options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited |
+                                                             NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
+                                                       owner:self userInfo:nil]];
+}
+- (void)mouseMoved:(NSEvent*)e {
+  NSInteger i = [self indexAt:[self convertPoint:e.locationInWindow fromView:nil]];
+  if (i != self.hovered) { self.hovered = i; self.needsDisplay = YES; }
+}
+- (void)mouseExited:(NSEvent*)e { self.hovered = -1; self.needsDisplay = YES; }
+- (void)mouseUp:(NSEvent*)e {
+  NSInteger i = [self indexAt:[self convertPoint:e.locationInWindow fromView:nil]];
+  if (i >= 0) [self.owner favoriteClicked:self.items[(NSUInteger)i]];
+}
+- (NSMenu*)menuForEvent:(NSEvent*)e {
+  NSInteger i = [self indexAt:[self convertPoint:e.locationInWindow fromView:nil]];
+  return i >= 0 ? [self.owner sidebarMenuForItem:self.items[(NSUInteger)i]] : nil;
+}
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info {
+  BOOL ok = [self.owner canDropFavorite:info];
+  self.dropTarget = ok;
+  self.needsDisplay = YES;
+  return ok ? NSDragOperationMove : NSDragOperationNone;
+}
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info { return self.dropTarget ? NSDragOperationMove : NSDragOperationNone; }
+- (void)draggingExited:(id<NSDraggingInfo>)info { self.dropTarget = NO; self.needsDisplay = YES; }
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)info {
+  self.dropTarget = NO;
+  self.needsDisplay = YES;
+  NSInteger i = [self indexAt:[self convertPoint:info.draggingLocation fromView:nil]];
+  return [self.owner acceptFavoriteDrop:info index:i >= 0 ? (NSUInteger)i : self.items.count];
 }
 @end
 
@@ -422,6 +599,8 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   NSView* _spaceBar;        // Arc's bottom bar: archive, Space icons, "+"
   NSStackView* _spaceIcons;
   NSView* _spaceHeader;            // Arc's Space title row: icon + name, "..." menu
+  FavoritesGridView* _favGrid;     // Arc's Favorites tiles under the address pill
+  BOOL _iconRefreshQueued;
   NSTextField* _spaceHeaderTitle;
   NSString* _lastSpaceSlide;   // tests: "left" / "right" / "none"
   NSMutableArray<Boost*>* _boosts;
@@ -469,7 +648,10 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   sidebar.autoresizingMask = NSViewHeightSizable;
   _sidebar = sidebar;
   // Space theme tint: a gradient over the whole frame, under every control.
-  _themeView = [[NSView alloc] initWithFrame:bounds];
+  ThemeBackdropView* backdrop = [[ThemeBackdropView alloc] initWithFrame:bounds];
+  __weak MainWindowController* weakOwner = self;
+  backdrop.appearanceChanged = ^{ [weakOwner applyTheme]; };
+  _themeView = backdrop;
   _themeView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   _themeView.wantsLayer = YES;
   _themeGradient = [CAGradientLayer layer];
@@ -511,25 +693,37 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   _spacePicker.target = self;
   _spacePicker.action = @selector(spaceChanged:);
   // The pop-up stays as the Space list model; Arc shows a plain title row instead of a drop-down.
-  _spaceHeader = [[NSView alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 122, kSidebarWidth - 17, 30)];
-  _spaceHeader.autoresizingMask = NSViewMinYMargin;
+  // Arc's Space title: the name in dim semibold text; "..." shows on hover; right-click opens the Space menu.
+  SpaceHeaderView* header = [[SpaceHeaderView alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 234, kSidebarWidth - 17, 34)];
+  header.autoresizingMask = NSViewMinYMargin;
+  _spaceHeader = header;
   _spaceHeaderTitle = [NSTextField labelWithString:@""];
   _spaceHeaderTitle.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
-  _spaceHeaderTitle.textColor = NSColor.secondaryLabelColor;
+  _spaceHeaderTitle.textColor = [NSColor colorWithName:nil dynamicProvider:^NSColor*(NSAppearance* ap) {
+    BOOL dark = [ap bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] == NSAppearanceNameDarkAqua;
+    return [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.45];
+  }];
   _spaceHeaderTitle.lineBreakMode = NSLineBreakByTruncatingTail;
-  _spaceHeaderTitle.frame = NSMakeRect(10, 6, _spaceHeader.bounds.size.width - 48, 18);
+  _spaceHeaderTitle.frame = NSMakeRect(7, 8, _spaceHeader.bounds.size.width - 44, 18);
   [_spaceHeader addSubview:_spaceHeaderTitle];
   NSButton* more = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"ellipsis" accessibilityDescription:@"Space menu"]
                                       target:self action:@selector(showSpaceMenu:)];
   more.bordered = NO;
   more.toolTip = @"Space options";
   more.contentTintColor = NSColor.secondaryLabelColor;
-  more.frame = NSMakeRect(_spaceHeader.bounds.size.width - 30, 2, 26, 26);
+  more.frame = NSMakeRect(_spaceHeader.bounds.size.width - 30, 4, 26, 26);
+  more.alphaValue = 0;
   [_spaceHeader addSubview:more];
+  header.reveal = more;
+  header.menuProvider = ^NSMenu*{ return [weakOwner spaceMenu]; };
   NSClickGestureRecognizer* rename = [[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(renameCurrentSpace:)];
   rename.numberOfClicksRequired = 2;  // double-click the name to rename, as in Arc
   [_spaceHeaderTitle addGestureRecognizer:rename];
   [sidebar addSubview:_spaceHeader];
+  _favGrid = [[FavoritesGridView alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 90, kSidebarWidth - 17, 0)];
+  _favGrid.owner = self;
+  _favGrid.autoresizingMask = NSViewMinYMargin;
+  [sidebar addSubview:_favGrid];
   [self updateSpaceHeader];
 
   NSScrollView* scroll = [[NSScrollView alloc]
@@ -551,7 +745,7 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   _outline.backgroundColor = NSColor.clearColor;
   _outline.rowHeight = kRowHeight;
   _outline.style = NSTableViewStylePlain;
-  _outline.intercellSpacing = NSMakeSize(0, 2);
+  _outline.intercellSpacing = NSMakeSize(0, 0);  // rows carry Arc's 5 pt gap themselves (41 pt pitch)
   _outline.indentationPerLevel = 14;
   _outline.columnAutoresizingStyle = NSTableViewUniformColumnAutoresizingStyle;
   _outline.floatsGroupRows = NO;
@@ -575,16 +769,18 @@ class DevToolsResults : public CefDevToolsMessageObserver {
 
   // Sidebar top, as in Arc: window buttons, then sidebar toggle; back, forward, reload at the right; then the
   // 36 pt address pill (8 pt from each side, 46 pt from the top) with copy-link and site-settings buttons.
-  _sidebarNav = [[NSView alloc] initWithFrame:NSMakeRect(0, bounds.size.height - 28, kSidebarWidth, 28)];
+  // Arc: window buttons and these icons share one line centred 23.5 pt below the top; toggle centred at x 94,
+  // back / forward / reload at 183 / 217 / 251.
+  _sidebarNav = [[NSView alloc] initWithFrame:NSMakeRect(0, bounds.size.height - 37, kSidebarWidth, 28)];
   _sidebarNav.autoresizingMask = NSViewMinYMargin;
-  NSArray* nav = @[ @[ @"sidebar.left", @"toggleSidebar:", @78 ], @[ @"arrow.left", @"goBack:", @(kSidebarWidth - 8 - 3 * 28) ],
-                    @[ @"arrow.right", @"goForward:", @(kSidebarWidth - 8 - 2 * 28) ],
-                    @[ @"arrow.clockwise", @"reloadPage:", @(kSidebarWidth - 8 - 28) ] ];
+  NSArray* nav = @[ @[ @"sidebar.left", @"toggleSidebar:", @81 ], @[ @"arrow.left", @"goBack:", @170 ],
+                    @[ @"arrow.right", @"goForward:", @204 ], @[ @"arrow.clockwise", @"reloadPage:", @238 ] ];
   for (NSArray* n in nav) {
     NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:n[0] accessibilityDescription:nil]
                                      target:self action:NSSelectorFromString(n[1])];
     b.bordered = NO;
     b.contentTintColor = NSColor.secondaryLabelColor;
+    b.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:14 weight:NSFontWeightMedium];
     b.frame = NSMakeRect([n[2] doubleValue], 1, 26, 26);
     [_sidebarNav addSubview:b];
   }
@@ -595,13 +791,17 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   __weak MainWindowController* weakSelf = self;
   _addressPill.onClick = ^{ [weakSelf openLocation:nil]; };
   _addressPillText = [NSTextField labelWithString:@""];
-  _addressPillText.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
+  _addressPillText.font = [NSFont systemFontOfSize:13];
+  _addressPillText.textColor = [NSColor colorWithName:nil dynamicProvider:^NSColor*(NSAppearance* ap) {
+    BOOL dark = [ap bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] == NSAppearanceNameDarkAqua;
+    return [NSColor colorWithWhite:dark ? 1 : 0 alpha:dark ? 0.65 : 0.6];
+  }];
   _addressPillText.lineBreakMode = NSLineBreakByTruncatingTail;
   _addressPillText.frame = NSMakeRect(12, 9, _addressPill.bounds.size.width - 12 - 60, 18);
   [_addressPill addSubview:_addressPillText];
   NSArray* pillButtons = @[ @[ @"paintbrush.pointed", @"editBoost:", @"Boost This Site" ], @[ @"link", @"copyCurrentURL:", @"Copy URL" ],
                             @[ @"slider.horizontal.3", @"showSiteSettings:", @"Site Settings" ] ];
-  _addressPillText.frame = NSMakeRect(12, 9, _addressPill.bounds.size.width - 12 - 86, 18);
+  _addressPillText.frame = NSMakeRect(11, 9, _addressPill.bounds.size.width - 11 - 86, 18);
   CGFloat px = _addressPill.bounds.size.width - 6 - 3 * 26;
   for (NSArray* n in pillButtons) {
     NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:n[0] accessibilityDescription:n[2]]
@@ -617,26 +817,26 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   [sidebar addSubview:_addressPill];
 
   // Bottom bar, as in Arc: archive (Library) at the left, one icon per Space in the middle, "+" menu at the right.
-  _spaceBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 6, kSidebarWidth - 17, 30)];
+  _spaceBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 10, kSidebarWidth - 17, 30)];  // Arc: centred 25 pt up
   NSButton* lib = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"archivebox" accessibilityDescription:@"Archive"]
                                      target:self action:@selector(showArchive:)];
   lib.bordered = NO;
   lib.toolTip = @"Archive";
   lib.contentTintColor = NSColor.secondaryLabelColor;
-  lib.frame = NSMakeRect(0, 2, 26, 26);
+  lib.frame = NSMakeRect(2, 2, 26, 26);
   [_spaceBar addSubview:lib];
   NSButton* plus = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"plus" accessibilityDescription:@"New"]
                                       target:self action:@selector(showNewMenu:)];
   plus.bordered = NO;
   plus.toolTip = @"New Tab, Folder or Space";
   plus.contentTintColor = NSColor.secondaryLabelColor;
-  plus.frame = NSMakeRect(_spaceBar.bounds.size.width - 26, 2, 26, 26);
+  plus.frame = NSMakeRect(_spaceBar.bounds.size.width - 29, 2, 26, 26);
   [_spaceBar addSubview:plus];
   _spaceIcons = [NSStackView stackViewWithViews:@[]];
   _spaceIcons.orientation = NSUserInterfaceLayoutOrientationHorizontal;
-  _spaceIcons.spacing = 2;
+  _spaceIcons.spacing = 0;
   _spaceIcons.distribution = NSStackViewDistributionGravityAreas;
-  _spaceIcons.frame = NSMakeRect(30, 0, _spaceBar.bounds.size.width - 60, 30);
+  _spaceIcons.frame = NSMakeRect(32, 0, _spaceBar.bounds.size.width - 64, 30);
   [_spaceBar addSubview:_spaceIcons];
   [sidebar addSubview:_spaceBar];
 
@@ -681,10 +881,65 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   [self reloadSidebar];
 }
 
+// Sidebar column, top down (Arc): pill 46-82; Favorites grid from 90; Space title 8 below the grid; tabs after it,
+// down to the bottom bar (or the media bar above it).
+- (void)layoutSidebar {
+  CGFloat H = _sidebar.bounds.size.height, w = kSidebarWidth - 17;
+  CGFloat gridH = [_favGrid heightForWidth:w];
+  _favGrid.hidden = gridH == 0;
+  _favGrid.frame = NSMakeRect(8, H - 90 - gridH, w, gridH);
+  CGFloat below = gridH ? 90 + gridH : 82;
+  _spaceHeader.frame = NSMakeRect(8, H - below - 42, w, 34);
+  CGFloat top = _spaceHeader.hidden ? below + 8 : below + 42;
+  CGFloat bottom = _mediaBar.hidden ? 42 : 82;
+  _sidebarScroll.frame = NSMakeRect(8, bottom, w, MAX(0, H - top - bottom));
+}
+
+- (void)updateFavoritesGrid {
+  NSMutableArray* items = [NSMutableArray array];
+  for (ArcItem* f in _space.favorites.children)
+    if (f.url.length && !f.isFolder) [items addObject:f];
+  _favGrid.items = items;
+  [self layoutSidebar];
+}
+
+// Arc's default theme when a Space has no colour of its own: deep indigo in dark mode (top #120C39 to #140D40).
+- (BOOL)usingDefaultTheme { return _space.themeColors.count == 0 && IsDark(self.window.contentView); }
+
+// Arc lines the window buttons up with the sidebar icons (centres 19.5 / 42.5 / 66, 23.5 pt down).
+- (void)positionWindowButtons {
+  NSWindow* win = self.window;
+  if (win.styleMask & NSWindowStyleMaskFullScreen) return;
+  NSButton* close = [win standardWindowButton:NSWindowCloseButton];
+  NSView* container = close.superview.superview;
+  if (!container) return;
+  CGFloat h = _sidebar.hidden ? kToolbarHeight : 47;
+  NSRect cf = container.frame;
+  cf.size.height = h;
+  cf.origin.y = win.frame.size.height - h;
+  container.frame = cf;
+  CGFloat xs[3] = {13, 36, 59};
+  NSWindowButton kinds[3] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
+  for (int i = 0; i < 3; ++i) {
+    NSButton* b = [win standardWindowButton:kinds[i]];
+    NSRect f = b.frame;
+    f.origin.x = xs[i] + (_sidebar.hidden ? 0 : 0);
+    f.origin.y = round((h - f.size.height) / 2);
+    b.frame = f;
+  }
+}
+- (NSRect)windowButtonFrame {  // tests: the close button, in window coordinates
+  NSButton* close = [self.window standardWindowButton:NSWindowCloseButton];
+  return [close convertRect:close.bounds toView:nil];
+}
+- (void)windowDidEndLiveResize:(NSNotification*)note { [self positionWindowButtons]; }
+- (void)windowDidExitFullScreen:(NSNotification*)note { [self positionWindowButtons]; }
+- (void)windowDidBecomeMain:(NSNotification*)note { [self positionWindowButtons]; }
+
 - (void)reloadSidebar {
   [_outline reloadData];
+  [self updateFavoritesGrid];
   if (!_space) return;
-  if (_space.favorites) [_outline expandItem:_space.favorites];
   [_outline expandItem:_space.pinned];
   [_outline expandItem:_space.unpinned];
 }
@@ -981,6 +1236,9 @@ NSString* CleanLinkURL(NSString* url) {
   _client->set_renderer_callback([weakSelf](int browserId, int kind, int status) {
     [weakSelf browser:browserId rendererEvent:kind status:status];
   });
+  _client->set_favicon_callback([weakSelf](int browserId, const std::string& url) {
+    [weakSelf browser:browserId faviconURL:[NSString stringWithUTF8String:url.c_str()]];
+  });
   _client->set_load_end_callback([weakSelf](int browserId, const std::string& url) {
     [weakSelf applyBoostToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
   });
@@ -1126,8 +1384,7 @@ NSString* CleanLinkURL(NSString* url) {
 - (NSArray<ArcItem*>*)childrenOf:(id)item {
   if (!item) {
     if (!_space) return @[];
-    return _space.favorites ? @[ _space.favorites, _space.pinned, _space.unpinned ]
-                            : @[ _space.pinned, _space.unpinned ];
+    return @[ _space.pinned, _space.unpinned ];  // Favorites are the tile grid above, as in Arc
   }
   return ((ArcItem*)item).children;
 }
@@ -1150,7 +1407,10 @@ NSString* CleanLinkURL(NSString* url) {
 }
 
 - (CGFloat)outlineView:(NSOutlineView*)ov heightOfRowByItem:(id)item {
-  return ((ArcItem*)item).isSection ? kSectionRowHeight : kRowHeight;
+  ArcItem* a = item;
+  if (a == _space.unpinned) return kNewTabHeaderHeight;
+  if (a.isSection) return kPinnedHeaderHeight;
+  return kRowPitch;
 }
 
 - (NSTableRowView*)outlineView:(NSOutlineView*)ov rowViewForItem:(id)item {
@@ -1162,7 +1422,8 @@ NSString* CleanLinkURL(NSString* url) {
   rv.hovered = NO;
   rv.pressed = NO;
   rv.multi = ov.selectedRowIndexes.count > 1;
-  rv.separatorAbove = item == _space.unpinned && _space.pinned.children.count > 0;
+  rv.separatorAbove = item == _space.unpinned;  // Arc: always a hairline above "+ New Tab"
+  rv.newTabRow = item == _space.unpinned;
   return rv;
 }
 
@@ -1176,7 +1437,8 @@ NSString* CleanLinkURL(NSString* url) {
   [_outline enumerateAvailableRowViewsUsingBlock:^(NSTableRowView* rv, NSInteger r) {
     if (![rv isKindOfClass:SidebarRowView.class]) return;
     SidebarRowView* s = (SidebarRowView*)rv;
-    BOOL h = r == row && ![(ArcItem*)[self->_outline itemAtRow:r] isSection];
+    ArcItem* it = [self->_outline itemAtRow:r];
+    BOOL h = r == row && (!it.isSection || it == self->_space.unpinned);
     if (s.hovered != h) { s.hovered = h; s.needsDisplay = YES; }
   }];
 }
@@ -1190,6 +1452,11 @@ NSString* CleanLinkURL(NSString* url) {
   NSInteger row = _outline.clickedRow;
   ArcItem* a = row >= 0 ? [_outline itemAtRow:row] : nil;
   if (a.isFolder) [self toggleFolder:a];
+  if (a && a == _space.unpinned) {  // the "+ New Tab" row
+    NSPoint p = [_outline convertPoint:NSApp.currentEvent.locationInWindow fromView:nil];
+    NSRect rr = [_outline rectOfRow:row];
+    if (p.y >= NSMaxY(rr) - kRowPitch) [self newTab:nil];
+  }
 }
 - (void)toggleFolder:(ArcItem*)folder {
   if ([_outline isItemExpanded:folder]) [_outline collapseItem:folder];
@@ -1215,21 +1482,22 @@ NSString* CleanLinkURL(NSString* url) {
   ArcItem* a = item;
   NSTableCellView* cell = [ov makeViewWithIdentifier:@"cell" owner:self];
   if (!cell) {
-    cell = [[NSTableCellView alloc] initWithFrame:NSMakeRect(0, 0, col.width, kRowHeight)];
+    cell = [[NSTableCellView alloc] initWithFrame:NSMakeRect(0, 0, col.width, kRowPitch)];
     cell.identifier = @"cell";
-    NSImageView* icon = [[NSImageView alloc] initWithFrame:NSMakeRect(10, 10, 16, 16)];
-    icon.autoresizingMask = NSViewMinYMargin | NSViewMaxYMargin;
+    NSImageView* icon = [[NSImageView alloc] initWithFrame:NSMakeRect(10, 12.5, 16, 16)];
+    icon.imageScaling = NSImageScaleProportionallyUpOrDown;
+    icon.autoresizingMask = NSViewMaxYMargin;  // pinned to the bottom 41 pt (the "+ New Tab" header is taller)
     [cell addSubview:icon];
     cell.imageView = icon;
     NSTextField* label = [NSTextField labelWithString:@""];
     label.lineBreakMode = NSLineBreakByTruncatingTail;
-    label.frame = NSMakeRect(34, 9, col.width - 42, 18);
-    label.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin | NSViewMaxYMargin;
+    label.frame = NSMakeRect(37, 11.5, col.width - 45, 18);
+    label.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin;
     [cell addSubview:label];
     cell.textField = label;
-    NSImageView* chev = [[NSImageView alloc] initWithFrame:NSMakeRect(col.width - 24, 12, 12, 12)];
+    NSImageView* chev = [[NSImageView alloc] initWithFrame:NSMakeRect(col.width - 24, 14.5, 12, 12)];
     chev.tag = 77;
-    chev.autoresizingMask = NSViewMinXMargin | NSViewMinYMargin | NSViewMaxYMargin;
+    chev.autoresizingMask = NSViewMinXMargin | NSViewMaxYMargin;
     chev.contentTintColor = NSColor.tertiaryLabelColor;
     chev.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:9 weight:NSFontWeightSemibold];
     [cell addSubview:chev];
@@ -1247,24 +1515,145 @@ NSString* CleanLinkURL(NSString* url) {
     for (ArcItem* pane in a.children) [names addObject:pane.displayTitle];
     title = [names componentsJoinedByString:@" | "];
   }
-  cell.textField.stringValue = title;
+  BOOL newTab = a == _space.unpinned;
+  BOOL dark = IsDark(ov);
+  BOOL indigo = [self usingDefaultTheme];
+  // Arc: tab titles 14 pt medium (lavender on the default dark theme); the "+ New Tab" row is dimmer.
+  cell.textField.stringValue = newTab ? @"New Tab" : (a.isSection ? @"" : title);
   cell.textField.editable = a.isFolder;
   cell.textField.delegate = a.isFolder ? self : nil;
-  cell.textField.font = a.isSection ? [NSFont systemFontOfSize:11 weight:NSFontWeightSemibold]
-                                    : [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
-  cell.textField.textColor = a.isSection ? NSColor.secondaryLabelColor : NSColor.labelColor;
+  cell.textField.font = [NSFont systemFontOfSize:14 weight:NSFontWeightMedium];
+  cell.textField.textColor = newTab ? [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.45]
+                                    : (indigo ? ArcDefaultTabText() : NSColor.labelColor);
+  // Cells fill the row; the header row's "+ New Tab" sits in its bottom 41 pt.
   NSRect lf = cell.textField.frame;
-  lf.origin.x = a.isSection ? 10 : 34;
+  lf.origin.x = 37;
+  lf.origin.y = 11.5;
   lf.size.width = cell.bounds.size.width - lf.origin.x - 8;
   cell.textField.frame = lf;
-  NSString* symbol = a.isSection ? nil : (a.isFolder ? (a.liveKind ? @"dot.radiowaves.up.forward" : ([ov isItemExpanded:a] ? @"folder.fill" : @"folder")) : (a.noteID ? @"note.text" : (a.easelID ? @"scribble.variable" : @"globe")));
-  if (a.isSplit) symbol = a.splitHorizontal ? @"rectangle.split.1x2" : @"rectangle.split.2x1";
-  if (a.crashed) symbol = @"exclamationmark.triangle";
-  else if (a.audioMuted) symbol = @"speaker.slash.fill";
-  else if (a.mediaPlaying) symbol = @"speaker.wave.2.fill";
-  cell.imageView.image = symbol ? [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil] : nil;
+  NSRect icf = cell.imageView.frame;
+  icf.origin.y = 12.5;
+  cell.imageView.frame = icf;
+  cell.textField.hidden = a.isSection && !newTab;
+  NSImage* image = nil;
+  if (newTab) {
+    image = [NSImage imageWithSystemSymbolName:@"plus" accessibilityDescription:@"New Tab"];
+    cell.imageView.contentTintColor = [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.45];
+  } else if (!a.isSection) {
+    NSString* symbol = a.isFolder ? (a.liveKind ? @"dot.radiowaves.up.forward" : ([ov isItemExpanded:a] ? @"folder.fill" : @"folder"))
+                                  : (a.noteID ? @"note.text" : (a.easelID ? @"scribble.variable" : nil));
+    if (a.isSplit) symbol = a.splitHorizontal ? @"rectangle.split.1x2" : @"rectangle.split.2x1";
+    if (a.crashed) symbol = @"exclamationmark.triangle";
+    else if (a.audioMuted) symbol = @"speaker.slash.fill";
+    else if (a.mediaPlaying) symbol = @"speaker.wave.2.fill";
+    image = symbol ? [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil] : [self iconImageForItem:a];
+    cell.imageView.contentTintColor = indigo ? [ArcDefaultTabText() colorWithAlphaComponent:0.85] : NSColor.secondaryLabelColor;
+  }
+  cell.imageView.image = image;
   return cell;
 }
+
+#pragma mark Site icons
+
+// Chromium's saved icons: this Space's own profile first, then (read-only) the same profile in Arc.
+- (NSArray<NSString*>*)faviconDatabasesForSpace:(ArcSpace*)space {
+  if (!space.profileDirectory.length) return @[];
+  NSString* support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
+      stringByAppendingPathComponent:@"NotArc"];
+  NSString* prefix = self.selfTestProfiles ? @"SelfTest Space " : @"Space ";
+  NSString* mine = [[support stringByAppendingPathComponent:[prefix stringByAppendingString:space.profileDirectory]]
+      stringByAppendingPathComponent:@"Favicons"];
+  NSString* arc = [[[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]
+      stringByAppendingPathComponent:space.profileDirectory] stringByAppendingPathComponent:@"Favicons"];
+  return @[ mine, arc ];
+}
+
+- (NSImage*)iconImageForItem:(ArcItem*)item {
+  NSString* url = item.url.length ? item.url : item.pinnedURL;
+  if (item.isSplit) url = item.children.firstObject.url;
+  ArcSpace* space = [self spaceOwningItem:item] ?: _space;
+  __weak MainWindowController* weakSelf = self;
+  NSImage* img = [[FaviconStore shared] iconForURL:url databases:[self faviconDatabasesForSpace:space]
+                                            loaded:^{ [weakSelf queueIconRefresh]; }];
+  if (img) return img;
+  NSImage* globe = [NSImage imageWithSystemSymbolName:@"globe" accessibilityDescription:nil];
+  [globe setTemplate:YES];
+  return globe;
+}
+
+- (void)queueIconRefresh {
+  if (_iconRefreshQueued) return;
+  _iconRefreshQueued = YES;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_main_queue(), ^{
+    self->_iconRefreshQueued = NO;
+    NSInteger rows = self->_outline.numberOfRows;
+    if (rows > 0)
+      [self->_outline reloadDataForRowIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, (NSUInteger)rows)]
+                                columnIndexes:[NSIndexSet indexSetWithIndex:0]];
+    self->_favGrid.needsDisplay = YES;
+  });
+}
+
+- (void)browser:(int)browserId faviconURL:(NSString*)iconURL {
+  auto it = _browsers.find(browserId);
+  ArcItem* item = [self itemForBrowserId:browserId];
+  if (it == _browsers.end() || !item || !iconURL.length) return;
+  NSString* page = [self itemCurrentURL:item];
+  __weak MainWindowController* weakSelf = self;
+  class Done : public CefDownloadImageCallback {
+   public:
+    explicit Done(void (^cb)(NSData*)) : cb_([cb copy]) {}
+    void OnDownloadImageFinished(const CefString&, int, CefRefPtr<CefImage> image) override {
+      NSData* png = nil;
+      if (image && !image->IsEmpty()) {
+        int w = 0, h = 0;
+        CefRefPtr<CefBinaryValue> v = image->GetAsPNG(2.0f, true, w, h);
+        if (!v) v = image->GetAsPNG(1.0f, true, w, h);
+        if (v && v->GetSize()) {
+          NSMutableData* d = [NSMutableData dataWithLength:v->GetSize()];
+          v->GetData(d.mutableBytes, v->GetSize(), 0);
+          png = d;
+        }
+      }
+      void (^cb)(NSData*) = cb_;
+      dispatch_async(dispatch_get_main_queue(), ^{ cb(png); });
+    }
+   private:
+    void (^cb_)(NSData*);
+    IMPLEMENT_REFCOUNTING(Done);
+  };
+  it->second->GetHost()->DownloadImage(iconURL.UTF8String, true, 32, false, new Done(^(NSData* png) {
+    if (!png) return;
+    [[FaviconStore shared] setIconData:png forURL:page];
+    if (item.url.length && ![FaviconSiteKey(item.url) isEqualToString:FaviconSiteKey(page)])
+      [[FaviconStore shared] setIconData:png forURL:item.url];
+    [weakSelf queueIconRefresh];
+  }));
+}
+
+#pragma mark Favorites grid
+
+- (void)favoriteClicked:(ArcItem*)item {
+  if (item.url.length) [self showItem:item];
+  _favGrid.needsDisplay = YES;
+}
+- (BOOL)canDropFavorite:(id<NSDraggingInfo>)info {
+  ArcItem* dragged = [self draggedItem:info];
+  return dragged && _space.favorites && !dragged.isFolder && !dragged.isSplit && dragged.url.length;
+}
+- (BOOL)acceptFavoriteDrop:(id<NSDraggingInfo>)info index:(NSUInteger)index {
+  if (![self canDropFavorite:info]) return NO;
+  ArcItem* dragged = [self draggedItem:info];
+  return [self moveItem:dragged toParent:_space.favorites index:(NSInteger)MIN(index, _space.favorites.children.count)];
+}
+- (NSArray<NSString*>*)favoriteTileTitles {  // tests
+  NSMutableArray* out = [NSMutableArray array];
+  for (ArcItem* f in _favGrid.items) [out addObject:f.displayTitle ?: @""];
+  return out;
+}
+- (NSRect)favoritesGridFrame { return _favGrid.hidden ? NSZeroRect : [_favGrid convertRect:_favGrid.bounds toView:nil]; }  // tests
+- (NSRect)spaceHeaderFrame { return [_spaceHeader convertRect:_spaceHeader.bounds toView:nil]; }  // tests
+- (BOOL)defaultThemeShown { return !_themeView.hidden && [self usingDefaultTheme]; }  // tests
 
 #pragma mark Media
 
@@ -1328,11 +1717,7 @@ static NSString* const kMediaResumeJS =
   }
   if (_mediaBar.hidden == !show) return;
   _mediaBar.hidden = !show;
-  NSRect f = _sidebarScroll.frame;
-  CGFloat bottom = show ? 82 : 42;
-  f.size.height += f.origin.y - bottom;
-  f.origin.y = bottom;
-  _sidebarScroll.frame = f;
+  [self layoutSidebar];
 }
 
 - (ArcItem*)mediaBarItem { return _mediaBar.hidden ? nil : _mediaItem; }
@@ -1896,6 +2281,8 @@ static NSString* RelativeAgo(NSDate* d) {
   if (row < 0 && parent.isSplit) row = [_outline rowForItem:parent];
   if (row >= 0 && row != _outline.selectedRow)
     [_outline selectRowIndexes:[NSIndexSet indexSetWithIndex:row] byExtendingSelection:NO];
+  if (row < 0 && _outline.selectedRow >= 0) [_outline deselectAll:nil];  // e.g. a Favorite is on screen
+  _favGrid.needsDisplay = YES;
 }
 
 #pragma mark Persistence
@@ -2402,6 +2789,7 @@ static const CGFloat kPaneGap = 6;
 }
 
 - (void)windowDidResize:(NSNotification*)note {
+  [self positionWindowButtons];
   if (_splitItems.count > 1) [self layoutPanes];
 }
 
@@ -2864,13 +3252,20 @@ static ArcItem* NewSection(NSString* title) {
   NSMutableArray* cg = [NSMutableArray array];
   for (NSString* hex in _space.themeColors)
     if (NSColor* c = ColorFromHex(hex)) [cg addObject:(id)c.CGColor];
+  BOOL fallback = cg.count == 0 && [self usingDefaultTheme];
+  if (fallback) {  // Arc's default dark Space
+    [cg addObject:(id)ColorFromHex(@"#120C39").CGColor];
+    [cg addObject:(id)ColorFromHex(@"#140D40").CGColor];
+  }
   _themeView.hidden = cg.count == 0;
+  [_outline reloadDataForRowIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, (NSUInteger)_outline.numberOfRows)]
+                      columnIndexes:[NSIndexSet indexSetWithIndex:0]];  // tab text colour follows the theme
   if (!cg.count) return;
   if (cg.count == 1) [cg addObject:cg[0]];
   [CATransaction begin];
   [CATransaction setDisableActions:YES];
   _themeGradient.colors = cg;
-  _themeGradient.opacity = (float)MAX(0.1, MIN(1.0, _space.themeIntensity ?: 0.5));
+  _themeGradient.opacity = fallback ? 1 : (float)MAX(0.1, MIN(1.0, _space.themeIntensity ?: 0.5));
   [CATransaction commit];
 }
 
@@ -3446,6 +3841,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (IBAction)toggleSidebar:(id)sender {
   _sidebar.hidden = !_sidebar.hidden;
   [self layoutContentArea];
+  [self positionWindowButtons];
 }
 
 // Page area = window minus the sidebar (if shown) minus the toolbar (if shown).
@@ -3524,9 +3920,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (void)applySpaceHeader:(BOOL)show {
   if (_spaceHeader.hidden == !show) return;
   _spaceHeader.hidden = !show;
-  NSRect f = _sidebarScroll.frame;
-  f.size.height += show ? -34 : 34;
-  _sidebarScroll.frame = f;
+  [self layoutSidebar];
 }
 
 
@@ -4825,6 +5219,16 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
     IMPLEMENT_REFCOUNTING(NameVisitor);
   };
   if (!mgr->VisitUrlCookies(url.UTF8String, false, new NameVisitor([done copy]))) done(@[]);
+}
+
+// Renders the sidebar (theme backdrop included) to a PNG, for comparing with Arc screenshots.
+- (BOOL)writeSidebarSnapshot:(NSString*)path {
+  NSView* root = self.window.contentView;
+  NSRect r = NSMakeRect(0, 0, kSidebarWidth, root.bounds.size.height);
+  NSBitmapImageRep* rep = [root bitmapImageRepForCachingDisplayInRect:r];
+  [root cacheDisplayInRect:r toBitmapImageRep:rep];
+  NSData* png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+  return [png writeToFile:path atomically:YES];
 }
 
 // Removes an item (and its tabs) from the current Space without archiving (tests and Live Folder cleanup).

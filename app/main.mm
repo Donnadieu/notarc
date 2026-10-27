@@ -54,6 +54,7 @@
 @property(nonatomic, strong) MainWindowController* window;
 @property(nonatomic) BOOL selfTest;
 @property(nonatomic) BOOL selfTestReload;  // phase 2: reopen the saved store, no actions
+@property(nonatomic, copy) NSString* snapshotPath;  // --sidebar-snapshot=<png>: hidden run that renders the sidebar and quits
 @property(nonatomic, strong) NSMutableArray<NSString*>* pendingURLs;  // links that arrived before the window
 @end
 
@@ -363,6 +364,14 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       }
     }];
     [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
+    if (self.snapshotPath) {
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        std::printf("SNAPSHOT %s\n", [self.window writeSidebarSnapshot:self.snapshotPath] ? "ok" : "failed");
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      });
+      return;
+    }
     if (!self.selfTestReload) [self runSelfTestActions];
     if (self.selfTestReload) {
       // Phase 2 (run by scripts/test-session-restore.sh): report what came back, then quit cleanly.
@@ -1679,7 +1688,8 @@ int main(int argc, char* argv[]) {
   static char noTimerThrottle[] = "--disable-background-timer-throttling";
   static char noMacOcclusion[] = "--disable-features=MacWebContentsOcclusion";  // pages in hidden test windows stay "visible"
   for (int i = 1; i < argc; ++i)
-    if (std::string(argv[i]) == "--selftest" || std::string(argv[i]) == "--selftest-reload") {
+    if (std::string(argv[i]) == "--selftest" || std::string(argv[i]) == "--selftest-reload" ||
+        std::string(argv[i]).rfind("--sidebar-snapshot=", 0) == 0) {
       args.push_back(mockKeychain);
       args.push_back(autoplay);
       args.push_back(fakeDevices);
@@ -1707,6 +1717,12 @@ int main(int argc, char* argv[]) {
     BOOL selfTestReload = NO;
     for (int i = 1; i < argc; ++i)
       if (std::string(argv[i]) == "--selftest-reload") selfTest = selfTestReload = YES;
+    NSString* snapshotPath = nil;
+    for (int i = 1; i < argc; ++i)
+      if (std::string(argv[i]).rfind("--sidebar-snapshot=", 0) == 0) {
+        selfTest = YES;  // same isolation as the self-test: test profiles, mock Keychain, hidden window
+        snapshotPath = [NSString stringWithUTF8String:argv[i] + strlen("--sidebar-snapshot=")];
+      }
 
     CefSettings settings;
     settings.no_sandbox = true;
@@ -1726,6 +1742,7 @@ int main(int argc, char* argv[]) {
     AppDelegate* delegate = [AppDelegate new];
     delegate.selfTest = selfTest;
     delegate.selfTestReload = selfTestReload;
+    delegate.snapshotPath = snapshotPath;
     NSApp.delegate = delegate;
     [delegate performSelectorOnMainThread:@selector(start) withObject:nil waitUntilDone:NO];
 

@@ -16,6 +16,11 @@ void BrowserClient::OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString
   if (on_title_) on_title_(browser->GetIdentifier(), title.ToString());
 }
 
+void BrowserClient::OnFaviconURLChange(CefRefPtr<CefBrowser> browser, const std::vector<CefString>& icon_urls) {
+  CEF_REQUIRE_UI_THREAD();
+  if (on_favicon_ && !icon_urls.empty()) on_favicon_(browser->GetIdentifier(), icon_urls.front().ToString());
+}
+
 void BrowserClient::OnAddressChange(CefRefPtr<CefBrowser> browser,
                                     CefRefPtr<CefFrame> frame,
                                     const CefString& url) {
