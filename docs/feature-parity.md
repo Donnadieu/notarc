@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-40 done, 20 partial, 27 not started or out of scope, of 87 items.
+41 done, 20 partial, 26 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -40,7 +40,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [x] Create / delete / reorder Spaces
 - [ ] Space themes: colours, gradients, icons/emoji (Space style editor) (partial: per-Space colour or two-colour gradient with intensity, preset palettes, emoji icon; grain and per-Space light/dark missing) (#26)
 - [ ] Swipe / Ctrl+number to switch Spaces (partial: Ctrl+1-9 and Cmd+Opt+arrows done; trackpad swipe missing) (#27)
-- [ ] Create/rename Profiles, assign Space to Profile (missing) (#28)
+- [x] Create/rename Profiles, assign Space to Profile (#28)
 - [x] Show/hide Space header, search Spaces (View > Hide/Show Space Header; Spaces appear in command bar results) (#29)
 
 ## Command bar & navigation

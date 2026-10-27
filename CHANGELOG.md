@@ -5,6 +5,7 @@ or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
 - The sidebar now looks like Arc's: the default indigo background, Favorites as icon tiles, real site icons on every tab, the Space name above a "+ New Tab" row, Arc's row spacing and text colours, and window buttons lined up with the sidebar icons.
+- Profiles: the Space menu (right-click the Space name, or "...") > Profile moves a Space to another profile, with its own logins and Favorites, or makes and renames profiles. Your Arc profile names come over on first launch.
 - Logins now survive quitting and reopening NotArc, including sites that sign you in only for the session.
 - Live Folders: the + menu > New Live Folder... makes a folder that fills itself from an RSS or Atom feed, or from a
   GitHub repository's open pull requests (or issues, with /issues). It refreshes every 15 minutes (or Refresh Live
