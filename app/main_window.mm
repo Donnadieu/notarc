@@ -8,6 +8,8 @@
 #import "app/arc_extensions.h"
 #import "app/link_routing.h"
 #import "app/link_routing_editor.h"
+#import "app/bookmark_import.h"
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 #import "app/history_store.h"
 #import "app/arc_cookies.h"
 #import "app/little_window.h"
@@ -3253,6 +3255,55 @@ static const CGFloat kPaneGap = 6;
   t.archivedAt = [NSDate date];
   [[self archive] addObject:t];
   if (self.archivePath) ArchiveStoreSave(_archive, self.archivePath);
+}
+
+- (BOOL)addImportedBookmarks:(ArcItem*)folder {
+  if (!folder || !_space.pinned) return NO;
+  [_space.pinned.children addObject:folder];
+  [_outline reloadItem:_space.pinned reloadChildren:YES];
+  [_outline expandItem:folder];
+  [self scheduleSave];
+  return YES;
+}
+
+- (IBAction)importBookmarksFromMenu:(id)sender {
+  NSAlert* a = [NSAlert new];
+  a.messageText = @"Import Bookmarks";
+  a.informativeText = @"Bookmarks go into a folder in this Space's Pinned tabs. From Safari or Firefox, export a "
+                      @"bookmarks HTML file there (Safari: File > Export > Bookmarks) and choose it here.";
+  NSPopUpButton* from = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 300, 26) pullsDown:NO];
+  for (NSArray* s in DetectedBookmarkSources()) {
+    [from addItemWithTitle:s[0]];
+    from.lastItem.representedObject = s;
+  }
+  [from addItemWithTitle:@"Bookmarks HTML file..."];
+  a.accessoryView = from;
+  [a addButtonWithTitle:@"Import"];
+  [a addButtonWithTitle:@"Cancel"];
+  __weak MainWindowController* weakSelf = self;
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r != NSAlertFirstButtonReturn) return;
+    NSArray* src = from.selectedItem.representedObject;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      MainWindowController* me = weakSelf;
+      if (!me) return;
+      NSUInteger n = 0;
+      ArcItem* folder = nil;
+      if (src) {
+        folder = BookmarksFromChromiumFile(src[1], [@"Bookmarks from " stringByAppendingString:src[0]], &n);
+      } else {
+        NSOpenPanel* p = [NSOpenPanel openPanel];
+        p.allowedContentTypes = @[ UTTypeHTML ];
+        if ([p runModal] != NSModalResponseOK) return;
+        folder = BookmarksFromHTMLFile(p.URL.path, @"Imported Bookmarks", &n);
+      }
+      NSAlert* done = [NSAlert new];
+      done.messageText = folder && n ? [NSString stringWithFormat:@"%lu bookmarks imported", (unsigned long)n]
+                                     : @"No bookmarks found";
+      if (folder && n) [me addImportedBookmarks:folder];
+      [done beginSheetModalForWindow:me.window completionHandler:nil];
+    });
+  }];
 }
 
 - (IBAction)newIncognitoWindow:(id)sender {
