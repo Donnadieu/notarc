@@ -119,6 +119,10 @@ NSString* CleanLinkURL(NSString* url);
 // Profiles (Arc: each Space belongs to a browser profile with its own logins, history and Favorites).
 // Keyed by profile folder ("Profile 4"); names come from Arc on first launch and are saved in Profiles.json.
 - (NSUInteger)importArcHistory;
+// One button for everything that can come over from Arc today: history and extensions (logins come over on
+// each Space's first page load). Returns counts: @"history", @"extensions", @"skipped".
+- (NSDictionary<NSString*, NSNumber*>*)importEverythingFromArcInto:(NSString*)extensionsDir userData:(NSString*)userData;
+- (void)offerArcImportIfFirstLaunch;  // first real launch only: "Bring everything over from Arc?"
 // File > Import Extensions from Arc: copies the Spaces' Arc extensions; they load with Chrome-style pages.
 - (NSArray*)importArcExtensionsInto:(NSString*)destination fromArcUserData:(NSString*)userData;  // File > Import History from Arc: each Space's Arc profile history; returns visits added
 - (NSArray<NSString*>*)profileDirectories;            // in display order
