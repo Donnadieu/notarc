@@ -602,6 +602,7 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   NSView* _spaceHeader;            // Arc's Space title row: icon + name, "..." menu
   FavoritesGridView* _favGrid;     // Arc's Favorites tiles under the address pill
   BOOL _iconRefreshQueued;
+  NSMutableDictionary<NSString*, NSString*>* _profileNames;  // profile folder -> name
   NSTextField* _spaceHeaderTitle;
   NSString* _lastSpaceSlide;   // tests: "left" / "right" / "none"
   NSMutableArray<Boost*>* _boosts;
@@ -3208,10 +3209,151 @@ static ArcItem* NewSection(NSString* title) {
         NSString* cur = _space.colorScheme ?: @"auto";
         i.state = [cur isEqualToString:o[1]] ? NSControlStateValueOn : NSControlStateValueOff;
       }
+      [m addItem:[self profileMenuItem]];
     }
   }
   return m;
 }
+
+#pragma mark Profiles
+
+- (NSString*)profilesPath {
+  if (!self.storePath) return nil;
+  return [[self.storePath stringByDeletingLastPathComponent]
+      stringByAppendingPathComponent:self.selfTestProfiles ? @"SelfTestProfiles.json" : @"Profiles.json"];
+}
+
+- (NSMutableDictionary<NSString*, NSString*>*)profileNames {
+  if (_profileNames) return _profileNames;
+  _profileNames = [NSMutableDictionary dictionary];
+  NSString* path = [self profilesPath];
+  NSData* data = path ? [NSData dataWithContentsOfFile:path] : nil;
+  NSDictionary* saved = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+  if ([saved isKindOfClass:NSDictionary.class]) {
+    for (NSString* k in saved)
+      if ([saved[k] isKindOfClass:NSString.class]) _profileNames[k] = saved[k];
+  } else {
+    // First launch: Arc's own profile names (Local State, read-only).
+    NSData* ls = [NSData dataWithContentsOfFile:[[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]
+                                                    stringByAppendingPathComponent:@"Local State"]];
+    NSDictionary* root = ls ? [NSJSONSerialization JSONObjectWithData:ls options:0 error:nil] : nil;
+    NSDictionary* cache = [root isKindOfClass:NSDictionary.class] ? root[@"profile"][@"info_cache"] : nil;
+    if ([cache isKindOfClass:NSDictionary.class])
+      for (NSString* dir in cache) {
+        NSString* name = [cache[dir] isKindOfClass:NSDictionary.class] ? cache[dir][@"name"] : nil;
+        if ([name isKindOfClass:NSString.class] && name.length && ![name hasPrefix:@"__"]) _profileNames[dir] = name;
+      }
+  }
+  for (ArcSpace* s in _spaces)  // every profile a Space uses has a name
+    if (s.profileDirectory.length && !_profileNames[s.profileDirectory])
+      _profileNames[s.profileDirectory] = [s.profileDirectory isEqualToString:@"Default"] ? @"Default" : (s.title ?: s.profileDirectory);
+  return _profileNames;
+}
+
+- (void)saveProfiles {
+  NSString* path = [self profilesPath];
+  if (!path) return;
+  NSData* data = [NSJSONSerialization dataWithJSONObject:[self profileNames]
+                                                 options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+                                                   error:nil];
+  [data writeToFile:path atomically:YES];
+}
+
+// Profiles used by a Space first (in Space order), then the rest by name.
+- (NSArray<NSString*>*)profileDirectories {
+  NSMutableArray* out = [NSMutableArray array];
+  for (ArcSpace* s in _spaces)
+    if (s.profileDirectory.length && ![out containsObject:s.profileDirectory]) [out addObject:s.profileDirectory];
+  NSDictionary* names = [self profileNames];
+  NSMutableArray* rest = [NSMutableArray array];
+  for (NSString* k in names) if (![out containsObject:k]) [rest addObject:k];
+  [rest sortUsingComparator:^NSComparisonResult(NSString* a, NSString* b) {
+    return [names[a] localizedCaseInsensitiveCompare:names[b]];
+  }];
+  [out addObjectsFromArray:rest];
+  return out;
+}
+
+- (NSString*)nameOfProfile:(NSString*)dir { return [self profileNames][dir] ?: dir; }
+
+- (NSString*)createProfileNamed:(NSString*)name {
+  NSMutableDictionary* names = [self profileNames];
+  NSString* dir;
+  for (NSUInteger n = 1;; ++n) {  // never collides with Arc's "Profile N" folders
+    dir = [NSString stringWithFormat:@"NotArc Profile %lu", (unsigned long)n];
+    if (!names[dir]) break;
+  }
+  names[dir] = name.length ? name : @"New Profile";
+  [self saveProfiles];
+  return dir;
+}
+
+- (void)renameProfile:(NSString*)dir to:(NSString*)name {
+  if (!dir.length || !name.length) return;
+  [self profileNames][dir] = name;
+  [self saveProfiles];
+}
+
+// Moving a Space to another profile: its pages reload signed in as that profile, and it shows that profile's
+// Favorites, as in Arc.
+- (void)assignSpace:(ArcSpace*)space toProfile:(NSString*)dir {
+  if (!space || !dir.length || [space.profileDirectory isEqualToString:dir]) return;
+  BOOL current = space == _space;
+  ArcItem* shown = current ? _shown : nil;
+  NSArray<ArcItem*>* tabs = [self tabsIn:@[ space.pinned, space.unpinned ]];
+  for (ArcItem* t in tabs) if (t.browserId) [self unloadItem:t];
+  if (space.favorites) {
+    BOOL shared = NO;
+    for (ArcSpace* s in _spaces) if (s != space && s.favorites == space.favorites) shared = YES;
+    if (!shared) for (ArcItem* t in [self tabsIn:@[ space.favorites ]]) if (t.browserId) [self unloadItem:t];
+  }
+  space.profileDirectory = dir;
+  ArcItem* fav = nil;
+  for (ArcSpace* s in _spaces) if (s != space && [s.profileDirectory isEqualToString:dir] && s.favorites) fav = s.favorites;
+  space.favorites = fav ?: NewSection(@"Favorites");
+  if (![self profileNames][dir]) {
+    [self profileNames][dir] = dir;
+    [self saveProfiles];
+  }
+  if (current) {
+    [self reloadSidebar];
+    if (shown && [tabs containsObject:shown]) {
+      _shown = nil;
+      [self showItem:shown];
+    }
+  }
+  [self scheduleSave];
+}
+
+- (IBAction)assignProfileFromMenu:(NSMenuItem*)sender { [self assignSpace:_space toProfile:sender.representedObject]; }
+
+- (IBAction)newProfileForSpace:(id)sender {
+  NSString* name = [self askForSpaceName:@"New Profile" initial:@""];
+  if (name.length) [self assignSpace:_space toProfile:[self createProfileNamed:name]];
+}
+
+- (IBAction)renameCurrentProfile:(id)sender {
+  NSString* dir = _space.profileDirectory;
+  NSString* name = [self askForSpaceName:@"Rename Profile" initial:[self nameOfProfile:dir]];
+  if (name.length) [self renameProfile:dir to:name];
+}
+
+// Space menu > Profile: pick the Space's profile, or make / rename one (Arc: "Edit Space profile").
+- (NSMenuItem*)profileMenuItem {
+  NSMenuItem* top = [[NSMenuItem alloc] initWithTitle:@"Profile" action:nil keyEquivalent:@""];
+  top.submenu = [[NSMenu alloc] initWithTitle:@"Profile"];
+  for (NSString* dir in [self profileDirectories]) {
+    NSMenuItem* i = [top.submenu addItemWithTitle:[self nameOfProfile:dir] action:@selector(assignProfileFromMenu:) keyEquivalent:@""];
+    i.target = self;
+    i.representedObject = dir;
+    i.state = [dir isEqualToString:_space.profileDirectory] ? NSControlStateValueOn : NSControlStateValueOff;
+  }
+  [top.submenu addItem:NSMenuItem.separatorItem];
+  [top.submenu addItemWithTitle:@"New Profile..." action:@selector(newProfileForSpace:) keyEquivalent:@""].target = self;
+  [top.submenu addItemWithTitle:@"Rename Profile..." action:@selector(renameCurrentProfile:) keyEquivalent:@""].target = self;
+  return top;
+}
+
 - (NSArray<NSString*>*)spaceMenuTitles {  // tests
   NSMutableArray* out = [NSMutableArray array];
   for (NSMenuItem* i in [self spaceMenu].itemArray) if (!i.isSeparatorItem) [out addObject:i.title];
