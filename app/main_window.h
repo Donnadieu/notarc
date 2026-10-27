@@ -161,6 +161,8 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Incognito window (#40, Cmd+Shift+N): its own in-memory profile, shared by all open Incognito windows and wiped
 // when the last one closes. Nothing goes to History, the Archive or disk.
 - (IBAction)newIncognitoWindow:(id)sender;
+// AppleScript (#76): "select", "back", "forward", "reload", "stop", "close", or "loading" (returns it) for a tab.
+- (BOOL)scriptItem:(ArcItem*)item command:(NSString*)command;
 // Import bookmarks (#80): adds the folder to the current Space's Pinned section, like Arc. Returns NO if nil.
 - (BOOL)addImportedBookmarks:(ArcItem*)folder;
 - (IBAction)importBookmarksFromMenu:(id)sender;  // File > Import Bookmarks...

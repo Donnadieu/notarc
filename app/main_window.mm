@@ -3306,6 +3306,25 @@ static const CGFloat kPaneGap = 6;
   }];
 }
 
+- (BOOL)scriptItem:(ArcItem*)item command:(NSString*)command {
+  if (!item) return NO;
+  auto it = _browsers.find(item.browserId);
+  CefRefPtr<CefBrowser> b = it == _browsers.end() ? nullptr : it->second;
+  if ([command isEqualToString:@"loading"]) return b && b->IsLoading();
+  if ([command isEqualToString:@"select"]) { [self showItem:item]; return YES; }
+  if ([command isEqualToString:@"close"]) {
+    if (_shown != item) [self showItem:item];
+    [self closeCurrentTab];
+    return YES;
+  }
+  if (!b) return NO;
+  if ([command isEqualToString:@"back"]) b->GoBack();
+  else if ([command isEqualToString:@"forward"]) b->GoForward();
+  else if ([command isEqualToString:@"reload"]) b->Reload();
+  else if ([command isEqualToString:@"stop"]) b->StopLoad();
+  return YES;
+}
+
 - (IBAction)newIncognitoWindow:(id)sender {
   _commandOpensSplit = NO;
   _commandOpensLittle = NO;

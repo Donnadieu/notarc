@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE dictionary SYSTEM "file://localhost/System/Library/DTDs/sdef.dtd">
+<!-- NotArc scripting dictionary (#76): windows, Spaces and tabs, with the same terms Arc scripts use. -->
+<dictionary title="NotArc Terminology" xmlns:xi="http://www.w3.org/2001/XInclude">
+  <xi:include href="file:///System/Library/ScriptingDefinitions/CocoaStandard.sdef" xpointer="xpointer(/dictionary/suite)"/>
+  <suite name="NotArc Suite" code="NAsu" description="Windows, Spaces and tabs.">
+    <class-extension extends="window" description="A NotArc window.">
+      <element type="tab" access="rw"><cocoa key="scriptTabs"/></element>
+      <element type="space" access="r"><cocoa key="scriptSpaces"/></element>
+      <property name="active tab" code="NAat" type="tab" access="r"><cocoa key="scriptActiveTab"/></property>
+      <property name="active space" code="NAas" type="space" access="r"><cocoa key="scriptActiveSpace"/></property>
+      <property name="incognito" code="NAin" type="boolean" access="r"><cocoa key="scriptIncognito"/></property>
+    </class-extension>
+    <class name="tab" code="NAtb" plural="tabs" description="A tab in the current Space.">
+      <cocoa class="NAScriptTab"/>
+      <property name="id" code="ID  " type="text" access="r"><cocoa key="uniqueID"/></property>
+      <property name="title" code="pnam" type="text" access="r"><cocoa key="scriptTitle"/></property>
+      <property name="URL" code="NAur" type="text" access="rw"><cocoa key="scriptURL"/></property>
+      <property name="loading" code="NAld" type="boolean" access="r"><cocoa key="scriptLoading"/></property>
+      <property name="location" code="NAlc" type="text" access="r" description="pinned, unpinned or favorites"><cocoa key="scriptLocation"/></property>
+      <responds-to command="select"><cocoa method="handleSelect:"/></responds-to>
+      <responds-to command="go back"><cocoa method="handleGoBack:"/></responds-to>
+      <responds-to command="go forward"><cocoa method="handleGoForward:"/></responds-to>
+      <responds-to command="reload"><cocoa method="handleReload:"/></responds-to>
+      <responds-to command="stop"><cocoa method="handleStop:"/></responds-to>
+      <responds-to command="execute"><cocoa method="handleExecute:"/></responds-to>
+      <responds-to command="close"><cocoa method="handleCloseTab:"/></responds-to>
+    </class>
+    <class name="space" code="NAsp" plural="spaces" description="A Space.">
+      <cocoa class="NAScriptSpace"/>
+      <property name="id" code="ID  " type="text" access="r"><cocoa key="uniqueID"/></property>
+      <property name="title" code="pnam" type="text" access="r"><cocoa key="scriptTitle"/></property>
+      <element type="tab" access="r"><cocoa key="scriptTabs"/></element>
+      <responds-to command="focus"><cocoa method="handleFocus:"/></responds-to>
+    </class>
+    <command name="select" code="NAsuSelt" description="Show a tab."><direct-parameter type="specifier"/></command>
+    <command name="go back" code="NAsuBack"><direct-parameter type="specifier"/></command>
+    <command name="go forward" code="NAsuFwrd"><direct-parameter type="specifier"/></command>
+    <command name="reload" code="NAsuRlod"><direct-parameter type="specifier"/></command>
+    <command name="stop" code="NAsuStop"><direct-parameter type="specifier"/></command>
+    <command name="focus" code="NAsuFocs" description="Switch to a Space."><direct-parameter type="specifier"/></command>
+    <command name="execute" code="NAsuExJS" description="Run JavaScript in a tab.">
+      <direct-parameter type="specifier"/>
+      <parameter name="javascript" code="NAjs" type="text"><cocoa key="javascript"/></parameter>
+    </command>
+  </suite>
+</dictionary>

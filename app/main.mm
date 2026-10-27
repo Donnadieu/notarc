@@ -816,6 +816,22 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                          !SettingObject(@"shortcutOverrides")[p];
             BOOL display = [ShortcutDisplay(@"n", NSEventModifierFlagCommand | NSEventModifierFlagShift) isEqualToString:@"⇧⌘N"];
             BOOL window = [ShortcutsWindowController shared].window != nil && ![ShortcutsWindowController shared].window.isVisible;
+            {  // AppleScript (#76): dictionary loaded, KVC wrappers, and a real script run in this process only.
+              NSScriptSuiteRegistry* reg = NSScriptSuiteRegistry.sharedScriptSuiteRegistry;
+              BOOL dict = [reg classDescriptionWithAppleEventCode:'NAtb'] != nil && [reg classDescriptionWithAppleEventCode:'NAsp'] != nil;
+              NSArray* tabs = [w.window valueForKey:@"scriptTabs"];
+              NSArray* spaces = [w.window valueForKey:@"scriptSpaces"];
+              id active = [w.window valueForKey:@"scriptActiveTab"];
+              BOOL kvc = tabs.count > 0 && spaces.count == w.spaces.count &&
+                         [[active valueForKey:@"uniqueID"] isEqualToString:w.shownItem.itemID];
+              NSDictionary* err = nil;
+              NSAppleEventDescriptor* r = [[[NSAppleScript alloc] initWithSource:
+                  @"tell current application\nset n to 0\nrepeat with w in windows\nset c to count of spaces of w\n"
+                  @"if c > n then set n to c\nend repeat\nreturn n as text\nend tell"] executeAndReturnError:&err];
+              BOOL script = r && r.stringValue.integerValue == (NSInteger)w.spaces.count;
+              if (!script) std::printf("SELFTEST-APPLESCRIPT-DEBUG %s %s\n", r.stringValue.UTF8String ?: "-", err.description.UTF8String ?: "-");
+              std::printf("SELFTEST-APPLESCRIPT dictionary=%d kvc=%d script=%d\n", dict, kvc, script);
+            }
             std::printf("SELFTEST-SHORTCUTEDIT set=%d conflict=%d reset=%d display=%d window=%d\n", set, conflict, reset, display, window);
           }
           [[NSFileManager defaultManager] removeItemAtPath:js error:nil];
