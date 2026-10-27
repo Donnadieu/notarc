@@ -35,6 +35,11 @@
 @property(nonatomic) BOOL mediaPlaying;  // audio or video playing (not saved)
 @property(nonatomic) BOOL mediaPaused;   // has media that was playing and is now paused (not saved)
 @property(nonatomic) BOOL audioMuted;
+// Calls (#47, not saved): the page has the camera / microphone, and whether the user turned them off.
+@property(nonatomic) BOOL usingCamera;
+@property(nonatomic) BOOL usingMic;
+@property(nonatomic) BOOL micMuted;
+@property(nonatomic) BOOL cameraOff;
 @property(nonatomic) BOOL wasOpen;  // had a live page when last saved (restored after a crash)
 @property(nonatomic) BOOL crashed;  // the page's process died; a Reload overlay covers it (not saved)    // tab muted (not saved)  // 0 until a web view exists for this tab
 @property(nonatomic, strong) NSDate* lastActiveAt;  // drives auto-archive of Today tabs

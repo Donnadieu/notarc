@@ -586,6 +586,8 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   CAGradientLayer* _themeGradient;
   NSPopover* _hoverCard;
   NSView* _mediaBar;
+  NSButton* _callMic;
+  NSButton* _callCam;
   NSMutableDictionary<NSNumber*, NSView*>* _crashViews;
   ArcItem* _hungItem;
   NSAlert* _hungAlert;
@@ -731,7 +733,17 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   _mediaTitle.frame = NSMakeRect(32, 8, kSidebarWidth - 16 - 64, 18);
   NSClickGestureRecognizer* go = [[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(mediaBarShowTab:)];
   [_mediaTitle addGestureRecognizer:go];
-  for (NSView* v in @[ _mediaPlay, _mediaTitle, _mediaMute ]) [_mediaBar addSubview:v];
+  // Arc's call controls: in a call, the bar shows microphone and camera toggles instead of play / mute.
+  _callCam = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"video.fill" accessibilityDescription:@"Camera"]
+                                target:self action:@selector(callBarCamera:)];
+  _callCam.bordered = NO;
+  _callCam.frame = NSMakeRect(kSidebarWidth - 16 - 56, 5, 24, 24);
+  _callMic = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"mic.fill" accessibilityDescription:@"Microphone"]
+                                target:self action:@selector(callBarMic:)];
+  _callMic.bordered = NO;
+  _callMic.frame = NSMakeRect(kSidebarWidth - 16 - 28, 5, 24, 24);
+  _callCam.hidden = _callMic.hidden = YES;
+  for (NSView* v in @[ _mediaPlay, _mediaTitle, _mediaMute, _callCam, _callMic ]) [_mediaBar addSubview:v];
   _mediaBar.hidden = YES;
   [sidebar addSubview:_mediaBar];
 
@@ -1407,6 +1419,10 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   });
   _client->set_load_end_callback([weakSelf](int browserId, const std::string& url) {
     [weakSelf applyBoostToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
+    [weakSelf installCallHookInBrowser:browserId];
+  });
+  _client->set_capture_callback([weakSelf](int browserId, bool video, bool audio) {
+    [weakSelf browser:browserId captureVideo:video audio:audio];
   });
   _client->set_zap_callback([weakSelf](int browserId, const std::string& selector) {
     [weakSelf handleZapSelector:[NSString stringWithUTF8String:selector.c_str()] browser:browserId];
@@ -1860,6 +1876,19 @@ static NSString* const kMediaResumeJS =
   return nil;
 }
 
+// Remembers the camera/mic streams a page asks for, so the sidebar's call buttons can turn them off.
+static NSString* const kCallHookJS =
+    @"(()=>{if(window.__notarcHook)return;window.__notarcHook=1;window.__notarcStreams=[];"
+    @"const md=navigator.mediaDevices;if(!md||!md.getUserMedia)return;const g=md.getUserMedia.bind(md);"
+    @"md.getUserMedia=c=>g(c).then(s=>{window.__notarcStreams.push(s);return s;});})()";
+
+- (void)installCallHookInBrowser:(int)browserId {
+  auto it = _browsers.find(browserId);
+  if (it == _browsers.end()) return;
+  CefRefPtr<CefFrame> f = it->second->GetMainFrame();
+  f->ExecuteJavaScript(kCallHookJS.UTF8String, f->GetURL(), 0);
+}
+
 - (void)runJS:(NSString*)js inItem:(ArcItem*)item {  // also used by the self-test
   auto it = _browsers.find(item.browserId);
   if (it == _browsers.end()) return;
@@ -1885,7 +1914,71 @@ static NSString* const kMediaResumeJS =
   [self updateMediaBar];
 }
 
+// The page's camera / microphone use changed (CEF reports it); a call tab gets call controls in the sidebar bar.
+- (void)browser:(int)browserId captureVideo:(BOOL)video audio:(BOOL)audio {
+  ArcItem* item = [self itemForBrowserId:browserId];
+  if (!item) return;
+  item.usingCamera = video;
+  item.usingMic = audio;
+  if (!audio) item.micMuted = NO;
+  if (!video) item.cameraOff = NO;
+  [self updateMediaBar];
+}
+
+- (ArcItem*)callItem {
+  for (ArcSpace* s in _spaces)
+    for (ArcItem* t in s.allTabs)
+      if (t.browserId && (t.usingMic || t.usingCamera)) return t;
+  return nil;
+}
+
+// Turns the page's own tracks on or off, like the mute buttons in Meet or Zoom: the call keeps the devices,
+// the other side gets silence / a black frame. Streams are the ones the page asked for (see kCallHookJS).
+- (void)setCallTrack:(NSString*)kind enabled:(BOOL)enabled inItem:(ArcItem*)item {
+  [self runJS:[NSString stringWithFormat:@"(()=>{for(const s of window.__notarcStreams||[])for(const t of s.get%@Tracks())"
+                                          @"t.enabled=%@;})()", kind, enabled ? @"true" : @"false"]
+       inItem:item];
+}
+
+- (void)toggleCallMic:(ArcItem*)item {
+  if (!item.usingMic) return;
+  item.micMuted = !item.micMuted;
+  [self setCallTrack:@"Audio" enabled:!item.micMuted inItem:item];
+  [self updateMediaBar];
+}
+
+- (void)toggleCallCamera:(ArcItem*)item {
+  if (!item.usingCamera) return;
+  item.cameraOff = !item.cameraOff;
+  [self setCallTrack:@"Video" enabled:!item.cameraOff inItem:item];
+  [self updateMediaBar];
+}
+
+- (BOOL)callControlsShown { return !_mediaBar.hidden && (!_callMic.hidden || !_callCam.hidden); }
+
+- (IBAction)callBarMic:(id)sender { [self toggleCallMic:[self callItem]]; }
+- (IBAction)callBarCamera:(id)sender { [self toggleCallCamera:[self callItem]]; }
+
 - (void)updateMediaBar {
+  ArcItem* call = [self callItem];
+  _callMic.hidden = !call || !call.usingMic;
+  _callCam.hidden = !call || !call.usingCamera;
+  _mediaPlay.hidden = _mediaMute.hidden = call != nil;
+  if (call) {
+    _callMic.image = [NSImage imageWithSystemSymbolName:call.micMuted ? @"mic.slash.fill" : @"mic.fill" accessibilityDescription:nil];
+    _callMic.contentTintColor = call.micMuted ? NSColor.systemRedColor : nil;
+    _callCam.image = [NSImage imageWithSystemSymbolName:call.cameraOff ? @"video.slash.fill" : @"video.fill" accessibilityDescription:nil];
+    _callCam.contentTintColor = call.cameraOff ? NSColor.systemRedColor : nil;
+    _callMic.toolTip = call.micMuted ? @"Unmute microphone" : @"Mute microphone";
+    _callCam.toolTip = call.cameraOff ? @"Turn camera on" : @"Turn camera off";
+    _mediaItem = call;
+    _mediaTitle.stringValue = call.displayTitle ?: @"";
+    if (_mediaBar.hidden) {
+      _mediaBar.hidden = NO;
+      [self layoutSidebar];
+    }
+    return;
+  }
   ArcItem* pick = nil;
   for (ArcItem* t in _space.allTabs)
     if (t != _shown && t.browserId && (t.mediaPlaying || t.mediaPaused) && (!pick || (t.mediaPlaying && !pick.mediaPlaying)))
