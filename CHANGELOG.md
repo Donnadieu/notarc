@@ -4,6 +4,7 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- File > Import Extensions from Arc copies your Spaces' Arc extensions into NotArc (newest version, same IDs); they load with Chrome-style pages. Old Manifest V2 extensions such as uBlock Origin are skipped, with uBlock Origin Lite suggested.
 - Groundwork for Chrome extensions, password filling and autofill: pages can run in Chromium's full Chrome mode (off by default; `defaults write io.github.donnadieu.notarc chromePages -bool YES` to try it).
 - File > Import History from Arc brings each Space's Arc history (newest 20,000 visits) into History (Cmd+Y), tagged with its Space. Running it again adds nothing twice.
 - The sidebar now looks like Arc's: the default indigo background, Favorites as icon tiles, real site icons on every tab, the Space name above a "+ New Tab" row, Arc's row spacing and text colours, and window buttons lined up with the sidebar icons.

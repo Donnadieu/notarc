@@ -8,6 +8,8 @@
 
 #import "app/arc_import.h"
 #import "app/main_window.h"
+#import "app/arc_extensions.h"
+#import "app/chrome_page.h"
 #include <sqlite3.h>
 #import "app/boost_store.h"
 #import "app/easel.h"
@@ -127,6 +129,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"New Easel" action:@selector(newEasel:) keyEquivalent:@""];
   [file addItem:NSMenuItem.separatorItem];
   [file addItemWithTitle:@"Import History from Arc" action:@selector(importArcHistoryFromMenu:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Import Extensions from Arc" action:@selector(importArcExtensionsFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Capture to Easel" action:@selector(captureToEasel:) keyEquivalent:@"2"].keyEquivalentModifierMask =
       NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [file addItemWithTitle:@"Add Text to Easel" action:@selector(addEaselText:) keyEquivalent:@""];
@@ -1484,6 +1487,36 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         NSUInteger added = [w importArcHistory], again = [w importArcHistory];
         NSUInteger arcRows = 0;
         for (ArchivedTab* v in w.historyVisits) if ([v.url hasPrefix:@"https://example.org/"]) ++arcRows;
+        {  // Import Extensions from Arc, against a fake Arc profile (never Arc's real one).
+          NSFileManager* fm = NSFileManager.defaultManager;
+          NSString* fake = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-arc-userdata"];
+          NSString* dest = NotArcExtensionsDirectory(YES);
+          [fm removeItemAtPath:fake error:nil];
+          [fm removeItemAtPath:dest error:nil];
+          NSString* prof = w.currentSpace.profileDirectory.length ? w.currentSpace.profileDirectory : @"Default";
+          NSDictionary* exts = @{
+            @"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" : @"{\"manifest_version\":3,\"name\":\"Test Three\",\"version\":\"1.0\",\"key\":\"x\"}",
+            @"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" : @"{\"manifest_version\":2,\"name\":\"Old Two\",\"version\":\"1.0\"}"};
+          for (NSString* ident in exts) {
+            for (NSString* ver in @[ @"0.9_0", @"1.10_0" ]) {
+              NSString* d = [NSString stringWithFormat:@"%@/%@/Extensions/%@/%@", fake, prof, ident, ver];
+              [fm createDirectoryAtPath:[d stringByAppendingPathComponent:@"_metadata"] withIntermediateDirectories:YES attributes:nil error:nil];
+              [exts[ident] writeToFile:[d stringByAppendingPathComponent:@"manifest.json"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+              [ver writeToFile:[d stringByAppendingPathComponent:@"v.txt"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            }
+          }
+          NSArray<ArcExtensionCopy*>* copies = [w importArcExtensionsInto:dest fromArcUserData:fake];
+          NSArray* loadable = ArcCopiedExtensionPaths(dest);
+          NSString* v = [NSString stringWithContentsOfFile:[dest stringByAppendingPathComponent:@"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/v.txt"]
+                                                  encoding:NSUTF8StringEncoding error:nil];
+          BOOL mv2Skipped = NO;
+          for (ArcExtensionCopy* c in copies) if (c.skippedMV2 && [c.name isEqualToString:@"Old Two"]) mv2Skipped = YES;
+          BOOL noMeta = ![fm fileExistsAtPath:[dest stringByAppendingPathComponent:@"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/_metadata"]];
+          std::printf("SELFTEST-ARCEXTENSIONS copied=%d newest=%d mv2Skipped=%d noMetadata=%d\n", loadable.count == 1,
+                      [v isEqualToString:@"1.10_0"], mv2Skipped, noMeta);
+          [fm removeItemAtPath:fake error:nil];
+          [fm removeItemAtPath:dest error:nil];
+        }
         std::printf("SELFTEST-ARCHISTORY added=%d again0=%d onlyPages=%d\n", added == 2, again == 0, arcRows == 2);
         w.arcHistoryOverride = nil;
         [w clearHistory:nil];
@@ -1757,6 +1790,22 @@ int main(int argc, char* argv[]) {
       args.push_back(noMacOcclusion);
       break;
     }
+  // Chrome-style pages (#66) load the extensions copied from Arc. Chromium keeps only the last --disable-features,
+  // so the self-test's occlusion switch is folded in here.
+  static std::string loadExt, features;
+  {
+    BOOL testRun = NO;
+    for (char* a : args) if (a == noMacOcclusion) testRun = YES;
+    NSArray<NSString*>* paths = ChromePagesEnabled() ? ArcCopiedExtensionPaths(NotArcExtensionsDirectory(testRun)) : @[];
+    if (paths.count) {
+      loadExt = std::string("--load-extension=") + [paths componentsJoinedByString:@","].UTF8String;
+      features = std::string("--disable-features=DisableLoadExtensionCommandLineSwitch") +
+                 (testRun ? ",MacWebContentsOcclusion" : "");
+      for (auto& a : args) if (a == noMacOcclusion) a = features.data();
+      if (!testRun) args.push_back(features.data());
+      args.push_back(loadExt.data());
+    }
+  }
   args.push_back(nullptr);
   argc = static_cast<int>(args.size()) - 1;
   argv = args.data();
