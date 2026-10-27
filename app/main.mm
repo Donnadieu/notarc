@@ -10,6 +10,7 @@
 #import "app/main_window.h"
 #import "app/arc_extensions.h"
 #import "app/link_routing.h"
+#import "app/link_routing_editor.h"
 #import "app/chrome_page.h"
 #include <sqlite3.h>
 #import "app/boost_store.h"
@@ -764,6 +765,21 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           NSString* went = [w routeExternalLink:@"https://routed.example/selftest" sourceApp:nil];
           BOOL routed = [went isEqualToString:w.currentSpace.title] &&
                         [w.currentSpace.unpinned.children.firstObject.url hasPrefix:@"https://routed.example/"];
+          {  // Air Traffic Control editor: add / edit / default / remove, each saved to disk at once.
+            LinkRoutingEditor* ed = (LinkRoutingEditor*)[w airTrafficControlEditor];
+            NSUInteger n0 = ed.routing.rules.count;
+            [ed addRule];
+            [ed setRuleAt:n0 match:@"domain" pattern:@"figma.com" app:@"" to:@"little" space:nil];
+            [ed setDefaultTo:@"space" space:w.currentSpace.spaceID];
+            LinkRouting* disk = [LinkRouting loadFrom:w.linkRoutingPath];
+            LinkRule* fr = [disk ruleForURL:@"https://www.figma.com/file/1" sourceApp:nil];
+            BOOL added = disk.rules.count == n0 + 1 && [fr.destination isEqualToString:@"little"] && !fr.sourceApp;
+            BOOL def = [disk.defaultDestination isEqualToString:@"space"] && [disk.defaultSpaceID isEqualToString:w.currentSpace.spaceID];
+            [ed removeRuleAt:n0];
+            BOOL removed = [LinkRouting loadFrom:w.linkRoutingPath].rules.count == n0;
+            BOOL hidden = !ed.window.isVisible;
+            std::printf("SELFTEST-ATCEDITOR added=%d default=%d removed=%d hidden=%d\n", added, def, removed, hidden);
+          }
           std::printf("SELFTEST-LINKROUTING arcFormat=%d matchTypes=%d roundTrip=%d routed=%d\n", arc, types, roundTrip, routed);
           [[NSFileManager defaultManager] removeItemAtPath:f error:nil];
           [[NSFileManager defaultManager] removeItemAtPath:saved error:nil];
@@ -1739,6 +1755,8 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
 - (IBAction)showDownloads:(id)sender { [[DownloadManager shared] showWindow]; }
 
 - (IBAction)checkForUpdates:(id)sender { [[Updater shared] checkInteractive:YES]; }
+
+- (IBAction)showAirTrafficControl:(id)sender { [self.window showAirTrafficControl:sender]; }
 
 - (IBAction)showSettings:(id)sender {
   [[SettingsWindowController shared] showWindow:nil];
