@@ -144,6 +144,14 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"Capture to Easel" action:@selector(captureToEasel:) keyEquivalent:@"2"].keyEquivalentModifierMask =
       NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [file addItemWithTitle:@"Add Text to Easel" action:@selector(addEaselText:) keyEquivalent:@""];
+  NSMenuItem* captureItem = [file addItemWithTitle:@"Capture" action:nil keyEquivalent:@""];
+  NSMenu* capture = [[NSMenu alloc] initWithTitle:@"Capture"];
+  [capture addItemWithTitle:@"Capture Area" action:@selector(captureArea:) keyEquivalent:@"3"].keyEquivalentModifierMask =
+      NSEventModifierFlagCommand | NSEventModifierFlagShift;
+  [capture addItemWithTitle:@"Capture Visible Page" action:@selector(captureVisiblePage:) keyEquivalent:@""];
+  [capture addItemWithTitle:@"Capture Full Page" action:@selector(captureFullPage:) keyEquivalent:@""];
+  [capture addItemWithTitle:@"Capture in Portrait Mode" action:@selector(capturePortrait:) keyEquivalent:@""];
+  captureItem.submenu = capture;
   [file addItemWithTitle:@"New Incognito Window" action:@selector(newIncognitoWindow:) keyEquivalent:@"n"].keyEquivalentModifierMask =
       NSEventModifierFlagCommand | NSEventModifierFlagShift;
   NSMenuItem* littleItem = [file addItemWithTitle:@"New Little Window" action:@selector(newLittleWindow:)
@@ -458,6 +466,44 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                               back, w.callItem == nil && !w.callControlsShown);
                   [w setSitePermission:@"microphone" value:nil forOrigin:@"https://example.org"];
                   [w setSitePermission:@"camera" value:nil forOrigin:@"https://example.org"];
+                  // Capture (#48): visible, area, full page and portrait on a tall test page; files go to a scratch
+                  // folder and the clipboard is a private pasteboard, so nothing of the user's is touched.
+                  NSString* dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"NotArcCaptureSelfTest"];
+                  [NSFileManager.defaultManager removeItemAtPath:dir error:nil];
+                  [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+                  w.captureDirectory = dir;
+                  [w runJS:@"document.body.style.height='3000px';document.title='tall'" inItem:t];
+                  WaitUntil(^{ return [t.liveTitle isEqualToString:@"tall"]; }, 5, ^{
+                    [w capture:@"visible" rect:NSZeroRect done:^(NSData* vis) {
+                      NSBitmapImageRep* v = vis ? [NSBitmapImageRep imageRepWithData:vis] : nil;
+                      [w capture:@"area" rect:NSMakeRect(10, 10, 100, 50) done:^(NSData* area) {
+                        NSBitmapImageRep* a = area ? [NSBitmapImageRep imageRepWithData:area] : nil;
+                        [w capture:@"full" rect:NSZeroRect done:^(NSData* full) {
+                          NSBitmapImageRep* f = full ? [NSBitmapImageRep imageRepWithData:full] : nil;
+                          [w capture:@"portrait" rect:NSZeroRect done:^(NSData* por) {
+                            NSBitmapImageRep* p = por ? [NSBitmapImageRep imageRepWithData:por] : nil;
+                            double sc = v && v.size.width > 0 ? v.pixelsWide / v.size.width : 1;
+                            BOOL visible = v.pixelsWide > 100;
+                            BOOL areaOK = a && llabs(a.pixelsWide - (NSInteger)(100 * v.pixelsWide / [w webViewForItem:t].bounds.size.width)) <= 2;
+                            BOOL fullOK = f && f.pixelsHigh >= 3000 && f.pixelsHigh > v.pixelsHigh;
+                            BOOL portrait = p && p.pixelsWide > v.pixelsWide && p.pixelsHigh > v.pixelsHigh;
+                            NSString* path = [w deliverCapture:area];
+                            NSPasteboard* pb = [NSPasteboard pasteboardWithName:@"io.github.donnadieu.notarc.selftest"];
+                            BOOL saved = path && [path hasPrefix:dir] && [[NSData dataWithContentsOfFile:path] isEqual:area];
+                            BOOL copied = [[pb dataForType:NSPasteboardTypePNG] isEqual:area];
+                            (void)sc;
+                            std::printf("SELFTEST-CAPTURE visible=%d area=%d full=%d portrait=%d saved=%d copied=%d\n", visible,
+                                        areaOK, fullOK, portrait, saved, copied);
+                            if (!areaOK || !fullOK) std::printf("CAPTURE-DEBUG v=%ldx%ld a=%ldx%ld f=%ldx%ld view=%.0f\n",
+                                (long)v.pixelsWide, (long)v.pixelsHigh, (long)a.pixelsWide, (long)a.pixelsHigh,
+                                (long)f.pixelsWide, (long)f.pixelsHigh, [w webViewForItem:t].bounds.size.width);
+                            [pb releaseGlobally];
+                            [NSFileManager.defaultManager removeItemAtPath:dir error:nil];
+                          }];
+                        }];
+                      }];
+                    }];
+                  });
                 });
               });
             });
@@ -1453,7 +1499,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
             if (!related) std::printf("SELFTEST-BOOST-DEBUG rel=[%s]\n", t.liveTitle.UTF8String);
           [w setBoostForHost:@"example.org" configure:^(Boost* x) { x.enabled = NO; }];
           [w runJS:@"document.title='off:'+!!document.getElementById('__notarc_boost__')+'|'+getComputedStyle(document.querySelector('p')).display" inItem:t];
-          WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"off:"]; }, 5, ^{
+          WaitUntil(^{ return (BOOL)([t.liveTitle hasPrefix:@"off:"] && [w.boostIndicatorState isEqualToString:@"off"]); }, 5, ^{
             BOOL off = [t.liveTitle isEqualToString:@"off:false|block"];
             NSString* indOff = w.boostIndicatorState;
             BOOL saved = w.savedBoostCount == 1;

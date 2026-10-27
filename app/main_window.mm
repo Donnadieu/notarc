@@ -538,6 +538,61 @@ NSInteger UnreadCountFromTitle(NSString* title) {
 
 static BOOL RemoveItem(ArcItem* parent, ArcItem* target);
 
+// Capture Area overlay: dims the page, the dragged rectangle shows clear with a size label.
+@interface CaptureAreaView : NSView
+@property(nonatomic, copy) void (^finished)(NSRect rect);  // page points, top-left origin; empty = cancelled
+@end
+
+@implementation CaptureAreaView {
+  NSPoint _start;
+  NSRect _sel;
+}
+- (BOOL)isFlipped { return YES; }
+- (BOOL)acceptsFirstResponder { return YES; }
+- (void)resetCursorRects { [self addCursorRect:self.bounds cursor:NSCursor.crosshairCursor]; }
+- (void)drawRect:(NSRect)dirty {
+  NSBezierPath* p = [NSBezierPath bezierPathWithRect:self.bounds];
+  if (!NSIsEmptyRect(_sel)) [p appendBezierPathWithRect:_sel];
+  p.windingRule = NSWindingRuleEvenOdd;
+  [[NSColor colorWithWhite:0 alpha:0.35] setFill];
+  [p fill];
+  if (NSIsEmptyRect(_sel)) {
+    NSDictionary* a = @{NSForegroundColorAttributeName : NSColor.whiteColor, NSFontAttributeName : [NSFont systemFontOfSize:15 weight:NSFontWeightMedium]};
+    NSString* hint = @"Drag to capture an area. Esc cancels.";
+    NSSize s = [hint sizeWithAttributes:a];
+    [hint drawAtPoint:NSMakePoint(NSMidX(self.bounds) - s.width / 2, NSMidY(self.bounds) - s.height / 2) withAttributes:a];
+    return;
+  }
+  [[NSColor colorWithWhite:1 alpha:0.9] setStroke];
+  NSBezierPath* b = [NSBezierPath bezierPathWithRect:NSInsetRect(_sel, 0.5, 0.5)];
+  b.lineWidth = 1;
+  [b stroke];
+  NSString* size = [NSString stringWithFormat:@"%.0f × %.0f", _sel.size.width, _sel.size.height];
+  NSDictionary* a = @{NSForegroundColorAttributeName : NSColor.whiteColor, NSFontAttributeName : [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightMedium]};
+  [size drawAtPoint:NSMakePoint(NSMinX(_sel), NSMaxY(_sel) + 4) withAttributes:a];
+}
+- (void)mouseDown:(NSEvent*)e {
+  _start = [self convertPoint:e.locationInWindow fromView:nil];
+  _sel = NSZeroRect;
+}
+- (void)mouseDragged:(NSEvent*)e {
+  NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+  _sel = NSIntersectionRect(NSMakeRect(MIN(p.x, _start.x), MIN(p.y, _start.y), fabs(p.x - _start.x), fabs(p.y - _start.y)), self.bounds);
+  self.needsDisplay = YES;
+}
+- (void)mouseUp:(NSEvent*)e { [self finish:(_sel.size.width >= 4 && _sel.size.height >= 4) ? _sel : NSZeroRect]; }
+- (void)keyDown:(NSEvent*)e {
+  if (e.keyCode == 53) [self finish:NSZeroRect];
+  else [super keyDown:e];
+}
+- (void)cancelOperation:(id)sender { [self finish:NSZeroRect]; }
+- (void)finish:(NSRect)r {
+  void (^f)(NSRect) = self.finished;
+  self.finished = nil;
+  if (f) f(r);
+}
+@end
+
 // Results of DevTools methods (used for page captures: Page.captureScreenshot).
 class DevToolsResults : public CefDevToolsMessageObserver {
  public:
@@ -642,6 +697,10 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   CefRefPtr<DevToolsResults> _devtoolsResults;
   std::map<int, CefRefPtr<CefRegistration>> _devtoolsRegs;
   int _devtoolsNextId;
+  NSData* _lastCapture;
+  NSString* _lastCaptureLink;
+  NSView* _captureOverlay;
+  NSString* _captureDirectory;
   NSButton* _boostButton;   // Arc: Boost indicator in the address pill
   NSString* _boostIndicator; // tests: "on" / "off" / "none"
   NSTextField* _addressPillText;
@@ -3012,6 +3071,190 @@ static const CGFloat kPaneGap = 6;
   params->SetString("format", "png");
   b->GetHost()->ExecuteDevToolsMethod(mid, "Page.captureScreenshot", params);
 }
+static CefRefPtr<CefDictionaryValue> CefDict(NSDictionary* d) {
+  CefRefPtr<CefDictionaryValue> v = CefDictionaryValue::Create();
+  for (NSString* k in d) {
+    id o = d[k];
+    if ([o isKindOfClass:NSDictionary.class]) v->SetDictionary(k.UTF8String, CefDict(o));
+    else if ([o isKindOfClass:NSString.class]) v->SetString(k.UTF8String, [o UTF8String]);
+    else if (o == (id)kCFBooleanTrue || o == (id)kCFBooleanFalse) v->SetBool(k.UTF8String, [o boolValue]);
+    else if ([o isKindOfClass:NSNumber.class]) v->SetDouble(k.UTF8String, [o doubleValue]);
+  }
+  return v;
+}
+
+// Any DevTools method on a tab; the result object (or nil on failure) comes back on the main thread.
+- (void)devtools:(ArcItem*)page method:(NSString*)method params:(NSDictionary*)params done:(void (^)(NSDictionary*))done {
+  auto it = _browsers.find(page.browserId);
+  if (it == _browsers.end()) { if (done) done(nil); return; }
+  CefRefPtr<CefBrowser> b = it->second;
+  if (!_devtoolsResults) _devtoolsResults = new DevToolsResults();
+  if (!_devtoolsRegs.count(page.browserId)) _devtoolsRegs[page.browserId] = b->GetHost()->AddDevToolsMessageObserver(_devtoolsResults);
+  int mid = 100000 + (++_devtoolsNextId);
+  void (^cb)(NSDictionary*) = [done copy];
+  _devtoolsResults->pending[mid] = [cb](bool ok, const std::string& json) {
+    NSDictionary* r = nil;
+    if (ok) {
+      id o = [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:json.data() length:json.size()] options:0 error:nil];
+      if ([o isKindOfClass:NSDictionary.class]) r = o;
+    }
+    if (cb) dispatch_async(dispatch_get_main_queue(), ^{ cb(r); });
+  };
+  b->GetHost()->ExecuteDevToolsMethod(mid, method.UTF8String, params.count ? CefDict(params) : nullptr);
+}
+
+static NSData* PNGFrom(NSDictionary* r) {
+  return [r[@"data"] isKindOfClass:NSString.class] ? [[NSData alloc] initWithBase64EncodedString:r[@"data"] options:0] : nil;
+}
+
+static NSBitmapImageRep* RepFrom(NSData* png) { return png ? [NSBitmapImageRep imageRepWithData:png] : nil; }
+
+// Crop a capture of the visible page to a rect given in page-view points (top-left origin).
+static NSData* CropPNG(NSData* png, NSRect r, NSSize viewSize) {
+  NSBitmapImageRep* rep = RepFrom(png);
+  if (!rep || viewSize.width <= 0) return nil;
+  CGFloat s = rep.pixelsWide / viewSize.width;
+  CGRect px = CGRectIntegral(CGRectMake(r.origin.x * s, r.origin.y * s, r.size.width * s, r.size.height * s));
+  px = CGRectIntersection(px, CGRectMake(0, 0, rep.pixelsWide, rep.pixelsHigh));
+  if (CGRectIsEmpty(px)) return nil;
+  CGImageRef c = CGImageCreateWithImageInRect(rep.CGImage, px);
+  NSBitmapImageRep* out = [[NSBitmapImageRep alloc] initWithCGImage:c];
+  CGImageRelease(c);
+  return [out representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+}
+
+// Portrait mode: the capture on a padded background in the Space's colour, rounded and with a soft shadow.
+static NSData* PortraitPNG(NSData* png, NSColor* bg) {
+  NSBitmapImageRep* rep = RepFrom(png);
+  if (!rep) return nil;
+  CGFloat w = rep.pixelsWide, h = rep.pixelsHigh, pad = MAX(w, h) * 0.08, radius = MIN(w, h) * 0.02;
+  NSBitmapImageRep* out = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:(NSInteger)(w + 2 * pad)
+      pixelsHigh:(NSInteger)(h + 2 * pad) bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
+      colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+  [NSGraphicsContext saveGraphicsState];
+  NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithBitmapImageRep:out];
+  NSRect all = NSMakeRect(0, 0, w + 2 * pad, h + 2 * pad);
+  NSGradient* g = [[NSGradient alloc] initWithStartingColor:[bg blendedColorWithFraction:0.25 ofColor:NSColor.whiteColor]
+                                                endingColor:[bg blendedColorWithFraction:0.2 ofColor:NSColor.blackColor]];
+  [g drawInRect:all angle:-45];
+  NSRect card = NSMakeRect(pad, pad, w, h);
+  NSShadow* sh = [NSShadow new];
+  sh.shadowColor = [NSColor colorWithWhite:0 alpha:0.35];
+  sh.shadowBlurRadius = pad * 0.35;
+  sh.shadowOffset = NSMakeSize(0, -pad * 0.08);
+  [NSGraphicsContext saveGraphicsState];
+  [sh set];
+  NSBezierPath* path = [NSBezierPath bezierPathWithRoundedRect:card xRadius:radius yRadius:radius];
+  [NSColor.whiteColor setFill];
+  [path fill];
+  [NSGraphicsContext restoreGraphicsState];
+  [path addClip];
+  [rep drawInRect:card];
+  [NSGraphicsContext restoreGraphicsState];
+  return [out representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+}
+
+- (NSColor*)captureBackgroundColor {
+  NSString* hex = _space.themeColors.firstObject;
+  if (hex.length >= 7) {
+    unsigned v = 0;
+    [[NSScanner scannerWithString:[hex substringFromIndex:1]] scanHexInt:&v];
+    return [NSColor colorWithSRGBRed:((v >> 16) & 255) / 255.0 green:((v >> 8) & 255) / 255.0 blue:(v & 255) / 255.0 alpha:1];
+  }
+  return [NSColor colorWithSRGBRed:0x60 / 255.0 green:0x4f / 255.0 blue:0xd6 / 255.0 alpha:1];
+}
+
+// mode: "visible", "full", "portrait" or "area" (rect in page points, top-left origin).
+- (void)capture:(NSString*)mode rect:(NSRect)rect done:(void (^)(NSData* png))done {
+  ArcItem* page = _shown;
+  if (!page || page.noteID || page.easelID || !page.browserId) { if (done) done(nil); return; }
+  NSSize viewSize = [self webViewForItem:page].bounds.size;
+  NSColor* bg = [self captureBackgroundColor];
+  if ([mode isEqualToString:@"full"]) {
+    __weak MainWindowController* weakSelf = self;
+    [self devtools:page method:@"Page.getLayoutMetrics" params:nil done:^(NSDictionary* m) {
+      NSDictionary* size = m[@"cssContentSize"] ?: m[@"contentSize"];
+      double w = [size[@"width"] doubleValue], h = MIN([size[@"height"] doubleValue], 16384.0);
+      if (!weakSelf || w <= 0 || h <= 0) { if (done) done(nil); return; }
+      [weakSelf devtools:page method:@"Page.captureScreenshot"
+                  params:@{@"format" : @"png", @"captureBeyondViewport" : @YES,
+                           @"clip" : @{@"x" : @0, @"y" : @0, @"width" : @(w), @"height" : @(h), @"scale" : @1}}
+                    done:^(NSDictionary* r) { if (done) done(PNGFrom(r)); }];
+    }];
+    return;
+  }
+  [self devtools:page method:@"Page.captureScreenshot" params:@{@"format" : @"png"} done:^(NSDictionary* r) {
+    NSData* png = PNGFrom(r);
+    if ([mode isEqualToString:@"area"]) png = CropPNG(png, rect, viewSize);
+    else if ([mode isEqualToString:@"portrait"]) png = PortraitPNG(png, bg);
+    if (done) done(png);
+  }];
+}
+
+- (NSString*)captureDirectory {
+  if (_captureDirectory) return _captureDirectory;
+  return [NSSearchPathForDirectoriesInDomains(NSDownloadsDirectory, NSUserDomainMask, YES).firstObject ?: NSHomeDirectory()
+      stringByAppendingPathComponent:@""];
+}
+
+// Copies the capture, saves it as a PNG, and offers Add to Easel (Arc's capture actions).
+- (NSString*)deliverCapture:(NSData*)png {
+  if (!png) { NSBeep(); return nil; }
+  _lastCapture = png;
+  _lastCaptureLink = [self itemCurrentURL:_shown];
+  NSPasteboard* pb = _captureDirectory ? [NSPasteboard pasteboardWithName:@"io.github.donnadieu.notarc.selftest"]
+                                       : NSPasteboard.generalPasteboard;
+  [pb clearContents];
+  [pb setData:png forType:NSPasteboardTypePNG];
+  NSDateFormatter* f = [NSDateFormatter new];
+  f.dateFormat = @"yyyy-MM-dd 'at' HH.mm.ss";
+  NSString* dir = self.captureDirectory;
+  NSString* base = [NSString stringWithFormat:@"NotArc Capture %@", [f stringFromDate:NSDate.date]];
+  NSString* path = [dir stringByAppendingPathComponent:[base stringByAppendingPathExtension:@"png"]];
+  for (int n = 2; [NSFileManager.defaultManager fileExistsAtPath:path]; n++)
+    path = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@ %d.png", base, n]];
+  if (![png writeToFile:path atomically:YES]) path = nil;
+  if (!_captureDirectory)
+    [self showToast:path ? @"Capture copied and saved to Downloads" : @"Capture copied" action:@"Add to Easel"
+           selector:@selector(addLastCaptureToEasel:)];
+  return path;
+}
+
+- (IBAction)addLastCaptureToEasel:(id)sender {
+  if (!_lastCapture) return;
+  ArcItem* easel = [self recentEasel];
+  if (easel) [self showItem:easel]; else [self createEaselWithID:nil];
+  [_easelView addImagePNG:_lastCapture link:_lastCaptureLink];
+}
+
+- (void)captureMode:(NSString*)mode {
+  __weak MainWindowController* weakSelf = self;
+  [self capture:mode rect:NSZeroRect done:^(NSData* png) { [weakSelf deliverCapture:png]; }];
+}
+- (IBAction)captureVisiblePage:(id)sender { [self captureMode:@"visible"]; }
+- (IBAction)captureFullPage:(id)sender { [self captureMode:@"full"]; }
+- (IBAction)capturePortrait:(id)sender { [self captureMode:@"portrait"]; }
+
+// Capture Area: drag a rectangle over the page; Esc or a click without dragging cancels.
+- (IBAction)captureArea:(id)sender {
+  NSView* web = [self webViewForItem:_shown];
+  if (!web || _shown.noteID || _shown.easelID) { NSBeep(); return; }
+  [_captureOverlay removeFromSuperview];
+  CaptureAreaView* o = [[CaptureAreaView alloc] initWithFrame:_content.frame];
+  __weak MainWindowController* weakSelf = self;
+  __weak CaptureAreaView* weakO = o;
+  o.finished = ^(NSRect r) {
+    MainWindowController* me = weakSelf;
+    [weakO removeFromSuperview];
+    if (!me || NSIsEmptyRect(r)) return;
+    // Let the overlay leave the screen before capturing; the page renders itself, so it never shows anyway.
+    [me capture:@"area" rect:r done:^(NSData* png) { [weakSelf deliverCapture:png]; }];
+  };
+  [_content.superview addSubview:o positioned:NSWindowAbove relativeTo:nil];
+  _captureOverlay = o;
+  [self.window makeFirstResponder:o];
+}
+
 - (IBAction)captureToEasel:(id)sender {
   ArcItem* page = _shown;
   if (!page || page.noteID || page.easelID) { NSBeep(); return; }
