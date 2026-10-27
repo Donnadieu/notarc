@@ -128,6 +128,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       NSEventModifierFlagCommand | NSEventModifierFlagControl;
   [file addItemWithTitle:@"New Easel" action:@selector(newEasel:) keyEquivalent:@""];
   [file addItem:NSMenuItem.separatorItem];
+  [file addItemWithTitle:@"Import Everything from Arc..." action:@selector(importEverythingFromArcMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import History from Arc" action:@selector(importArcHistoryFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import Extensions from Arc" action:@selector(importArcExtensionsFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Capture to Easel" action:@selector(captureToEasel:) keyEquivalent:@"2"].keyEquivalentModifierMask =
@@ -358,6 +359,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   }
   self.pendingURLs = nil;
   if (!self.selfTest) [NSApp activateIgnoringOtherApps:YES];
+  if (!self.selfTest) [self.window offerArcImportIfFirstLaunch];  // never in hidden test runs
 
   if (self.selfTest) {
     // Hidden run: no Dock icon, never activates, every window 1% opaque (invisible, but not "occluded", so media still plays) and click-through,
@@ -1514,6 +1516,12 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           BOOL noMeta = ![fm fileExistsAtPath:[dest stringByAppendingPathComponent:@"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/_metadata"]];
           std::printf("SELFTEST-ARCEXTENSIONS copied=%d newest=%d mv2Skipped=%d noMetadata=%d\n", loadable.count == 1,
                       [v isEqualToString:@"1.10_0"], mv2Skipped, noMeta);
+          // One button: history (fake DB still set up above) + extensions, in one call.
+          [w clearHistory:nil];
+          NSDictionary* all = [w importEverythingFromArcInto:dest userData:fake];
+          std::printf("SELFTEST-IMPORTALL history=%d extensions=%d skipped=%d\n", [all[@"history"] intValue] == 2,
+                      [all[@"extensions"] intValue] == 1, [all[@"skipped"] intValue] == 1);
+          [w clearHistory:nil];
           [fm removeItemAtPath:fake error:nil];
           [fm removeItemAtPath:dest error:nil];
         }

@@ -2667,6 +2667,46 @@ static const CGFloat kPaneGap = 6;
   [a beginSheetModalForWindow:self.window completionHandler:nil];
 }
 
+- (NSDictionary<NSString*, NSNumber*>*)importEverythingFromArcInto:(NSString*)extensionsDir userData:(NSString*)userData {
+  NSUInteger history = [self importArcHistory];
+  NSUInteger copied = 0, skipped = 0;
+  for (ArcExtensionCopy* c in [self importArcExtensionsInto:extensionsDir fromArcUserData:userData])
+    c.skippedMV2 ? ++skipped : ++copied;
+  return @{@"history" : @(history), @"extensions" : @(copied), @"skipped" : @(skipped)};
+}
+
+- (IBAction)importEverythingFromArcMenu:(id)sender {
+  NSDictionary* n = [self importEverythingFromArcInto:NotArcExtensionsDirectory(NO)
+                                             userData:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]];
+  NSAlert* a = [NSAlert new];
+  a.messageText = @"Everything from Arc is here";
+  a.informativeText = [NSString stringWithFormat:
+      @"Spaces, tabs, pinned tabs and Favorites: imported\nLogins: come over as each Space opens\nHistory: %@ visits added\n"
+      @"Extensions: %@ copied%@\n\nSaved passwords, autofill and cards are coming in a later update.",
+      n[@"history"], n[@"extensions"],
+      [n[@"skipped"] intValue] ? [NSString stringWithFormat:@" (%@ too old for current Chromium)", n[@"skipped"]] : @""];
+  [a beginSheetModalForWindow:self.window completionHandler:nil];
+}
+
+// Arc acceptance: one button the first time NotArc opens, then you keep working like you never moved.
+- (void)offerArcImportIfFirstLaunch {
+  NSUserDefaults* d = NSUserDefaults.standardUserDefaults;
+  if ([d boolForKey:@"arcImportOffered"]) return;
+  if (![NSFileManager.defaultManager fileExistsAtPath:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]]) return;
+  [d setBool:YES forKey:@"arcImportOffered"];
+  NSAlert* a = [NSAlert new];
+  a.messageText = @"Bring everything over from Arc?";
+  a.informativeText = @"Your Spaces, tabs and logins are already here. This adds your history and extensions. "
+                      @"Arc itself isn't changed. You can do this later from File > Import Everything from Arc.";
+  [a addButtonWithTitle:@"Import Everything"];
+  [a addButtonWithTitle:@"Not Now"];
+  __weak MainWindowController* weakSelf = self;
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r == NSAlertFirstButtonReturn)
+      dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf importEverythingFromArcMenu:nil]; });
+  }];
+}
+
 - (IBAction)importArcHistoryFromMenu:(id)sender {
   NSUInteger n = [self importArcHistory];
   NSAlert* a = [NSAlert new];
