@@ -12,6 +12,7 @@
 #import "app/arc_extensions.h"
 #import "app/link_routing.h"
 #import "app/link_routing_editor.h"
+#import "app/bookmark_import.h"
 #import "app/chrome_page.h"
 #include <sqlite3.h>
 #import "app/boost_store.h"
@@ -133,6 +134,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"New Easel" action:@selector(newEasel:) keyEquivalent:@""];
   [file addItem:NSMenuItem.separatorItem];
   [file addItemWithTitle:@"Import Everything from Arc..." action:@selector(importEverythingFromArcMenu:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Import Bookmarks..." action:@selector(importBookmarksFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import History from Arc" action:@selector(importArcHistoryFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import Extensions from Arc" action:@selector(importArcExtensionsFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Capture to Easel" action:@selector(captureToEasel:) keyEquivalent:@"2"].keyEquivalentModifierMask =
@@ -765,6 +767,37 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                      SwipeDirectionForScroll(3, 10, YES, YES) == 0 && SwipeDirectionForScroll(12, 0, NO, YES) == 0 &&
                      SwipeDirectionForScroll(12, 0, YES, NO) == 0;
         std::printf("SELFTEST-SWIPE direction=%d installed=%d\n", swipe, w.swipeNavigationInstalled);
+        {  // Import bookmarks: Chromium JSON and a Netscape HTML export, into a Pinned folder.
+          NSString* tmp = NSTemporaryDirectory();
+          NSString* js = [tmp stringByAppendingPathComponent:@"selftest-Bookmarks"];
+          [@"{\"roots\":{\"bookmark_bar\":{\"type\":\"folder\",\"name\":\"Bar\",\"children\":["
+            "{\"type\":\"url\",\"name\":\"Example\",\"url\":\"https://example.com/\"},"
+            "{\"type\":\"url\",\"name\":\"JS\",\"url\":\"javascript:void(0)\"},"
+            "{\"type\":\"folder\",\"name\":\"Work\",\"children\":[{\"type\":\"url\",\"name\":\"Docs\",\"url\":\"https://docs.example.com/\"}]}]},"
+            "\"other\":{\"type\":\"folder\",\"name\":\"Other bookmarks\",\"children\":[{\"type\":\"url\",\"name\":\"O\",\"url\":\"https://other.example/\"}]},"
+            "\"synced\":{\"type\":\"folder\",\"name\":\"Mobile\",\"children\":[]}}}"
+              writeToFile:js atomically:YES encoding:NSUTF8StringEncoding error:nil];
+          NSUInteger cn = 0, hn = 0;
+          ArcItem* cf = BookmarksFromChromiumFile(js, @"SelfTest Chrome", &cn);
+          BOOL chrome = cn == 3 && cf.children.count == 3 && [cf.children[1].title isEqualToString:@"Work"] &&
+                        cf.children[1].isFolder && [cf.children[2].title isEqualToString:@"Other bookmarks"];
+          NSString* ht = [tmp stringByAppendingPathComponent:@"selftest-bookmarks.html"];
+          [@"<!DOCTYPE NETSCAPE-Bookmark-file-1>\n<TITLE>Bookmarks</TITLE><H1>Bookmarks</H1>\n<DL><p>\n"
+            "<DT><A HREF=\"https://a.example/?x=1&amp;y=2\" ADD_DATE=\"1\">A &amp; B</A>\n"
+            "<DT><H3>Folder One</H3>\n<DL><p>\n<DT><A HREF=\"https://b.example/\">B</A>\n"
+            "<DT><H3>Empty</H3>\n<DL><p>\n</DL><p>\n</DL><p>\n</DL><p>\n"
+              writeToFile:ht atomically:YES encoding:NSUTF8StringEncoding error:nil];
+          ArcItem* hf = BookmarksFromHTMLFile(ht, @"SelfTest HTML", &hn);
+          BOOL html = hn == 2 && hf.children.count == 2 && [hf.children[0].url isEqualToString:@"https://a.example/?x=1&y=2"] &&
+                      [hf.children[0].title isEqualToString:@"A & B"] && [hf.children[1].title isEqualToString:@"Folder One"] &&
+                      hf.children[1].children.count == 1;
+          NSUInteger pinnedBefore = w.currentSpace.pinned.children.count;
+          BOOL added = [w addImportedBookmarks:cf] && w.currentSpace.pinned.children.count == pinnedBefore + 1;
+          [w.currentSpace.pinned.children removeObject:cf];
+          std::printf("SELFTEST-BOOKMARKS chrome=%d html=%d pinned=%d\n", chrome, html, added);
+          [[NSFileManager defaultManager] removeItemAtPath:js error:nil];
+          [[NSFileManager defaultManager] removeItemAtPath:ht error:nil];
+        }
         {  // Air Traffic Control: Arc's rule format, every match type, source-app rules.
           NSString* f = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-arc-linkrouting.json"];
           [@"{\"version\":1,\"defaultDestination\":{\"littleArc\":{\"_0\":{\"mostRecent\":{}}}},\"rules\":["
