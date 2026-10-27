@@ -47,6 +47,8 @@ set(APP_SRCS
   app/settings.mm
   app/browser_client.h
   app/browser_client.mm
+  app/shortcuts.h
+  app/shortcuts.mm
   app/bookmark_import.h
   app/bookmark_import.mm
   app/link_routing_editor.h
