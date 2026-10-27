@@ -168,6 +168,8 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (void)toggleCallMic:(ArcItem*)item;
 - (void)toggleCallCamera:(ArcItem*)item;
 - (BOOL)callControlsShown;  // tests
+@property(nonatomic, copy) NSDictionary<NSString*, NSArray<NSString*>*>* searchSuggestionStub;
+- (void)commandSuggestionsAfterFetch:(NSString*)text done:(void (^)(NSArray<NSDictionary*>* items))done;  // tests: query -> suggestions
 - (void)pictureInPicture:(BOOL)enter item:(ArcItem*)item done:(void (^)(NSString* result))done;  // #46
 - (NSView*)webViewForItem:(ArcItem*)item;
 // Import bookmarks (#80): adds the folder to the current Space's Pinned section, like Arc. Returns NO if nil.

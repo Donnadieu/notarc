@@ -154,9 +154,10 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
     cell.textField = title;
   }
   static NSDictionary* kinds = @{ @"go" : @"Go", @"tab" : @"Switch to Tab", @"space" : @"Space", @"history" : @"History",
-                                  @"action" : @"Action", @"site" : @"Top Site" };
+                                  @"action" : @"Action", @"site" : @"Top Site", @"search" : @"Search" };
   static NSDictionary* icons = @{ @"go" : @"magnifyingglass", @"tab" : @"square.on.square", @"space" : @"square.stack",
-                                  @"history" : @"clock", @"action" : @"command", @"site" : @"globe" };
+                                  @"history" : @"clock", @"action" : @"command", @"site" : @"globe",
+                                  @"search" : @"magnifyingglass" };
   BOOL sel = [t.selectedRowIndexes containsIndex:(NSUInteger)row];
   NSColor* primary = sel ? NSColor.whiteColor : [NSColor.labelColor colorWithAlphaComponent:0.80];
   NSColor* secondary = sel ? [NSColor colorWithWhite:1 alpha:0.70] : [NSColor.labelColor colorWithAlphaComponent:0.33];
@@ -698,6 +699,11 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   std::map<int, CefRefPtr<CefRegistration>> _devtoolsRegs;
   int _devtoolsNextId;
   NSData* _lastCapture;
+  NSString* _suggestRequested;               // search suggestions (#31): query last fetched
+  NSString* _suggestQuery;                   // query the current _searchSuggestions belong to
+  NSArray<NSString*>* _searchSuggestions;
+  NSURLSessionDataTask* _suggestTask;
+  NSUInteger _suggestToken;
   NSString* _lastCaptureLink;
   NSView* _captureOverlay;
   NSString* _captureDirectory;
@@ -5517,7 +5523,68 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
                                     NSStringFromClass(rv.class), !_commandDivider.hidden, _commandField.placeholderString,
                                     NSStringFromClass([[_suggestionTable viewAtColumn:0 row:0 makeIfNecessary:YES] class])];
 }
+// Search suggestions (#31): the engine's own suggestions for what is typed, fetched shortly after typing stops.
+// Not sent from Incognito, for URLs being typed, or when turned off in Settings.
+- (void)fetchSearchSuggestions:(NSString*)text {
+  NSString* q = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+  if ([q isEqualToString:_suggestRequested]) return;
+  _suggestRequested = q;
+  [_suggestTask cancel];
+  _suggestTask = nil;
+  NSUInteger token = ++_suggestToken;
+  BOOL urlish = [q containsString:@"://"] || ([q containsString:@"."] && ![q containsString:@" "] && q.length > 3 &&
+                                              [q rangeOfString:@"." options:NSBackwardsSearch].location < q.length - 1 &&
+                                              [q componentsSeparatedByString:@"."].lastObject.length <= 6);
+  if (!q.length || urlish || _commandOpensIncognito || !SettingBool(kSettingSearchSuggestions)) {
+    _searchSuggestions = nil;
+    _suggestQuery = nil;
+    return;
+  }
+  __weak MainWindowController* weakSelf = self;
+  void (^apply)(NSArray<NSString*>*) = ^(NSArray<NSString*>* list) {
+    MainWindowController* me = weakSelf;
+    if (!me || token != me->_suggestToken) return;
+    me->_searchSuggestions = list;
+    me->_suggestQuery = q;
+    if (me->_commandBar.isVisible) [me refreshSuggestions];
+  };
+  if (self.searchSuggestionStub || self.selfTestProfiles) {  // tests never touch the network
+    dispatch_async(dispatch_get_main_queue(), ^{ apply(weakSelf.searchSuggestionStub[q.lowercaseString] ?: @[]); });
+    return;
+  }
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.12 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    MainWindowController* me = weakSelf;
+    if (!me || token != me->_suggestToken) return;
+    NSString* enc = [q stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
+    enc = [enc stringByReplacingOccurrencesOfString:@"&" withString:@"%26"];
+    enc = [enc stringByReplacingOccurrencesOfString:@"+" withString:@"%2B"];
+    NSURL* url = [NSURL URLWithString:SuggestURLForQuery(enc)];
+    if (!url) return;
+    static NSURLSession* session;
+    if (!session) {
+      NSURLSessionConfiguration* c = NSURLSessionConfiguration.ephemeralSessionConfiguration;  // no cookies sent
+      c.timeoutIntervalForRequest = 4;
+      session = [NSURLSession sessionWithConfiguration:c];
+    }
+    me->_suggestTask = [session dataTaskWithURL:url completionHandler:^(NSData* d, NSURLResponse* r, NSError* e) {
+      NSArray* list = e ? @[] : ParseSearchSuggestions(d);
+      dispatch_async(dispatch_get_main_queue(), ^{ apply(list); });
+    }];
+    [me->_suggestTask resume];
+  });
+}
+
+// Tests: what the command bar would list for this text once suggestions for it have arrived.
+- (void)commandSuggestionsAfterFetch:(NSString*)text done:(void (^)(NSArray<NSDictionary*>*))done {
+  [self fetchSearchSuggestions:text];
+  __weak MainWindowController* weakSelf = self;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    done([weakSelf commandSuggestionsFor:text] ?: @[]);
+  });
+}
+
 - (void)refreshSuggestions {
+  [self fetchSearchSuggestions:_commandField.stringValue];
   _suggestionList.items = [self commandSuggestionsFor:_commandField.stringValue];
   [_suggestionTable reloadData];
   if (_suggestionList.items.count) [_suggestionTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
@@ -5636,6 +5703,16 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
   NSString* resolved = ResolveCommandBarInput(text) ?: text;
   BOOL looksURL = ![resolved containsString:@"?q="] && ![resolved containsString:@"search?"];
   [out addObject:@{ @"kind" : @"go", @"title" : text, @"subtitle" : looksURL ? resolved : @"Search", @"key" : @"go", @"text" : text }];
+  NSString* typed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+  if (_searchSuggestions.count && [_suggestQuery isEqualToString:typed]) {
+    NSUInteger added = 0;
+    for (NSString* s in _searchSuggestions) {
+      if (added >= 3) break;
+      if ([s.lowercaseString isEqualToString:q]) continue;
+      [out addObject:@{ @"kind" : @"search", @"title" : s, @"subtitle" : @"Search", @"key" : @"go", @"text" : s }];
+      ++added;
+    }
+  }
   for (NSDictionary* d in sorted) {
     if (out.count >= kMaxSuggestions) break;
     [out addObject:d];
