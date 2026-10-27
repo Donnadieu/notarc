@@ -22,6 +22,7 @@ static NSDictionary* EncodeItem(ArcItem* item) {
   if (item.liveTitle.length) d[@"savedTitle"] = item.liveTitle;
   if (item.url.length) d[@"url"] = item.url;
   if (item.pinnedURL.length) d[@"pinnedURL"] = item.pinnedURL;
+  if (item.hideUnreadBadge) d[@"hideUnread"] = @YES;
   if (item.browserId) d[@"open"] = @YES;
   if (item.lastActiveAt) d[@"lastActiveAt"] = @(item.lastActiveAt.timeIntervalSinceReferenceDate);
   d[@"folder"] = @(item.isFolder);
@@ -56,6 +57,7 @@ static ArcItem* DecodeItem(NSDictionary* d, int depth) {
     item.lastActiveAt = [NSDate dateWithTimeIntervalSinceReferenceDate:[d[@"lastActiveAt"] doubleValue]];
   item.wasOpen = [d[@"open"] boolValue];
   item.isFolder = [d[@"folder"] boolValue];
+  item.hideUnreadBadge = [d[@"hideUnread"] boolValue];
   item.isSplit = [d[@"split"] boolValue];
   if ([d[@"note"] isKindOfClass:NSString.class]) item.noteID = d[@"note"];
   if ([d[@"easel"] isKindOfClass:NSString.class] && [d[@"easel"] rangeOfString:@"/"].location == NSNotFound) item.easelID = d[@"easel"];

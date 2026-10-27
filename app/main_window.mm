@@ -359,6 +359,26 @@ static BOOL IsDark(NSView* v) {
 // Arc's Favorites: a grid of icon tiles above the Space (rows of up to 4, balanced: 6 favorites = 2 rows of 3).
 // Tiles are 47 pt tall, 8 pt apart, radius 10, 10% white; the open favorite is brighter.
 constexpr CGFloat kFavTileHeight = 47, kFavRowGap = 8, kFavColGap = 9, kFavRadius = 10;
+// Unread count a page puts in its title, as Gmail ("Inbox (12) - ..."), Slack/LinkedIn/X ("(3) ..."),
+// Outlook ("Mail - 5 unread") do. 0 = none. Arc shows it as a badge on the Favorite's tile.
+NSInteger UnreadCountFromTitle(NSString* title) {
+  if (!title.length) return 0;
+  static NSRegularExpression* lead, *paren, *word;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    lead = [NSRegularExpression regularExpressionWithPattern:@"^\\s*[\\(\\[](\\d{1,5})\\+?[\\)\\]]" options:0 error:nil];
+    paren = [NSRegularExpression regularExpressionWithPattern:@"\\((\\d{1,5})\\+?\\)" options:0 error:nil];
+    word = [NSRegularExpression regularExpressionWithPattern:@"(\\d{1,5})\\s+(unread|new)\\b"
+                                                     options:NSRegularExpressionCaseInsensitive error:nil];
+  });
+  NSRange all = NSMakeRange(0, title.length);
+  for (NSRegularExpression* re in @[ lead, paren, word ]) {
+    NSTextCheckingResult* m = [re firstMatchInString:title options:0 range:all];
+    if (m) return [[title substringWithRange:[m rangeAtIndex:1]] integerValue];
+  }
+  return 0;
+}
+
 @interface FavoritesGridView : NSView <NSViewToolTipOwner>
 @property(nonatomic, weak) MainWindowController* owner;
 @property(nonatomic, copy) NSArray<ArcItem*>* items;
@@ -432,6 +452,19 @@ constexpr CGFloat kFavTileHeight = 47, kFavRowGap = 8, kFavColGap = 9, kFavRadiu
       icon = tinted;
     }
     [icon drawInRect:ir fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:nil];
+    // Arc's unread badge: a small pill over the icon's top-right corner (a dot when there's no room for the number).
+    NSInteger unread = it.hideUnreadBadge ? 0 : UnreadCountFromTitle(it.liveTitle);
+    if (unread > 0) {
+      NSString* text = unread > 99 ? @"99+" : [NSString stringWithFormat:@"%ld", (long)unread];
+      NSDictionary* attrs = @{NSFontAttributeName : [NSFont systemFontOfSize:9 weight:NSFontWeightBold],
+                              NSForegroundColorAttributeName : NSColor.whiteColor};
+      NSSize ts = [text sizeWithAttributes:attrs];
+      CGFloat h = 13, w = MAX(h, ceil(ts.width) + 7);
+      NSRect b = NSMakeRect(round(NSMaxX(ir) - 5), round(NSMinY(ir) - 6), w, h);
+      [[NSColor colorWithSRGBRed:0.96 green:0.27 blue:0.33 alpha:1] setFill];
+      [[NSBezierPath bezierPathWithRoundedRect:b xRadius:h / 2 yRadius:h / 2] fill];
+      [text drawAtPoint:NSMakePoint(round(NSMidX(b) - ts.width / 2), round(NSMidY(b) - ts.height / 2)) withAttributes:attrs];
+    }
   }
   if (self.dropTarget) {
     [[NSColor colorWithWhite:dark ? 1 : 0 alpha:0.25] setStroke];
@@ -1367,7 +1400,10 @@ NSString* CleanLinkURL(NSString* url) {
 - (void)browser:(int)browserId title:(NSString*)title url:(NSString*)url {
   ArcItem* item = [self itemForBrowser:browserId];
   if (!item) return;
-  if (title.length) item.liveTitle = title;
+  if (title.length && ![title isEqualToString:item.liveTitle]) {
+    item.liveTitle = title;
+    if ([self sectionContaining:item] == _space.favorites) [self updateFavoritesGrid];
+  }
   if (url.length && !item.pinnedURL.length && [self isPinnedItem:item]) item.pinnedURL = item.url ?: url;
   if (url.length) item.url = url;
   if (url.length && item == _shown) [self updateToolbarAddress];
@@ -4536,6 +4572,13 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   return mi;
 }
 
+- (void)menuToggleUnreadBadge:(NSMenuItem*)sender {
+  ArcItem* item = sender.representedObject;
+  item.hideUnreadBadge = !item.hideUnreadBadge;
+  [self updateFavoritesGrid];
+  [self scheduleSave];
+}
+
 - (NSMenu*)sidebarMenuForItem:(ArcItem*)item {
   NSMenu* m = [[NSMenu alloc] initWithTitle:@"Sidebar"];
   if (!item || item.isSection) return m;
@@ -4558,6 +4601,11 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   }
   [m addItem:[NSMenuItem separatorItem]];
   if (isTab || item.isFolder) [m addItem:[self menuItem:@"Rename..." action:@selector(menuRename:) item:item]];
+  if (isTab && section == _space.favorites) {
+    NSMenuItem* u = [self menuItem:@"Show Unread Badge" action:@selector(menuToggleUnreadBadge:) item:item];
+    u.state = item.hideUnreadBadge ? NSControlStateValueOff : NSControlStateValueOn;
+    [m addItem:u];
+  }
   if (item.liveKind) [m addItem:[self menuItem:@"Refresh Live Folder" action:@selector(menuRefreshLive:) item:item]];
   if ([self parentOfItem:item].liveKind)  // Arc: liveFolderChildItemManuallyDeleted
     [m addItem:[self menuItem:@"Remove from Live Folder" action:@selector(menuDismissLive:) item:item]];

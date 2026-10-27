@@ -7,6 +7,8 @@
 @property(nonatomic, copy) NSString* itemID;
 @property(nonatomic, copy) NSString* title;      // user rename, else Arc's saved title
 @property(nonatomic, copy) NSString* liveTitle;  // title reported by the loaded page
+// Arc's "Show Unread Badge" (Favorites, on by default): turned off per tab.
+@property(nonatomic) BOOL hideUnreadBadge;
 @property(nonatomic, copy) NSString* url;        // nil for folders and section roots; current page
 // Pinned tabs and Favorites: the URL the tab returns to when closed or reset (Arc's saved URL).
 @property(nonatomic, copy) NSString* pinnedURL;
