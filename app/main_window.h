@@ -116,6 +116,13 @@ NSString* CleanLinkURL(NSString* url);
 - (ArcSpace*)createSpaceNamed:(NSString*)name;
 - (void)renameSpace:(ArcSpace*)space to:(NSString*)name;
 - (BOOL)deleteSpace:(ArcSpace*)space;
+// Profiles (Arc: each Space belongs to a browser profile with its own logins, history and Favorites).
+// Keyed by profile folder ("Profile 4"); names come from Arc on first launch and are saved in Profiles.json.
+- (NSArray<NSString*>*)profileDirectories;            // in display order
+- (NSString*)nameOfProfile:(NSString*)profileDirectory;
+- (NSString*)createProfileNamed:(NSString*)name;      // returns the new profile folder
+- (void)renameProfile:(NSString*)profileDirectory to:(NSString*)name;
+- (void)assignSpace:(ArcSpace*)space toProfile:(NSString*)profileDirectory;
 - (void)moveSpace:(ArcSpace*)space by:(NSInteger)delta;
 - (void)selectSpaceAtIndex:(NSUInteger)index;
 - (NSArray<ArcSpace*>*)spaces;

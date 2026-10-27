@@ -545,6 +545,17 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       BOOL sameProfile = [made.profileDirectory isEqualToString:original.profileDirectory];
       [w openInNewTab:@"https://example.com/in-new-space"];
       [w renameSpace:made to:@"SelfTest Renamed"];
+      // Arc profiles: make one, rename it, move the new Space onto it (fresh Favorites, own logins), and back.
+      NSString* prof = [w createProfileNamed:@"SelfTest Profile"];
+      [w renameProfile:prof to:@"SelfTest Profile Renamed"];
+      BOOL named = [[w nameOfProfile:prof] isEqualToString:@"SelfTest Profile Renamed"] && [w.profileDirectories containsObject:prof];
+      [w assignSpace:made toProfile:prof];
+      BOOL assigned = [made.profileDirectory isEqualToString:prof] && made.favorites.children.count == 0 &&
+                      [w.currentSpace.allTabs.lastObject.url hasPrefix:@"https://example.com/in-new-space"];
+      [w assignSpace:made toProfile:original.profileDirectory];
+      BOOL profBack = [made.profileDirectory isEqualToString:original.profileDirectory] && made.favorites == original.favorites;
+      BOOL inMenu = [w.spaceMenuTitles containsObject:@"Profile"];
+      std::printf("SELFTEST-PROFILES created=%d assigned=%d back=%d menu=%d\n", named, assigned, profBack, inMenu);
       NSUInteger idx = [w.spaces indexOfObject:made];
       [w moveSpace:made by:-1];
       BOOL moved = [w.spaces indexOfObject:made] == idx - 1;
