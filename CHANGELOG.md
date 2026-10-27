@@ -3,7 +3,7 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.17.0
 - AppleScript: scripts can list windows, Spaces and tabs, read a tab's title, URL and loading state, open, select, close, reload and navigate tabs, run JavaScript in a tab, and switch Spaces. The terms match Arc's, so most Arc scripts work after changing the app name.
 - Fixed: the app's Info.plist had an empty executable name and bundle name.
 - Keyboard Shortcuts (NotArc menu > Keyboard Shortcuts...): change, remove or reset the shortcut of any menu command. A combination already in use moves to the new command. Saved and applied at launch.
