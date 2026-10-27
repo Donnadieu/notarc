@@ -112,6 +112,10 @@ class BrowserClient : public CefClient,
                     int active_match_ordinal, bool final_update) override;
 
   void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override;
+  // The page's icon changed (first URL the page offers); the window downloads it for the sidebar.
+  using FaviconCallback = std::function<void(int browser_id, const std::string& icon_url)>;
+  void set_favicon_callback(FaviconCallback cb) { on_favicon_ = std::move(cb); }
+  void OnFaviconURLChange(CefRefPtr<CefBrowser> browser, const std::vector<CefString>& icon_urls) override;
   void OnAddressChange(CefRefPtr<CefBrowser> browser,
                        CefRefPtr<CefFrame> frame,
                        const CefString& url) override;
@@ -165,6 +169,7 @@ class BrowserClient : public CefClient,
   MediaCallback on_media_;
   ZapCallback on_zap_;
   LoadEndCallback on_load_end_;
+  FaviconCallback on_favicon_;
   RendererCallback on_renderer_;
   std::map<int, CefRefPtr<CefUnresponsiveProcessCallback>> hung_;
   PermissionCallback on_permission_;

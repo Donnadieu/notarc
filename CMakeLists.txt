@@ -47,6 +47,8 @@ set(APP_SRCS
   app/settings.mm
   app/browser_client.h
   app/browser_client.mm
+  app/favicons.h
+  app/favicons.mm
   app/main_window.h
   app/main_window.mm
 )
