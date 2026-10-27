@@ -365,6 +365,16 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
     }];
     [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
     if (self.snapshotPath) {
+      ArcSpace* busiest = self.window.currentSpace;
+      for (ArcSpace* s in self.window.spaces)
+        if (s.unpinned.children.count > busiest.unpinned.children.count) busiest = s;
+      if (busiest != self.window.currentSpace) [self.window switchToSpace:busiest];
+      if (!busiest.unpinned.children.count)  // the self-test copy has no Today tabs: open a few so rows render
+        for (NSString* u in @[ @"https://github.com/", @"https://www.youtube.com/", @"https://www.reddit.com/", @"https://news.ycombinator.com/" ])
+          [self.window openInNewTab:u];
+      std::printf("SNAPSHOT-SPACES %lu current=%s tabs=%lu icons=%lu\n", (unsigned long)self.window.spaces.count,
+                  self.window.currentSpace.title.UTF8String, (unsigned long)self.window.currentSpace.unpinned.children.count,
+                  (unsigned long)self.window.spaceBarIcons.count);
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 8 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         std::printf("SNAPSHOT %s\n", [self.window writeSidebarSnapshot:self.snapshotPath] ? "ok" : "failed");
         std::fflush(stdout);
@@ -663,7 +673,9 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       // Arc sidebar rows: 36 pt pills, radius 8; selected 20% white (dark) / 85% white (light), hover lighter.
       ArcItem* shownTab = w.shownItem;
       ArcItem* otherTab = nil;
-      for (ArcItem* t in w.currentSpace.allTabs) if (t != shownTab && t.url.length && !t.isSplit) { otherTab = t; break; }
+      // Favorites are grid tiles, not rows: pick a tab that has a sidebar row.
+      for (ArcItem* t in w.currentSpace.allTabs)
+        if (t != shownTab && t.url.length && !t.isSplit && [w sidebarRowStyleForItem:t].length) { otherTab = t; break; }
       NSString* selStyle = shownTab ? [w sidebarRowStyleForItem:shownTab] : @"";
       [w hoverSidebarItem:otherTab];
       NSString* hovStyle = otherTab ? [w sidebarRowStyleForItem:otherTab] : @"";
@@ -671,6 +683,12 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       NSString* offStyle = otherTab ? [w sidebarRowStyleForItem:otherTab] : @"";
       BOOL rowsOK = [selStyle hasPrefix:@"h=36 r=8 sel=1"] && [hovStyle containsString:@"hover=1"] &&
                     [offStyle hasSuffix:@"alpha=0.00"];
+      // Arc sidebar: Favorites as tiles 90 pt below the top (8 pt in); Space title right under them.
+      NSRect gf = w.favoritesGridFrame, hf = w.spaceHeaderFrame;
+      BOOL gridOK = w.currentSpace.favorites.children.count == 0 ||
+                    (gf.origin.x == 8 && NSMaxY(wb) - NSMaxY(gf) == 90 && w.favoriteTileTitles.count > 0 && NSMaxY(hf) < NSMinY(gf));
+      std::printf("SELFTEST-SIDEBARLOOK grid=%d defaultTheme=%d\n", gridOK,
+                  w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown);
       if (!rowsOK) std::printf("SELFTEST-ROWS-DEBUG sel=[%s] hov=[%s] off=[%s]\n", selStyle.UTF8String, hovStyle.UTF8String, offStyle.UTF8String);
       [w toggleFocusMode:nil];
       NSRect ff = w.pageCardFrame;
@@ -783,12 +801,13 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       BOOL perSpace = YES;
       if (other) {
         [w switchToSpace:other];
-        perSpace = other.themeColors.count ? !w.themeView.hidden : w.themeView.hidden;
+        // Unthemed Spaces show Arc's default indigo in dark mode, and nothing in light mode.
+        perSpace = other.themeColors.count ? !w.themeView.hidden : w.themeView.hidden == !w.defaultThemeShown;
         [w switchToSpace:sp];
         perSpace = perSpace && !w.themeView.hidden;
       }
       [w setTheme:nil intensity:0.5 forSpace:sp];
-      BOOL cleared = w.themeView.hidden;
+      BOOL cleared = w.themeView.hidden == !w.defaultThemeShown;
       [w setIcon:@"" forSpace:sp];
       std::printf("SELFTEST-THEME shown=%d colors=%d icon=%d saved=%d perSpace=%d cleared=%d\n", shown, colors, icon, saved,
                   perSpace, cleared && sp.iconEmoji == nil);

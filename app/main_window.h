@@ -279,6 +279,10 @@ NSString* CleanLinkURL(NSString* url);
 - (NSString*)boostIndicatorState;                                                   // tests: on/off/none
 - (void)setColorScheme:(NSString*)scheme forSpace:(ArcSpace*)space;  // nil/"auto", "light", "dark"
 - (BOOL)sidebarIsDark;                       // tests
+- (BOOL)defaultThemeShown;                   // tests: Arc's default indigo is behind an unthemed Space
+- (NSArray<NSString*>*)favoriteTileTitles;   // tests
+- (NSRect)favoritesGridFrame;                // tests
+- (NSRect)spaceHeaderFrame;                  // tests
 - (NSString*)lastSpaceSlide;   // tests
 - (NSUInteger)cardPopCount;    // tests
 - (void)showCommandBarForNewTab:(BOOL)newTab;

@@ -272,7 +272,8 @@ static BOOL IsDark(NSView* v) {
   if (self.separatorAbove) {  // Arc: SidebarSeparator, 15% white (dark) / black (light)
     [(IsDark(self) ? [NSColor colorWithWhite:1 alpha:0.15] : [NSColor colorWithWhite:0 alpha:0.15]) setFill];
     CGFloat y = self.newTabRow ? 10 : 0;
-    NSRectFill(NSMakeRect(10, self.flipped ? y : self.bounds.size.height - 1 - y, self.bounds.size.width - 20, 1));
+    NSRectFillUsingOperation(NSMakeRect(10, self.flipped ? y : self.bounds.size.height - 1 - y, self.bounds.size.width - 20, 1),
+                             NSCompositingOperationSourceOver);
   }
   if (!self.selected) [self drawPill];
 }
@@ -303,10 +304,10 @@ static BOOL IsDark(NSView* v) {
 }
 - (NSRect)frameOfCellAtColumn:(NSInteger)column row:(NSInteger)row {
   NSRect f = [super frameOfCellAtColumn:column row:row];
-  if ([self levelForRow:row] >= 1) {
-    f.origin.x -= self.indentationPerLevel;
-    f.size.width += self.indentationPerLevel;
-  }
+  NSRect rr = [self rectOfRow:row];
+  CGFloat x = NSMinX(rr) + MAX(0, [self levelForRow:row] - 1) * self.indentationPerLevel;
+  f.size.width = NSMaxX(rr) - x;
+  f.origin.x = x;
   return f;
 }
 @end
@@ -794,7 +795,8 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   _addressPillText.font = [NSFont systemFontOfSize:13];
   _addressPillText.textColor = [NSColor colorWithName:nil dynamicProvider:^NSColor*(NSAppearance* ap) {
     BOOL dark = [ap bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] == NSAppearanceNameDarkAqua;
-    return [NSColor colorWithWhite:dark ? 1 : 0 alpha:dark ? 0.65 : 0.6];
+    return dark ? [NSColor colorWithSRGBRed:0xaa / 255.0 green:0xa8 / 255.0 blue:0xb9 / 255.0 alpha:1]
+                : [NSColor colorWithWhite:0 alpha:0.6];
   }];
   _addressPillText.lineBreakMode = NSLineBreakByTruncatingTail;
   _addressPillText.frame = NSMakeRect(12, 9, _addressPill.bounds.size.width - 12 - 60, 18);
@@ -817,7 +819,7 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   [sidebar addSubview:_addressPill];
 
   // Bottom bar, as in Arc: archive (Library) at the left, one icon per Space in the middle, "+" menu at the right.
-  _spaceBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 10, kSidebarWidth - 17, 30)];  // Arc: centred 25 pt up
+  _spaceBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 8, kSidebarWidth - 17, 30)];  // Arc: centred 23.5 pt up
   NSButton* lib = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"archivebox" accessibilityDescription:@"Archive"]
                                      target:self action:@selector(showArchive:)];
   lib.bordered = NO;
@@ -839,6 +841,7 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   _spaceIcons.frame = NSMakeRect(32, 0, _spaceBar.bounds.size.width - 64, 30);
   [_spaceBar addSubview:_spaceIcons];
   [sidebar addSubview:_spaceBar];
+  [self rebuildSpaceBar];  // rebuildSpacePicker above ran before the bar existed
 
   _content = [[NSView alloc] initWithFrame:NSMakeRect(kSidebarWidth, 0,
                                                       bounds.size.width - kSidebarWidth,
@@ -3153,8 +3156,13 @@ static ArcItem* NewSection(NSString* title) {
     [b.widthAnchor constraintEqualToConstant:24].active = YES;
     [_spaceIcons addView:b inGravity:NSStackViewGravityCenter];
   }
-  // Arc hides the switcher when there's only one Space.
+  // Arc hides the switcher when there's only one Space. Dots are 34 pt apart, centred in the bar.
   _spaceIcons.hidden = _spaces.count < 2;
+  _spaceIcons.spacing = 10;
+  _spaceIcons.alignment = NSLayoutAttributeCenterY;
+  CGFloat sw = _spaces.count * 24 + (_spaces.count ? (_spaces.count - 1) * 10 : 0);
+  _spaceIcons.frame = NSMakeRect(round((_spaceBar.bounds.size.width - sw) / 2), 0, sw, 30);
+  for (NSView* v in _spaceIcons.views) [v.heightAnchor constraintEqualToConstant:30].active = YES;
 }
 - (void)spaceIconClicked:(NSButton*)sender { [self selectSpaceAtIndex:(NSUInteger)sender.tag]; }
 - (NSArray<NSString*>*)spaceBarIcons {  // tests: "*Title" for the current Space
