@@ -168,6 +168,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (void)toggleCallMic:(ArcItem*)item;
 - (void)toggleCallCamera:(ArcItem*)item;
 - (BOOL)callControlsShown;  // tests
+- (NSView*)webViewForItem:(ArcItem*)item;
 // Import bookmarks (#80): adds the folder to the current Space's Pinned section, like Arc. Returns NO if nil.
 - (BOOL)addImportedBookmarks:(ArcItem*)folder;
 - (IBAction)importBookmarksFromMenu:(id)sender;  // File > Import Bookmarks...
@@ -302,6 +303,15 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Easels
 - (IBAction)newEasel:(id)sender;
 - (IBAction)captureToEasel:(id)sender;
+// Capture (#48): area (drag), visible page, full page, portrait mode; each copies the PNG and saves it to Downloads.
+- (IBAction)captureArea:(id)sender;
+- (IBAction)captureVisiblePage:(id)sender;
+- (IBAction)captureFullPage:(id)sender;
+- (IBAction)capturePortrait:(id)sender;
+- (IBAction)addLastCaptureToEasel:(id)sender;
+- (void)capture:(NSString*)mode rect:(NSRect)rect done:(void (^)(NSData* png))done;  // "visible", "full", "portrait", "area"
+- (NSString*)deliverCapture:(NSData*)png;  // returns the saved path
+@property(nonatomic, copy) NSString* captureDirectory;  // tests: a scratch folder (also switches to a private pasteboard)
 - (IBAction)addEaselText:(id)sender;
 - (void)easelDidChange:(EaselView*)easel;
 - (ArcItem*)createEaselWithID:(NSString*)easelID;
