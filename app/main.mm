@@ -13,6 +13,7 @@
 #import "app/link_routing.h"
 #import "app/link_routing_editor.h"
 #import "app/bookmark_import.h"
+#import "app/shortcuts.h"
 #import "app/chrome_page.h"
 #include <sqlite3.h>
 #import "app/boost_store.h"
@@ -83,6 +84,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   NSMenu* appMenu = [NSMenu new];
   [appMenu addItemWithTitle:@"Check for Updates..." action:@selector(checkForUpdates:) keyEquivalent:@""];
   [appMenu addItemWithTitle:@"Settings..." action:@selector(showSettings:) keyEquivalent:@","];
+  [appMenu addItemWithTitle:@"Keyboard Shortcuts..." action:@selector(showKeyboardShortcuts:) keyEquivalent:@""];
   [appMenu addItem:[NSMenuItem separatorItem]];
   [appMenu addItemWithTitle:@"Quit NotArc" action:@selector(terminate:) keyEquivalent:@"q"];
   appItem.submenu = appMenu;
@@ -293,6 +295,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       .keyEquivalentModifierMask = NSEventModifierFlagControl;
   tabsItem.submenu = tabs;
   NSApp.mainMenu = bar;
+  ApplyShortcutOverrides(bar);  // the user's own shortcuts (Settings > Keyboard Shortcuts...)
 }
 
 - (void)start {
@@ -795,6 +798,26 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           BOOL added = [w addImportedBookmarks:cf] && w.currentSpace.pinned.children.count == pinnedBefore + 1;
           [w.currentSpace.pinned.children removeObject:cf];
           std::printf("SELFTEST-BOOKMARKS chrome=%d html=%d pinned=%d\n", chrome, html, added);
+          {  // Keyboard shortcut overrides (settings are memory-only in tests).
+            NSMenu* mm = NSApp.mainMenu;
+            NSString* p = @"File/New Easel";
+            NSMenuItem* easel = MenuItemAtPath(mm, p);
+            SetShortcut(mm, p, @"e", NSEventModifierFlagCommand | NSEventModifierFlagOption);
+            BOOL set = [easel.keyEquivalent isEqualToString:@"e"] &&
+                       (easel.keyEquivalentModifierMask & NSEventModifierFlagOption) &&
+                       [SettingObject(@"shortcutOverrides")[p][@"key"] isEqualToString:@"e"];
+            // Taking New Tab's Cmd+T: New Tab loses it, Reset gives it back.
+            NSMenuItem* newTab = MenuItemAtPath(mm, @"File/New Tab");
+            NSString* cleared = SetShortcut(mm, p, @"t", NSEventModifierFlagCommand);
+            BOOL conflict = [cleared isEqualToString:@"File/New Tab"] && newTab.keyEquivalent.length == 0;
+            SetShortcut(mm, @"File/New Tab", nil, 0);
+            SetShortcut(mm, p, nil, 0);
+            BOOL reset = [newTab.keyEquivalent isEqualToString:@"t"] && easel.keyEquivalent.length == 0 &&
+                         !SettingObject(@"shortcutOverrides")[p];
+            BOOL display = [ShortcutDisplay(@"n", NSEventModifierFlagCommand | NSEventModifierFlagShift) isEqualToString:@"⇧⌘N"];
+            BOOL window = [ShortcutsWindowController shared].window != nil && ![ShortcutsWindowController shared].window.isVisible;
+            std::printf("SELFTEST-SHORTCUTEDIT set=%d conflict=%d reset=%d display=%d window=%d\n", set, conflict, reset, display, window);
+          }
           [[NSFileManager defaultManager] removeItemAtPath:js error:nil];
           [[NSFileManager defaultManager] removeItemAtPath:ht error:nil];
         }
@@ -1827,6 +1850,11 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
 - (IBAction)checkForUpdates:(id)sender { [[Updater shared] checkInteractive:YES]; }
 
 - (IBAction)showAirTrafficControl:(id)sender { [self.window showAirTrafficControl:sender]; }
+
+- (IBAction)showKeyboardShortcuts:(id)sender {
+  [[ShortcutsWindowController shared] showWindow:nil];
+  [[ShortcutsWindowController shared].window makeKeyAndOrderFront:nil];
+}
 
 - (IBAction)showSettings:(id)sender {
   [[SettingsWindowController shared] showWindow:nil];
