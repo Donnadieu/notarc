@@ -1746,6 +1746,7 @@ int main(int argc, char* argv[]) {
   static char noMacOcclusion[] = "--disable-features=MacWebContentsOcclusion";  // pages in hidden test windows stay "visible"
   for (int i = 1; i < argc; ++i)
     if (std::string(argv[i]) == "--selftest" || std::string(argv[i]) == "--selftest-reload" ||
+        std::string(argv[i]).rfind("--views-spike", 0) == 0 ||
         std::string(argv[i]).rfind("--sidebar-snapshot=", 0) == 0) {
       args.push_back(mockKeychain);
       args.push_back(autoplay);
@@ -1756,6 +1757,14 @@ int main(int argc, char* argv[]) {
       args.push_back(noTimerThrottle);
       args.push_back(noMacOcclusion);
       break;
+    }
+  // --views-spike=<unpacked extension dir> (#66): load it the way a user-installed unpacked extension loads.
+  static std::string spikeExt, spikeFeatures = "--disable-features=DisableLoadExtensionCommandLineSwitch";
+  for (int i = 1; i < argc; ++i)
+    if (std::string(argv[i]).rfind("--views-spike=", 0) == 0) {
+      spikeExt = "--load-extension=" + std::string(argv[i] + strlen("--views-spike="));
+      args.push_back(spikeExt.data());
+      args.push_back(spikeFeatures.data());
     }
   args.push_back(nullptr);
   argc = static_cast<int>(args.size()) - 1;
@@ -1774,6 +1783,9 @@ int main(int argc, char* argv[]) {
     BOOL selfTestReload = NO;
     for (int i = 1; i < argc; ++i)
       if (std::string(argv[i]) == "--selftest-reload") selfTest = selfTestReload = YES;
+    BOOL viewsSpike = NO;
+    for (int i = 1; i < argc; ++i)
+      if (std::string(argv[i]).rfind("--views-spike", 0) == 0) selfTest = viewsSpike = YES;
     NSString* snapshotPath = nil;
     for (int i = 1; i < argc; ++i)
       if (std::string(argv[i]).rfind("--sidebar-snapshot=", 0) == 0) {
@@ -1796,6 +1808,13 @@ int main(int argc, char* argv[]) {
     SettingsRegisterDefaults();
     if (selfTest) SettingsUseMemoryOnly();
 
+    if (viewsSpike) {
+      extern void RunViewsSpike();
+      RunViewsSpike();
+      CefRunMessageLoop();
+      CefShutdown();
+      return 0;
+    }
     AppDelegate* delegate = [AppDelegate new];
     delegate.selfTest = selfTest;
     delegate.selfTestReload = selfTestReload;
