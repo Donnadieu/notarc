@@ -157,6 +157,8 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Air Traffic Control (#34): opens a link from another app where the rules say (a Space or a Little Window).
 // Returns "little", or the title of the Space it went to.
 - (NSString*)routeExternalLink:(NSString*)url sourceApp:(NSString*)bundleID;
+- (IBAction)showAirTrafficControl:(id)sender;  // the rule editor (Settings > Links, command bar)
+- (NSWindowController*)airTrafficControlEditor;  // tests
 @property(nonatomic, copy) NSString* linkRoutingPath;  // set before the first link arrives
 - (IBAction)editThemeColor:(id)sender;
 // Hover cards: resting the pointer on a sidebar tab for a moment shows a card with its title, site,

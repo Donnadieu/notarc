@@ -7,6 +7,7 @@
 #import "app/chrome_page.h"
 #import "app/arc_extensions.h"
 #import "app/link_routing.h"
+#import "app/link_routing_editor.h"
 #import "app/history_store.h"
 #import "app/arc_cookies.h"
 #import "app/little_window.h"
@@ -1282,6 +1283,25 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   if (target != _space) [self switchToSpace:target];
   [self openInNewTab:url];
   return target.title ?: @"";
+}
+
+- (NSWindowController*)airTrafficControlEditor {
+  static NSMutableDictionary<NSString*, LinkRoutingEditor*>* editors;
+  if (!editors) editors = [NSMutableDictionary dictionary];
+  NSString* path = self.linkRoutingPath;
+  if (!path) return nil;
+  [self linkRouting];  // first time: seed from Arc
+  NSMutableArray* spaces = [NSMutableArray array];
+  for (ArcSpace* s in _spaces) if (s.spaceID.length) [spaces addObject:@[ s.spaceID, s.title ?: @"Space" ]];
+  LinkRoutingEditor* e = [[LinkRoutingEditor alloc] initWithPath:path spaces:spaces];  // fresh: Spaces may have changed
+  editors[path] = e;
+  return e;
+}
+
+- (IBAction)showAirTrafficControl:(id)sender {
+  NSWindowController* e = [self airTrafficControlEditor];
+  [e showWindow:nil];
+  [e.window makeKeyAndOrderFront:nil];
 }
 
 - (BOOL)swipeNavigationInstalled { return _swipeMonitor != nil; }
