@@ -67,6 +67,13 @@ class SpikeClient : public CefClient, public CefDisplayHandler, public CefLoadHa
     std::string url = f->GetURL().ToString();
     std::printf("SPIKE-LOAD step=%d code=%d %s\n", g_step, code, url.c_str());
     std::fflush(stdout);
+    if (g_step == 5) {
+      std::printf("SPIKE-ARCEXT sameId=%d code=%d\n", url.rfind("chrome-extension://ddkjiahejlhfcafbddmgiahcphecmpfh/", 0) == 0, code);
+      std::fflush(stdout);
+      g_step = 6;
+      Finish("done");
+      return;
+    }
     if (g_step == 1 && url.rfind("chrome://password-manager", 0) == 0) {
       std::printf("SPIKE-PASSWORDMANAGER loaded=%d\n", code == 200 || code == 0);
       g_step = 2;
@@ -241,7 +248,8 @@ void TestMoveAndSlide(NSWindow* main, NSWindow* card) {
     BOOL slid = NSEqualRects(card.frame, home);
     std::printf("SPIKE-SLIDE followsMain=%d slideBack=%d stillChild=%d\n", follows, slid, card.parentWindow == main);
     std::fflush(stdout);
-    Finish("done");
+    g_step = 5;
+    g_view2->GetBrowser()->GetMainFrame()->LoadURL("chrome-extension://ddkjiahejlhfcafbddmgiahcphecmpfh/manifest.json");
   }];
 }
 
