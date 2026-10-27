@@ -18,6 +18,7 @@ static const CGFloat kToolbarHeight = 34;
   LittleWindowMove _onMove;
   LittleWindowClosed _onClose;
   BOOL _moved;
+  BOOL _incognito;
 }
 
 - (instancetype)initWithURL:(NSString*)url
@@ -92,6 +93,31 @@ static const CGFloat kToolbarHeight = 34;
   return self;
 }
 
+- (BOOL)incognito { return _incognito; }
+
+- (void)makeIncognito {
+  _incognito = YES;
+  NSWindow* w = self.window;
+  w.level = NSNormalWindowLevel;
+  w.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
+  w.backgroundColor = [NSColor colorWithSRGBRed:0.13 green:0.12 blue:0.16 alpha:1];
+  _openButton.hidden = YES;  // a private page never moves into a saved Space
+  _spaceMenu.hidden = YES;
+  NSImageView* mask = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"eyeglasses" accessibilityDescription:@"Incognito"]];
+  mask.contentTintColor = NSColor.whiteColor;
+  NSView* toolbar = _titleLabel.superview;
+  mask.frame = NSMakeRect(toolbar.bounds.size.width - 128, 8, 20, 18);
+  mask.autoresizingMask = NSViewMinXMargin;
+  [toolbar addSubview:mask];
+  NSTextField* label = [NSTextField labelWithString:@"Incognito"];
+  label.font = [NSFont systemFontOfSize:12 weight:NSFontWeightSemibold];
+  label.textColor = NSColor.whiteColor;
+  label.frame = NSMakeRect(toolbar.bounds.size.width - 104, 8, 96, 18);
+  label.autoresizingMask = NSViewMinXMargin;
+  [toolbar addSubview:label];
+  w.title = @"Incognito";
+}
+
 - (void)presentAsPeekOver:(NSWindow*)parent {
   NSWindow* w = self.window;
   w.level = NSNormalWindowLevel;
@@ -110,7 +136,7 @@ static const CGFloat kToolbarHeight = 34;
 - (void)pageTitleChanged:(NSString*)title {
   _pageTitle = [title copy];
   _titleLabel.stringValue = title;
-  self.window.title = title;
+  self.window.title = _incognito ? [@"Incognito - " stringByAppendingString:title] : title;
 }
 
 - (void)pageURLChanged:(NSString*)url {
@@ -128,6 +154,7 @@ static const CGFloat kToolbarHeight = 34;
 - (NSString*)pageTitle { return _pageTitle ?: self.currentURL; }
 
 - (void)setSpaceNames:(NSArray<NSString*>*)names {
+  if (_incognito) return;
   _spaceNames = [names copy];
   [_spaceMenu removeAllItems];
   [_spaceMenu addItemWithTitle:@""];  // pull-down title slot
@@ -145,7 +172,7 @@ static const CGFloat kToolbarHeight = 34;
 
 - (void)openInSpaceAtIndex:(NSUInteger)index {
   NSString* url = self.currentURL;
-  if (!_onMoveToSpace || !url.length || index >= _spaceNames.count) return;
+  if (_incognito || !_onMoveToSpace || !url.length || index >= _spaceNames.count) return;
   _moved = YES;
   _onMoveToSpace(url, index);
   [self.window close];
@@ -153,6 +180,7 @@ static const CGFloat kToolbarHeight = 34;
 
 - (IBAction)openInMainWindow:(id)sender {
   NSString* url = self.currentURL;
+  if (_incognito) return;
   _moved = YES;
   if (_onMove && url.length) _onMove(url);
   [self.window close];

@@ -612,6 +612,10 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   ArcItem* _splitGroup;  // sidebar item of the split being shown
   NSMutableArray<NSView*>* _dividers;
   NSMutableArray<LittleWindowController*>* _littleWindows;
+  NSMutableArray<LittleWindowController*>* _incognitoWindows;
+  CefRefPtr<CefRequestContext> _incognitoContext;
+  BOOL _incognitoReady;
+  BOOL _commandOpensIncognito;
   LittleWindowController* _peek;
   NSView* _toast;
   NSView* _toolbar;
@@ -3251,7 +3255,60 @@ static const CGFloat kPaneGap = 6;
   if (self.archivePath) ArchiveStoreSave(_archive, self.archivePath);
 }
 
+- (IBAction)newIncognitoWindow:(id)sender {
+  _commandOpensSplit = NO;
+  _commandOpensLittle = NO;
+  _commandOpensIncognito = YES;
+  [self showCommandBarForNewTab:YES];
+}
+
+- (void)openIncognitoWindow:(NSString*)input {
+  NSString* url = ResolveCommandBarInput(input.length ? input : @"about:blank");
+  if (!url) return;
+  __weak MainWindowController* weakSelf = self;
+  if (!_incognitoContext) {
+    CefRequestContextSettings settings;  // empty cache_path = in memory only
+    _incognitoReady = NO;
+    _incognitoContext = CefRequestContext::CreateContext(settings, new SpaceContextHandler([weakSelf]() {
+      MainWindowController* me = weakSelf;
+      if (me) me->_incognitoReady = YES;
+    }));
+  }
+  if (!_incognitoReady) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_main_queue(), ^{
+      [weakSelf openIncognitoWindow:url];
+    });
+    return;
+  }
+  LittleWindowController* w = [[LittleWindowController alloc] initWithURL:url context:_incognitoContext onMove:nil
+      onClose:^(LittleWindowController* lw, NSString*, NSString*, BOOL) {
+        MainWindowController* me = weakSelf;
+        if (!me) return;
+        [me->_incognitoWindows removeObject:lw];
+        if (!me->_incognitoWindows.count) {  // last one closed: forget everything
+          me->_incognitoContext = nullptr;
+          me->_incognitoReady = NO;
+        }
+      }];
+  [w makeIncognito];
+  if (!_incognitoWindows) _incognitoWindows = [NSMutableArray array];
+  [_incognitoWindows addObject:w];
+  if (!self.window.isVisible || self.window.alphaValue < 0.02) {  // hidden test runs stay hidden
+    w.window.alphaValue = 0.01;
+    [w.window orderBack:nil];
+  } else {
+    [w showWindow:nil];
+  }
+}
+
+- (NSUInteger)incognitoWindowCount { return _incognitoWindows.count; }
+
+- (BOOL)incognitoContextIsOnDisk {
+  return _incognitoContext && !_incognitoContext->GetCachePath().ToString().empty();
+}
+
 - (IBAction)newLittleWindow:(id)sender {
+  _commandOpensIncognito = NO;
   _commandOpensSplit = NO;
   _commandOpensLittle = YES;
   [self showCommandBarForNewTab:YES];
@@ -5080,7 +5137,7 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
 - (NSArray<NSDictionary*>*)commandSuggestionsFor:(NSString*)text {
   NSString* q = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].lowercaseString;
   NSDictionary* picks = SettingObject(kSettingCommandPicks);
-  BOOL urlOnly = _commandOpensSplit || _commandOpensLittle;
+  BOOL urlOnly = _commandOpensSplit || _commandOpensLittle || _commandOpensIncognito;
   NSMutableArray<NSDictionary*>* out = [NSMutableArray array];
   NSMutableSet<NSString*>* seenURLs = [NSMutableSet set];
   if (!_history && self.historyPath) _history = [[HistoryStore alloc] initWithPath:self.historyPath];
@@ -5169,8 +5226,10 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     SettingSetObject(kSettingCommandPicks, picks);
   }
   BOOL split = _commandOpensSplit, little = _commandOpensLittle, newTab = _commandOpensNewTab;
+  BOOL incognito = _commandOpensIncognito;
   _commandOpensSplit = NO;
   _commandOpensLittle = NO;
+  _commandOpensIncognito = NO;
   if (_commandBar.isVisible) [self hideCommandBar];
   if ([kind isEqualToString:@"tab"]) {
     ArcSpace* sp = s[@"space"];
@@ -5183,7 +5242,8 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     [NSApp sendAction:mi.action to:mi.target from:mi];
   } else {
     NSString* target = s[@"url"] ?: s[@"text"];
-    if (little) [self openLittleWindow:target];
+    if (incognito) [self openIncognitoWindow:target];
+    else if (little) [self openLittleWindow:target];
     else if (split) [self openInSplit:target horizontal:_pendingSplitHorizontal before:_splitBefore];
     else if (newTab) [self openInNewTab:target];
     else [self navigateCurrentTab:target];
@@ -5227,17 +5287,20 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
   if (command == @selector(insertNewline:)) {
     NSString* text = _commandField.stringValue;
     [self hideCommandBar];
-    if (_commandOpensLittle) [self openLittleWindow:text];
+    if (_commandOpensIncognito) [self openIncognitoWindow:text];
+    else if (_commandOpensLittle) [self openLittleWindow:text];
     else if (_commandOpensSplit) [self openInSplit:text horizontal:_pendingSplitHorizontal before:_splitBefore];
     else if (_commandOpensNewTab) [self openInNewTab:text];
     else [self navigateCurrentTab:text];
     _commandOpensSplit = NO;
     _commandOpensLittle = NO;
+    _commandOpensIncognito = NO;
     return YES;
   }
   if (command == @selector(cancelOperation:)) {
     _commandOpensSplit = NO;
     _commandOpensLittle = NO;
+    _commandOpensIncognito = NO;
     [self hideCommandBar];
     return YES;
   }
@@ -5247,6 +5310,7 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
 - (IBAction)newTab:(id)sender {
   _commandOpensSplit = NO;
   _commandOpensLittle = NO;
+  _commandOpensIncognito = NO;
   [self showCommandBarForNewTab:YES];
 }
 - (IBAction)openLocation:(id)sender { [self showCommandBarForNewTab:NO]; }
