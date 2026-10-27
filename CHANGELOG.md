@@ -3,6 +3,9 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- Search suggestions: the command bar lists up to three suggestions from your search engine under Go (Google, DuckDuckGo, Bing, Ecosia or Kagi). Not sent for typed addresses or from Incognito, no cookies sent; Settings checkbox, on by default.
+
 ## 0.18.0
 - Automatic picture-in-picture: a video playing in the tab you leave pops out into a floating window and goes back when you return (Settings > Links checkbox, on by default). The sidebar media bar stays the mini player.
 - Self-tests: the end-of-run snapshot waits for the last page checks to finish.
