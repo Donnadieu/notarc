@@ -22,7 +22,11 @@ extern NSString* const kSettingShowSpaceHeader;        // BOOL, default YES: Spa
 extern NSString* const kSettingLittleArchiveHours;     // double; 0 = never. Default 6.
 
 void SettingsRegisterDefaults(void);
-NSString* SearchURLForQuery(NSString* encodedQuery);   // uses the chosen search engine
+NSString* SearchURLForQuery(NSString* encodedQuery);
+// Search suggestions (#31): the chosen engine's suggestion endpoint (OpenSearch JSON), and its parser.
+extern NSString* const kSettingSearchSuggestions;     // BOOL, default YES
+NSString* SuggestURLForQuery(NSString* encodedQuery);
+NSArray<NSString*>* ParseSearchSuggestions(NSData* json);   // uses the chosen search engine
 BOOL SettingBool(NSString* key);
 double SettingDouble(NSString* key);
 

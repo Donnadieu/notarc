@@ -23,6 +23,7 @@ void SettingsRegisterDefaults(void) {
     kSettingLittleArchiveHours : @6,
     kSettingShowToolbar : @NO,
     kSettingAutoPiP : @YES,
+    kSettingSearchSuggestions : @YES,
     kSettingShowSpaceHeader : @YES,
   }];
 }
@@ -55,6 +56,40 @@ static NSArray<NSArray<NSString*>*>* Engines() {
     @[ @"ecosia", @"Ecosia", @"https://www.ecosia.org/search?q=" ],
     @[ @"kagi", @"Kagi", @"https://kagi.com/search?q=" ],
   ];
+}
+
+NSString* const kSettingSearchSuggestions = @"searchSuggestions";
+
+NSString* SuggestURLForQuery(NSString* q) {
+  NSDictionary* urls = @{
+    @"google" : @"https://suggestqueries.google.com/complete/search?client=firefox&q=",
+    @"duckduckgo" : @"https://duckduckgo.com/ac/?type=list&q=",
+    @"bing" : @"https://api.bing.com/osjson.aspx?query=",
+    @"ecosia" : @"https://ac.ecosia.org/autocomplete?type=list&q=",
+    @"kagi" : @"https://kagi.com/api/autosuggest?q=",
+  };
+  NSString* chosen = [NSUserDefaults.standardUserDefaults stringForKey:kSettingSearchEngine];
+  return [(urls[chosen ?: @"google"] ?: urls[@"google"]) stringByAppendingString:q];
+}
+
+// ["query", ["s1", "s2", ...], ...] (OpenSearch); also accepts [{"phrase": ...}] lists.
+NSArray<NSString*>* ParseSearchSuggestions(NSData* json) {
+  if (!json.length) return @[];
+  id o = [NSJSONSerialization JSONObjectWithData:json options:0 error:nil];
+  NSMutableArray* out = [NSMutableArray array];
+  NSArray* list = nil;
+  if ([o isKindOfClass:NSArray.class]) {
+    NSArray* a = o;
+    if (a.count >= 2 && [a[1] isKindOfClass:NSArray.class]) list = a[1];
+    else list = a;
+  }
+  for (id x in list) {
+    NSString* s = [x isKindOfClass:NSString.class] ? x
+                : ([x isKindOfClass:NSDictionary.class] && [x[@"phrase"] isKindOfClass:NSString.class] ? x[@"phrase"] : nil);
+    if (s.length && ![out containsObject:s]) [out addObject:s];
+    if (out.count >= 5) break;
+  }
+  return out;
 }
 
 NSString* SearchURLForQuery(NSString* q) {
@@ -145,6 +180,7 @@ static NSArray* LittleArchiveChoices() {
 
   NSGridView* general = [NSGridView gridViewWithViews:@[
     @[ [NSTextField labelWithString:@"Search engine:"], _engine ],
+    @[ NSGridCell.emptyContentView, [self check:@"Show search suggestions in the command bar" key:kSettingSearchSuggestions] ],
     @[ [NSTextField labelWithString:@"Archive Today tabs:"], _archive ],
   ]];
   [general columnAtIndex:0].xPlacement = NSGridCellPlacementTrailing;

@@ -959,6 +959,38 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
               if (!script) std::printf("SELFTEST-APPLESCRIPT-DEBUG %s %s\n", r.stringValue.UTF8String ?: "-", err.description.UTF8String ?: "-");
               std::printf("SELFTEST-APPLESCRIPT dictionary=%d kvc=%d script=%d\n", dict, kvc, script);
             }
+            {  // Search suggestions (#31): parser on engine-shaped JSON, rows from a stub (no network), off switches.
+              NSArray* g = ParseSearchSuggestions([@"[\"arc\",[\"arc browser\",\"arc raiders\",\"arc browser\"]]" dataUsingEncoding:NSUTF8StringEncoding]);
+              NSArray* k = ParseSearchSuggestions([@"[{\"phrase\":\"kagi one\"},{\"phrase\":\"kagi two\"}]" dataUsingEncoding:NSUTF8StringEncoding]);
+              BOOL parse = [g isEqualToArray:(@[ @"arc browser", @"arc raiders" ])] && [k isEqualToArray:(@[ @"kagi one", @"kagi two" ])] &&
+                           ParseSearchSuggestions([@"oops" dataUsingEncoding:NSUTF8StringEncoding]).count == 0;
+              NSUserDefaults* ud = NSUserDefaults.standardUserDefaults;
+              [ud setVolatileDomain:@{kSettingSearchEngine : @"duckduckgo"} forName:NSArgumentDomain];
+              BOOL engineURL = [SuggestURLForQuery(@"x") hasPrefix:@"https://duckduckgo.com/ac/"];
+              [ud setVolatileDomain:@{kSettingSearchEngine : @"kagi"} forName:NSArgumentDomain];
+              engineURL = engineURL && [SuggestURLForQuery(@"x") hasPrefix:@"https://kagi.com/api/autosuggest"];
+              [ud setVolatileDomain:@{} forName:NSArgumentDomain];
+              w.searchSuggestionStub = @{@"zebra crossing" : @[ @"zebra crossing rules", @"zebra crossing uk", @"zebra crossing history", @"zebra crossing 4" ]};
+              [w commandSuggestionsAfterFetch:@"zebra crossing" done:^(NSArray<NSDictionary*>* items) {
+                NSMutableArray* found = [NSMutableArray array];
+                for (NSDictionary* d in items) if ([d[@"kind"] isEqualToString:@"search"]) [found addObject:d[@"title"]];
+                BOOL rows = found.count == 3 && [found.firstObject isEqualToString:@"zebra crossing rules"] &&
+                            [items.firstObject[@"kind"] isEqualToString:@"go"];
+                SettingSetObject(kSettingSearchSuggestions, @NO);
+                [w commandSuggestionsAfterFetch:@"zebra crossing x" done:^(NSArray<NSDictionary*>* off) {
+                  BOOL offOK = YES;
+                  for (NSDictionary* d in off) if ([d[@"kind"] isEqualToString:@"search"]) offOK = NO;
+                  SettingSetObject(kSettingSearchSuggestions, nil);
+                  [w commandSuggestionsAfterFetch:@"github.com" done:^(NSArray<NSDictionary*>* url) {
+                    BOOL urlOK = YES;
+                    for (NSDictionary* d in url) if ([d[@"kind"] isEqualToString:@"search"]) urlOK = NO;
+                    w.searchSuggestionStub = nil;
+                    std::printf("SELFTEST-SEARCHSUGGEST parse=%d engine=%d rows=%d settingOff=%d noURL=%d\n", parse, engineURL, rows,
+                                offOK, urlOK);
+                  }];
+                }];
+              }];
+            }
             std::printf("SELFTEST-SHORTCUTEDIT set=%d conflict=%d reset=%d display=%d window=%d\n", set, conflict, reset, display, window);
           }
           [[NSFileManager defaultManager] removeItemAtPath:js error:nil];
