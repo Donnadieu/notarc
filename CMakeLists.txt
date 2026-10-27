@@ -47,6 +47,8 @@ set(APP_SRCS
   app/settings.mm
   app/browser_client.h
   app/browser_client.mm
+  app/link_routing.h
+  app/link_routing.mm
   app/arc_extensions.h
   app/arc_extensions.mm
   app/chrome_page.h

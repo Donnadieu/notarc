@@ -154,6 +154,10 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (void)setTheme:(NSArray<NSString*>*)colors intensity:(double)intensity forSpace:(ArcSpace*)space;
 - (void)setIcon:(NSString*)emoji forSpace:(ArcSpace*)space;
 - (void)switchToSpace:(ArcSpace*)space;
+// Air Traffic Control (#34): opens a link from another app where the rules say (a Space or a Little Window).
+// Returns "little", or the title of the Space it went to.
+- (NSString*)routeExternalLink:(NSString*)url sourceApp:(NSString*)bundleID;
+@property(nonatomic, copy) NSString* linkRoutingPath;  // set before the first link arrives
 - (IBAction)editThemeColor:(id)sender;
 // Hover cards: resting the pointer on a sidebar tab for a moment shows a card with its title, site,
 // full address and when it was last used. Returns the card's text lines (for tests).
