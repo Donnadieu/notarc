@@ -1,16 +1,20 @@
 // #66 spike (hidden, isolated like --selftest): can a Chrome-style CEF Views window run a real unpacked extension,
 // offer Chromium's password manager, and still hold a native NSView sidebar next to the page?
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 
 #include <cstdio>
 
 #include "include/cef_app.h"
 #include "include/cef_client.h"
+#include "include/cef_command_handler.h"
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_window.h"
 #include "include/wrapper/cef_helpers.h"
 
+int g_chromeCommands = 0, g_menuActions = 0;
 void SwapToSecondTab();
+void TestKeysAndCorners();
 CefRefPtr<CefWindow> g_window2;
 
 namespace {
@@ -30,8 +34,15 @@ void Finish(const char* why) {
   CefQuitMessageLoop();
 }
 
-class SpikeClient : public CefClient, public CefDisplayHandler, public CefLoadHandler {
+class SpikeClient : public CefClient, public CefDisplayHandler, public CefLoadHandler, public CefCommandHandler {
  public:
+  CefRefPtr<CefCommandHandler> GetCommandHandler() override { return this; }
+  bool OnChromeCommand(CefRefPtr<CefBrowser>, int command_id, cef_window_open_disposition_t) override {
+    ++g_chromeCommands;
+    std::printf("SPIKE-CHROMECMD id=%d\n", command_id);
+    std::fflush(stdout);
+    return true;  // NotArc handles every Chrome command itself (no Chrome tabs/windows)
+  }
   CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
   CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
   void OnTitleChange(CefRefPtr<CefBrowser> b, const CefString& title) override {
@@ -41,7 +52,7 @@ class SpikeClient : public CefClient, public CefDisplayHandler, public CefLoadHa
     if (g_step == 3 && t == "EXT-OK") {
       std::printf("SPIKE-TAB2 extension=1 style=%d\n", g_view2->GetRuntimeStyle());
       g_step = 4;
-      Finish("done");
+      dispatch_async(dispatch_get_main_queue(), ^{ TestKeysAndCorners(); });
       return;
     }
     if (g_step == 0 && t == "EXT-OK") {
@@ -162,6 +173,54 @@ void SwapWithContext(CefRefPtr<CefRequestContext> ctx) {
   if (!g_window || !g_view2) { Finish("swap-null"); return; }
   g_step = 3;
   CefWindow::CreateTopLevelWindow(new Tab2WindowDelegate);
+}
+
+@interface SpikeTarget : NSObject
+@end
+@implementation SpikeTarget
+- (void)spikeNewTab:(id)sender {
+  extern int g_menuActions;
+  ++g_menuActions;
+  std::printf("SPIKE-MENUACTION newTab\n");
+  std::fflush(stdout);
+}
+@end
+
+static SpikeTarget* g_target;
+
+// Keyboard: with the page window focused, Cmd+T must reach NotArc's own New Tab (menu), not Chrome's.
+// Corners: the page window is clear and its content layer is clipped to the card's 10 pt radius.
+void TestKeysAndCorners() {
+  NSWindow* main = ((__bridge NSView*)g_window->GetWindowHandle()).window;
+  NSWindow* card = ((__bridge NSView*)g_window2->GetWindowHandle()).window;
+  g_target = [SpikeTarget new];
+  NSMenu* menu = [[NSMenu alloc] initWithTitle:@"Main"];
+  NSMenuItem* fileItem = [menu addItemWithTitle:@"File" action:nil keyEquivalent:@""];
+  fileItem.submenu = [[NSMenu alloc] initWithTitle:@"File"];
+  NSMenuItem* nt = [fileItem.submenu addItemWithTitle:@"New Tab" action:@selector(spikeNewTab:) keyEquivalent:@"t"];
+  nt.target = g_target;
+  NSApp.mainMenu = menu;
+
+  card.opaque = NO;
+  card.backgroundColor = NSColor.clearColor;
+  card.contentView.wantsLayer = YES;
+  card.contentView.layer.cornerRadius = 10;
+  card.contentView.layer.masksToBounds = YES;
+  card.contentView.layer.cornerCurve = kCACornerCurveContinuous;
+
+  [card makeKeyWindow];
+  NSEvent* down = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:NSEventModifierFlagCommand
+                                  timestamp:0 windowNumber:card.windowNumber context:nil characters:@"t"
+                charactersIgnoringModifiers:@"t" isARepeat:NO keyCode:17];
+  [NSApp sendEvent:down];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    std::printf("SPIKE-KEYS cardKey=%d mainIsMain=%d menuAction=%d chromeCommands=%d\n", card.isKeyWindow,
+                main.isMainWindow || NSApp.mainWindow == main, g_menuActions, g_chromeCommands);
+    std::printf("SPIKE-CORNERS clear=%d radius=%.0f masks=%d\n", !card.opaque && card.backgroundColor.alphaComponent == 0,
+                card.contentView.layer.cornerRadius, card.contentView.layer.masksToBounds);
+    std::fflush(stdout);
+    Finish("done");
+  });
 }
 
 void RunViewsSpike() {
