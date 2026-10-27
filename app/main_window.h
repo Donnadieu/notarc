@@ -157,7 +157,13 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Air Traffic Control (#34): opens a link from another app where the rules say (a Space or a Little Window).
 // Returns "little", or the title of the Space it went to.
 - (NSString*)routeExternalLink:(NSString*)url sourceApp:(NSString*)bundleID;
-- (IBAction)showAirTrafficControl:(id)sender;  // the rule editor (Settings > Links, command bar)
+- (IBAction)showAirTrafficControl:(id)sender;
+// Incognito window (#40, Cmd+Shift+N): its own in-memory profile, shared by all open Incognito windows and wiped
+// when the last one closes. Nothing goes to History, the Archive or disk.
+- (IBAction)newIncognitoWindow:(id)sender;
+- (void)openIncognitoWindow:(NSString*)url;
+- (NSUInteger)incognitoWindowCount;  // tests
+- (BOOL)incognitoContextIsOnDisk;    // tests: NO = in-memory  // the rule editor (Settings > Links, command bar)
 - (NSWindowController*)airTrafficControlEditor;  // tests
 @property(nonatomic, copy) NSString* linkRoutingPath;  // set before the first link arrives
 - (IBAction)editThemeColor:(id)sender;
