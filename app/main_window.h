@@ -12,6 +12,8 @@ NSString* CleanLinkURL(NSString* url);
 
 @class Boost;
 @class EaselView;
+NSInteger UnreadCountFromTitle(NSString* title);  // "Inbox (12)" -> 12
+
 @interface MainWindowController : NSWindowController <NSWindowDelegate>
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID;
 // Self-test: Space profiles live in separate "SelfTest Space ..." folders and Arc cookies are not imported,
@@ -295,6 +297,7 @@ NSString* CleanLinkURL(NSString* url);
 - (BOOL)sidebarIsDark;                       // tests
 - (BOOL)defaultThemeShown;                   // tests: Arc's default indigo is behind an unthemed Space
 - (NSArray<NSString*>*)favoriteTileTitles;   // tests
+- (NSMenu*)sidebarMenuForItem:(ArcItem*)item;  // tests
 - (NSRect)favoritesGridFrame;                // tests
 - (NSRect)spaceHeaderFrame;                  // tests
 - (NSString*)lastSpaceSlide;   // tests

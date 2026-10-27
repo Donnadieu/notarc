@@ -3,6 +3,9 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- Unread badges on Favorites: a red count on the tile when the site puts one in its title (Gmail, Slack, LinkedIn, X, Outlook). Right-click a Favorite > Show Unread Badge turns it off for that tab.
+
 ## 0.15.0
 - One button for Arc: the first time NotArc opens it offers "Bring everything over from Arc?" (also File > Import Everything from Arc...), adding history and extensions on top of the Spaces, tabs and logins that already come over.
 - File > Import Extensions from Arc copies your Spaces' Arc extensions into NotArc (newest version, same IDs); they load with Chrome-style pages. Old Manifest V2 extensions such as uBlock Origin are skipped, with uBlock Origin Lite suggested.

@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-41 done, 20 partial, 26 not started or out of scope, of 87 items.
+42 done, 20 partial, 25 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -26,7 +26,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [x] Close and Keep Pinned; reset pinned tab to its saved URL (also Replace Pinned URL with Current, Reset All Pinned Tabs) (#17)
 - [ ] Tidy tab titles (missing) (#18)
 - [ ] Hover previews / hover cards on sidebar items (partial: hover card with title, site, state, last used and address; page thumbnail missing) (#19)
-- [ ] Unread badge on tabs (missing) (#20)
+- [x] Unread badge on tabs (#20)
 - [x] Go to Sidebar Item 1-9, last item, next/previous item (Cmd+1-8, Cmd+9 last, Cmd+Opt+Up/Down) (#21)
 - [x] Hide/show sidebar, toolbar mode with full URL (Cmd+S sidebar; View > Show Toolbar (Cmd+Shift+S) with back/forward/reload and the full editable URL) (#22)
 - [x] Multi-select sidebar items and bulk actions (Cmd/Shift-click; Copy Links, Copy Links as Markdown, New Folder with N Items, Pin/Unpin Selected, Move to Space, Archive N Tabs) (#23)
