@@ -5,6 +5,7 @@
 #import "app/archive_window.h"
 #import "app/arc_history.h"
 #import "app/chrome_page.h"
+#import "app/arc_extensions.h"
 #import "app/history_store.h"
 #import "app/arc_cookies.h"
 #import "app/little_window.h"
@@ -2637,6 +2638,33 @@ static const CGFloat kPaneGap = 6;
     else if (error) std::fprintf(stderr, "Arc history import skipped for %s: %s\n", p.UTF8String, error.localizedDescription.UTF8String);
   }
   return [store mergeVisits:all];
+}
+
+- (NSArray*)importArcExtensionsInto:(NSString*)destination fromArcUserData:(NSString*)userData {
+  NSMutableArray* profiles = [NSMutableArray array];
+  for (ArcSpace* s in _spaces) {
+    NSString* p = s.profileDirectory.length ? s.profileDirectory : @"Default";
+    if (![profiles containsObject:p]) [profiles addObject:p];
+  }
+  return ArcCopyExtensions(userData, profiles, destination);
+}
+
+- (IBAction)importArcExtensionsFromMenu:(id)sender {
+  NSArray<ArcExtensionCopy*>* copies =
+      [self importArcExtensionsInto:NotArcExtensionsDirectory(NO)
+                    fromArcUserData:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]];
+  NSMutableArray* names = [NSMutableArray array], *skipped = [NSMutableArray array];
+  for (ArcExtensionCopy* c in copies) [(c.skippedMV2 ? skipped : names) addObject:c.name];
+  NSAlert* a = [NSAlert new];
+  a.messageText = names.count ? [NSString stringWithFormat:@"%lu extensions copied from Arc", (unsigned long)names.count]
+                              : @"No extensions to copy";
+  NSMutableString* info = [NSMutableString stringWithString:[names componentsJoinedByString:@", "]];
+  if (skipped.count)
+    [info appendFormat:@"\n\nNot supported by current Chromium: %@ (try uBlock Origin Lite).", [skipped componentsJoinedByString:@", "]];
+  [info appendString:ChromePagesEnabled() ? @"\n\nThey load the next time NotArc starts. Password managers need one sign-in."
+                                          : @"\n\nThey load once Chrome-style pages are turned on (coming soon)."];
+  a.informativeText = info;
+  [a beginSheetModalForWindow:self.window completionHandler:nil];
 }
 
 - (IBAction)importArcHistoryFromMenu:(id)sender {
