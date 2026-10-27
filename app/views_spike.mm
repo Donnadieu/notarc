@@ -15,6 +15,7 @@
 int g_chromeCommands = 0, g_menuActions = 0;
 void SwapToSecondTab();
 void TestKeysAndCorners();
+void TestMoveAndSlide(NSWindow* main, NSWindow* card);
 CefRefPtr<CefWindow> g_window2;
 
 namespace {
@@ -219,8 +220,29 @@ void TestKeysAndCorners() {
     std::printf("SPIKE-CORNERS clear=%d radius=%.0f masks=%d\n", !card.opaque && card.backgroundColor.alphaComponent == 0,
                 card.contentView.layer.cornerRadius, card.contentView.layer.masksToBounds);
     std::fflush(stdout);
-    Finish("done");
+    TestMoveAndSlide(main, card);
   });
+}
+
+// Space switch: the page window must follow the main window when it moves, and slide with the card.
+void TestMoveAndSlide(NSWindow* main, NSWindow* card) {
+  NSRect m0 = main.frame, c0 = card.frame;
+  [main setFrameOrigin:NSMakePoint(m0.origin.x - 100, m0.origin.y - 50)];
+  NSRect c1 = card.frame;
+  BOOL follows = c1.origin.x == c0.origin.x - 100 && c1.origin.y == c0.origin.y - 50;
+  NSRect home = c1;
+  NSRect off = NSOffsetRect(home, -home.size.width, 0);
+  [card setFrame:off display:NO];
+  [NSAnimationContext runAnimationGroup:^(NSAnimationContext* ctx) {
+    ctx.duration = 0.25;
+    ctx.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+    [card.animator setFrame:home display:YES];
+  } completionHandler:^{
+    BOOL slid = NSEqualRects(card.frame, home);
+    std::printf("SPIKE-SLIDE followsMain=%d slideBack=%d stillChild=%d\n", follows, slid, card.parentWindow == main);
+    std::fflush(stdout);
+    Finish("done");
+  }];
 }
 
 void RunViewsSpike() {
