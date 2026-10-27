@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-42 done, 20 partial, 25 not started or out of scope, of 87 items.
+42 done, 21 partial, 24 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -119,7 +119,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [ ] App icon choice, sound effects, toasts (missing) (#74)
 - [x] PDF viewer (Chromium's built-in viewer: PDFs open in the tab with zoom, search, print and download) (#75)
 - [ ] AppleScript support for windows and tabs (missing) (#76)
-- [ ] Two-finger swipe back/forward and overscroll (missing) (#77)
+- [ ] Two-finger swipe back/forward and overscroll (partial: swipe tracking with an edge arrow, follows the macOS "Swipe between pages" setting; to confirm with a real trackpad) (#77)
 - [ ] Web notifications, permission prompts, external app (protocol) dialogs (partial: sheets for camera, mic, location, notifications and other permissions, plus "Open <App>?" for links to other apps; "Remember for this site"; View > Reset Site Permissions; showing web notifications in macOS Notification Center not verified) (#78)
 - [x] Hung page / unresponsive renderer dialog (Page Unresponsive sheet: Wait or Exit Page) (#79)
 - [ ] Import bookmarks (missing) (#80)
