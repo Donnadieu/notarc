@@ -337,7 +337,17 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   self.window.archivePath = ArchiveStorePath(self.selfTest);
   self.window.historyPath = HistoryStorePath(self.selfTest);
   self.window.linkRoutingPath = LinkRoutingPath(self.selfTest);
-  if (self.selfTest) [[NSFileManager defaultManager] removeItemAtPath:self.window.linkRoutingPath error:nil];
+  if (self.selfTest) {
+    [[NSFileManager defaultManager] removeItemAtPath:self.window.linkRoutingPath error:nil];
+    // Profiles the self-test makes ("NotArc Profile N") start fresh each run instead of piling up. Only
+    // "SelfTest ..." test data is removed; real profiles are never touched.
+    NSFileManager* fm = NSFileManager.defaultManager;
+    NSString* support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
+        stringByAppendingPathComponent:@"NotArc"];
+    for (NSString* n in [fm contentsOfDirectoryAtPath:support error:nil])
+      if ([n hasPrefix:@"SelfTest Space NotArc Profile "]) [fm removeItemAtPath:[support stringByAppendingPathComponent:n] error:nil];
+    [fm removeItemAtPath:[support stringByAppendingPathComponent:@"SelfTestProfiles.json"] error:nil];
+  }
   if (!self.selfTest) [[Updater shared] scheduleDailyChecks];
   if (self.selfTest) [[NSFileManager defaultManager] removeItemAtPath:self.window.historyPath error:nil];
   if (self.selfTest && !self.selfTestReload)
