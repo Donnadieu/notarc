@@ -47,6 +47,8 @@ set(APP_SRCS
   app/settings.mm
   app/browser_client.h
   app/browser_client.mm
+  app/bookmark_import.h
+  app/bookmark_import.mm
   app/link_routing_editor.h
   app/link_routing_editor.mm
   app/link_routing.h
@@ -71,7 +73,7 @@ target_compile_options(${APP_NAME} PRIVATE
   $<$<COMPILE_LANGUAGE:OBJCXX>:${CEF_COMPILER_FLAGS} ${CEF_CXX_COMPILER_FLAGS}>
   $<$<AND:$<COMPILE_LANGUAGE:OBJCXX>,$<CONFIG:Release>>:${CEF_COMPILER_FLAGS_RELEASE} ${CEF_CXX_COMPILER_FLAGS_RELEASE}>)
 add_dependencies(${APP_NAME} libcef_dll_wrapper)
-target_link_libraries(${APP_NAME} libcef_dll_wrapper ${CEF_STANDARD_LIBS} sqlite3 "-framework Security" "-framework QuartzCore")  # updater uses Foundation + CommonCrypto (libSystem); Space themes use CAGradientLayer
+target_link_libraries(${APP_NAME} libcef_dll_wrapper ${CEF_STANDARD_LIBS} sqlite3 "-framework Security" "-framework QuartzCore" "-framework UniformTypeIdentifiers")  # updater uses Foundation + CommonCrypto (libSystem); Space themes use CAGradientLayer
 set_target_properties(${APP_NAME} PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/app/Info.plist.in)
 COPY_MAC_FRAMEWORK("${APP_NAME}" "${CEF_BINARY_DIR}" "${APP_BUNDLE}")

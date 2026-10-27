@@ -4,6 +4,7 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- File > Import Bookmarks...: bookmarks from Chrome, Brave, Edge, Vivaldi or Chromium (each profile listed), or a bookmarks HTML file exported from Safari or Firefox, land as a folder in the current Space's Pinned tabs.
 - Incognito windows (File > New Incognito Window, Cmd+Shift+N): dark, with their own in-memory profile shared by open Incognito windows and wiped when the last one closes. Nothing goes to History, the Archive or disk, and you stay signed out of your Spaces' accounts.
 - Air Traffic Control editor (Settings > Links > Air Traffic Control...): add, change and remove link rules, pick the Space or Little Window, and set where everything else goes. It replaces the "Links from other apps open in a Little Window" checkbox.
 - Air Traffic Control: links opened from other apps follow your Arc link rules (by URL or by the app they came from) into the right Space or a Little Window. Your rules come over from Arc on first launch.
