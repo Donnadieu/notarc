@@ -45,6 +45,8 @@ set(APP_SRCS
   app/little_window.mm
   app/settings.h
   app/settings.mm
+  app/content_blocker.h
+  app/content_blocker.mm
   app/browser_client.h
   app/browser_client.mm
   app/scripting.h

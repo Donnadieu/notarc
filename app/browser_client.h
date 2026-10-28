@@ -72,6 +72,9 @@ class BrowserClient : public CefClient,
   }
   void OnProtocolExecution(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
                            bool& allow_os_execution) override;
+  // Built-in ad & tracker blocking (#53): cancels third-party requests to listed hosts.
+  ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
+                                   CefRefPtr<CefCallback> callback) override;
   // Downloads save straight into the download folder (no Save dialog), tracked by DownloadManager.
   bool OnBeforeDownload(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item,
                         const CefString& suggested_name, CefRefPtr<CefBeforeDownloadCallback> callback) override;

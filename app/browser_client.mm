@@ -1,5 +1,6 @@
 #include "app/browser_client.h"
 #import "app/downloads.h"
+#include "app/content_blocker.h"
 
 #include <cstdio>
 
@@ -36,6 +37,17 @@ void BrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
 void BrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
   if (--open_browsers_ == 0 && quit_when_empty_) CefQuitMessageLoop();
+}
+
+CefResourceRequestHandler::ReturnValue BrowserClient::OnBeforeResourceLoad(CefRefPtr<CefBrowser> browser,
+                                                                             CefRefPtr<CefFrame> frame,
+                                                                             CefRefPtr<CefRequest> request,
+                                                                             CefRefPtr<CefCallback> callback) {
+  if (!content_blocker::Enabled()) return RV_CONTINUE;
+  bool main_frame = request->GetResourceType() == RT_MAIN_FRAME;
+  std::string page = request->GetFirstPartyForCookies().ToString();
+  if (page.empty() && frame) page = frame->GetURL().ToString();
+  return content_blocker::ShouldBlock(request->GetURL().ToString(), page, main_frame) ? RV_CANCEL : RV_CONTINUE;
 }
 
 bool BrowserClient::DoClose(CefRefPtr<CefBrowser> browser) {

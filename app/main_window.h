@@ -74,7 +74,9 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (IBAction)focusNextPane:(id)sender;       // Ctrl+Shift+]
 - (IBAction)focusPreviousPane:(id)sender;   // Ctrl+Shift+[
 - (IBAction)shareSplitView:(id)sender;
-- (IBAction)translatePage:(id)sender;       // View > Translate Page / Show Original (#52)      // copies every pane's address
+- (IBAction)translatePage:(id)sender;
+- (BOOL)adBlockingOnForHost:(NSString*)host;          // #53
+- (void)setAdBlocking:(BOOL)on forHost:(NSString*)host;       // View > Translate Page / Show Original (#52)      // copies every pane's address
 - (NSString*)splitViewShareText;            // tests
 - (NSArray<ArcItem*>*)visiblePanesForTest;  // tests
 - (BOOL)openSplitFromText:(NSString*)text;  // 2-4 addresses, one per line -> one split
