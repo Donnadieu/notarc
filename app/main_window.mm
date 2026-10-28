@@ -620,6 +620,7 @@ static MainWindowController* OwnerOf(int browserId, MainWindowController* fallba
 // Spaces, like Arc's StorableWindows (one sidebar, each window with its own Space, tab and split).
 static __weak MainWindowController* gMainWindow;
 static NSMutableArray<MainWindowController*>* gWindows;
+static BOOL gQuitting = NO;  // quitting closes every window, but the other windows should come back next launch
 
 @implementation MainWindowController {
   NSMutableArray<ArcSpace*>* _spaces;
@@ -1657,6 +1658,7 @@ static NSString* const kPiPExitJS =
   [self layoutPanes];
   [self selectSidebarRowFor:item];
   [self updateToolbarAddress];
+  if (![self isMainWindowController]) [MainWindowController saveWindowState];
 }
 
 - (void)openTabsForSelfTest:(NSUInteger)count {
@@ -1703,6 +1705,7 @@ static NSString* const kPiPExitJS =
 }
 
 - (void)closeAllBrowsers {
+  [MainWindowController prepareForQuit];
   _closing = YES;
   for (MainWindowController* w in [gWindows copy])
     if (w != self) [w.window close];  // their pages close too, before the quit check below
@@ -6942,6 +6945,7 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 
 - (void)closeSecondaryWindow {
   [gWindows removeObject:self];
+  [MainWindowController saveWindowState];  // closed by hand: it doesn't come back (skipped while quitting)
   [_mediaTimer invalidate];
   _mediaTimer = nil;
   for (LittleWindowController* lw in [_littleWindows copy]) [lw.window close];
@@ -6958,6 +6962,81 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   [_content removeFromSuperview];
   _content = nil;
   [gMainWindow refreshOtherWindows];
+}
+
+// Other windows come back after a restart (Arc: StorableWindows). Saved as Windows.json next to the sidebar:
+// each window's Space, shown tab and frame. The main window is the sidebar's own focused Space.
++ (NSString*)windowStatePath {
+  MainWindowController* main = gMainWindow;
+  if (!main.storePath) return nil;
+  return [main.storePath.stringByDeletingLastPathComponent
+      stringByAppendingPathComponent:main.selfTestProfiles ? @"SelfTestWindows.json" : @"Windows.json"];
+}
+
++ (NSArray<NSDictionary*>*)windowStateList {
+  NSMutableArray* out = [NSMutableArray array];
+  for (MainWindowController* w in gWindows) {
+    if (w == gMainWindow || !w->_space.spaceID) continue;
+    NSMutableDictionary* d = [NSMutableDictionary dictionary];
+    d[@"space"] = w->_space.spaceID;
+    if (w->_shown.itemID) d[@"item"] = w->_shown.itemID;
+    d[@"frame"] = NSStringFromRect(w.window.frame);
+    [out addObject:d];
+  }
+  return out;
+}
+
++ (void)saveWindowState {
+  if (gQuitting) return;
+  NSString* path = [self windowStatePath];
+  if (!path) return;
+  NSData* data = [NSJSONSerialization dataWithJSONObject:@{@"version" : @1, @"windows" : [self windowStateList]}
+                                                 options:NSJSONWritingPrettyPrinted error:nil];
+  [data writeToFile:path atomically:YES];
+}
+
++ (void)prepareForQuit {
+  if (gQuitting) return;
+  [self saveWindowState];  // frames as they are now
+  gQuitting = YES;
+}
+
++ (NSUInteger)savedWindowCount {  // tests
+  NSString* path = [self windowStatePath];
+  NSDictionary* d = path ? [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:path] ?: [NSData data]
+                                                           options:0 error:nil] : nil;
+  return [d isKindOfClass:NSDictionary.class] ? [d[@"windows"] count] : 0;
+}
+
+- (NSArray<MainWindowController*>*)restoreWindowsFromList:(NSArray<NSDictionary*>*)list {
+  NSMutableArray* opened = [NSMutableArray array];
+  MainWindowController* main = gMainWindow ?: self;
+  for (NSDictionary* d in list) {
+    if (![d isKindOfClass:NSDictionary.class]) continue;
+    ArcSpace* space = nil;
+    for (ArcSpace* s in main->_spaces)
+      if ([s.spaceID isEqualToString:d[@"space"]]) space = s;
+    if (!space) continue;  // the Space was deleted since
+    ArcItem* item = nil;
+    for (ArcItem* t in space.allTabs)
+      if ([t.itemID isEqualToString:d[@"item"]]) item = t;
+    MainWindowController* w = [[MainWindowController alloc] initSecondaryFrom:main space:space];
+    NSRect f = [d[@"frame"] isKindOfClass:NSString.class] ? NSRectFromString(d[@"frame"]) : NSZeroRect;
+    if (f.size.width >= 400 && f.size.height >= 300) [w.window setFrame:f display:NO];
+    // A tab already on screen in the main window stays there.
+    if (item.url.length && item != main->_shown && ![main->_splitItems containsObject:item]) [w showItem:item];
+    [opened addObject:w];
+  }
+  return opened;
+}
+
+- (void)restoreSavedWindows {
+  NSString* path = [MainWindowController windowStatePath];
+  NSData* data = path ? [NSData dataWithContentsOfFile:path] : nil;
+  NSDictionary* d = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+  if (![d isKindOfClass:NSDictionary.class] || ![d[@"windows"] isKindOfClass:NSArray.class]) return;
+  [self restoreWindowsFromList:d[@"windows"]];
+  [self.window makeKeyAndOrderFront:nil];  // the main window stays in front
 }
 
 #pragma mark NSWindowDelegate

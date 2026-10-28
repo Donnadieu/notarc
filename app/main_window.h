@@ -166,6 +166,12 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (MainWindowController*)openNewWindowShowing:(ArcItem*)item;  // nil = the current Space's last tab
 - (void)moveItemToMainWindow:(ArcItem*)item;
 + (NSUInteger)openWindowCount;
++ (NSArray<NSDictionary*>*)windowStateList;   // other windows: Space, tab, frame
++ (void)saveWindowState;
++ (void)prepareForQuit;                        // keep the other windows for next launch
++ (NSUInteger)savedWindowCount;                // tests
+- (NSArray<MainWindowController*>*)restoreWindowsFromList:(NSArray<NSDictionary*>*)list;
+- (void)restoreSavedWindows;                   // after createBrowsers
 - (BOOL)isMainWindowController;
 - (BOOL)hostsBrowserOfItem:(ArcItem*)item;  // tests
 - (BOOL)sidebarShowsItem:(ArcItem*)item;    // tests
