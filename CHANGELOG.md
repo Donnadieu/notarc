@@ -3,7 +3,7 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.21.0
 - Translate Page (View menu): opens the page through Google's web translator into your macOS language; Show Original
   goes back. Nothing is sent to Google unless you choose it.
 - Split view: Focus Previous Pane (Ctrl+Shift+[) next to Focus Next Pane, both wrapping around. Share Split View copies
