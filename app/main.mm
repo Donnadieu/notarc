@@ -496,13 +496,15 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                             BOOL areaOK = a && llabs(a.pixelsWide - (NSInteger)(100 * v.pixelsWide / [w webViewForItem:t].bounds.size.width)) <= 2;
                             BOOL fullOK = f && f.pixelsHigh >= 3000 && f.pixelsHigh > v.pixelsHigh;
                             BOOL portrait = p && p.pixelsWide > v.pixelsWide && p.pixelsHigh > v.pixelsHigh;
+                            NSInteger soundsBefore = SoundEffectsPlayedForTest();
                             NSString* path = [w deliverCapture:area];
+                            BOOL shutter = SoundEffectsPlayedForTest() == soundsBefore + 1;
                             NSPasteboard* pb = [NSPasteboard pasteboardWithName:@"io.github.donnadieu.notarc.selftest"];
                             BOOL saved = path && [path hasPrefix:dir] && [[NSData dataWithContentsOfFile:path] isEqual:area];
                             BOOL copied = [[pb dataForType:NSPasteboardTypePNG] isEqual:area];
                             (void)sc;
-                            std::printf("SELFTEST-CAPTURE visible=%d area=%d full=%d portrait=%d saved=%d copied=%d\n", visible,
-                                        areaOK, fullOK, portrait, saved, copied);
+                            std::printf("SELFTEST-CAPTURE visible=%d area=%d full=%d portrait=%d saved=%d copied=%d shutter=%d\n",
+                                        visible, areaOK, fullOK, portrait, saved, copied, shutter);
                             if (!areaOK || !fullOK) std::printf("CAPTURE-DEBUG v=%ldx%ld a=%ldx%ld f=%ldx%ld view=%.0f\n",
                                 (long)v.pixelsWide, (long)v.pixelsHigh, (long)a.pixelsWide, (long)a.pixelsHigh,
                                 (long)f.pixelsWide, (long)f.pixelsHigh, [w webViewForItem:t].bounds.size.width);
@@ -1096,6 +1098,22 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                       SettingSetBool(kSettingBlockAds, NO);
                       ApplyContentBlockerSettings();
                       BOOL off = !cb::ShouldBlock("https://doubleclick.net/x", "https://news.example/", false);
+                      {  // #74 sound effects and reorder haptics: settings gate them; tests count instead of playing
+                        NSInteger s0 = SoundEffectsPlayedForTest(), h0 = ReorderHapticsForTest();
+                        BOOL onByDefault = SettingBool(kSettingSoundEffects) && SettingBool(kSettingReorderHaptics);
+                        BOOL plays = PlaySoundEffect(NotArcSoundCapture) && SoundEffectsPlayedForTest() == s0 + 1;
+                        ReorderHaptic();
+                        BOOL tick = ReorderHapticsForTest() == h0 + 1;
+                        SettingSetBool(kSettingSoundEffects, NO);
+                        SettingSetBool(kSettingReorderHaptics, NO);
+                        BOOL silent = !PlaySoundEffect(NotArcSoundCapture) && SoundEffectsPlayedForTest() == s0 + 1;
+                        ReorderHaptic();
+                        BOOL noTick = ReorderHapticsForTest() == h0 + 1;
+                        SettingSetBool(kSettingSoundEffects, YES);
+                        SettingSetBool(kSettingReorderHaptics, YES);
+                        std::printf("SELFTEST-SOUNDS onByDefault=%d plays=%d tick=%d silent=%d noTick=%d\n", onByDefault, plays,
+                                    tick, silent, noTick);
+                      }
                       std::printf("SELFTEST-ADBLOCK offByDefault=%d blocks=%d mainFrame=%d firstParty=%d clean=%d exception=%d "
                                   "restored=%d off=%d list=%d\n", offByDefault, blocks, mainFrame, firstParty, clean, exception,
                                   restored, off, (int)cb::ListSize() > 100);

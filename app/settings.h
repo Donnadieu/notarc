@@ -28,6 +28,15 @@ NSURL* DefaultBrowserAppURL(void);  // the app that opens https links now
 BOOL NotArcIsDefaultBrowser(void);
 void MakeNotArcDefaultBrowser(void (^done)(BOOL ok));
 // Search suggestions (#31): the chosen engine's suggestion endpoint (OpenSearch JSON), and its parser.
+extern NSString* const kSettingSoundEffects;        // BOOL, default YES (Arc: "Play Arc sound effects")
+extern NSString* const kSettingReorderHaptics;      // BOOL, default YES (Arc: "Haptic feedback when reordering tabs")
+// Sound effects (#74): plays macOS's own system sounds, never Arc's. Returns YES if the effect was due (setting on);
+// self-test runs count it instead of making noise.
+typedef NS_ENUM(NSInteger, NotArcSound) { NotArcSoundCapture };
+BOOL PlaySoundEffect(NotArcSound sound);
+NSInteger SoundEffectsPlayedForTest(void);
+void ReorderHaptic(void);                           // trackpad tick while reordering tabs, if on
+NSInteger ReorderHapticsForTest(void);
 extern NSString* const kSettingBlockAds;            // BOOL, default NO (Arc's built-in blocker was opt-in)
 extern NSString* const kSettingAdBlockExceptions;   // NSArray<NSString*> of hosts where blocking is off
 void ApplyContentBlockerSettings(void);            // pushes the settings into the request filter

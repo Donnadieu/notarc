@@ -3432,6 +3432,7 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   for (int n = 2; [NSFileManager.defaultManager fileExistsAtPath:path]; n++)
     path = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@ %d.png", base, n]];
   if (![png writeToFile:path atomically:YES]) path = nil;
+  PlaySoundEffect(NotArcSoundCapture);  // Arc played a shutter sound on capture
   if (!_captureDirectory)
     [self showToast:path ? @"Capture copied and saved to Downloads" : @"Capture copied" action:@"Add to Easel"
            selector:@selector(addLastCaptureToEasel:)];
@@ -6706,7 +6707,9 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   ArcItem* target = item;
   if (!dragged || !target) return NO;
   if (index == NSOutlineViewDropOnItemIndex) index = target.children.count;
-  return [self moveItem:dragged toParent:target index:index];
+  BOOL moved = [self moveItem:dragged toParent:target index:index];
+  if (moved) ReorderHaptic();  // Arc: haptic feedback when reordering tabs
+  return moved;
 }
 
 #pragma mark Auto-archive

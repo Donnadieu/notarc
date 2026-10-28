@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-54 done, 21 partial, 12 not started or out of scope, of 87 items.
+54 done, 22 partial, 11 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -116,7 +116,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [x] Sad tab / crash recovery, session restore (crashed-tab Reload view; each Space reopens on its last tab; after an app crash or force-quit the open tabs are reloaded) (#71)
 - [ ] Settings window (all preferences) (partial: search engine, auto-archive, Peek and Little Window link options; profiles, appearance, Max and advanced panes missing) (#72)
 - [x] Keyboard shortcuts with user overrides (#73)
-- [ ] App icon choice, sound effects, toasts (missing) (#74)
+- [ ] App icon choice, sound effects, toasts (partial: toasts; Capture shutter sound (macOS system sound) with Play sound effects setting; haptic tick when reordering tabs with its setting; no app icon choice yet) (#74)
 - [x] PDF viewer (Chromium's built-in viewer: PDFs open in the tab with zoom, search, print and download) (#75)
 - [x] AppleScript support for windows and tabs (#76)
 - [ ] Two-finger swipe back/forward and overscroll (partial: swipe tracking with an edge arrow, follows the macOS "Swipe between pages" setting; to confirm with a real trackpad) (#77)
