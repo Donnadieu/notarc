@@ -1875,6 +1875,21 @@ static NSString* const kPiPExitJS =
   icf.origin.y = 12.5;
   cell.imageView.frame = icf;
   cell.textField.hidden = a.isSection && !newTab;
+  // Other windows: "Move to main window" sits at the right of the Today header (Arc: moveToMainWindow).
+  NSButton* toMain = [cell viewWithTag:78];
+  if (newTab && !toMain) {
+    toMain = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"macwindow.and.cursorarrow"
+                                                 accessibilityDescription:@"Move to main window"]
+                                target:self action:@selector(moveShownToMainWindow:)];
+    toMain.tag = 78;
+    toMain.bordered = NO;
+    toMain.toolTip = @"Move to main window";
+    toMain.frame = NSMakeRect(cell.bounds.size.width - 28, 10, 22, 22);
+    toMain.autoresizingMask = NSViewMinXMargin | NSViewMaxYMargin;
+    [cell addSubview:toMain];
+  }
+  toMain.hidden = !newTab || [self isMainWindowController];
+  if (!toMain.hidden) toMain.contentTintColor = [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.45];
   NSImage* image = nil;
   if (newTab) {
     image = [NSImage imageWithSystemSymbolName:@"plus" accessibilityDescription:@"New Tab"];
@@ -6888,6 +6903,15 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   if (sp != main->_space) [main switchToSpace:sp];
   [main showItem:item];
   if (!self.selfTestProfiles) [main.window makeKeyAndOrderFront:nil];
+}
+
+- (IBAction)moveShownToMainWindow:(id)sender { [self moveItemToMainWindow:_shown]; }
+
+- (BOOL)moveToMainButtonShown {  // tests
+  NSInteger row = [_outline rowForItem:_space.unpinned];
+  NSView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
+  NSButton* b = [cell viewWithTag:78];
+  return b && !b.hidden;
 }
 
 - (void)menuMoveToMainWindow:(NSMenuItem*)sender { [self moveItemToMainWindow:sender.representedObject]; }
