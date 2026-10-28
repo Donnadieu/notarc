@@ -3,6 +3,9 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- Multiple windows: Chrome-style pages (Settings, off by default) also move between windows without reloading.
+
 ## 0.20.0
 - Multiple windows: File > New Window (Cmd+N) opens a window on your current Space. Every window shares the same sidebar
   (Spaces, pinned, Today) and stays signed in; each has its own Space and tab. Move to New Window and Move to Main Window

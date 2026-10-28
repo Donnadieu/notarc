@@ -580,6 +580,8 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       BOOL shared = w2.spaces == w.spaces && w2.currentSpace == w.currentSpace;
       BOOL moved = w2.shownItem == t && [w2 hostsBrowserOfItem:t] && ![w hostsBrowserOfItem:t] && w.shownItem != t;
       BOOL sameBrowser = bid != 0 && t.browserId == bid;
+      // Chrome-style pages (#66, off by default): the page window must follow into the new window.
+      BOOL chromeMoved = !ChromePagesEnabled() || ([w2 chromePageOfItem:t isInWindow:w2.window] && ![w chromePageOfItem:t isInWindow:w.window]);
       [w openInNewTab:@"https://example.org/window-sync" background:YES];
       ArcSpace* sp = w.currentSpace;
       ArcItem* added = sp.unpinned.children.firstObject;
@@ -590,6 +592,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         NSArray<NSDictionary*>* list = [MainWindowController windowStateList];
         BOOL button = [w2 moveToMainButtonShown] && ![w moveToMainButtonShown];
         [w2 moveShownToMainWindow:nil];
+        BOOL chromeBack = !ChromePagesEnabled() || [w chromePageOfItem:t isInWindow:w.window];
         BOOL back = w.shownItem == t && [w hostsBrowserOfItem:t] && ![w2 hostsBrowserOfItem:t] && t.browserId == bid;
         [w2.window close];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
@@ -607,8 +610,9 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
             BOOL closedAgain = [MainWindowController openWindowCount] == 1;
             [w saveSidebarNow];
             std::printf("SELFTEST-WINDOWS opened=%d shared=%d moved=%d sameBrowser=%d synced=%d back=%d closed=%d kept=%d "
-                        "saved=%d forgot=%d restored=%d closedAgain=%d button=%d\n",
-                        opened, shared, moved, sameBrowser, synced, back, closed, kept, saved, forgot, restored, closedAgain, button);
+                        "saved=%d forgot=%d restored=%d closedAgain=%d button=%d chromeMoved=%d chromeBack=%d\n",
+                        opened, shared, moved, sameBrowser, synced, back, closed, kept, saved, forgot, restored, closedAgain, button,
+                        chromeMoved, chromeBack);
             finish();
           });
         });
