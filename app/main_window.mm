@@ -609,6 +609,14 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   IMPLEMENT_REFCOUNTING(DevToolsResults);
 };
 
+// Which window hosts each page (#39). Every window shares one BrowserClient, so its callbacks look the page up
+// here; a page moved to another window keeps running and its events follow it.
+static NSMapTable<NSNumber*, MainWindowController*>* gBrowserOwners;
+static MainWindowController* OwnerOf(int browserId, MainWindowController* fallback) {
+  MainWindowController* w = [gBrowserOwners objectForKey:@(browserId)];
+  return w ?: fallback;
+}
+
 @implementation MainWindowController {
   NSMutableArray<ArcSpace*>* _spaces;
   ArcSpace* _space;  // currently shown Space
@@ -1445,18 +1453,18 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   __weak MainWindowController* weakSelf = self;
   _client = new BrowserClient(
       [weakSelf](int browserId, const std::string& title) {
-        [weakSelf browser:browserId title:[NSString stringWithUTF8String:title.c_str()] url:nil];
+        [OwnerOf(browserId, weakSelf) browser:browserId title:[NSString stringWithUTF8String:title.c_str()] url:nil];
       },
       [weakSelf](int browserId, const std::string& url) {
-        [weakSelf browser:browserId title:nil url:[NSString stringWithUTF8String:url.c_str()]];
+        [OwnerOf(browserId, weakSelf) browser:browserId title:nil url:[NSString stringWithUTF8String:url.c_str()]];
       });
-  _client->set_focus_callback([weakSelf](int browserId) { [weakSelf paneFocused:browserId]; });
+  _client->set_focus_callback([weakSelf](int browserId) { [OwnerOf(browserId, weakSelf) paneFocused:browserId]; });
   _client->set_link_menu_callback([weakSelf](int browserId, int command, const std::string& url, const std::string&) {
     NSString* target = [NSString stringWithUTF8String:url.c_str()];
-    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf handleLinkCommand:command url:target fromBrowser:browserId]; });
+    dispatch_async(dispatch_get_main_queue(), ^{ [OwnerOf(browserId, weakSelf) handleLinkCommand:command url:target fromBrowser:browserId]; });
   });
   _client->set_open_callback([weakSelf](int browserId, const std::string& url, int disposition, bool gesture) -> bool {
-    MainWindowController* strong = weakSelf;
+    MainWindowController* strong = OwnerOf(browserId, weakSelf);
     if (!strong) return false;
     NSString* target = [NSString stringWithUTF8String:url.c_str()];
     // Decide now (so CEF knows not to open its own window), act after this callback returns.
@@ -1464,43 +1472,43 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
     return handled;
   });
   _client->set_navigation_filter([weakSelf](int browserId, const std::string& url) -> bool {
-    MainWindowController* strong = weakSelf;
+    MainWindowController* strong = OwnerOf(browserId, weakSelf);
     if (!strong) return false;
     NSString* target = [NSString stringWithUTF8String:url.c_str()];
     if (![strong shouldPeekFromItem:[strong itemForBrowser:browserId] toURL:target]) return false;
-    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf openPeek:target]; });
+    dispatch_async(dispatch_get_main_queue(), ^{ [strong openPeek:target]; });
     return true;
   });
   _client->set_media_callback([weakSelf](int browserId, const std::string& state, const std::string& title) {
     if (getenv("NOTARC_MEDIA_DEBUG") && !title.empty()) std::fprintf(stderr, "MEDIA-DEBUG %d %s %s\n", browserId, state.c_str(), title.c_str());
-    [weakSelf browser:browserId mediaState:[NSString stringWithUTF8String:state.c_str()]];
+    [OwnerOf(browserId, weakSelf) browser:browserId mediaState:[NSString stringWithUTF8String:state.c_str()]];
   });
   _mediaTimer = [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer*) { [weakSelf pollMediaNow]; }];
   _client->set_renderer_callback([weakSelf](int browserId, int kind, int status) {
-    [weakSelf browser:browserId rendererEvent:kind status:status];
+    [OwnerOf(browserId, weakSelf) browser:browserId rendererEvent:kind status:status];
   });
   _client->set_favicon_callback([weakSelf](int browserId, const std::string& url) {
-    [weakSelf browser:browserId faviconURL:[NSString stringWithUTF8String:url.c_str()]];
+    [OwnerOf(browserId, weakSelf) browser:browserId faviconURL:[NSString stringWithUTF8String:url.c_str()]];
   });
   _client->set_load_end_callback([weakSelf](int browserId, const std::string& url) {
-    [weakSelf applyBoostToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
-    [weakSelf installCallHookInBrowser:browserId];
+    [OwnerOf(browserId, weakSelf) applyBoostToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
+    [OwnerOf(browserId, weakSelf) installCallHookInBrowser:browserId];
   });
   _client->set_capture_callback([weakSelf](int browserId, bool video, bool audio) {
-    [weakSelf browser:browserId captureVideo:video audio:audio];
+    [OwnerOf(browserId, weakSelf) browser:browserId captureVideo:video audio:audio];
   });
   _client->set_zap_callback([weakSelf](int browserId, const std::string& selector) {
-    [weakSelf handleZapSelector:[NSString stringWithUTF8String:selector.c_str()] browser:browserId];
+    [OwnerOf(browserId, weakSelf) handleZapSelector:[NSString stringWithUTF8String:selector.c_str()] browser:browserId];
   });
   _client->set_permission_callback([weakSelf](int browserId, int requestId, const std::string& origin, uint32_t perms) {
-    [weakSelf browser:browserId permissionRequest:requestId origin:[NSString stringWithUTF8String:origin.c_str()]
+    [OwnerOf(browserId, weakSelf) browser:browserId permissionRequest:requestId origin:[NSString stringWithUTF8String:origin.c_str()]
                  bits:perms];
   });
   _client->set_external_callback([weakSelf](int browserId, const std::string& url) {
-    [weakSelf browser:browserId externalURL:[NSString stringWithUTF8String:url.c_str()]];
+    [OwnerOf(browserId, weakSelf) browser:browserId externalURL:[NSString stringWithUTF8String:url.c_str()]];
   });
   _client->set_find_callback([weakSelf](int browserId, int count, int active) {
-    [weakSelf findResult:count active:active];
+    [OwnerOf(browserId, weakSelf) findResult:count active:active];
   });
   if (self.restoreOpenTabs) {
     NSUInteger n = 0;
@@ -1526,6 +1534,15 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (NSUInteger)liveTabCount { return _browsers.size(); }
 
 // Web views are created lazily, the first time a tab is opened (Arc does the same).
+- (void)adoptBrowser:(int)browserId {
+  if (!gBrowserOwners) gBrowserOwners = [NSMapTable strongToWeakObjectsMapTable];
+  [gBrowserOwners setObject:self forKey:@(browserId)];
+}
+
+- (BOOL)hostsBrowserOfItem:(ArcItem*)item {  // tests
+  return item.browserId && OwnerOf(item.browserId, nil) == self && _browsers.count(item.browserId);
+}
+
 - (void)ensureBrowserForItem:(ArcItem*)item {
   if (item.noteID || item.easelID) return;  // notes and easels are native, no web view
   if (item.browserId || !item.url.length || !_client || !_content) return;
@@ -1550,6 +1567,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
     _chromePages[@(browser->GetIdentifier())] = host;
     item.browserId = browser->GetIdentifier();
     _browsers[item.browserId] = browser;
+  [self adoptBrowser:item.browserId];
     return;
   }
   CefWindowInfo info;
@@ -1568,6 +1586,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   view.frame = _content.bounds;
   item.browserId = browser->GetIdentifier();
   _browsers[item.browserId] = browser;
+  [self adoptBrowser:item.browserId];
 }
 
 // Automatic picture-in-picture (#46): a video playing in the tab you leave pops out; coming back puts it back.
@@ -5929,6 +5948,7 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target) {
       it->second->GetHost()->CloseBrowser(true);
       [view removeFromSuperview];  // child browsers are torn down when their view goes away
     }
+    [gBrowserOwners removeObjectForKey:@(it->first)];
     _browsers.erase(it);
   }
   item.browserId = 0;
