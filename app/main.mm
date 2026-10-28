@@ -1989,8 +1989,48 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         BOOL otherTagged = NO;
         for (ArchivedTab* v in w.historyVisits) if ([v.reason isEqualToString:@"Google Chrome (Test)"]) otherTagged = YES;
         BOOL missing = [w importHistoryFromFile:@"/nonexistent/History" browser:@"x"] == 0;
-        std::printf("SELFTEST-IMPORTHISTORY added=%d again=%d tagged=%d missing=%d\n", otherAdded == 2, otherAgain == 0,
-                    otherTagged, missing);
+        BOOL firefox = NO, safari = NO;
+        {  // fake Firefox places.sqlite and Safari History.db (never the real ones)
+          NSString* ff = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-places.sqlite"];
+          NSString* sf = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-safari-history.db"];
+          [NSFileManager.defaultManager removeItemAtPath:ff error:nil];
+          [NSFileManager.defaultManager removeItemAtPath:sf error:nil];
+          sqlite3* f = NULL;
+          sqlite3_open(ff.UTF8String, &f);
+          sqlite3_exec(f,
+              "CREATE TABLE moz_places(id INTEGER PRIMARY KEY, url TEXT, title TEXT);"
+              "CREATE TABLE moz_historyvisits(id INTEGER PRIMARY KEY, place_id INTEGER, visit_date INTEGER, visit_type INTEGER);"
+              "INSERT INTO moz_places VALUES(1,'https://example.net/fox','Fox'),(2,'https://example.net/hop','Hop');"
+              "INSERT INTO moz_historyvisits VALUES(1,1,1700000000000000,1),(2,2,1700000001000000,5);", NULL, NULL, NULL);
+          sqlite3_close(f);
+          sqlite3* s = NULL;
+          sqlite3_open(sf.UTF8String, &s);
+          sqlite3_exec(s,
+              "CREATE TABLE history_items(id INTEGER PRIMARY KEY, url TEXT);"
+              "CREATE TABLE history_visits(id INTEGER PRIMARY KEY, history_item INTEGER, visit_time REAL, title TEXT,"
+              " redirect_destination INTEGER);"
+              "INSERT INTO history_items VALUES(1,'https://example.net/safari'),(2,'http://example.net/old');"
+              "INSERT INTO history_visits VALUES(1,1,720000000.0,'Safari Page',NULL),(2,2,720000001.0,'Old',1);",
+              NULL, NULL, NULL);
+          sqlite3_close(s);
+          NSUInteger nf = [w importHistoryFromFile:ff browser:@"Firefox (Test)" kind:@"firefox"];
+          NSUInteger ns = [w importHistoryFromFile:sf browser:@"Safari (Test)" kind:@"safari"];
+          BOOL foxDated = NO, safTitled = NO;
+          for (ArchivedTab* v in w.historyVisits) {
+            if ([v.url isEqualToString:@"https://example.net/fox"] && fabs(v.archivedAt.timeIntervalSince1970 - 1700000000) < 1)
+              foxDated = YES;
+            if ([v.url isEqualToString:@"https://example.net/safari"] && [v.title isEqualToString:@"Safari Page"] &&
+                fabs(v.archivedAt.timeIntervalSinceReferenceDate - 720000000) < 1)
+              safTitled = YES;
+          }
+          firefox = nf == 1 && foxDated;
+          safari = ns == 1 && safTitled &&
+                   [w importHistoryFromFile:@"/nonexistent/History.db" browser:@"Safari" kind:@"safari"] == NSNotFound;
+          [NSFileManager.defaultManager removeItemAtPath:ff error:nil];
+          [NSFileManager.defaultManager removeItemAtPath:sf error:nil];
+        }
+        std::printf("SELFTEST-IMPORTHISTORY added=%d again=%d tagged=%d missing=%d firefox=%d safari=%d\n", otherAdded == 2,
+                    otherAgain == 0, otherTagged, missing, firefox, safari);
         [w clearHistory:nil];
         added = [w importArcHistory];
         NSUInteger arcRows = 0;

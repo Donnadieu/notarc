@@ -201,7 +201,9 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (BOOL)addImportedBookmarks:(ArcItem*)folder;
 - (IBAction)importBookmarksFromMenu:(id)sender;  // File > Import Bookmarks...
 - (IBAction)importHistoryFromMenu:(id)sender;    // File > Import History... (Chrome, Brave, Edge, Vivaldi, Chromium)
-- (NSUInteger)importHistoryFromFile:(NSString*)db browser:(NSString*)name;  // visits added; read-only on the source
+- (NSUInteger)importHistoryFromFile:(NSString*)db browser:(NSString*)name;  // Chromium format; visits added
+// kind: @"chromium", @"firefox" or @"safari". Returns visits added, or NSNotFound if the file can't be read.
+- (NSUInteger)importHistoryFromFile:(NSString*)db browser:(NSString*)name kind:(NSString*)kind;
 - (void)openIncognitoWindow:(NSString*)url;
 - (NSUInteger)incognitoWindowCount;  // tests
 - (BOOL)incognitoContextIsOnDisk;    // tests: NO = in-memory  // the rule editor (Settings > Links, command bar)

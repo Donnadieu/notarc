@@ -3879,14 +3879,21 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 }
 
 - (NSUInteger)importHistoryFromFile:(NSString*)db browser:(NSString*)name {
+  NSUInteger n = [self importHistoryFromFile:db browser:name kind:@"chromium"];
+  return n == NSNotFound ? 0 : n;
+}
+
+- (NSUInteger)importHistoryFromFile:(NSString*)db browser:(NSString*)name kind:(NSString*)kind {
   HistoryStore* store = [self historyStore];
-  if (!store || !db.length) return 0;
+  if (!store || !db.length) return NSNotFound;
   NSError* error = nil;
-  // Chromium-family browsers keep history in the same database format as Arc; read it the same read-only way.
-  NSArray* visits = ArcReadHistory(db, name, 20000, &error);
+  // Chromium-family browsers keep history in the same database format as Arc; Firefox and Safari have their own.
+  NSArray* visits = [kind isEqualToString:@"firefox"] ? FirefoxReadHistory(db, name, 20000, &error)
+                    : [kind isEqualToString:@"safari"] ? SafariReadHistory(db, name, 20000, &error)
+                                                       : ArcReadHistory(db, name, 20000, &error);
   if (!visits) {
     if (error) std::fprintf(stderr, "History import skipped: %s\n", error.localizedDescription.UTF8String);
-    return 0;
+    return NSNotFound;
   }
   return [store mergeVisits:visits];
 }
@@ -3896,11 +3903,16 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   NSAlert* a = [NSAlert new];
   a.messageText = @"Import History";
   if (!sources.count) {
-    a.informativeText = @"No Chrome, Brave, Edge, Vivaldi or Chromium history was found on this Mac.";
+    a.informativeText = @"No browser history was found on this Mac.";
     [a beginSheetModalForWindow:self.window completionHandler:nil];
     return;
   }
   a.informativeText = @"Visits are added to NotArc's History (Cmd+Y) and command bar. The other browser isn't changed.";
+  for (NSArray* s in sources)
+    if ([s[2] isEqualToString:@"safari"] && ![NSFileManager.defaultManager isReadableFileAtPath:s[1]]) {
+      a.informativeText = [a.informativeText stringByAppendingString:@" Safari needs Full Disk Access for NotArc."];
+      break;
+    }
   NSPopUpButton* from = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 300, 26) pullsDown:NO];
   for (NSArray* s in sources) {
     [from addItemWithTitle:s[0]];
@@ -3916,9 +3928,16 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
     dispatch_async(dispatch_get_main_queue(), ^{
       MainWindowController* me = weakSelf;
       if (!me || !src) return;
-      NSUInteger n = [me importHistoryFromFile:src[1] browser:src[0]];
+      NSUInteger n = [me importHistoryFromFile:src[1] browser:src[0] kind:src[2]];
       NSAlert* done = [NSAlert new];
-      done.messageText = n ? [NSString stringWithFormat:@"%lu visits imported", (unsigned long)n] : @"No new history to import";
+      if (n == NSNotFound) {
+        done.messageText = [NSString stringWithFormat:@"Couldn't read %@ history", src[0]];
+        if ([src[2] isEqualToString:@"safari"])
+          done.informativeText = @"macOS protects Safari's history. To import it, give NotArc Full Disk Access in System "
+                                 @"Settings > Privacy & Security, then try again.";
+      } else {
+        done.messageText = n ? [NSString stringWithFormat:@"%lu visits imported", (unsigned long)n] : @"No new history to import";
+      }
       [done beginSheetModalForWindow:me.window completionHandler:nil];
     });
   }];

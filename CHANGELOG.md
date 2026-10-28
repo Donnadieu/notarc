@@ -4,7 +4,8 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
-- File > Import History...: brings your browsing history from Chrome, Brave, Edge, Vivaldi or Chromium into History
+- File > Import History...: brings your browsing history from Chrome, Brave, Edge, Vivaldi, Chromium, Firefox or Safari
+  (Safari needs Full Disk Access for NotArc) into History
   and the command bar. The other browser isn't changed; importing twice adds nothing twice.
 
 ## 0.22.0

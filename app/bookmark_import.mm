@@ -107,7 +107,24 @@ ArcItem* BookmarksFromHTMLFile(NSString* path, NSString* folderTitle, NSUInteger
 static NSArray<NSArray<NSString*>*>* DetectedProfileFiles(NSString* file);
 
 NSArray<NSArray<NSString*>*>* DetectedBookmarkSources(void) { return DetectedProfileFiles(@"Bookmarks"); }
-NSArray<NSArray<NSString*>*>* DetectedHistorySources(void) { return DetectedProfileFiles(@"History"); }
+NSArray<NSArray<NSString*>*>* DetectedHistorySources(void) {
+  NSMutableArray* out = [NSMutableArray array];
+  for (NSArray* s in DetectedProfileFiles(@"History")) [out addObject:@[ s[0], s[1], @"chromium" ]];
+  NSFileManager* fm = NSFileManager.defaultManager;
+  NSString* support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+  NSString* ff = [support stringByAppendingPathComponent:@"Firefox/Profiles"];
+  for (NSString* p in [[fm contentsOfDirectoryAtPath:ff error:nil] sortedArrayUsingSelector:@selector(localizedStandardCompare:)]) {
+    NSString* f = [[ff stringByAppendingPathComponent:p] stringByAppendingPathComponent:@"places.sqlite"];
+    if (![fm fileExistsAtPath:f]) continue;
+    NSRange dot = [p rangeOfString:@"."];
+    NSString* label = dot.location != NSNotFound ? [p substringFromIndex:dot.location + 1] : p;
+    [out addObject:@[ [NSString stringWithFormat:@"Firefox (%@)", label], f, @"firefox" ]];
+  }
+  // Safari's history sits behind macOS privacy protection; listed always, readable only with Full Disk Access.
+  NSString* safari = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Safari/History.db"];
+  [out addObject:@[ @"Safari", safari, @"safari" ]];
+  return out;
+}
 
 static NSArray<NSArray<NSString*>*>* DetectedProfileFiles(NSString* file) {
   NSString* support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
