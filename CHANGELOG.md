@@ -3,7 +3,7 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.22.0
 - Sound effects: Capture plays a shutter sound (Settings > Play sound effects). Reordering tabs in the sidebar gives a
   trackpad tick (Settings > Haptic feedback when reordering tabs). Both on by default.
 - Block ads & trackers (Settings, off by default): stops pages loading ads and trackers from well-known ad and tracking
