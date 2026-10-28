@@ -72,6 +72,11 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (IBAction)addHorizontalSplit:(id)sender;  // Ctrl+Shift+-
 - (IBAction)closeSplitPane:(id)sender;      // Ctrl+Shift+W
 - (IBAction)focusNextPane:(id)sender;       // Ctrl+Shift+]
+- (IBAction)focusPreviousPane:(id)sender;   // Ctrl+Shift+[
+- (IBAction)shareSplitView:(id)sender;      // copies every pane's address
+- (NSString*)splitViewShareText;            // tests
+- (NSArray<ArcItem*>*)visiblePanesForTest;  // tests
+- (BOOL)openSplitFromText:(NSString*)text;  // 2-4 addresses, one per line -> one split
 - (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal;
 - (NSArray<NSValue*>*)paneFrames;  // tests: frames of the visible panes
 

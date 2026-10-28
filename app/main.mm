@@ -238,6 +238,9 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       .keyEquivalentModifierMask = cs;
   [split addItemWithTitle:@"Focus Next Pane" action:@selector(focusNextPane:) keyEquivalent:@"]"]
       .keyEquivalentModifierMask = cs;
+  [split addItemWithTitle:@"Focus Previous Pane" action:@selector(focusPreviousPane:) keyEquivalent:@"["]
+      .keyEquivalentModifierMask = cs;
+  [split addItemWithTitle:@"Share Split View" action:@selector(shareSplitView:) keyEquivalent:@""];
   for (int i = 1; i <= 4; ++i) {
     NSMenuItem* pane = [split addItemWithTitle:[NSString stringWithFormat:@"Focus Pane %d", i]
                                         action:@selector(focusPaneFromMenu:)
@@ -694,6 +697,26 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       [w openInSplit:@"https://example.com" horizontal:NO];
       [w openInSplit:@"https://example.org" horizontal:NO];
       NSArray<NSValue*>* f = [w paneFrames];
+      {  // #38: switch panes both ways with wraparound; share copies every pane's address
+        NSArray<ArcItem*>* panes = [w visiblePanesForTest];
+        ArcItem* start = w.shownItem;
+        NSUInteger i0 = [panes indexOfObject:start];
+        [w focusNextPane:nil];
+        BOOL next = panes.count == 3 && w.shownItem == panes[(i0 + 1) % 3];
+        [w focusPreviousPane:nil];
+        [w focusPreviousPane:nil];
+        BOOL prevWrap = panes.count == 3 && w.shownItem == panes[(i0 + 2) % 3];
+        [w focusNextPane:nil];
+        [w shareSplitView:nil];
+        NSString* copied = [[NSPasteboard pasteboardWithName:@"io.github.donnadieu.notarc.selftest"] stringForType:NSPasteboardTypeString];
+        NSArray* lines = [copied componentsSeparatedByString:@"\n"];
+        BOOL share = lines.count == 3 && [copied containsString:@"https://example.com"] && [copied containsString:@"https://example.org"];
+        BOOL general = ![[NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString] isEqualToString:copied];
+        NSUInteger before = [w paneFrames].count;
+        BOOL single = ![w openSplitFromText:@"https://example.com/one"] && [w paneFrames].count == before;
+        std::printf("SELFTEST-SPLITSWITCH next=%d prevWrap=%d share=%d generalUntouched=%d back=%d singleIgnored=%d\n", next,
+                    prevWrap, share, general, w.shownItem == start, single);
+      }
       BOOL sideBySide = f.count == 3 && NSMaxX(f[0].rectValue) <= NSMinX(f[1].rectValue) &&
                         NSMaxX(f[1].rectValue) <= NSMinX(f[2].rectValue);
       std::printf("SELFTEST-SPLIT panes=%lu sideBySide=%d widths=%.0f,%.0f,%.0f\n", (unsigned long)f.count, sideBySide,

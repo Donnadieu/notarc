@@ -3715,6 +3715,63 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   if (auto b = [self currentBrowser]) b->GetHost()->SetFocus(true);
 }
 
+// Arc: "Switch to previous Split View" (the adjacent pane, wrapping around).
+- (IBAction)focusPreviousPane:(id)sender {
+  if (![_splitItems containsObject:_shown]) return;
+  NSUInteger n = _splitItems.count;
+  NSUInteger index = ([_splitItems indexOfObject:_shown] + n - 1) % n;
+  [self showItem:_splitItems[index]];
+  if (auto b = [self currentBrowser]) b->GetHost()->SetFocus(true);
+}
+
+// Arc: "Share Split View" copied an arc.net link to the whole split. Arc's link service is gone, so NotArc copies
+// every pane's address (one per line as text, plus a Markdown list) so the split can be shared and reopened.
+- (NSPasteboard*)copyPasteboard {
+  return self.selfTestProfiles ? [NSPasteboard pasteboardWithName:@"io.github.donnadieu.notarc.selftest"]
+                               : NSPasteboard.generalPasteboard;
+}
+
+- (NSArray<ArcItem*>*)visiblePanesForTest { return [self visiblePanes]; }
+
+- (NSString*)splitViewShareText {
+  if (![_splitItems containsObject:_shown]) return nil;
+  NSMutableArray* lines = [NSMutableArray array];
+  for (ArcItem* pane in _splitItems) {
+    NSString* url = [self itemCurrentURL:pane];
+    if (url.length) [lines addObject:url];
+  }
+  return lines.count ? [lines componentsJoinedByString:@"\n"] : nil;
+}
+
+- (IBAction)shareSplitView:(id)sender {
+  NSString* text = [self splitViewShareText];
+  if (!text) { NSBeep(); return; }
+  NSMutableArray* md = [NSMutableArray array];
+  for (ArcItem* pane in _splitItems) {
+    NSString* url = [self itemCurrentURL:pane];
+    if (!url.length) continue;
+    NSString* title = [pane.displayTitle stringByReplacingOccurrencesOfString:@"]" withString:@"\\]"];
+    [md addObject:[NSString stringWithFormat:@"- [%@](%@)", title, url]];
+  }
+  NSPasteboard* pb = [self copyPasteboard];
+  [pb clearContents];
+  [pb setString:text forType:NSPasteboardTypeString];
+  [pb setString:[md componentsJoinedByString:@"\n"] forType:@"net.daringfireball.markdown"];
+}
+
+// Opening shared links: several addresses at once (one per line) become one split, like the one that was shared.
+- (BOOL)openSplitFromText:(NSString*)text {
+  NSMutableArray<NSString*>* urls = [NSMutableArray array];
+  for (NSString* line in [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet]) {
+    NSString* t = [line stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    if ([t hasPrefix:@"http://"] || [t hasPrefix:@"https://"]) [urls addObject:t];
+  }
+  if (urls.count < 2 || urls.count > 4) return NO;  // Arc splits hold up to four panes
+  [self openInNewTab:urls.firstObject];
+  for (NSUInteger i = 1; i < urls.count; ++i) [self openInSplit:urls[i] horizontal:NO];
+  return YES;
+}
+
 #pragma mark Little Window
 
 - (void)openLittleWindow:(NSString*)input {
@@ -5944,6 +6001,10 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
   if (command == @selector(insertNewline:)) {
     NSString* text = _commandField.stringValue;
     [self hideCommandBar];
+    if (!_commandOpensIncognito && !_commandOpensLittle && [text containsString:@"\n"] && [self openSplitFromText:text]) {
+      _commandOpensSplit = NO;  // a pasted shared split: one split with all its pages
+      return YES;
+    }
     if (_commandOpensIncognito) [self openIncognitoWindow:text];
     else if (_commandOpensLittle) [self openLittleWindow:text];
     else if (_commandOpensSplit) [self openInSplit:text horizontal:_pendingSplitHorizontal before:_splitBefore];
