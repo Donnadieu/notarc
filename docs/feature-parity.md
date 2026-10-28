@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-52 done, 19 partial, 16 not started or out of scope, of 87 items.
+52 done, 20 partial, 15 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -58,7 +58,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 
 - [ ] Split view: vertical/horizontal, up to 4 panes, add/close/move panes (partial: add in all four directions, flip layout, close and focus panes, split as one sidebar item, draggable dividers and saving splits done; dragging a tab into the page to split and maximize pane missing) (#37)
 - [ ] Switch between split views; share split view (missing) (#38)
-- [ ] Multiple windows, move tab to window, Move to main window (missing) (#39)
+- [ ] Multiple windows, move tab to window, Move to main window (partial: File > New Window, one shared sidebar, Move to New Window / Move to Main Window without reloading, Today-header button, windows reopen after restart; Chrome-style pages don't move yet) (#39)
 - [x] Incognito window (#40)
 - [x] Full screen, focus mode (Ctrl+Cmd+F full screen; Cmd+Opt+Shift+F focus mode hides sidebar and window buttons) (#41)
 
