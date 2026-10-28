@@ -991,6 +991,15 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                 }];
               }];
             }
+            {  // Default browser (#69): read-only checks; never changes the system setting or shows macOS's prompt.
+              NSURL* app = DefaultBrowserAppURL();
+              BOOL detect = app != nil && NotArcIsDefaultBrowser() ==
+                  [[NSBundle bundleWithURL:app].bundleIdentifier isEqualToString:NSBundle.mainBundle.bundleIdentifier];
+              BOOL row = [[SettingsWindowController shared] defaultBrowserRowConsistent];
+              NSArray* types = NSBundle.mainBundle.infoDictionary[@"CFBundleURLTypes"];
+              BOOL schemes = [[types.firstObject[@"CFBundleURLSchemes"] componentsJoinedByString:@","] isEqualToString:@"http,https"];
+              std::printf("SELFTEST-DEFAULTBROWSER detect=%d row=%d schemes=%d\n", detect, row, schemes);
+            }
             std::printf("SELFTEST-SHORTCUTEDIT set=%d conflict=%d reset=%d display=%d window=%d\n", set, conflict, reset, display, window);
           }
           [[NSFileManager defaultManager] removeItemAtPath:js error:nil];

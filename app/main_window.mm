@@ -3029,14 +3029,36 @@ static const CGFloat kPaneGap = 6;
       @"Extensions: %@ copied%@\n\nSaved passwords, autofill and cards are coming in a later update.",
       n[@"history"], n[@"extensions"],
       [n[@"skipped"] intValue] ? [NSString stringWithFormat:@" (%@ too old for current Chromium)", n[@"skipped"]] : @""];
-  [a beginSheetModalForWindow:self.window completionHandler:nil];
+  __weak MainWindowController* weakSelf = self;
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf offerDefaultBrowserIfFirstLaunch]; });
+  }];
 }
 
 // Arc acceptance: one button the first time NotArc opens, then you keep working like you never moved.
+// Arc's onboarding step: asked once, after the import question; macOS then shows its own confirmation.
+- (void)offerDefaultBrowserIfFirstLaunch {
+  NSUserDefaults* d = NSUserDefaults.standardUserDefaults;
+  if ([d boolForKey:@"defaultBrowserOffered"] || NotArcIsDefaultBrowser() || self.window.attachedSheet) return;
+  [d setBool:YES forKey:@"defaultBrowserOffered"];
+  NSAlert* a = [NSAlert new];
+  a.messageText = @"Make NotArc your default browser?";
+  a.informativeText = @"Links you click in other apps will open here, routed by your Air Traffic Control rules. "
+                      @"You can change this later in Settings.";
+  [a addButtonWithTitle:@"Make Default"];
+  [a addButtonWithTitle:@"Not Now"];
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r == NSAlertFirstButtonReturn) MakeNotArcDefaultBrowser(nil);
+  }];
+}
+
 - (void)offerArcImportIfFirstLaunch {
   NSUserDefaults* d = NSUserDefaults.standardUserDefaults;
-  if ([d boolForKey:@"arcImportOffered"]) return;
-  if (![NSFileManager.defaultManager fileExistsAtPath:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]]) return;
+  if ([d boolForKey:@"arcImportOffered"] ||
+      ![NSFileManager.defaultManager fileExistsAtPath:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]]) {
+    [self offerDefaultBrowserIfFirstLaunch];
+    return;
+  }
   [d setBool:YES forKey:@"arcImportOffered"];
   NSAlert* a = [NSAlert new];
   a.messageText = @"Bring everything over from Arc?";
@@ -3048,6 +3070,8 @@ static const CGFloat kPaneGap = 6;
   [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
     if (r == NSAlertFirstButtonReturn)
       dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf importEverythingFromArcMenu:nil]; });
+    else
+      dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf offerDefaultBrowserIfFirstLaunch]; });
   }];
 }
 

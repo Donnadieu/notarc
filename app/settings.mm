@@ -60,6 +60,28 @@ static NSArray<NSArray<NSString*>*>* Engines() {
 
 NSString* const kSettingSearchSuggestions = @"searchSuggestions";
 
+NSURL* DefaultBrowserAppURL(void) {
+  return [NSWorkspace.sharedWorkspace URLForApplicationToOpenURL:[NSURL URLWithString:@"https://example.com"]];
+}
+
+BOOL NotArcIsDefaultBrowser(void) {
+  NSURL* app = DefaultBrowserAppURL();
+  if (!app) return NO;
+  NSString* bid = [NSBundle bundleWithURL:app].bundleIdentifier;
+  return [bid isEqualToString:NSBundle.mainBundle.bundleIdentifier];
+}
+
+void MakeNotArcDefaultBrowser(void (^done)(BOOL ok)) {
+  NSURL* me = NSBundle.mainBundle.bundleURL;
+  NSWorkspace* ws = NSWorkspace.sharedWorkspace;
+  // http first; macOS asks once and applies the choice to https too.
+  [ws setDefaultApplicationAtURL:me toOpenURLsWithScheme:@"http" completionHandler:^(NSError* e1) {
+    [NSWorkspace.sharedWorkspace setDefaultApplicationAtURL:me toOpenURLsWithScheme:@"https" completionHandler:^(NSError* e2) {
+      dispatch_async(dispatch_get_main_queue(), ^{ if (done) done(!e1 && !e2 && NotArcIsDefaultBrowser()); });
+    }];
+  }];
+}
+
 NSString* SuggestURLForQuery(NSString* q) {
   NSDictionary* urls = @{
     @"google" : @"https://suggestqueries.google.com/complete/search?client=firefox&q=",
@@ -114,6 +136,8 @@ static NSArray* LittleArchiveChoices() {
   NSPopUpButton* _archive;
   NSPopUpButton* _littleArchive;
   NSTextField* _folderLabel;
+  NSTextField* _defaultLabel;
+  NSButton* _defaultButton;
 }
 
 + (instancetype)shared {
@@ -149,6 +173,36 @@ static NSArray* LittleArchiveChoices() {
   return f;
 }
 
+// Default Browser (#69): shows which app opens links now, and a button that asks macOS to make it NotArc.
+- (NSView*)defaultBrowserRow {
+  _defaultLabel = [NSTextField labelWithString:@""];
+  _defaultButton = [NSButton buttonWithTitle:@"Make NotArc Default Browser" target:self action:@selector(makeDefault:)];
+  [self refreshDefaultBrowser];
+  NSStackView* row = [NSStackView stackViewWithViews:@[ _defaultLabel, _defaultButton ]];
+  row.spacing = 12;
+  return row;
+}
+
+- (void)refreshDefaultBrowser {
+  BOOL mine = NotArcIsDefaultBrowser();
+  NSURL* app = DefaultBrowserAppURL();
+  NSString* name = app ? [NSFileManager.defaultManager displayNameAtPath:app.path].stringByDeletingPathExtension : @"another app";
+  _defaultLabel.stringValue = mine ? @"NotArc is your default browser." : [NSString stringWithFormat:@"Links open in %@.", name];
+  _defaultButton.hidden = mine;
+}
+
+- (void)makeDefault:(id)sender {
+  __weak SettingsWindowController* weakSelf = self;
+  MakeNotArcDefaultBrowser(^(BOOL ok) { [weakSelf refreshDefaultBrowser]; });
+}
+
+- (BOOL)defaultBrowserRowConsistent {  // tests
+  if (!_defaultLabel) [self defaultBrowserRow];
+  return _defaultButton.hidden == NotArcIsDefaultBrowser() && _defaultLabel.stringValue.length > 0;
+}
+
+- (void)windowDidBecomeKey:(NSNotification*)n { [self refreshDefaultBrowser]; }
+
 - (NSTextField*)heading:(NSString*)text {
   NSTextField* f = [NSTextField labelWithString:text];
   f.font = [NSFont boldSystemFontOfSize:13];
@@ -164,6 +218,7 @@ static NSArray* LittleArchiveChoices() {
   w.releasedWhenClosed = NO;
   self = [super initWithWindow:w];
   if (!self) return nil;
+  w.delegate = (id<NSWindowDelegate>)self;  // refresh the default-browser line whenever Settings comes forward
 
   _engine = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
   NSString* chosen = [NSUserDefaults.standardUserDefaults stringForKey:kSettingSearchEngine];
@@ -201,6 +256,8 @@ static NSArray* LittleArchiveChoices() {
     [self heading:@"General"],
     general,
     [self note:@"Pinned tabs and Favorites are never archived. Archived tabs stay searchable in the Archive (Cmd+Y)."],
+    [self heading:@"Default Browser"],
+    [self defaultBrowserRow],
     [self heading:@"Links"],
     [self check:@"Open a Peek window when clicking on links to other sites" key:kSettingPeekPinnedLinks],
     [self note:@"Only affects Pinned tabs and Favorites."],
