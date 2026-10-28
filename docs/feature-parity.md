@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-51 done, 20 partial, 16 not started or out of scope, of 87 items.
+52 done, 19 partial, 16 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -111,7 +111,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [ ] Chrome extensions (Web Store), extension picker (missing) (#66)
 - [ ] Password saving/autofill, address/card autofill (missing) (#67)
 - [ ] DevTools (show/hide), developer mode (partial: DevTools done) (#68)
-- [ ] Set as default browser, open links from other apps (partial: registers as a browser and opens links from other apps; no in-app "make default" prompt) (#69)
+- [x] Set as default browser, open links from other apps (#69)
 - [ ] Context menus (page, link, image, sidebar) (partial: sidebar menu and NotArc link actions done; image actions are Chromium defaults) (#70)
 - [x] Sad tab / crash recovery, session restore (crashed-tab Reload view; each Space reopens on its last tab; after an app crash or force-quit the open tabs are reloaded) (#71)
 - [ ] Settings window (all preferences) (partial: search engine, auto-archive, Peek and Little Window link options; profiles, appearance, Max and advanced panes missing) (#72)
