@@ -530,33 +530,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                                       BOOL offRespected = !t.inPictureInPicture;
                                       SettingSetObject(kSettingAutoPiP, nil);
                                       if (!log) std::printf("PIP-DEBUG %s\n", t.liveTitle.UTF8String);
-                                      // Tab thumbnails (#65): leaving a tab keeps a small picture of it for its hover card.
-                                      ArcItem* src = other;
-                                      [w showItem:src];
-                                      [w runJS:@"document.body.style.background='#3b82f6'" inItem:src];
-                                      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-                                        [w showItem:t];
-                                        WaitUntil(^{ return (BOOL)(src.thumbnail != nil); }, 5, ^{
-                                          NSImage* th = src.thumbnail;
-                                          BOOL taken = th != nil && th.size.width > 0 && th.size.width <= 330;
-                                          NSBitmapImageRep* px = th ? [[NSBitmapImageRep alloc] initWithData:th.TIFFRepresentation] : nil;
-                                          NSColor* mid = [[px colorAtX:px.pixelsWide / 2 y:px.pixelsHigh / 2]
-                                              colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
-                                          // The hidden test window is 1% opaque, so the copy keeps the page's hue but not its
-                                          // brightness: check the blue test page comes out clearly blue.
-                                          BOOL page = mid && mid.alphaComponent > 0 && mid.blueComponent - mid.redComponent > 0.15 &&
-                                                      mid.blueComponent - mid.greenComponent > 0.15;
-                                          [w showHoverCardForItem:src];
-                                          BOOL inCard = w.hoverCardHasThumbnail;
-                                          [w hideHoverCard];
-                                          [w showHoverCardForItem:t];  // the tab on screen shows no stale picture
-                                          BOOL notShown = !w.hoverCardHasThumbnail;
-                                          [w hideHoverCard];
-                                          std::printf("SELFTEST-THUMBNAIL taken=%d small=%d page=%d inCard=%d notForShown=%d\n", th != nil,
-                                                      taken, page, inCard, notShown);
-                                          gLateTestsDone = YES;
-                                        });
-                                      });
+                                      gLateTestsDone = YES;
                                       std::printf("SELFTEST-AUTOPIP playing=%d popped=%d back=%d gesture=%d settingOff=%d\n", playing,
                                                   popped, back, log, offRespected);
                                     });

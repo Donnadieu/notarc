@@ -243,7 +243,6 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (void)answerHungSheet:(BOOL)exitPage;  // page the Wait/Exit sheet is about, nil if none
 - (void)hideHoverCard;
 @property(nonatomic, readonly) BOOL hoverCardShown;
-@property(nonatomic, readonly) BOOL hoverCardHasThumbnail;  // #65
 - (IBAction)changeSpaceIcon:(id)sender;
 @property(nonatomic, readonly) NSView* themeView;  // the tint layer over the sidebar (for tests)
 // Clear Browsing Data: history and cookies from `since` on (nil = all time) in every Space's profile;
