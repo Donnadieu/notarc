@@ -119,6 +119,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [bar insertItem:fileItem atIndex:1];  // App, File, Edit
   NSMenu* file = [[NSMenu alloc] initWithTitle:@"File"];
   [file addItemWithTitle:@"New Tab" action:@selector(newTab:) keyEquivalent:@"t"];
+  [file addItemWithTitle:@"New Window" action:@selector(newWindow:) keyEquivalent:@"n"];
   [file addItemWithTitle:@"Open Location..." action:@selector(openLocation:) keyEquivalent:@"l"];
   [file addItemWithTitle:@"Close Tab" action:@selector(closeTab:) keyEquivalent:@"w"];
   [file addItemWithTitle:@"Undo Close Tab" action:@selector(undoCloseTab:) keyEquivalent:@""];
@@ -560,11 +561,41 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 170 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
      WaitUntil(^{ return (BOOL)(gLateTestsDone || self.selfTestReload); }, 30, ^{
-      for (NSDictionary* tab in [self.window tabSnapshot])
-        std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
-                    [tab[@"profile"] UTF8String], [tab[@"title"] UTF8String], [tab[@"url"] UTF8String]);
-      std::fflush(stdout);
-      [self.window closeAllBrowsers];
+      void (^finish)(void) = ^{
+        for (NSDictionary* tab in [self.window tabSnapshot])
+          std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
+                      [tab[@"profile"] UTF8String], [tab[@"title"] UTF8String], [tab[@"url"] UTF8String]);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      };
+      if (self.selfTestReload) { finish(); return; }
+      // Multiple windows (#39): runs last so no other check shares the screen with a second window.
+      MainWindowController* w = self.window;
+      ArcItem* t = w.shownItem;
+      int bid = t.browserId;
+      MainWindowController* w2 = [w openNewWindowShowing:t];
+      BOOL opened = [MainWindowController openWindowCount] == 2 && !w2.isMainWindowController && w.isMainWindowController;
+      BOOL shared = w2.spaces == w.spaces && w2.currentSpace == w.currentSpace;
+      BOOL moved = w2.shownItem == t && [w2 hostsBrowserOfItem:t] && ![w hostsBrowserOfItem:t] && w.shownItem != t;
+      BOOL sameBrowser = bid != 0 && t.browserId == bid;
+      [w openInNewTab:@"https://example.org/window-sync" background:YES];
+      ArcSpace* sp = w.currentSpace;
+      ArcItem* added = sp.unpinned.children.firstObject;
+      WaitUntil(^{ return [w2 sidebarShowsItem:added]; }, 3, ^{
+        BOOL synced = [w2 sidebarShowsItem:added] && w2.shownItem == t;
+        [sp.unpinned.children removeObject:added];
+        [w2 moveItemToMainWindow:t];
+        BOOL back = w.shownItem == t && [w hostsBrowserOfItem:t] && ![w2 hostsBrowserOfItem:t] && t.browserId == bid;
+        [w2.window close];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+          BOOL closed = [MainWindowController openWindowCount] == 1;
+          BOOL kept = [w.currentSpace.allTabs containsObject:t] && [w hostsBrowserOfItem:t];
+          [w saveSidebarNow];
+          std::printf("SELFTEST-WINDOWS opened=%d shared=%d moved=%d sameBrowser=%d synced=%d back=%d closed=%d kept=%d\n",
+                      opened, shared, moved, sameBrowser, synced, back, closed, kept);
+          finish();
+        });
+      });
      });
     });
   }

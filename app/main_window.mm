@@ -616,6 +616,10 @@ static MainWindowController* OwnerOf(int browserId, MainWindowController* fallba
   MainWindowController* w = [gBrowserOwners objectForKey:@(browserId)];
   return w ?: fallback;
 }
+// The first window owns the shared pieces (profile contexts, sidebar save); others are views onto the same
+// Spaces, like Arc's StorableWindows (one sidebar, each window with its own Space, tab and split).
+static __weak MainWindowController* gMainWindow;
+static NSMutableArray<MainWindowController*>* gWindows;
 
 @implementation MainWindowController {
   NSMutableArray<ArcSpace*>* _spaces;
@@ -733,6 +737,9 @@ static MainWindowController* OwnerOf(int browserId, MainWindowController* fallba
   NSMutableDictionary<NSString*, NSControl*>* _boostControls;
   int _zapBrowser;
   NSUInteger _cardPops;        // tests
+  NSHashTable* _sidebarDirtyFrom;  // windows whose sidebar change other windows haven't picked up yet
+  BOOL _sidebarRefreshScheduled;
+  BOOL _syncingSidebar;
 }
 
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID {
@@ -1216,7 +1223,13 @@ NSString* CleanLinkURL(NSString* url) {
 }
 
 // One isolated browser profile per Arc Space (cookies, storage), keyed by Arc's profile name.
+- (BOOL)contextIsReady:(NSString*)profile {
+  if (gMainWindow && gMainWindow != self) return [gMainWindow contextIsReady:profile];
+  return _readyContexts.count(profile.UTF8String) > 0;
+}
+
 - (CefRefPtr<CefRequestContext>)contextForSpace:(ArcSpace*)space {
+  if (gMainWindow && gMainWindow != self) return [gMainWindow contextForSpace:space];
   std::string key = space.profileDirectory.UTF8String;
   auto it = _contexts.find(key);
   if (it != _contexts.end()) return it->second;
@@ -1449,6 +1462,9 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 }
 
 - (void)createBrowsers {
+  gMainWindow = self;
+  if (!gWindows) gWindows = [NSMutableArray array];
+  if (![gWindows containsObject:self]) [gWindows addObject:self];
   [self installSwipeNavigation];
   __weak MainWindowController* weakSelf = self;
   _client = new BrowserClient(
@@ -1548,7 +1564,17 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   if (item.browserId || !item.url.length || !_client || !_content) return;
   ArcSpace* space = [self spaceOwningItem:item];
   CefRefPtr<CefRequestContext> context = [self contextForSpace:space];
-  if (!_readyContexts.count(space.profileDirectory.UTF8String)) {
+  if (![self contextIsReady:space.profileDirectory]) {
+    if (gMainWindow && gMainWindow != self) {  // the main window starts profiles; try again shortly
+      __weak MainWindowController* weakSelf = self;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+        MainWindowController* me = weakSelf;
+        if (!me || !me->_content) return;
+        [me ensureBrowserForItem:item];
+        if ([[me visiblePanes] containsObject:item]) [me layoutPanes];
+      });
+      return;
+    }
     if (!_pendingTabs) _pendingTabs = [NSMutableDictionary dictionary];
     NSMutableArray* queue = _pendingTabs[space.profileDirectory] ?: [NSMutableArray array];
     if (![queue containsObject:item]) [queue addObject:item];
@@ -1620,7 +1646,8 @@ static NSString* const kPiPExitJS =
   _shown.lastActiveAt = [NSDate date];  // the tab we leave was active until now
   _shown = item;
   ArcSpace* owner = [self spaceOwningItem:item];
-  if (item.itemID && ![owner.shownItemID isEqualToString:item.itemID]) {
+  // The Space's last-shown tab (restored at launch) follows the main window only; other windows keep their own.
+  if (item.itemID && [self isMainWindowController] && ![owner.shownItemID isEqualToString:item.itemID]) {
     owner.shownItemID = item.itemID;
     [self scheduleSave];
   }
@@ -1677,6 +1704,8 @@ static NSString* const kPiPExitJS =
 
 - (void)closeAllBrowsers {
   _closing = YES;
+  for (MainWindowController* w in [gWindows copy])
+    if (w != self) [w.window close];  // their pages close too, before the quit check below
   for (LittleWindowController* lw in [_littleWindows copy]) [lw.window close];
   [_peek.window close];
   if (_client) _client->set_quit_when_empty(true);
@@ -2653,6 +2682,7 @@ static NSString* RelativeAgo(NSDate* d) {
     }
   }];
   [self hideHoverCard];
+  if (_syncingSidebar) return;  // redrawing for another window's change: never switch tabs here
   if (_outline.selectedRowIndexes.count > 1) return;  // multi-select only marks rows; it doesn't switch tabs
   ArcItem* item = [_outline itemAtRow:_outline.selectedRow];
   if (item.isSplit) {
@@ -2681,7 +2711,24 @@ static NSString* RelativeAgo(NSDate* d) {
 #pragma mark Persistence
 
 // Coalesce bursts of changes (page titles arrive several times per load) into one write.
-- (void)scheduleSave {
+- (void)scheduleSave { [self scheduleSaveFrom:self]; }
+
+- (void)scheduleSaveFrom:(MainWindowController*)origin {
+  if (gMainWindow && gMainWindow != self) {  // one writer: the main window saves the shared sidebar
+    [gMainWindow scheduleSaveFrom:origin];
+    return;
+  }
+  if (gWindows.count > 1) {
+    if (!_sidebarDirtyFrom) _sidebarDirtyFrom = [NSHashTable weakObjectsHashTable];
+    [_sidebarDirtyFrom addObject:origin];
+    if (!_sidebarRefreshScheduled) {
+      _sidebarRefreshScheduled = YES;
+      __weak MainWindowController* weakMain = self;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
+        [weakMain refreshOtherWindows];
+      });
+    }
+  }
   if (!self.storePath || _saveScheduled) return;
   _saveScheduled = YES;
   __weak MainWindowController* weakSelf = self;
@@ -2690,7 +2737,40 @@ static NSString* RelativeAgo(NSDate* d) {
   });
 }
 
+// Another window changed the shared sidebar: redraw ours. A window that made the change already redrew itself.
+- (void)refreshOtherWindows {
+  _sidebarRefreshScheduled = NO;
+  NSArray* origins = _sidebarDirtyFrom.allObjects;
+  [_sidebarDirtyFrom removeAllObjects];
+  for (MainWindowController* w in [gWindows copy]) {
+    if (origins.count == 1 && origins.firstObject == w) continue;
+    [w sidebarModelChanged];
+  }
+}
+
+- (void)sidebarModelChanged {
+  if (!_content) return;
+  if (_space && ![_spaces containsObject:_space]) {  // our Space was deleted elsewhere
+    _space = nil;
+    _shown = nil;
+    [self rebuildSpacePicker];
+    if (_spaces.count) [self switchToSpace:_spaces.firstObject];
+    return;
+  }
+  _syncingSidebar = YES;
+  [self reloadSidebar];
+  if (_spacePicker.numberOfItems != (NSInteger)_spaces.count) [self rebuildSpacePicker];
+  [self selectSidebarRowFor:_shown];
+  _syncingSidebar = NO;
+}
+
+- (BOOL)sidebarShowsItem:(ArcItem*)item { return item && [_outline rowForItem:item] >= 0; }  // tests
+
 - (void)saveSidebarNow {
+  if (gMainWindow && gMainWindow != self) {
+    [gMainWindow saveSidebarNow];
+    return;
+  }
   _saveScheduled = NO;
   if (!self.storePath) return;
   NSError* error = nil;
@@ -2902,7 +2982,10 @@ static const CGFloat kPaneGap = 6;
 - (void)layoutPanes {
   [self syncSplitState];
   NSArray<ArcItem*>* panes = [self visiblePanes];
-  for (ArcItem* pane in panes) [self ensureBrowserForItem:pane];
+  for (ArcItem* pane in panes) {
+    [self claimBrowserOfItem:pane];  // a tab is on screen in one window at a time; its page moves here
+    [self ensureBrowserForItem:pane];
+  }
   NSArray<NSValue*>* frames = [self framesForPaneCount:panes.count];
   for (auto& kv : _browsers) {
     NSUInteger index = NSNotFound;
@@ -3622,7 +3705,7 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   ArcSpace* space = _space;
   CefRefPtr<CefRequestContext> context = [self contextForSpace:space];
   __weak MainWindowController* weakSelf = self;
-  if (!_readyContexts.count(space.profileDirectory.UTF8String)) {
+  if (![self contextIsReady:space.profileDirectory]) {
     // The Space's profile is still starting (e.g. a link arrived at launch); try again shortly.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
       [weakSelf openLittleWindow:url];
@@ -5290,6 +5373,11 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
     move.submenu = sub;
     [m addItem:move];
   }
+  if (isTab) {
+    [m addItem:[self menuItem:@"Move to New Window" action:@selector(menuMoveToNewWindow:) item:item]];
+    if (gMainWindow && gMainWindow != self)
+      [m addItem:[self menuItem:@"Move to Main Window" action:@selector(menuMoveToMainWindow:) item:item]];
+  }
   if (isToday && [_space.unpinned.children containsObject:item]) {
     [m addItem:[NSMenuItem separatorItem]];
     [m addItem:[self menuItem:@"Archive Other Tabs" action:@selector(menuArchiveOthers:) item:item]];
@@ -6583,6 +6671,7 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 }
 
 - (std::vector<CefRefPtr<CefRequestContext>>)allContexts {
+  if (gMainWindow && gMainWindow != self) return [gMainWindow allContexts];
   std::vector<CefRefPtr<CefRequestContext>> out;
   for (auto& kv : _contexts) out.push_back(kv.second);
   if (auto g = CefRequestContext::GetGlobalContext()) out.push_back(g);
@@ -6737,9 +6826,144 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   return _archiveWindow.visibleCount;
 }
 
+#pragma mark Windows (#39)
+
++ (NSUInteger)openWindowCount { return MAX(gWindows.count, (NSUInteger)1); }
+- (BOOL)isMainWindowController { return !gMainWindow || gMainWindow == self; }
+
+- (instancetype)initSecondaryFrom:(MainWindowController*)main space:(ArcSpace*)space {
+  if ((self = [self initWithSpaces:main->_spaces focusedSpaceID:space.spaceID])) {
+    _spaces = main->_spaces;  // the same Spaces, not a copy
+    _space = space ?: main->_space;
+    self.selfTestProfiles = main.selfTestProfiles;
+    self.archivePath = main.archivePath;
+    self.historyPath = main.historyPath;
+    self.linkRoutingPath = main.linkRoutingPath;
+    _client = main->_client;
+    _history = [main historyStore];
+    _archive = [main archive];
+    _boosts = [main boostList];
+    if (self.selfTestProfiles) {  // hidden runs: never on screen, never clickable
+      self.window.alphaValue = 0.01;
+      self.window.ignoresMouseEvents = YES;
+    }
+    NSRect f = main.window.frame;
+    [self.window setFrame:NSOffsetRect(f, 28, -28) display:NO];
+    [self rebuildSpacePicker];
+    [self reloadSidebar];
+    [gWindows addObject:self];
+    [self showWindow:nil];
+    [self installSwipeNavigation];
+    __weak MainWindowController* weakSelf = self;
+    _mediaTimer = [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer*) { [weakSelf pollMediaNow]; }];
+  }
+  return self;
+}
+
+- (MainWindowController*)openNewWindowShowing:(ArcItem*)item {
+  MainWindowController* main = gMainWindow ?: self;
+  ArcSpace* space = item ? [self spaceOwningItem:item] : _space;  // Arc: a new window inherits the Space
+  MainWindowController* w = [[MainWindowController alloc] initSecondaryFrom:main space:space];
+  if (item) [w showItem:item];
+  return w;
+}
+
+- (IBAction)newWindow:(id)sender {
+  MainWindowController* w = [self openNewWindowShowing:nil];
+  if (!self.selfTestProfiles) [w showCommandBarForNewTab:YES];
+}
+
+- (void)menuMoveToNewWindow:(NSMenuItem*)sender {
+  ArcItem* item = sender.representedObject;
+  if (item.url.length) [self openNewWindowShowing:item];
+}
+
+- (void)moveItemToMainWindow:(ArcItem*)item {
+  MainWindowController* main = gMainWindow;
+  if (!main || main == self || !item.url.length) return;
+  ArcSpace* sp = [self spaceOwningItem:item];
+  if (sp != main->_space) [main switchToSpace:sp];
+  [main showItem:item];
+  if (!self.selfTestProfiles) [main.window makeKeyAndOrderFront:nil];
+}
+
+- (void)menuMoveToMainWindow:(NSMenuItem*)sender { [self moveItemToMainWindow:sender.representedObject]; }
+
+// The page itself moves (Arc: reassignWebContent): same browser, nothing reloads.
+- (void)claimBrowserOfItem:(ArcItem*)item {
+  if (!item.browserId) return;
+  MainWindowController* owner = OwnerOf(item.browserId, nil);
+  if (!owner || owner == self) return;
+  [owner giveBrowserOfItem:item to:self];
+}
+
+- (void)giveBrowserOfItem:(ArcItem*)item to:(MainWindowController*)dest {
+  auto it = _browsers.find(item.browserId);
+  if (it == _browsers.end() || _chromePages[@(it->first)]) return;  // Chrome-style pages stay put for now
+  CefRefPtr<CefBrowser> browser = it->second;
+  _browsers.erase(it);
+  [dest acceptBrowser:browser];
+  [self lostItem:item];
+}
+
+- (void)acceptBrowser:(CefRefPtr<CefBrowser>)browser {
+  NSView* view = CAST_CEF_WINDOW_HANDLE_TO_NSVIEW(browser->GetHost()->GetWindowHandle());
+  [_content addSubview:view];  // reparent directly; the view is never without a window in between
+  view.frame = _content.bounds;
+  view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  _browsers[browser->GetIdentifier()] = browser;
+  [self adoptBrowser:browser->GetIdentifier()];
+}
+
+// A tab this window showed went to another window: show the next tab that isn't on screen elsewhere.
+- (void)lostItem:(ArcItem*)item {
+  if (_shown != item && ![_splitItems containsObject:item]) {
+    [self layoutPanes];
+    return;
+  }
+  _shown = nil;
+  _splitItems = nil;
+  ArcItem* next = nil;
+  for (ArcItem* t in _space.allTabs) {
+    if (t == item || !t.url.length || t.noteID || t.easelID) continue;
+    MainWindowController* o = t.browserId ? OwnerOf(t.browserId, nil) : nil;
+    if (o && o != self) continue;
+    next = t;
+    break;
+  }
+  if (next) {
+    [self showItem:next];
+  } else {
+    [self layoutPanes];
+    [self selectSidebarRowFor:nil];
+    [self updateToolbarAddress];
+  }
+}
+
+- (void)closeSecondaryWindow {
+  [gWindows removeObject:self];
+  [_mediaTimer invalidate];
+  _mediaTimer = nil;
+  for (LittleWindowController* lw in [_littleWindows copy]) [lw.window close];
+  [_peek.window close];
+  if (_swipeMonitor) [NSEvent removeMonitor:_swipeMonitor];
+  _swipeMonitor = nil;
+  std::vector<int> ids;
+  for (auto& kv : _browsers) ids.push_back(kv.first);
+  for (int bid : ids) {  // its tabs stay in the sidebar; their pages close and reload when shown again
+    ArcItem* item = [self itemForBrowser:bid];
+    if (item) [self unloadItem:item];
+  }
+  _browsers.clear();
+  [_content removeFromSuperview];
+  _content = nil;
+  [gMainWindow refreshOtherWindows];
+}
+
 #pragma mark NSWindowDelegate
 
 - (BOOL)windowShouldClose:(NSWindow*)sender {
+  if (gMainWindow && gMainWindow != self) return YES;  // another window: its tabs stay in the shared sidebar
   if (_closing || _browsers.empty() || !_client || _client->open_browser_count() == 0) return YES;
   [self closeAllBrowsers];
   return NO;
@@ -6749,6 +6973,12 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 // view on window close is what actually tears the browsers down (DoClose returns false).
 - (void)windowWillClose:(NSNotification*)notification {
   if (notification.object != self.window) return;  // the Archive window closing is not a quit
+  if (gMainWindow && gMainWindow != self) {
+    [self closeSecondaryWindow];
+    return;
+  }
+  for (MainWindowController* w in [gWindows copy])
+    if (w != self) [w.window close];
   for (LittleWindowController* lw in [_littleWindows copy]) [lw.window close];
   [_peek.window close];
   [_archiveTimer invalidate];

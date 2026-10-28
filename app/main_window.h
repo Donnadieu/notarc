@@ -161,6 +161,14 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Incognito window (#40, Cmd+Shift+N): its own in-memory profile, shared by all open Incognito windows and wiped
 // when the last one closes. Nothing goes to History, the Archive or disk.
 - (IBAction)newIncognitoWindow:(id)sender;
+// Multiple windows (#39): one shared sidebar; each window has its own Space and tab.
+- (IBAction)newWindow:(id)sender;
+- (MainWindowController*)openNewWindowShowing:(ArcItem*)item;  // nil = the current Space's last tab
+- (void)moveItemToMainWindow:(ArcItem*)item;
++ (NSUInteger)openWindowCount;
+- (BOOL)isMainWindowController;
+- (BOOL)hostsBrowserOfItem:(ArcItem*)item;  // tests
+- (BOOL)sidebarShowsItem:(ArcItem*)item;    // tests
 // AppleScript (#76): "select", "back", "forward", "reload", "stop", "close", or "loading" (returns it) for a tab.
 - (BOOL)scriptItem:(ArcItem*)item command:(NSString*)command;
 // Call controls (#47): the tab using the camera/mic, and the sidebar's mute / camera-off toggles.
