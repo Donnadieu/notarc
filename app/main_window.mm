@@ -641,6 +641,7 @@ class DevToolsResults : public CefDevToolsMessageObserver {
   BOOL _focusMode;
   CAGradientLayer* _themeGradient;
   NSPopover* _hoverCard;
+  BOOL _hoverCardHasThumbnail;
   NSView* _mediaBar;
   NSButton* _callMic;
   NSButton* _callCam;
@@ -1593,8 +1594,48 @@ static NSString* const kPiPExitJS =
             }];
 }
 
+// Tab thumbnails (#65): a small JPEG of the page as you leave it, shown in hover cards.
+- (void)takeThumbnailOf:(ArcItem*)item {
+  // Taken from NotArc's own window, never through DevTools: once DevTools is attached to a tab, Chromium stops
+  // reporting it as frozen ("Page Unresponsive"). A page's pixels live in the GPU process, so the window server
+  // is the only other place to read them; an app may always read its own windows (no permission prompt).
+  if (!item.browserId || item.noteID || item.easelID || item.crashed) return;
+  NSView* web = [self webViewForItem:item];
+  NSWindow* win = web.window;
+  if (!win || web.hidden || web.bounds.size.width < 50 || web.bounds.size.height < 50) return;
+  // Flipping quickly back and forth shouldn't cost a capture each time; anything slower gets a fresh picture.
+  NSDate* now = [NSDate date];
+  if (item.thumbnail && item.thumbnailTaken && [now timeIntervalSinceDate:item.thumbnailTaken] < 0.5) return;
+  CFAbsoluteTime t0 = CFAbsoluteTimeGetCurrent();
+  NSRect inWin = [web convertRect:web.bounds toView:nil];
+  CGFloat h = MIN(inWin.size.height, inWin.size.width * 0.75);
+  NSRect top = NSMakeRect(inWin.origin.x, NSMaxY(inWin) - h, inWin.size.width, h);
+  NSRect scr = [win convertRectToScreen:top];
+  CGFloat mainH = NSScreen.screens.firstObject.frame.size.height;
+  CGRect cgRect = CGRectMake(scr.origin.x, mainH - NSMaxY(scr), scr.size.width, scr.size.height);  // top-left origin
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
+  // Only the page area of this one window, at 1x: small and quick.
+  CGImageRef part = CGWindowListCreateImage(cgRect, kCGWindowListOptionIncludingWindow, (CGWindowID)win.windowNumber,
+                                            kCGWindowImageBoundsIgnoreFraming | kCGWindowImageNominalResolution);
+#pragma clang diagnostic pop
+  if (!part) return;
+  NSSize small = NSMakeSize(320, 320 * h / inWin.size.width);
+  NSImage* img = [[NSImage alloc] initWithSize:small];
+  [img lockFocus];
+  NSGraphicsContext.currentContext.imageInterpolation = NSImageInterpolationHigh;
+  CGContextDrawImage(NSGraphicsContext.currentContext.CGContext, CGRectMake(0, 0, small.width, small.height), part);
+  [img unlockFocus];
+  CGImageRelease(part);
+  item.thumbnailTaken = now;
+  if (getenv("NOTARC_SELFTEST_TIMING") || self.selfTestProfiles)
+    std::printf("THUMB-TIME %.1f ms\n", (CFAbsoluteTimeGetCurrent() - t0) * 1000);
+  item.thumbnail = img;
+}
+
 - (void)showItem:(ArcItem*)item {
   if (!item.url.length) return;
+  if (item != _shown && _shown) [self takeThumbnailOf:_shown];
   if (item != _shown && _shown.mediaPlaying && SettingBool(kSettingAutoPiP)) [self pictureInPicture:YES item:_shown done:nil];
   if (item.inPictureInPicture && item != _shown) [self pictureInPicture:NO item:item done:nil];
   if (item != _shown && _shown) [self popPageCard];
@@ -2577,6 +2618,7 @@ static NSString* RelativeAgo(NSDate* d) {
 }
 
 - (BOOL)hoverCardShown { return _hoverCard.shown; }
+- (BOOL)hoverCardHasThumbnail { return _hoverCard != nil && _hoverCardHasThumbnail; }
 
 - (void)hideHoverCard {
   [_hoverCard close];
@@ -2605,6 +2647,20 @@ static NSString* RelativeAgo(NSDate* d) {
   stack.alignment = NSLayoutAttributeLeading;
   stack.spacing = 3;
   stack.edgeInsets = NSEdgeInsetsMake(10, 12, 10, 12);
+  _hoverCardHasThumbnail = NO;
+  if (item.thumbnail && item != _shown) {
+    NSImageView* iv = [NSImageView imageViewWithImage:item.thumbnail];
+    iv.imageScaling = NSImageScaleProportionallyUpOrDown;
+    iv.wantsLayer = YES;
+    iv.layer.cornerRadius = 6;
+    iv.layer.masksToBounds = YES;
+    NSSize s = item.thumbnail.size;
+    [iv.widthAnchor constraintEqualToConstant:280].active = YES;
+    [iv.heightAnchor constraintEqualToConstant:s.width > 0 ? 280 * s.height / s.width : 160].active = YES;
+    [stack addArrangedSubview:iv];
+    [stack setCustomSpacing:8 afterView:iv];
+    _hoverCardHasThumbnail = YES;
+  }
   for (NSUInteger i = 0; i < lines.count; ++i) {
     NSTextField* l = [NSTextField wrappingLabelWithString:lines[i]];
     l.preferredMaxLayoutWidth = 280;
