@@ -26,6 +26,8 @@ void SettingsRegisterDefaults(void) {
     kSettingAutoPiP : @YES,
     kSettingSearchSuggestions : @YES,
     kSettingBlockAds : @NO,
+    kSettingSoundEffects : @YES,
+    kSettingReorderHaptics : @YES,
     kSettingShowSpaceHeader : @YES,
   }];
 }
@@ -62,6 +64,38 @@ static NSArray<NSArray<NSString*>*>* Engines() {
 
 NSString* const kSettingSearchSuggestions = @"searchSuggestions";
 NSString* const kSettingBlockAds = @"blockAdsAndTrackers";
+NSString* const kSettingSoundEffects = @"soundEffects";
+NSString* const kSettingReorderHaptics = @"reorderHaptics";
+
+static NSInteger g_soundsPlayed = 0, g_haptics = 0;
+
+BOOL PlaySoundEffect(NotArcSound sound) {
+  if (!SettingBool(kSettingSoundEffects)) return NO;
+  if (g_memorySettings) {  // self-test: never make noise
+    ++g_soundsPlayed;
+    return YES;
+  }
+  static NSSound* capture;
+  if (!capture) {
+    NSString* sys = @"/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/system/";
+    capture = [[NSSound alloc] initWithContentsOfFile:[sys stringByAppendingString:@"Screen Capture.aif"] byReference:YES]
+                  ?: [NSSound soundNamed:@"Tink"];
+  }
+  NSSound* s = sound == NotArcSoundCapture ? capture : nil;
+  [s stop];
+  [s play];
+  return YES;
+}
+NSInteger SoundEffectsPlayedForTest(void) { return g_soundsPlayed; }
+
+void ReorderHaptic(void) {
+  if (!SettingBool(kSettingReorderHaptics)) return;
+  ++g_haptics;
+  if (g_memorySettings) return;
+  [NSHapticFeedbackManager.defaultPerformer performFeedbackPattern:NSHapticFeedbackPatternAlignment
+                                                   performanceTime:NSHapticFeedbackPerformanceTimeNow];
+}
+NSInteger ReorderHapticsForTest(void) { return g_haptics; }
 NSString* const kSettingAdBlockExceptions = @"adBlockExceptions";
 
 void ApplyContentBlockerSettings(void) {
@@ -318,6 +352,8 @@ static NSArray* LittleArchiveChoices() {
     [self note:@"Only affects Pinned tabs and Favorites."],
     [self check:@"Open a Peek window when clicking on links with Shift held" key:kSettingPeekShiftClick],
     [self check:@"Automatically open picture-in-picture when leaving a tab with a playing video" key:kSettingAutoPiP],
+    [self check:@"Play sound effects" key:kSettingSoundEffects],
+    [self check:@"Haptic feedback when reordering tabs" key:kSettingReorderHaptics],
     [NSButton buttonWithTitle:@"Air Traffic Control..." target:nil action:@selector(showAirTrafficControl:)],
     [self note:@"Rules that send links from other apps to a Space or a Little Window. Your Arc rules come over on first launch."],
     little,
