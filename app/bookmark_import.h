@@ -12,3 +12,5 @@ ArcItem* BookmarksFromHTMLFile(NSString* path, NSString* folderTitle, NSUInteger
 
 // Installed Chromium-family browsers with a Bookmarks file: @[ @[displayName, path], ... ].
 NSArray<NSArray<NSString*>*>* DetectedBookmarkSources(void);
+// Same browsers, profiles with a "History" database (#63): @[ @[displayName, path], ... ].
+NSArray<NSArray<NSString*>*>* DetectedHistorySources(void);

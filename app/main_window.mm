@@ -3878,6 +3878,52 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   return YES;
 }
 
+- (NSUInteger)importHistoryFromFile:(NSString*)db browser:(NSString*)name {
+  HistoryStore* store = [self historyStore];
+  if (!store || !db.length) return 0;
+  NSError* error = nil;
+  // Chromium-family browsers keep history in the same database format as Arc; read it the same read-only way.
+  NSArray* visits = ArcReadHistory(db, name, 20000, &error);
+  if (!visits) {
+    if (error) std::fprintf(stderr, "History import skipped: %s\n", error.localizedDescription.UTF8String);
+    return 0;
+  }
+  return [store mergeVisits:visits];
+}
+
+- (IBAction)importHistoryFromMenu:(id)sender {
+  NSArray* sources = DetectedHistorySources();
+  NSAlert* a = [NSAlert new];
+  a.messageText = @"Import History";
+  if (!sources.count) {
+    a.informativeText = @"No Chrome, Brave, Edge, Vivaldi or Chromium history was found on this Mac.";
+    [a beginSheetModalForWindow:self.window completionHandler:nil];
+    return;
+  }
+  a.informativeText = @"Visits are added to NotArc's History (Cmd+Y) and command bar. The other browser isn't changed.";
+  NSPopUpButton* from = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 300, 26) pullsDown:NO];
+  for (NSArray* s in sources) {
+    [from addItemWithTitle:s[0]];
+    from.lastItem.representedObject = s;
+  }
+  a.accessoryView = from;
+  [a addButtonWithTitle:@"Import"];
+  [a addButtonWithTitle:@"Cancel"];
+  __weak MainWindowController* weakSelf = self;
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r != NSAlertFirstButtonReturn) return;
+    NSArray* src = from.selectedItem.representedObject;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      MainWindowController* me = weakSelf;
+      if (!me || !src) return;
+      NSUInteger n = [me importHistoryFromFile:src[1] browser:src[0]];
+      NSAlert* done = [NSAlert new];
+      done.messageText = n ? [NSString stringWithFormat:@"%lu visits imported", (unsigned long)n] : @"No new history to import";
+      [done beginSheetModalForWindow:me.window completionHandler:nil];
+    });
+  }];
+}
+
 - (IBAction)importBookmarksFromMenu:(id)sender {
   NSAlert* a = [NSAlert new];
   a.messageText = @"Import Bookmarks";

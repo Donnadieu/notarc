@@ -104,7 +104,12 @@ ArcItem* BookmarksFromHTMLFile(NSString* path, NSString* folderTitle, NSUInteger
   return top;
 }
 
-NSArray<NSArray<NSString*>*>* DetectedBookmarkSources(void) {
+static NSArray<NSArray<NSString*>*>* DetectedProfileFiles(NSString* file);
+
+NSArray<NSArray<NSString*>*>* DetectedBookmarkSources(void) { return DetectedProfileFiles(@"Bookmarks"); }
+NSArray<NSArray<NSString*>*>* DetectedHistorySources(void) { return DetectedProfileFiles(@"History"); }
+
+static NSArray<NSArray<NSString*>*>* DetectedProfileFiles(NSString* file) {
   NSString* support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
   NSArray* browsers = @[ @[ @"Google Chrome", @"Google/Chrome" ], @[ @"Brave", @"BraveSoftware/Brave-Browser" ],
                          @[ @"Microsoft Edge", @"Microsoft Edge" ], @[ @"Vivaldi", @"Vivaldi" ], @[ @"Chromium", @"Chromium" ] ];
@@ -116,7 +121,7 @@ NSArray<NSArray<NSString*>*>* DetectedBookmarkSources(void) {
     NSData* ls = [NSData dataWithContentsOfFile:[dir stringByAppendingPathComponent:@"Local State"]];
     if (ls) names = [[NSJSONSerialization JSONObjectWithData:ls options:0 error:nil] valueForKeyPath:@"profile.info_cache"];
     for (NSString* p in [[fm contentsOfDirectoryAtPath:dir error:nil] sortedArrayUsingSelector:@selector(localizedStandardCompare:)]) {
-      NSString* f = [[dir stringByAppendingPathComponent:p] stringByAppendingPathComponent:@"Bookmarks"];
+      NSString* f = [[dir stringByAppendingPathComponent:p] stringByAppendingPathComponent:file];
       if (![fm fileExistsAtPath:f]) continue;
       NSString* pname = [names isKindOfClass:NSDictionary.class] ? names[p][@"name"] : nil;
       [out addObject:@[ [NSString stringWithFormat:@"%@ (%@)", b[0], pname ?: p], f ]];

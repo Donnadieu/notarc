@@ -3,6 +3,10 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- File > Import History...: brings your browsing history from Chrome, Brave, Edge, Vivaldi or Chromium into History
+  and the command bar. The other browser isn't changed; importing twice adds nothing twice.
+
 ## 0.22.0
 - Sound effects: Capture plays a shutter sound (Settings > Play sound effects). Reordering tabs in the sidebar gives a
   trackpad tick (Settings > Haptic feedback when reordering tabs). Both on by default.

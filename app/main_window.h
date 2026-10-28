@@ -200,6 +200,8 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Import bookmarks (#80): adds the folder to the current Space's Pinned section, like Arc. Returns NO if nil.
 - (BOOL)addImportedBookmarks:(ArcItem*)folder;
 - (IBAction)importBookmarksFromMenu:(id)sender;  // File > Import Bookmarks...
+- (IBAction)importHistoryFromMenu:(id)sender;    // File > Import History... (Chrome, Brave, Edge, Vivaldi, Chromium)
+- (NSUInteger)importHistoryFromFile:(NSString*)db browser:(NSString*)name;  // visits added; read-only on the source
 - (void)openIncognitoWindow:(NSString*)url;
 - (NSUInteger)incognitoWindowCount;  // tests
 - (BOOL)incognitoContextIsOnDisk;    // tests: NO = in-memory  // the rule editor (Settings > Links, command bar)
