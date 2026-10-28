@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-54 done, 19 partial, 14 not started or out of scope, of 87 items.
+54 done, 20 partial, 13 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -80,7 +80,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [ ] Easel (canvas of captures, text, live web clips) (partial: File > New Easel and the + menu add an easel to Today; File > Capture to Easel (Cmd+Shift+2) adds a capture of the visible page, linked to its source, to the most recent easel; text boxes (double-click the canvas); drag to move, Delete to remove; saved locally, archived and reopened like tabs. Missing: live web clips, region and full-page capture, drawing (arrows, shapes, freehand), resizing; sharing is out of scope) (#49)
 - [ ] Notes (rich-text documents in the sidebar) (partial: File > New Note (Cmd+Ctrl+N) and the + menu create a note at the top of Today; rich-text editor in the page card (bold, italic, underline, fonts, lists via Format menu), titled from its first line, autosaved locally, archived on close and reopened from the archive. Missing: Arc's note styling and toolbar, notes in split view, Markdown export; sharing is out of scope) (#50)
 - [ ] Boosts: custom CSS/JS per site, zap elements, boost editor (partial: per-site Boosts saved locally and applied on every page load, including subdomains: colour tint, font, text size, upper/lower case, zaps (Option-click zaps all related elements), custom CSS and JavaScript; editor panel with Shuffle; Boost indicator in the address pill; on/off. Missing: Arc's editor look and colour wheel; sharing is out of scope) (#51)
-- [ ] Translate page (missing) (#52)
+- [ ] Translate page (partial: View > Translate Page opens the page through Google's web translator into your macOS language, Show Original goes back; no automatic offer or in-place translation, as CEF lacks Chromium's translate bubble) (#52)
 - [ ] Ad blocking / content blocking (missing) (#53)
 - [x] Site control center (per-site permissions, clear cookies and refresh) (View > Site Settings, Cmd+Shift+I: connection security, Ask/Allow/Block for camera, mic, location, notifications, clipboard; Clear Cookies and Refresh; Reset Permissions) (#54)
 

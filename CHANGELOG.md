@@ -4,6 +4,8 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Translate Page (View menu): opens the page through Google's web translator into your macOS language; Show Original
+  goes back. Nothing is sent to Google unless you choose it.
 - Split view: Focus Previous Pane (Ctrl+Shift+[) next to Focus Next Pane, both wrapping around. Share Split View copies
   every pane's address; pasting two to four addresses into the command bar opens them as one split.
 - Multiple windows: Chrome-style pages (Settings, off by default) also move between windows without reloading.

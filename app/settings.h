@@ -29,6 +29,9 @@ BOOL NotArcIsDefaultBrowser(void);
 void MakeNotArcDefaultBrowser(void (^done)(BOOL ok));
 // Search suggestions (#31): the chosen engine's suggestion endpoint (OpenSearch JSON), and its parser.
 extern NSString* const kSettingSearchSuggestions;     // BOOL, default YES
+NSString* TranslateURLFor(NSString* url, NSString* lang);  // nil for non-web or already translated pages
+NSString* OriginalURLForTranslated(NSString* url);          // nil when the page isn't a translation
+NSString* PreferredTranslateLanguage(void);                 // first macOS language, e.g. "en", "zh-TW"
 NSString* SuggestURLForQuery(NSString* encodedQuery);
 NSArray<NSString*>* ParseSearchSuggestions(NSData* json);   // uses the chosen search engine
 BOOL SettingBool(NSString* key);

@@ -2895,6 +2895,15 @@ static NSString* RelativeAgo(NSDate* d) {
   b->GetHost()->ShowDevTools(info, nullptr, settings, CefPoint());
 }
 
+- (IBAction)translatePage:(id)sender {
+  NSString* url = [self currentURL];
+  if (!url.length || !_shown) return;
+  NSString* original = OriginalURLForTranslated(url);
+  NSString* target = original ?: TranslateURLFor(url, PreferredTranslateLanguage());
+  if (!target) { NSBeep(); return; }
+  [self loadURL:target inItem:_shown];
+}
+
 - (IBAction)copyCurrentURL:(id)sender {
   NSString* url = [self currentURL];
   if (!url.length) return;
@@ -6575,6 +6584,12 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 - (IBAction)resetAllPinnedTabs:(id)sender { [self resetPinnedTabsInSpace]; }
 
 - (BOOL)validateMenuItem:(NSMenuItem*)mi {
+  if (mi.action == @selector(translatePage:)) {
+    NSString* url = [self currentURL];
+    BOOL translated = url && OriginalURLForTranslated(url);
+    mi.title = translated ? @"Show Original" : @"Translate Page";
+    return translated || (url && TranslateURLFor(url, @"en"));
+  }
   if (mi.action == @selector(toggleToolbar:)) mi.title = SettingBool(kSettingShowToolbar) ? @"Hide Toolbar" : @"Show Toolbar";
   if (mi.action == @selector(toggleSpaceHeader:))
     mi.title = SettingBool(kSettingShowSpaceHeader) ? @"Hide Space Header" : @"Show Space Header";

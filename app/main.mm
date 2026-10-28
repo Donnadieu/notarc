@@ -197,6 +197,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [view addItemWithTitle:@"Show Toolbar" action:@selector(toggleToolbar:) keyEquivalent:@"s"]
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Hide Space Header" action:@selector(toggleSpaceHeader:) keyEquivalent:@""];
+  [view addItemWithTitle:@"Translate Page" action:@selector(translatePage:) keyEquivalent:@""];
   [view addItemWithTitle:@"Site Settings..." action:@selector(showSiteSettings:) keyEquivalent:@"i"]
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Reset Site Permissions" action:@selector(resetSitePermissions:) keyEquivalent:@""];
@@ -1060,6 +1061,18 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                     BOOL urlOK = YES;
                     for (NSDictionary* d in url) if ([d[@"kind"] isEqualToString:@"search"]) urlOK = NO;
                     w.searchSuggestionStub = nil;
+                    {  // #52 translate page: URL round trip only (no network in tests)
+                      NSString* tr = TranslateURLFor(@"https://example.com/a?b=1", @"fr");
+                      NSURLComponents* tc = [NSURLComponents componentsWithString:tr];
+                      BOOL build = [tc.host isEqualToString:@"translate.google.com"] && [tr containsString:@"tl=fr"];
+                      BOOL back = [OriginalURLForTranslated(tr) isEqualToString:@"https://example.com/a?b=1"];
+                      BOOL goog = [OriginalURLForTranslated(@"https://www-my--site-com.translate.goog/p?q=2&_x_tr_sl=auto&_x_tr_tl=en")
+                          isEqualToString:@"https://www.my-site.com/p?q=2"];
+                      BOOL skip = !TranslateURLFor(@"notarc://easel/x", @"en") && !TranslateURLFor(tr, @"en") &&
+                                  !OriginalURLForTranslated(@"https://example.com/");
+                      std::printf("SELFTEST-TRANSLATE build=%d back=%d goog=%d skip=%d lang=%d\n", build, back, goog, skip,
+                                  PreferredTranslateLanguage().length >= 2);
+                    }
                     std::printf("SELFTEST-SEARCHSUGGEST parse=%d engine=%d rows=%d settingOff=%d noURL=%d\n", parse, engineURL, rows,
                                 offOK, urlOK);
                   }];
