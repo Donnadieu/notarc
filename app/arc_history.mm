@@ -51,3 +51,60 @@ NSArray<ArchivedTab*>* ArcReadHistory(NSString* dbPath, NSString* spaceName, NSU
   sqlite3_close(db);
   return [[out reverseObjectEnumerator] allObjects];
 }
+
+// Shared read-only query runner: columns url, title, seconds-since-1970.
+static NSArray<ArchivedTab*>* ReadVisits(NSString* dbPath, const char* sql, NSString* name, NSUInteger limit,
+                                         NSError** error) {
+  NSString* uri = [NSString stringWithFormat:@"file:%@?immutable=1",
+                                             [dbPath stringByAddingPercentEncodingWithAllowedCharacters:
+                                                         NSCharacterSet.URLPathAllowedCharacterSet]];
+  sqlite3* db = NULL;
+  if (![NSFileManager.defaultManager isReadableFileAtPath:dbPath] ||
+      sqlite3_open_v2(uri.UTF8String, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) != SQLITE_OK) {
+    if (error)
+      *error = [NSError errorWithDomain:@"BrowserHistory" code:1
+                               userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Can't open %@", dbPath]}];
+    sqlite3_close(db);
+    return nil;
+  }
+  sqlite3_stmt* st = NULL;
+  NSMutableArray<ArchivedTab*>* out = [NSMutableArray array];
+  BOOL ok = sqlite3_prepare_v2(db, sql, -1, &st, NULL) == SQLITE_OK;
+  if (ok) {
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)limit);
+    while (sqlite3_step(st) == SQLITE_ROW) {
+      const char* url = (const char*)sqlite3_column_text(st, 0);
+      const char* title = (const char*)sqlite3_column_text(st, 1);
+      double t = sqlite3_column_double(st, 2);
+      if (!url || t <= 0) continue;
+      ArchivedTab* v = [ArchivedTab new];
+      v.url = [NSString stringWithUTF8String:url];
+      v.title = title ? [NSString stringWithUTF8String:title] : @"";
+      v.reason = name ?: @"";
+      v.archivedAt = [NSDate dateWithTimeIntervalSince1970:t];
+      if (v.url.length && ([v.url hasPrefix:@"http://"] || [v.url hasPrefix:@"https://"])) [out addObject:v];
+    }
+  } else if (error) {
+    *error = [NSError errorWithDomain:@"BrowserHistory" code:2
+                             userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithUTF8String:sqlite3_errmsg(db)]}];
+  }
+  sqlite3_finalize(st);
+  sqlite3_close(db);
+  return ok ? [[out reverseObjectEnumerator] allObjects] : nil;
+}
+
+NSArray<ArchivedTab*>* FirefoxReadHistory(NSString* dbPath, NSString* name, NSUInteger limit, NSError** error) {
+  // visit_date: microseconds since 1970. visit_type 4 = embedded frame, 5/6 = redirect sources, 7 = download.
+  const char* sql =
+      "SELECT p.url, p.title, v.visit_date / 1000000.0 FROM moz_historyvisits v JOIN moz_places p ON p.id = v.place_id "
+      "WHERE v.visit_type NOT IN (4, 5, 6, 7) ORDER BY v.visit_date DESC LIMIT ?1";
+  return ReadVisits(dbPath, sql, name, limit, error);
+}
+
+NSArray<ArchivedTab*>* SafariReadHistory(NSString* dbPath, NSString* name, NSUInteger limit, NSError** error) {
+  // visit_time: seconds since 2001-01-01; visits that redirected elsewhere are skipped.
+  const char* sql =
+      "SELECT i.url, v.title, v.visit_time + 978307200.0 FROM history_visits v JOIN history_items i ON i.id = v.history_item "
+      "WHERE v.redirect_destination IS NULL ORDER BY v.visit_time DESC LIMIT ?1";
+  return ReadVisits(dbPath, sql, name, limit, error);
+}
