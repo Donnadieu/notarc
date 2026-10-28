@@ -54,6 +54,7 @@
     [a addButtonWithTitle:@"Cancel"];
     if ([a runModal] != NSAlertFirstButtonReturn) return;
   }
+  [MainWindowController prepareForQuit];  // other windows come back next launch
   for (NSWindow* w in self.windows) [w performClose:nil];
 }
 @end
@@ -388,6 +389,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   }
   [self.window showWindow:nil];
   [self.window createBrowsers];
+  if (!self.selfTest) [self.window restoreSavedWindows];  // windows open at the last quit (#39)
   for (NSString* url in self.pendingURLs) [self.window routeExternalLink:url sourceApp:self.pendingSource];
   self.pendingURLs = nil;
   if (!self.selfTest) [NSApp activateIgnoringOtherApps:YES];
@@ -584,16 +586,30 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       WaitUntil(^{ return [w2 sidebarShowsItem:added]; }, 3, ^{
         BOOL synced = [w2 sidebarShowsItem:added] && w2.shownItem == t;
         [sp.unpinned.children removeObject:added];
+        BOOL saved = [MainWindowController savedWindowCount] == 1;
+        NSArray<NSDictionary*>* list = [MainWindowController windowStateList];
         [w2 moveItemToMainWindow:t];
         BOOL back = w.shownItem == t && [w hostsBrowserOfItem:t] && ![w2 hostsBrowserOfItem:t] && t.browserId == bid;
         [w2.window close];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
           BOOL closed = [MainWindowController openWindowCount] == 1;
           BOOL kept = [w.currentSpace.allTabs containsObject:t] && [w hostsBrowserOfItem:t];
-          [w saveSidebarNow];
-          std::printf("SELFTEST-WINDOWS opened=%d shared=%d moved=%d sameBrowser=%d synced=%d back=%d closed=%d kept=%d\n",
-                      opened, shared, moved, sameBrowser, synced, back, closed, kept);
-          finish();
+          BOOL forgot = [MainWindowController savedWindowCount] == 0;  // closed by hand: not reopened
+          // Next launch: the saved window comes back on its Space; a tab on screen in the main window stays there.
+          NSArray<MainWindowController*>* again = [w restoreWindowsFromList:list];
+          MainWindowController* w3 = again.firstObject;
+          BOOL restored = again.count == 1 && [MainWindowController openWindowCount] == 2 &&
+                          w3.currentSpace.spaceID && [w3.currentSpace.spaceID isEqualToString:list.firstObject[@"space"]] &&
+                          w.shownItem == t && [w hostsBrowserOfItem:t];
+          [w3.window close];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+            BOOL closedAgain = [MainWindowController openWindowCount] == 1;
+            [w saveSidebarNow];
+            std::printf("SELFTEST-WINDOWS opened=%d shared=%d moved=%d sameBrowser=%d synced=%d back=%d closed=%d kept=%d "
+                        "saved=%d forgot=%d restored=%d closedAgain=%d\n",
+                        opened, shared, moved, sameBrowser, synced, back, closed, kept, saved, forgot, restored, closedAgain);
+            finish();
+          });
         });
       });
      });
