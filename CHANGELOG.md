@@ -3,7 +3,7 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.19.0
 - Default browser: Settings shows which app opens your links and has a Make NotArc Default Browser button (macOS confirms). On first launch NotArc asks once, after the Arc import question.
 - Search suggestions: the command bar lists up to three suggestions from your search engine under Go (Google, DuckDuckGo, Bing, Ecosia or Kagi). Not sent for typed addresses or from Incognito, no cookies sent; Settings checkbox, on by default.
 

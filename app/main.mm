@@ -1567,6 +1567,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           Boost* b = [w boostForURL:@"https://example.org/x"];
           BOOL zapAdded = [b.zaps containsObject:@"a:nth-of-type(1)"];
           BOOL sub = [w boostForURL:@"https://docs.example.org/"] == b && [w boostForURL:@"https://example.com/"] == nil;
+          if (w.shownItem != t) [w showItem:t];  // the indicator follows the shown tab; other checks may switch tabs
           NSString* indOn = w.boostIndicatorState;
           // Zap all related: the selector Option-click picks covers every element with the same tag and classes.
           [w runJS:@"(function(){var d=document.createElement('div');d.id='zrel';"
@@ -1581,7 +1582,10 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
             if (!related) std::printf("SELFTEST-BOOST-DEBUG rel=[%s]\n", t.liveTitle.UTF8String);
           [w setBoostForHost:@"example.org" configure:^(Boost* x) { x.enabled = NO; }];
           [w runJS:@"document.title='off:'+!!document.getElementById('__notarc_boost__')+'|'+getComputedStyle(document.querySelector('p')).display" inItem:t];
-          WaitUntil(^{ return (BOOL)([t.liveTitle hasPrefix:@"off:"] && [w.boostIndicatorState isEqualToString:@"off"]); }, 5, ^{
+          WaitUntil(^{
+            if (w.shownItem != t) [w showItem:t];
+            return (BOOL)([t.liveTitle hasPrefix:@"off:"] && [w.boostIndicatorState isEqualToString:@"off"]);
+          }, 5, ^{
             BOOL off = [t.liveTitle isEqualToString:@"off:false|block"];
             NSString* indOff = w.boostIndicatorState;
             BOOL saved = w.savedBoostCount == 1;
