@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-54 done, 18 partial, 15 not started or out of scope, of 87 items.
+52 done, 19 partial, 16 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -25,7 +25,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [x] Archive tab, Archive Other Tabs / Above / Below, Clear Today tabs (#16)
 - [x] Close and Keep Pinned; reset pinned tab to its saved URL (also Replace Pinned URL with Current, Reset All Pinned Tabs) (#17)
 - [ ] Tidy tab titles (missing) (#18)
-- [x] Hover previews / hover cards on sidebar items (#19)
+- [ ] Hover previews / hover cards on sidebar items (partial: hover card with title, site, state, last used and address; page thumbnail missing) (#19)
 - [x] Unread badge on tabs (#20)
 - [x] Go to Sidebar Item 1-9, last item, next/previous item (Cmd+1-8, Cmd+9 last, Cmd+Opt+Up/Down) (#21)
 - [x] Hide/show sidebar, toolbar mode with full URL (Cmd+S sidebar; View > Show Toolbar (Cmd+Shift+S) with back/forward/reload and the full editable URL) (#22)
@@ -104,7 +104,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [x] Import from Arc (Spaces, tabs, archive, logins)
 - [ ] Import from Chrome/Safari/other browsers, password import (missing) (#63)
 - [x] Clear browsing data (time range; history, cookies, cache across all Spaces; Clear Cookies and Refresh for the current site) (#64)
-- [x] Tab thumbnails for switchers and previews (#65)
+- [ ] Tab thumbnails for switchers and previews (missing) (#65)
 
 ## Browser basics
 
