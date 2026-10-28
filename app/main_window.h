@@ -175,6 +175,8 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (BOOL)isMainWindowController;
 - (BOOL)hostsBrowserOfItem:(ArcItem*)item;  // tests
 - (BOOL)sidebarShowsItem:(ArcItem*)item;    // tests
+- (IBAction)moveShownToMainWindow:(id)sender;  // Today header button in other windows
+- (BOOL)moveToMainButtonShown;              // tests
 // AppleScript (#76): "select", "back", "forward", "reload", "stop", "close", or "loading" (returns it) for a tab.
 - (BOOL)scriptItem:(ArcItem*)item command:(NSString*)command;
 // Call controls (#47): the tab using the camera/mic, and the sidebar's mute / camera-off toggles.

@@ -588,7 +588,8 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         [sp.unpinned.children removeObject:added];
         BOOL saved = [MainWindowController savedWindowCount] == 1;
         NSArray<NSDictionary*>* list = [MainWindowController windowStateList];
-        [w2 moveItemToMainWindow:t];
+        BOOL button = [w2 moveToMainButtonShown] && ![w moveToMainButtonShown];
+        [w2 moveShownToMainWindow:nil];
         BOOL back = w.shownItem == t && [w hostsBrowserOfItem:t] && ![w2 hostsBrowserOfItem:t] && t.browserId == bid;
         [w2.window close];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
@@ -606,8 +607,8 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
             BOOL closedAgain = [MainWindowController openWindowCount] == 1;
             [w saveSidebarNow];
             std::printf("SELFTEST-WINDOWS opened=%d shared=%d moved=%d sameBrowser=%d synced=%d back=%d closed=%d kept=%d "
-                        "saved=%d forgot=%d restored=%d closedAgain=%d\n",
-                        opened, shared, moved, sameBrowser, synced, back, closed, kept, saved, forgot, restored, closedAgain);
+                        "saved=%d forgot=%d restored=%d closedAgain=%d button=%d\n",
+                        opened, shared, moved, sameBrowser, synced, back, closed, kept, saved, forgot, restored, closedAgain, button);
             finish();
           });
         });
