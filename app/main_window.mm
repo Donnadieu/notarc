@@ -6926,11 +6926,34 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 
 - (void)giveBrowserOfItem:(ArcItem*)item to:(MainWindowController*)dest {
   auto it = _browsers.find(item.browserId);
-  if (it == _browsers.end() || _chromePages[@(it->first)]) return;  // Chrome-style pages stay put for now
+  if (it == _browsers.end()) return;
   CefRefPtr<CefBrowser> browser = it->second;
+  ChromePageHost* host = _chromePages[@(it->first)];
   _browsers.erase(it);
-  [dest acceptBrowser:browser];
+  if (host) {  // Chrome-style page: its page window follows the placeholder into the other window
+    [_chromePages removeObjectForKey:@(browser->GetIdentifier())];
+    [dest acceptChromePage:host browser:browser];
+  } else {
+    [dest acceptBrowser:browser];
+  }
   [self lostItem:item];
+}
+
+- (void)acceptChromePage:(ChromePageHost*)host browser:(CefRefPtr<CefBrowser>)browser {
+  NSView* ph = host.placeholder;
+  [_content addSubview:ph];  // viewDidMoveToWindow re-attaches the page window to this window
+  ph.frame = _content.bounds;
+  ph.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  if (!_chromePages) _chromePages = [NSMutableDictionary dictionary];
+  _chromePages[@(browser->GetIdentifier())] = host;
+  _browsers[browser->GetIdentifier()] = browser;
+  [self adoptBrowser:browser->GetIdentifier()];
+  [host syncFrame];
+}
+
+- (BOOL)chromePageOfItem:(ArcItem*)item isInWindow:(NSWindow*)win {  // tests
+  ChromePageHost* host = _chromePages[@(item.browserId)];
+  return host && host.placeholder.window == win && (!host.pageWindow.isVisible || host.pageWindow.parentWindow == win);
 }
 
 - (void)acceptBrowser:(CefRefPtr<CefBrowser>)browser {
