@@ -2449,6 +2449,11 @@ static NSArray<NSArray*>* SiteSettingRows() {
     pop.action = @selector(sitePermissionChosen:);
     [views addObject:[NSStackView stackViewWithViews:@[ label, pop ]]];
   }
+  if (SettingBool(kSettingBlockAds)) {
+    NSButton* ads = [NSButton checkboxWithTitle:@"Block Ads & Trackers" target:self action:@selector(siteAdBlockToggled:)];
+    ads.state = [self adBlockingOnForHost:u.host] ? NSControlStateValueOn : NSControlStateValueOff;
+    [views addObject:ads];
+  }
   NSButton* clear = [NSButton buttonWithTitle:@"Clear Cookies and Refresh" target:self action:@selector(siteSettingsClearCookies:)];
   NSButton* reset = [NSButton buttonWithTitle:@"Reset Permissions" target:self action:@selector(siteSettingsReset:)];
   [views addObject:[NSStackView stackViewWithViews:@[ clear, reset ]]];
@@ -2467,6 +2472,35 @@ static NSArray<NSArray*>* SiteSettingRows() {
   NSView* anchor = _toolbar.hidden ? _content : _address;
   NSRect r = _toolbar.hidden ? NSMakeRect(8, NSMaxY(_content.bounds) - 4, 1, 1) : NSMakeRect(8, 0, 20, _address.bounds.size.height);
   [_sitePopover showRelativeToRect:r ofView:anchor preferredEdge:_toolbar.hidden ? NSRectEdgeMinY : NSRectEdgeMaxY];
+}
+
+static NSString* AdBlockSiteKey(NSString* host) {
+  NSString* h = host.lowercaseString;
+  return [h hasPrefix:@"www."] ? [h substringFromIndex:4] : h;
+}
+
+- (BOOL)adBlockingOnForHost:(NSString*)host {
+  if (!host.length) return SettingBool(kSettingBlockAds);
+  NSString* key = AdBlockSiteKey(host);
+  for (NSString* e in SettingObject(kSettingAdBlockExceptions))
+    if ([key isEqualToString:e] || [key hasSuffix:[@"." stringByAppendingString:e]]) return NO;
+  return SettingBool(kSettingBlockAds);
+}
+
+- (void)setAdBlocking:(BOOL)on forHost:(NSString*)host {
+  if (!host.length) return;
+  NSString* key = AdBlockSiteKey(host);
+  NSMutableArray* list = [SettingObject(kSettingAdBlockExceptions) mutableCopy] ?: [NSMutableArray array];
+  [list removeObject:key];
+  if (!on) [list addObject:key];
+  SettingSetObject(kSettingAdBlockExceptions, list);
+  ApplyContentBlockerSettings();
+}
+
+- (void)siteAdBlockToggled:(NSButton*)sender {
+  NSString* host = [NSURL URLWithString:_siteSettingsOrigin].host;
+  [self setAdBlocking:sender.state == NSControlStateValueOn forHost:host];
+  if (auto b = [self currentBrowser]) b->Reload();  // Arc reloaded so the change shows
 }
 
 - (void)sitePermissionChosen:(NSPopUpButton*)pop {

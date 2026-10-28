@@ -20,6 +20,7 @@
 #import "app/easel.h"
 #import "app/live_folder.h"
 #import "app/settings.h"
+#include "app/content_blocker.h"
 #include "app/browser_client.h"
 #import "app/history_store.h"
 #import "app/updater.h"
@@ -1072,6 +1073,32 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                                   !OriginalURLForTranslated(@"https://example.com/");
                       std::printf("SELFTEST-TRANSLATE build=%d back=%d goog=%d skip=%d lang=%d\n", build, back, goog, skip,
                                   PreferredTranslateLanguage().length >= 2);
+                    }
+                    {  // #53 ad & tracker blocking: request filter logic and the per-site exception (memory-only settings)
+                      namespace cb = content_blocker;
+                      BOOL offByDefault = !SettingBool(kSettingBlockAds) && !cb::Enabled() &&
+                                          !cb::ShouldBlock("https://securepubads.doubleclick.net/x.js", "https://news.example/", false);
+                      SettingSetBool(kSettingBlockAds, YES);
+                      ApplyContentBlockerSettings();
+                      BOOL blocks = cb::ShouldBlock("https://securepubads.g.doubleclick.net/tag/js/gpt.js", "https://news.example/a", false) &&
+                                    cb::ShouldBlock("https://www.google-analytics.com/g/collect", "https://shop.example/", false);
+                      BOOL mainFrame = !cb::ShouldBlock("https://doubleclick.net/", "https://doubleclick.net/", true);
+                      BOOL firstParty = !cb::ShouldBlock("https://ads.taboola.com/x", "https://www.taboola.com/", false);
+                      BOOL clean = !cb::ShouldBlock("https://cdn.example.net/app.js", "https://news.example/", false) &&
+                                   !cb::ShouldBlock("https://notdoubleclick.net/x", "https://news.example/", false);
+                      [w setAdBlocking:NO forHost:@"www.news.example"];
+                      BOOL exception = ![w adBlockingOnForHost:@"news.example"] &&
+                                       !cb::ShouldBlock("https://doubleclick.net/x", "https://sub.news.example/", false) &&
+                                       cb::ShouldBlock("https://doubleclick.net/x", "https://other.example/", false);
+                      [w setAdBlocking:YES forHost:@"news.example"];
+                      BOOL restored = [w adBlockingOnForHost:@"news.example"] &&
+                                      cb::ShouldBlock("https://doubleclick.net/x", "https://news.example/", false);
+                      SettingSetBool(kSettingBlockAds, NO);
+                      ApplyContentBlockerSettings();
+                      BOOL off = !cb::ShouldBlock("https://doubleclick.net/x", "https://news.example/", false);
+                      std::printf("SELFTEST-ADBLOCK offByDefault=%d blocks=%d mainFrame=%d firstParty=%d clean=%d exception=%d "
+                                  "restored=%d off=%d list=%d\n", offByDefault, blocks, mainFrame, firstParty, clean, exception,
+                                  restored, off, (int)cb::ListSize() > 100);
                     }
                     std::printf("SELFTEST-SEARCHSUGGEST parse=%d engine=%d rows=%d settingOff=%d noURL=%d\n", parse, engineURL, rows,
                                 offOK, urlOK);
@@ -2317,6 +2344,7 @@ int main(int argc, char* argv[]) {
     if (!CefInitialize(main_args, settings, nullptr, nullptr)) return CefGetExitCode();
     SettingsRegisterDefaults();
     if (selfTest) SettingsUseMemoryOnly();
+    ApplyContentBlockerSettings();
 
     AppDelegate* delegate = [AppDelegate new];
     delegate.selfTest = selfTest;

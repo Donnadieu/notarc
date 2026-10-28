@@ -3,6 +3,10 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- Block ads & trackers (Settings, off by default): stops pages loading ads and trackers from well-known ad and tracking
+  services. Site Settings has a per-site switch to turn it off for one site.
+
 ## 0.21.0
 - Translate Page (View menu): opens the page through Google's web translator into your macOS language; Show Original
   goes back. Nothing is sent to Google unless you choose it.

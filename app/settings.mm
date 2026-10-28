@@ -1,5 +1,6 @@
 #import "app/settings.h"
 #import "app/downloads.h"
+#include "app/content_blocker.h"
 
 NSString* const kSettingAutoArchiveHours = @"autoArchiveThresholdHours";
 NSString* const kSettingSearchEngine = @"searchEngine";
@@ -24,6 +25,7 @@ void SettingsRegisterDefaults(void) {
     kSettingShowToolbar : @NO,
     kSettingAutoPiP : @YES,
     kSettingSearchSuggestions : @YES,
+    kSettingBlockAds : @NO,
     kSettingShowSpaceHeader : @YES,
   }];
 }
@@ -59,6 +61,16 @@ static NSArray<NSArray<NSString*>*>* Engines() {
 }
 
 NSString* const kSettingSearchSuggestions = @"searchSuggestions";
+NSString* const kSettingBlockAds = @"blockAdsAndTrackers";
+NSString* const kSettingAdBlockExceptions = @"adBlockExceptions";
+
+void ApplyContentBlockerSettings(void) {
+  content_blocker::SetEnabled(SettingBool(kSettingBlockAds));
+  std::vector<std::string> hosts;
+  for (id h in SettingObject(kSettingAdBlockExceptions))
+    if ([h isKindOfClass:NSString.class]) hosts.push_back(((NSString*)h).UTF8String);
+  content_blocker::SetExceptions(hosts);
+}
 
 NSURL* DefaultBrowserAppURL(void) {
   return [NSWorkspace.sharedWorkspace URLForApplicationToOpenURL:[NSURL URLWithString:@"https://example.com"]];
@@ -278,6 +290,7 @@ static NSArray* LittleArchiveChoices() {
   NSGridView* general = [NSGridView gridViewWithViews:@[
     @[ [NSTextField labelWithString:@"Search engine:"], _engine ],
     @[ NSGridCell.emptyContentView, [self check:@"Show search suggestions in the command bar" key:kSettingSearchSuggestions] ],
+    @[ NSGridCell.emptyContentView, [self check:@"Block ads & trackers" key:kSettingBlockAds] ],
     @[ [NSTextField labelWithString:@"Archive Today tabs:"], _archive ],
   ]];
   [general columnAtIndex:0].xPlacement = NSGridCellPlacementTrailing;
@@ -343,6 +356,7 @@ static NSArray* LittleArchiveChoices() {
 
 - (void)toggled:(NSButton*)sender {
   [NSUserDefaults.standardUserDefaults setBool:sender.state == NSControlStateValueOn forKey:sender.identifier];
+  if ([sender.identifier isEqualToString:kSettingBlockAds]) ApplyContentBlockerSettings();
 }
 - (void)engineChanged:(NSPopUpButton*)sender {
   [NSUserDefaults.standardUserDefaults setObject:sender.selectedItem.representedObject forKey:kSettingSearchEngine];
