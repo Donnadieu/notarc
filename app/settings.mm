@@ -82,6 +82,48 @@ void MakeNotArcDefaultBrowser(void (^done)(BOOL ok)) {
   }];
 }
 
+// Translate page (#52): Arc used Chromium's translate bubble, which isn't in CEF. NotArc opens the page through
+// Google's page translator into your language; "Show Original" goes back to the page itself.
+NSString* TranslateURLFor(NSString* url, NSString* lang) {
+  NSURL* u = [NSURL URLWithString:url];
+  if (!u.host.length || !([u.scheme isEqualToString:@"http"] || [u.scheme isEqualToString:@"https"])) return nil;
+  if (OriginalURLForTranslated(url)) return nil;  // already translated
+  NSString* tl = lang.length ? lang : @"en";
+  NSURLComponents* c = [NSURLComponents componentsWithString:@"https://translate.google.com/translate"];
+  c.queryItems = @[ [NSURLQueryItem queryItemWithName:@"sl" value:@"auto"], [NSURLQueryItem queryItemWithName:@"tl" value:tl],
+                    [NSURLQueryItem queryItemWithName:@"u" value:url] ];
+  return c.URL.absoluteString;
+}
+
+NSString* OriginalURLForTranslated(NSString* url) {
+  NSURLComponents* c = [NSURLComponents componentsWithString:url];
+  if (!c.host) return nil;
+  if ([c.host isEqualToString:@"translate.google.com"]) {
+    for (NSURLQueryItem* q in c.queryItems)
+      if ([q.name isEqualToString:@"u"] && q.value.length) return q.value;
+    return nil;
+  }
+  // The translator serves pages from <host with dots as dashes>.translate.goog; map back to the real host.
+  if ([c.host hasSuffix:@".translate.goog"]) {
+    NSString* h = [c.host substringToIndex:c.host.length - @".translate.goog".length];
+    h = [[h stringByReplacingOccurrencesOfString:@"--" withString:@"\x01"] stringByReplacingOccurrencesOfString:@"-" withString:@"."];
+    h = [h stringByReplacingOccurrencesOfString:@"\x01" withString:@"-"];
+    NSMutableArray* keep = [NSMutableArray array];
+    for (NSURLQueryItem* q in c.queryItems)
+      if (![q.name hasPrefix:@"_x_tr_"]) [keep addObject:q];
+    c.host = h;
+    c.queryItems = keep.count ? keep : nil;
+    return c.URL.absoluteString;
+  }
+  return nil;
+}
+
+NSString* PreferredTranslateLanguage(void) {
+  NSString* l = NSLocale.preferredLanguages.firstObject ?: @"en";
+  if ([l hasPrefix:@"zh"]) return [l containsString:@"Hant"] || [l containsString:@"TW"] ? @"zh-TW" : @"zh-CN";
+  return [l componentsSeparatedByString:@"-"].firstObject;
+}
+
 NSString* SuggestURLForQuery(NSString* q) {
   NSDictionary* urls = @{
     @"google" : @"https://suggestqueries.google.com/complete/search?client=firefox&q=",
