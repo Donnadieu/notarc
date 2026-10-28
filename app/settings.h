@@ -23,6 +23,10 @@ extern NSString* const kSettingLittleArchiveHours;     // double; 0 = never. Def
 
 void SettingsRegisterDefaults(void);
 NSString* SearchURLForQuery(NSString* encodedQuery);
+// Default browser (#69). Reads only; MakeNotArcDefaultBrowser asks macOS, which shows its own confirmation.
+NSURL* DefaultBrowserAppURL(void);  // the app that opens https links now
+BOOL NotArcIsDefaultBrowser(void);
+void MakeNotArcDefaultBrowser(void (^done)(BOOL ok));
 // Search suggestions (#31): the chosen engine's suggestion endpoint (OpenSearch JSON), and its parser.
 extern NSString* const kSettingSearchSuggestions;     // BOOL, default YES
 NSString* SuggestURLForQuery(NSString* encodedQuery);
@@ -32,4 +36,5 @@ double SettingDouble(NSString* key);
 
 @interface SettingsWindowController : NSWindowController
 + (instancetype)shared;
+- (BOOL)defaultBrowserRowConsistent;  // tests
 @end
