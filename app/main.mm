@@ -143,6 +143,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItem:NSMenuItem.separatorItem];
   [file addItemWithTitle:@"Import Everything from Arc..." action:@selector(importEverythingFromArcMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import Bookmarks..." action:@selector(importBookmarksFromMenu:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Import History..." action:@selector(importHistoryFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import History from Arc" action:@selector(importArcHistoryFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import Extensions from Arc" action:@selector(importArcExtensionsFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Capture to Easel" action:@selector(captureToEasel:) keyEquivalent:@"2"].keyEquivalentModifierMask =
@@ -1981,6 +1982,17 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         for (ArcSpace* s in w.spaces) o[s.profileDirectory.length ? s.profileDirectory : @"Default"] = db;
         w.arcHistoryOverride = o;
         NSUInteger added = [w importArcHistory], again = [w importArcHistory];
+        // #63: the same reader imports Chrome-family history; a fake DB here (never a real browser's).
+        [w clearHistory:nil];
+        NSUInteger otherAdded = [w importHistoryFromFile:db browser:@"Google Chrome (Test)"];
+        NSUInteger otherAgain = [w importHistoryFromFile:db browser:@"Google Chrome (Test)"];
+        BOOL otherTagged = NO;
+        for (ArchivedTab* v in w.historyVisits) if ([v.reason isEqualToString:@"Google Chrome (Test)"]) otherTagged = YES;
+        BOOL missing = [w importHistoryFromFile:@"/nonexistent/History" browser:@"x"] == 0;
+        std::printf("SELFTEST-IMPORTHISTORY added=%d again=%d tagged=%d missing=%d\n", otherAdded == 2, otherAgain == 0,
+                    otherTagged, missing);
+        [w clearHistory:nil];
+        added = [w importArcHistory];
         NSUInteger arcRows = 0;
         for (ArchivedTab* v in w.historyVisits) if ([v.url hasPrefix:@"https://example.org/"]) ++arcRows;
         {  // Import Extensions from Arc, against a fake Arc profile (never Arc's real one).

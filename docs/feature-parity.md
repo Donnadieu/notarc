@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-54 done, 22 partial, 11 not started or out of scope, of 87 items.
+54 done, 23 partial, 10 not started or out of scope, of 87 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a checked line's issue is closed. Lines without a number were done before
 issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
@@ -102,7 +102,7 @@ issues were opened, or are out of scope. Status as of NotArc 0.11.0; see
 - [x] Downloads list (Cmd+Shift+J: progress, filter, Open, Show in Finder, Copy, Cancel; download folder setting; quit warning) (#61)
 - [x] History view (Cmd+Y, searchable, per-Space column, Clear History) (#62)
 - [x] Import from Arc (Spaces, tabs, archive, logins)
-- [ ] Import from Chrome/Safari/other browsers, password import (missing) (#63)
+- [ ] Import from Chrome/Safari/other browsers, password import (partial: File > Import Bookmarks (#80) and File > Import History from Chrome, Brave, Edge, Vivaldi, Chromium; no Safari/Firefox history or passwords yet) (#63)
 - [x] Clear browsing data (time range; history, cookies, cache across all Spaces; Clear Cookies and Refresh for the current site) (#64)
 - [ ] Tab thumbnails for switchers and previews (missing) (#65)
 
