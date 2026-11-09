@@ -18,6 +18,7 @@
 #include <sqlite3.h>
 #import "app/boost_store.h"
 #import "app/easel.h"
+#import "app/note_editor.h"
 #import "app/live_folder.h"
 #import "app/settings.h"
 #include "app/content_blocker.h"
@@ -140,6 +141,8 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"New Note" action:@selector(newNote:) keyEquivalent:@"n"].keyEquivalentModifierMask =
       NSEventModifierFlagCommand | NSEventModifierFlagControl;
   [file addItemWithTitle:@"New Easel" action:@selector(newEasel:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Export Note as Markdown..." action:@selector(exportNoteAsMarkdown:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Copy Note as Markdown" action:@selector(copyNoteAsMarkdown:) keyEquivalent:@""];
   [file addItem:NSMenuItem.separatorItem];
   [file addItemWithTitle:@"Import Everything from Arc..." action:@selector(importEverythingFromArcMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import Bookmarks..." action:@selector(importBookmarksFromMenu:) keyEquivalent:@""];
@@ -171,7 +174,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"Reset All Pinned Tabs" action:@selector(resetAllPinnedTabs:) keyEquivalent:@""];
   fileItem.submenu = file;
 
-  // Format (Notes): bold, italic, underline, fonts and lists come from AppKit's text system.
+  // Format (Notes): bold, italic, underline and fonts come from AppKit's text system; the rest from the note editor.
   NSMenuItem* formatItem = [NSMenuItem new];
   [bar addItem:formatItem];
   NSMenu* format = [[NSMenu alloc] initWithTitle:@"Format"];
@@ -189,7 +192,15 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   format.itemArray.lastObject.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
   format.itemArray[format.itemArray.count - 2].keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
   [format addItemWithTitle:@"Show Fonts" action:@selector(orderFrontFontPanel:) keyEquivalent:@""].target = fm;  // Cmd+T is New Tab
-  [format addItemWithTitle:@"Lists..." action:@selector(orderFrontListPanel:) keyEquivalent:@""];
+  // The note toolbar's commands (sent to the note being edited): paragraph style, strikethrough, lists, link.
+  [format addItem:[NSMenuItem separatorItem]];
+  [format addItemWithTitle:@"Strikethrough" action:@selector(noteToggleStrikethrough:) keyEquivalent:@""];
+  for (NSArray* e in @[ @[ @"Body", @0 ], @[ @"Heading 1", @1 ], @[ @"Heading 2", @2 ], @[ @"Heading 3", @3 ] ])
+    [format addItemWithTitle:e[0] action:@selector(noteFormatBlock:) keyEquivalent:@""].tag = [e[1] integerValue];
+  [format addItemWithTitle:@"Bulleted List" action:@selector(noteToggleBulletList:) keyEquivalent:@""];
+  [format addItemWithTitle:@"Numbered List" action:@selector(noteToggleNumberedList:) keyEquivalent:@""];
+  [format addItemWithTitle:@"Checklist" action:@selector(noteToggleChecklist:) keyEquivalent:@""];
+  [format addItemWithTitle:@"Add Link..." action:@selector(noteAddLink:) keyEquivalent:@""];
   formatItem.submenu = format;
 
   NSMenuItem* viewItem = [NSMenuItem new];
@@ -237,6 +248,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [split addItemWithTitle:@"Add Left Split" action:@selector(addLeftSplit:) keyEquivalent:@""];
   [split addItemWithTitle:@"Add Top Split" action:@selector(addTopSplit:) keyEquivalent:@""];
   [split addItemWithTitle:@"Flip Split Layout" action:@selector(flipSplitLayout:) keyEquivalent:@""];
+  [split addItemWithTitle:@"New Note in Split View" action:@selector(newNoteInSplitView:) keyEquivalent:@""];
   [split addItemWithTitle:@"Close Split Pane" action:@selector(closeSplitPane:) keyEquivalent:@"-"]
       .keyEquivalentModifierMask = cs;
   [split addItemWithTitle:@"Focus Next Pane" action:@selector(focusNextPane:) keyEquivalent:@"]"]
@@ -672,6 +684,132 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
 - (void)runSelfTestActions {
   [self.window openInNewTab:@"https://example.com"];
   [self runBasicsTestWhenReady:0];
+}
+
+// Notes (#50), part 2: Arc's note look and format bar, notes as split panes, Markdown export. Runs right after
+// SELFTEST-NOTES in the same timed block, synchronously, so no other check moves the shown tab in between.
+- (void)runNoteFormatSelfTest {
+  MainWindowController* w = self.window;
+  ArcSpace* space = w.currentSpace;
+  NSFontManager* fm = NSFontManager.sharedFontManager;
+  NSInteger generalBefore = NSPasteboard.generalPasteboard.changeCount;
+  ArcItem* n = [w createNoteWithID:nil];
+  NoteEditorView* ed = [w noteEditorForItem:n];
+  NoteTextView* tv = ed.textView;
+  NSUInteger controls = 0;
+  NSButton* italicButton = nil;
+  for (NSControl* c in ed.toolbarControls) {
+    if (c.action && c.target == tv) ++controls;
+    if (c.action == @selector(noteToggleItalic:)) italicButton = (NSButton*)c;
+  }
+  BOOL toolbar = ed && controls >= 9 && ed.toolbar.superview == ed && NSMaxY(ed.toolbar.frame) == NSMaxY(ed.bounds);
+  [w typeInNote:@"Plan\nIntro\nmilk\neggs\nbread\nwash car\nsee the docs now"];
+  NSTextStorage* ts = tv.textStorage;
+  NSFont* (^fontAt)(NSString*) = ^NSFont*(NSString* word) {
+    NSRange r = [ts.string rangeOfString:word];
+    return r.location == NSNotFound ? nil : [ts attribute:NSFontAttributeName atIndex:r.location effectiveRange:nil];
+  };
+  void (^select)(NSString*) = ^(NSString* word) { tv.selectedRange = [ts.string rangeOfString:word]; };
+  BOOL title = fontAt(@"Plan").pointSize >= 28 && fontAt(@"Intro").pointSize < 16 && [n.displayTitle isEqualToString:@"Plan"];
+  BOOL readable = ed.readingWidth > 200 && ed.readingWidth <= 681 && ed.sideMargin >= 28;
+  select(@"Intro");
+  [tv applyBlock:NoteBlockHeading2];
+  BOOL heading = fontAt(@"Intro").pointSize == 20 && ([fm traitsOfFont:fontAt(@"Intro")] & NSBoldFontMask);
+  tv.selectedRange = NSUnionRange([ts.string rangeOfString:@"milk"], [ts.string rangeOfString:@"eggs"]);
+  [tv applyList:NoteListBullet];
+  select(@"bread");
+  [tv applyList:NoteListNumber];
+  select(@"wash car");
+  [tv applyList:NoteListCheck];
+  BOOL checked = [tv toggleCheckboxInParagraphAt:[ts.string rangeOfString:@"wash car"].location];
+  select(@"car");
+  [tv noteToggleUnderline:nil];
+  select(@"see");
+  [tv noteToggleBold:nil];
+  select(@"the");
+  [italicButton performClick:nil];  // through the format bar
+  select(@"docs");
+  [tv setLinkOnSelection:@"https://example.org/docs"];
+  select(@"now");
+  [tv noteToggleStrikethrough:nil];
+  BOOL lists = [ts.string containsString:@"\u2022\tmilk\n\u2022\teggs\n1.\tbread\n\u2611\twash car"];
+  BOOL italic = ([fm traitsOfFont:fontAt(@"the")] & NSItalicFontMask) != 0;
+  NSString* scheme = space.colorScheme;
+  [w setColorScheme:@"dark" forSpace:space];
+  BOOL dark = [ed looksDark];
+  [w setColorScheme:@"light" forSpace:space];
+  BOOL light = [ed looksLight];
+  [w setColorScheme:scheme forSpace:space];
+  NSString* md = [w markdownForNote:n];
+  BOOL roundTrip = [NoteMarkdown([w savedNote:n]) isEqualToString:md];
+  std::printf("SELFTEST-NOTESTYLE toolbar=%d title=%d readable=%d heading=%d lists=%d checked=%d italic=%d dark=%d light=%d "
+              "roundTrip=%d\n", toolbar, title, readable, heading, lists, checked, italic, dark, light, roundTrip);
+
+  // Markdown: File > Export Note as Markdown... (written straight to a temp file here) and Copy Note as Markdown.
+  NSString* expected = @"# Plan\n\n### Intro\n\n- milk\n- eggs\n1. bread\n- [x] wash <u>car</u>\n\n"
+                       @"**see** *the* [docs](https://example.org/docs) ~~now~~\n";
+  BOOL markdown = [md isEqualToString:expected];
+  if (!markdown) std::printf("SELFTEST-NOTEMD-DEBUG got=%s\n", [[md stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"] UTF8String]);
+  NSMenuItem* exportItem = [[NSMenuItem alloc] initWithTitle:@"" action:@selector(exportNoteAsMarkdown:) keyEquivalent:@""];
+  BOOL menuEnabled = [(id<NSMenuItemValidation>)w validateMenuItem:exportItem];
+  [w copyNoteAsMarkdown:nil];
+  NSPasteboard* pb = [w copyPasteboard];
+  BOOL copied = [[pb stringForType:NSPasteboardTypeString] isEqualToString:md];
+  BOOL markdownType = [[pb stringForType:@"net.daringfireball.markdown"] isEqualToString:md];
+  NSString* path = [NSTemporaryDirectory() stringByAppendingPathComponent:@"notarc-selftest-note.md"];
+  [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+  BOOL exported = [w exportNote:n toPath:path] &&
+                  [[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] isEqualToString:expected];
+  [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+
+  // Split view: a page opened beside a note...
+  [w openInSplit:@"https://example.org/beside-note" horizontal:NO];
+  ArcItem* page = w.shownItem;
+  NoteEditorView* left = [w noteEditorForItem:n];
+  NSArray<NSValue*>* pf = [w paneFrames];
+  NSArray* panes = [w visiblePanesForTest];
+  BOOL pageBesideNote = panes.count == 2 && panes[0] == n && panes[1] == page && left && pf.count == 1 &&
+                        NSMaxX(left.frame) <= NSMinX(pf[0].rectValue) + 0.5 &&
+                        fabs(left.frame.size.width - pf[0].rectValue.size.width) < 10;
+  [w.window makeFirstResponder:left.textView];  // clicking into the note pane focuses it
+  BOOL focusNote = w.shownItem == n && [w visiblePanesForTest].count == 2;
+  [w.window makeFirstResponder:nil];
+  // ...and a new note beside a page (Split View > New Note in Split View).
+  [w openInNewTab:@"https://example.org/note-split"];
+  ArcItem* page2 = w.shownItem;
+  [w newNoteInSplitView:nil];
+  ArcItem* n2 = w.shownItem;
+  NoteEditorView* right = [w noteEditorForItem:n2];
+  NSArray<NSValue*>* pf2 = [w paneFrames];
+  BOOL noteBesidePage = n2.noteID && n2 != n && [[w visiblePanesForTest] isEqualToArray:@[ page2, n2 ]] && right &&
+                        pf2.count == 1 && NSMaxX(pf2[0].rectValue) <= NSMinX(right.frame) + 0.5 && right.frame.size.width > 100;
+  [w typeInNote:@"Side note"];
+  BOOL typed = [right.textView.string isEqualToString:@"Side note"] && [n2.displayTitle isEqualToString:@"Side note"];
+  [w showItem:page2];  // the page pane focused: the note stays on screen beside it
+  BOOL staysBeside = [w noteEditorForItem:n2] == right && [w paneFrames].count == 1 && [w visiblePanesForTest].count == 2;
+  // An existing note moves into another split (one document, never copied).
+  [w openInNewTab:@"https://example.org/note-move"];
+  ArcItem* page3 = w.shownItem;
+  [w openInSplit:n.url horizontal:NO];
+  NSUInteger copies = 0;
+  for (ArcItem* t in space.allTabs) copies += [t.url isEqualToString:n.url];
+  BOOL moved = copies == 1 && w.shownItem == n && [[w visiblePanesForTest] isEqualToArray:@[ page3, n ]] && [w noteEditorForItem:n] &&
+               [[w markdownForNote:n] isEqualToString:md];
+  for (ArcItem* t in @[ n, n2 ]) {
+    [w showItem:t];
+    [w closeTab:nil];
+  }
+  [w showItem:page3];
+  BOOL offForPages = ![(id<NSMenuItemValidation>)w validateMenuItem:exportItem] && [w visiblePanesForTest].count == 1;
+  for (ArcItem* t in @[ page, page2, page3 ]) {
+    [w showItem:t];
+    [w closeTab:nil];
+  }
+  BOOL generalUntouched = NSPasteboard.generalPasteboard.changeCount == generalBefore;
+  std::printf("SELFTEST-NOTESPLIT pageBesideNote=%d focusNote=%d noteBesidePage=%d typed=%d staysBeside=%d moved=%d\n",
+              pageBesideNote, focusNote, noteBesidePage, typed, staysBeside, moved);
+  std::printf("SELFTEST-NOTEMD markdown=%d menuEnabled=%d copied=%d markdownType=%d exported=%d offForPages=%d generalUntouched=%d\n",
+              markdown, menuEnabled, copied, markdownType, exported, offForPages, generalUntouched);
 }
 
 - (void)runRemainingSelfTestActions {
@@ -1859,6 +1997,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       [w closeTab:nil];
       std::printf("SELFTEST-NOTES editor=%d titled=%d saved=%d bold=%d hiddenForTabs=%d reloaded=%d archived=%d reopened=%d\n",
                   editor, titled, saved, bold, hidden, reloaded, archived, reopened);
+      [self runNoteFormatSelfTest];
     });
     // Site settings popover: rows reflect remembered answers; changing one is stored; clear cookies works from it.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{

@@ -16,6 +16,7 @@
 #import "app/settings.h"
 #import "app/boost_store.h"
 #import "app/easel.h"
+#import "app/note_editor.h"
 #import "app/live_folder.h"
 #import "app/favicons.h"
 #include "include/cef_devtools_message_observer.h"
@@ -184,7 +185,7 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
 @end
 
 @interface MainWindowController () <NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate,
-                                    NSMenuDelegate>
+                                    NSMenuDelegate, NoteEditorDelegate>
 @end
 
 // The gap between two split panes; dragging it resizes them.
@@ -701,10 +702,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSString* _lastClosedPeekURL;
   NSView* _sidebar;
   SidebarPillView* _addressPill;
-  NSScrollView* _noteScroll;  // Notes editor, shown in the page card
-  NSTextView* _noteText;
-  ArcItem* _noteItem;         // note currently in the editor
-  NSTimer* _noteSaveTimer;
+  NSMutableDictionary<NSString*, NoteEditorView*>* _noteEditors;  // notes on screen (one per pane), by item ID
   EaselView* _easelView;      // Easel canvas, shown in the page card
   NSScrollView* _easelScroll;
   ArcItem* _easelItem;
@@ -1705,6 +1703,7 @@ static NSString* const kPiPExitJS =
 }
 
 - (void)closeAllBrowsers {
+  [self saveNoteNow];  // the last half second of typing in a note
   [MainWindowController prepareForQuit];
   _closing = YES;
   for (MainWindowController* w in [gWindows copy])
@@ -3063,7 +3062,7 @@ static const CGFloat kPaneGap = 6;
     kv.second->GetHost()->WasHidden(!visible);
   }
   [self layoutDividers:panes.count > 1 ? frames : @[]];
-  [self layoutNoteEditor];
+  [self layoutNoteEditorsForPanes:panes frames:frames];
   [self layoutEasel];
 }
 
@@ -3501,109 +3500,161 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   }];
 }
 
-// MARK: Notes (Arc: NoteDocument). Rich text in the page card, saved as RTF next to the sidebar file.
+// MARK: Notes (Arc: NoteDocument). Rich text in the page card (or a split pane), saved as RTF next to the sidebar file.
 - (NSString*)notesDirectory {
   NSString* support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
       stringByAppendingPathComponent:@"NotArc"];
   return [support stringByAppendingPathComponent:self.selfTestProfiles ? @"SelfTestNotes" : @"Notes"];
 }
 - (NSString*)notePathFor:(ArcItem*)note { return [[self notesDirectory] stringByAppendingPathComponent:[note.noteID stringByAppendingString:@".rtf"]]; }
-- (NSAttributedString*)loadNote:(ArcItem*)note {
-  NSData* d = [NSData dataWithContentsOfFile:[self notePathFor:note]];
-  NSAttributedString* a = d ? [[NSAttributedString alloc] initWithRTF:d documentAttributes:nil] : nil;
-  return a ?: [[NSAttributedString alloc] initWithString:@""];
-}
+- (NSAttributedString*)loadNote:(ArcItem*)note { return NoteLoadRTF([self notePathFor:note]); }
 - (void)saveNoteNow {
-  [_noteSaveTimer invalidate];
-  _noteSaveTimer = nil;
-  if (!_noteItem || !_noteText) return;
-  NSAttributedString* a = _noteText.textStorage;
-  NSData* rtf = [a RTFFromRange:NSMakeRange(0, a.length) documentAttributes:@{NSDocumentTypeDocumentAttribute : NSRTFTextDocumentType}];
-  [[NSFileManager defaultManager] createDirectoryAtPath:[self notesDirectory] withIntermediateDirectories:YES attributes:nil error:nil];
-  [rtf writeToFile:[self notePathFor:_noteItem] atomically:YES];
+  for (NoteEditorView* e in _noteEditors.allValues) [e save];
 }
-- (void)layoutNoteEditor {
-  ArcItem* note = _shown.noteID ? _shown : nil;
-  if (note != _noteItem) {
-    [self saveNoteNow];
-    _noteItem = note;
-    if (note) {
-      if (!_noteScroll) [self buildNoteEditor];
-      [_noteText.textStorage setAttributedString:[self loadNote:note]];
-      _noteText.typingAttributes = [self noteBodyAttributes];
+// The editor of the focused pane when it's a note.
+- (NoteEditorView*)focusedNoteEditor { return _shown.noteID ? _noteEditors[_shown.itemID] : nil; }
+- (NoteEditorView*)noteEditorForItem:(ArcItem*)note {
+  NoteEditorView* e = note.itemID ? _noteEditors[note.itemID] : nil;
+  return e.superview && !e.hidden ? e : nil;
+}
+// Every note among the visible panes gets its own editor in its pane's frame; notes that left the screen are saved.
+- (void)layoutNoteEditorsForPanes:(NSArray<ArcItem*>*)panes frames:(NSArray<NSValue*>*)frames {
+  if (!_noteEditors) _noteEditors = [NSMutableDictionary dictionary];
+  NoteEditorView* focusedBefore = [self focusedNoteEditor];
+  NSMutableSet<NSString*>* onScreen = [NSMutableSet set];
+  for (NSUInteger i = 0; i < panes.count && i < frames.count; ++i) {
+    ArcItem* note = panes[i];
+    if (!note.noteID || !note.itemID) continue;
+    NoteEditorView* e = _noteEditors[note.itemID];
+    if (!e) {
+      e = [[NoteEditorView alloc] initWithFrame:frames[i].rectValue];
+      e.delegate = self;
+      e.item = note;
+      e.path = [self notePathFor:note];
+      [e load];
+      _noteEditors[note.itemID] = e;
     }
+    e.frame = frames[i].rectValue;
+    e.autoresizingMask = panes.count == 1 ? (NSViewWidthSizable | NSViewHeightSizable) : NSViewNotSizable;
+    e.hidden = NO;
+    [_content addSubview:e positioned:NSWindowAbove relativeTo:nil];
+    [onScreen addObject:note.itemID];
   }
-  _noteScroll.hidden = !note;
-  if (note) {
-    _noteScroll.frame = _content.bounds;
-    [_content addSubview:_noteScroll positioned:NSWindowAbove relativeTo:nil];
-    if (!self.selfTestProfiles) [self.window makeFirstResponder:_noteText];
+  for (NSString* key in _noteEditors.allKeys) {
+    if ([onScreen containsObject:key]) continue;
+    NoteEditorView* e = _noteEditors[key];
+    [e save];
+    [e removeFromSuperview];
+    [_noteEditors removeObjectForKey:key];
   }
+  NoteEditorView* focused = [self focusedNoteEditor];
+  if (focused && focused != focusedBefore && !self.selfTestProfiles) [self.window makeFirstResponder:focused.textView];
 }
-- (NSDictionary*)noteBodyAttributes {
-  return @{NSFontAttributeName : [NSFont systemFontOfSize:15], NSForegroundColorAttributeName : NSColor.textColor};
-}
-- (void)buildNoteEditor {
-  _noteScroll = [[NSScrollView alloc] initWithFrame:_content.bounds];
-  _noteScroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-  _noteScroll.hasVerticalScroller = YES;
-  _noteScroll.drawsBackground = YES;
-  _noteScroll.backgroundColor = NSColor.textBackgroundColor;
-  _noteText = [[NSTextView alloc] initWithFrame:_noteScroll.bounds];
-  _noteText.autoresizingMask = NSViewWidthSizable;
-  _noteText.richText = YES;
-  _noteText.allowsUndo = YES;
-  _noteText.usesFontPanel = YES;
-  _noteText.usesRuler = NO;
-  _noteText.importsGraphics = YES;
-  _noteText.automaticLinkDetectionEnabled = YES;
-  _noteText.textContainerInset = NSMakeSize(56, 40);  // Arc's notes are a centred page with generous margins
-  _noteText.delegate = (id<NSTextViewDelegate>)self;
-  _noteScroll.documentView = _noteText;
-}
-- (void)textDidChange:(NSNotification*)n {
-  if (n.object != _noteText || !_noteItem) return;
+- (void)noteEditorDidChange:(NoteEditorView*)editor {
+  ArcItem* note = editor.item;
   // The first line is the note's title in the sidebar, as in Arc.
-  NSString* first = [[_noteText.string componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] firstObject];
-  first = [first stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-  NSString* t = first.length ? (first.length > 80 ? [first substringToIndex:80] : first) : nil;
-  if (![t isEqualToString:_noteItem.liveTitle] && !(t == nil && _noteItem.liveTitle == nil)) {
-    _noteItem.liveTitle = t;
-    [_outline reloadItem:_noteItem];
+  NSString* t = editor.title;
+  if (![t isEqualToString:note.liveTitle] && !(t == nil && note.liveTitle == nil)) {
+    note.liveTitle = t;
+    ArcItem* parent = [self parentOfItem:note];
+    [_outline reloadItem:parent.isSplit ? parent : note];
     [self scheduleSave];
   }
-  [_noteSaveTimer invalidate];
-  __weak MainWindowController* weakSelf = self;
-  _noteSaveTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:NO block:^(NSTimer*) { [weakSelf saveNoteNow]; }];
 }
-- (ArcItem*)createNoteWithID:(NSString*)noteID {
-  if (!_space) return nil;
+// Clicking into a note pane of a split focuses that pane, like clicking into a page.
+- (void)noteEditorDidFocus:(NoteEditorView*)editor {
+  ArcItem* item = editor.item;
+  if (!item || item == _shown || ![_splitItems containsObject:item]) return;
+  _shown.lastActiveAt = [NSDate date];
+  _shown = item;
+  item.lastActiveAt = [NSDate date];
+  [self syncSplitState];
+  [self selectSidebarRowFor:item];
+  [self updateToolbarAddress];
+}
+- (void)noteEditor:(NoteEditorView*)editor openLink:(NSString*)url { [self openInNewTab:url]; }
+
+- (ArcItem*)makeNoteItemWithID:(NSString*)noteID {
   ArcItem* n = [ArcItem new];
   n.itemID = NSUUID.UUID.UUIDString;
   n.noteID = noteID ?: NSUUID.UUID.UUIDString;
   n.url = [@"notarc://note/" stringByAppendingString:n.noteID];
   n.children = [NSMutableArray array];
   n.lastActiveAt = [NSDate date];
-  [_space.unpinned.children insertObject:n atIndex:0];  // Arc puts new notes at the top of Today
-  [_outline reloadItem:_space.unpinned reloadChildren:YES];
-  [self scheduleSave];
   if (noteID) {  // reopened from the archive: title from its first line
     NSString* s = [self loadNote:n].string;
     NSString* first = [[s componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] firstObject];
     if (first.length) n.liveTitle = first;
   }
+  return n;
+}
+- (ArcItem*)createNoteWithID:(NSString*)noteID {
+  if (!_space) return nil;
+  ArcItem* n = [self makeNoteItemWithID:noteID];
+  [_space.unpinned.children insertObject:n atIndex:0];  // Arc puts new notes at the top of Today
+  [_outline reloadItem:_space.unpinned reloadChildren:YES];
+  [self scheduleSave];
   [self showItem:n];
   return n;
 }
 - (IBAction)newNote:(id)sender { [self createNoteWithID:nil]; }
+// Arc: newNoteInSplitView. A new note opens as a pane beside the focused page (or note).
+- (IBAction)newNoteInSplitView:(id)sender {
+  if (!_space) return;
+  if (!_shown) { [self createNoteWithID:nil]; return; }
+  ArcItem* n = [self makeNoteItemWithID:nil];
+  if (![self placeInSplit:n horizontal:NO before:NO]) [self createNoteWithID:nil];
+}
+
+// Markdown export (File > Export Note as Markdown..., Copy Note as Markdown).
+// The note to export: the focused pane if it's a note, else a note beside it in the split.
+- (ArcItem*)noteForExport {
+  if (_shown.noteID) return _shown;
+  for (ArcItem* pane in [self visiblePanes])
+    if (pane.noteID) return pane;
+  return nil;
+}
+- (NSString*)markdownForNote:(ArcItem*)note {
+  NoteEditorView* e = note.itemID ? _noteEditors[note.itemID] : nil;
+  return e ? e.markdown : NoteMarkdown([self loadNote:note]);
+}
+- (BOOL)exportNote:(ArcItem*)note toPath:(NSString*)path {
+  NSString* md = note ? [self markdownForNote:note] : nil;
+  return md && [md writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+- (IBAction)exportNoteAsMarkdown:(id)sender {
+  ArcItem* note = [self noteForExport];
+  if (!note) { NSBeep(); return; }
+  NSSavePanel* panel = [NSSavePanel savePanel];
+  UTType* md = [UTType typeWithFilenameExtension:@"md"];
+  if (md) panel.allowedContentTypes = @[ md ];
+  NSString* name = [[note.displayTitle ?: @"Note" componentsSeparatedByCharactersInSet:
+                        [NSCharacterSet characterSetWithCharactersInString:@"/:\\"]] componentsJoinedByString:@"-"];
+  panel.nameFieldStringValue = [(name.length ? name : @"Note") stringByAppendingPathExtension:@"md"];
+  [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r == NSModalResponseOK && ![self exportNote:note toPath:panel.URL.path]) NSBeep();
+  }];
+}
+- (IBAction)copyNoteAsMarkdown:(id)sender {
+  ArcItem* note = [self noteForExport];
+  if (!note) { NSBeep(); return; }
+  NSString* md = [self markdownForNote:note];
+  NSPasteboard* pb = [self copyPasteboard];
+  [pb clearContents];
+  [pb setString:md forType:NSPasteboardTypeString];
+  [pb setString:md forType:@"net.daringfireball.markdown"];
+}
+
 // Tests.
 - (void)typeInNote:(NSString*)text {
-  if (!_noteText || !_noteItem) return;
-  [_noteText setSelectedRange:NSMakeRange(_noteText.string.length, 0)];
-  [_noteText insertText:text replacementRange:_noteText.selectedRange];
+  NSTextView* tv = [self focusedNoteEditor].textView;
+  if (!tv) return;
+  [tv setSelectedRange:NSMakeRange(tv.string.length, 0)];
+  [tv insertText:text replacementRange:tv.selectedRange];
 }
-- (NSString*)noteEditorText { return _noteScroll.hidden ? nil : _noteText.string; }
+- (NSString*)noteEditorText { return [self focusedNoteEditor].textView.string; }
 - (NSString*)savedNoteText:(ArcItem*)note { [self saveNoteNow]; return [self loadNote:note].string; }
+- (NSAttributedString*)savedNote:(ArcItem*)note { [self saveNoteNow]; return [self loadNote:note]; }
 - (BOOL)noteRangeIsBold:(ArcItem*)note range:(NSRange)r {  // tests: reads the saved file
   NSAttributedString* a = [self loadNote:note];
   if (NSMaxRange(r) > a.length) return NO;
@@ -3611,12 +3662,13 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   return (f.fontDescriptor.symbolicTraits & NSFontDescriptorTraitBold) != 0;
 }
 - (void)makeNoteRangeBold:(NSRange)r {  // tests: what Format > Bold does to a selection
-  if (NSMaxRange(r) > _noteText.textStorage.length) return;
-  NSFont* f = [_noteText.textStorage attribute:NSFontAttributeName atIndex:r.location effectiveRange:nil] ?: [NSFont systemFontOfSize:15];
+  NSTextView* tv = [self focusedNoteEditor].textView;
+  if (NSMaxRange(r) > tv.textStorage.length) return;
+  NSFont* f = [tv.textStorage attribute:NSFontAttributeName atIndex:r.location effectiveRange:nil] ?: [NSFont systemFontOfSize:15];
   NSFont* b = [[NSFontManager sharedFontManager] convertFont:f toHaveTrait:NSBoldFontMask];
-  [_noteText shouldChangeTextInRange:r replacementString:nil];
-  [_noteText.textStorage addAttribute:NSFontAttributeName value:b range:r];
-  [_noteText didChangeText];
+  [tv shouldChangeTextInRange:r replacementString:nil];
+  [tv.textStorage addAttribute:NSFontAttributeName value:b range:r];
+  [tv didChangeText];
 }
 
 - (NSArray<NSValue*>*)paneFrames {
@@ -3700,27 +3752,48 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 // The new pane is a normal Today tab placed beside the focused pane (after it for right/bottom, before it
 // for left/top). The direction sets the layout of the whole split.
 - (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal before:(BOOL)before {
-  NSString* url = ResolveCommandBarInput(input);
-  if (!url || !_space || !_shown) return;
-  [self syncSplitState];
-  if (_splitItems.count >= 4) return;
-  ArcItem* group = [self ensureSplitGroupFor:_shown];
-  if (!group) {
-    NSBeep();
+  if ([input hasPrefix:@"notarc://note/"]) {  // a note: the existing one moves into the split, else it's reopened
+    NSString* nid = [input substringFromIndex:@"notarc://note/".length];
+    if (!nid.length || [nid rangeOfString:@"/"].location != NSNotFound) return;
+    ArcItem* note = [self tabWithURLPrefix:input];
+    [self placeInSplit:note ?: [self makeNoteItemWithID:nid] horizontal:horizontal before:before];
     return;
   }
-  group.splitHorizontal = horizontal;
-  group.splitFractions = nil;
+  NSString* url = ResolveCommandBarInput(input);
+  if (!url || !_space || !_shown) return;
   ArcItem* tab = [ArcItem new];
   tab.itemID = NSUUID.UUID.UUIDString;
   tab.url = url;
   tab.children = [NSMutableArray array];
+  [self placeInSplit:tab horizontal:horizontal before:before];
+}
+
+// Puts a pane beside the focused one: a new tab or note, or an existing item that moves out of its old place.
+- (BOOL)placeInSplit:(ArcItem*)item horizontal:(BOOL)horizontal before:(BOOL)before {
+  if (!item || !_space || !_shown || item == _shown) return NO;
+  [self syncSplitState];
+  if ([_splitItems containsObject:item]) {
+    [self showItem:item];
+    return YES;
+  }
+  if (_splitItems.count >= 4) return NO;
+  ArcItem* group = [self ensureSplitGroupFor:_shown];
+  if (!group) {
+    NSBeep();
+    return NO;
+  }
+  ArcItem* old = [self parentOfItem:item];
+  if (old.isSplit) [self detachFromSplit:item keep:NO];
+  else if (old) [old.children removeObject:item];
+  group.splitHorizontal = horizontal;
+  group.splitFractions = nil;
   NSUInteger at = [group.children indexOfObject:_shown] + (before ? 0 : 1);
-  [group.children insertObject:tab atIndex:at];
+  [group.children insertObject:item atIndex:at];
   [_outline reloadData];
   for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
   [self scheduleSave];
-  [self showItem:tab];
+  [self showItem:item];
+  return YES;
 }
 
 - (NSUInteger)indexOfShownInSplit { return [_splitItems indexOfObject:_shown]; }
@@ -5582,7 +5655,8 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (void)menuOpenInSplit:(NSMenuItem*)sender {
   ArcItem* item = sender.representedObject;
   if (!_shown || item == _shown) return;
-  [self openInSplit:item.url horizontal:NO before:NO];
+  if (item.noteID) [self placeInSplit:item horizontal:NO before:NO];  // a note is one document: it moves
+  else [self openInSplit:item.url horizontal:NO before:NO];
 }
 - (void)menuOpenLittle:(NSMenuItem*)sender { [self openLittleWindow:((ArcItem*)sender.representedObject).url]; }
 - (void)menuCopyURL:(NSMenuItem*)sender {
@@ -6695,6 +6769,9 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
     mi.title = SettingBool(kSettingShowSpaceHeader) ? @"Hide Space Header" : @"Show Space Header";
   if (mi.action == @selector(resetPinnedTab:) || mi.action == @selector(replacePinnedURL:))
     return _shown && [self isPinnedItem:_shown] && _shown.pinnedURL.length;
+  if (mi.action == @selector(exportNoteAsMarkdown:) || mi.action == @selector(copyNoteAsMarkdown:))
+    return [self noteForExport] != nil;
+  if (mi.action == @selector(newNoteInSplitView:)) return _space != nil && _splitItems.count < 4;
   return YES;
 }
 

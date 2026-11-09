@@ -4,6 +4,12 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Notes look like Arc's: the first line is a large title, text sits in a centred reading column, and a format bar
+  offers paragraph styles (Body, Heading 1-3), bold, italic, underline, strikethrough, bulleted and numbered lists,
+  checklists and links (also in the Format menu). It follows the Space's light or dark look.
+- Notes in split view: Split View > New Note in Split View opens a note beside the page, and Add Split from a note
+  opens a page beside it. Open in Split View on a note moves that note into the split.
+- File > Export Note as Markdown... saves the note as a .md file; Copy Note as Markdown copies it.
 - The parity checklist is up to date with 0.23.0, with an Out of scope section and docs/decisions.md for every
   scope call.
 
