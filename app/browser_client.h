@@ -1,6 +1,9 @@
 // CEF client shared by every web view in the window.
 #pragma once
 
+#include <string>
+#include <utility>
+#include <vector>
 #include <functional>
 #include <map>
 #include <string>
@@ -82,7 +85,18 @@ class BrowserClient : public CefClient,
                          CefRefPtr<CefDownloadItemCallback> callback) override;
 
   // Right-clicking a link adds NotArc's link actions on top of Chromium's menu.
-  enum LinkCommand { kLinkNewTab = 0, kLinkBackgroundTab, kLinkSplit, kLinkPeek, kLinkLittle, kLinkCopyMarkdown, kLinkCount };
+  // Image, page and selection actions (#70) share the same callback: `url` is the image's or page's address, `text` the
+  // selected text.
+  enum LinkCommand {
+    kLinkNewTab = 0, kLinkBackgroundTab, kLinkSplit, kLinkPeek, kLinkLittle, kLinkCopyMarkdown,
+    kImageOpen, kImageCopy, kImageCopyAddress, kImageSave,
+    kPageCopyURL, kPageCopyMarkdown, kPageCapture, kPageTranslate, kPageBoost,
+    kSelectionSearch,
+    kLinkCount
+  };
+  // What NotArc adds to Chromium's menu for a right-click (pure, for tests): command ids and titles, in order.
+  static std::vector<std::pair<int, std::string>> MenuItemsFor(bool link, bool image, bool selection, bool editable,
+                                                              const std::string& selectionText);
   using LinkMenuCallback = std::function<void(int browser_id, int command, const std::string& url, const std::string& text)>;
   void set_link_menu_callback(LinkMenuCallback cb) { on_link_menu_ = std::move(cb); }
   void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
@@ -146,6 +160,14 @@ class BrowserClient : public CefClient,
   // Boosts: "__notarc_zap__:<selector>" console lines, and main-frame load end (to apply Boosts).
   using ZapCallback = std::function<void(int browser_id, const std::string& selector)>;
   void set_zap_callback(ZapCallback cb) { on_zap_ = std::move(cb); }
+  // Web notifications (#78): a page's `new Notification(...)` / `registration.showNotification(...)`, as JSON
+  // {title, body, tag}, with the page's URL.
+  using NotifyCallback = std::function<void(int browser_id, const std::string& json, const std::string& page_url)>;
+  void set_notify_callback(NotifyCallback cb) { on_notify_ = std::move(cb); }
+  void OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType transition_type) override;
+  static const char* NotificationShimJS();
+  using LangCallback = std::function<void(int browser_id, const std::string& lang)>;  // page language (#52)
+  void set_lang_callback(LangCallback cb) { on_lang_ = std::move(cb); }
   using LoadEndCallback = std::function<void(int browser_id, const std::string& url)>;
   void set_load_end_callback(LoadEndCallback cb) { on_load_end_ = std::move(cb); }
   void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override;
@@ -178,6 +200,8 @@ class BrowserClient : public CefClient,
   MediaCallback on_media_;
   ZapCallback on_zap_;
   LoadEndCallback on_load_end_;
+  LangCallback on_lang_;
+  NotifyCallback on_notify_;
   FaviconCallback on_favicon_;
   RendererCallback on_renderer_;
   std::map<int, CefRefPtr<CefUnresponsiveProcessCallback>> hung_;

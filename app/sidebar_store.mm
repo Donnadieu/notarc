@@ -23,6 +23,7 @@ static NSDictionary* EncodeItem(ArcItem* item) {
   if (item.url.length) d[@"url"] = item.url;
   if (item.pinnedURL.length) d[@"pinnedURL"] = item.pinnedURL;
   if (item.hideUnreadBadge) d[@"hideUnread"] = @YES;
+  if (item.renamed) d[@"renamed"] = @YES;
   if (item.browserId) d[@"open"] = @YES;
   if (item.lastActiveAt) d[@"lastActiveAt"] = @(item.lastActiveAt.timeIntervalSinceReferenceDate);
   d[@"folder"] = @(item.isFolder);
@@ -58,6 +59,7 @@ static ArcItem* DecodeItem(NSDictionary* d, int depth) {
   item.wasOpen = [d[@"open"] boolValue];
   item.isFolder = [d[@"folder"] boolValue];
   item.hideUnreadBadge = [d[@"hideUnread"] boolValue];
+  item.renamed = [d[@"renamed"] boolValue];
   item.isSplit = [d[@"split"] boolValue];
   if ([d[@"note"] isKindOfClass:NSString.class]) item.noteID = d[@"note"];
   if ([d[@"easel"] isKindOfClass:NSString.class] && [d[@"easel"] rangeOfString:@"/"].location == NSNotFound) item.easelID = d[@"easel"];
@@ -117,6 +119,7 @@ NSArray<ArcSpace*>* SidebarStoreLoad(NSString* path, NSString** focusedSpaceID, 
     space.profileDirectory = s[@"profile"] ?: @"Default";
     if ([s[@"themeColors"] isKindOfClass:NSArray.class]) space.themeColors = s[@"themeColors"];
     space.themeIntensity = [s[@"themeIntensity"] respondsToSelector:@selector(doubleValue)] ? [s[@"themeIntensity"] doubleValue] : 0.5;
+    space.themeGrain = [s[@"themeGrain"] respondsToSelector:@selector(doubleValue)] ? MAX(0.0, MIN(1.0, [s[@"themeGrain"] doubleValue])) : 0;
     if ([s[@"icon"] isKindOfClass:NSString.class]) space.iconEmoji = s[@"icon"];
     if ([s[@"colorScheme"] isKindOfClass:NSString.class]) space.colorScheme = s[@"colorScheme"];
     if ([s[@"shown"] isKindOfClass:NSString.class]) space.shownItemID = s[@"shown"];
@@ -142,6 +145,7 @@ BOOL SidebarStoreSave(NSArray<ArcSpace*>* spaces, NSString* focusedSpaceID, NSSt
     if (space.themeColors.count) {
       s[@"themeColors"] = space.themeColors;
       s[@"themeIntensity"] = @(space.themeIntensity);
+      if (space.themeGrain > 0) s[@"themeGrain"] = @(space.themeGrain);
     }
     if (space.iconEmoji.length) s[@"icon"] = space.iconEmoji;
     if ([space.colorScheme isEqualToString:@"light"] || [space.colorScheme isEqualToString:@"dark"])

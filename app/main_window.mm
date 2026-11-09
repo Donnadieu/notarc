@@ -18,6 +18,11 @@
 #import "app/easel.h"
 #import "app/live_folder.h"
 #import "app/favicons.h"
+#import "app/tidy_title.h"
+#import "app/space_fetch.h"
+#import "app/email_peek.h"
+#import "app/web_notifications.h"
+#import "app/calendar_preview.h"
 #include "include/cef_devtools_message_observer.h"
 
 #include <cstdio>
@@ -217,6 +222,74 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
 - (void)mouseUp:(NSEvent*)e { if (self.onClick) self.onClick(); }
 @end
 
+// Arc's Space style editor has a grain slider: a fine monochrome noise over the theme colours. NotArc draws its own
+// noise tile once (seeded, so it looks the same every launch) and repeats it as a pattern colour.
+static constexpr float kMaxGrainOpacity = 0.35;
+static CGColorRef GrainPatternColor() {
+  static NSColor* color;
+  if (!color) {
+    const int n = 128;
+    NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:nullptr pixelsWide:n pixelsHigh:n bitsPerSample:8
+                                                               samplesPerPixel:2 hasAlpha:YES isPlanar:NO
+                                                                colorSpaceName:NSCalibratedWhiteColorSpace bytesPerRow:n * 2
+                                                                  bitsPerPixel:16];
+    uint32_t seed = 0x9E3779B9u;
+    unsigned char* px = rep.bitmapData;
+    for (int i = 0; i < n * n; ++i) {
+      seed = seed * 1664525u + 1013904223u;  // small LCG: deterministic, no allocation
+      unsigned v = seed >> 24;
+      px[i * 2] = v > 127 ? 255 : 0;          // white or black speck
+      px[i * 2 + 1] = (unsigned char)((v * 37u) & 0x7F);  // varying strength
+    }
+    NSImage* img = [[NSImage alloc] initWithSize:NSMakeSize(n / 2, n / 2)];  // @2x tile
+    [img addRepresentation:rep];
+    color = [NSColor colorWithPatternImage:img];
+  }
+  return color.CGColor;
+}
+
+// Arc's page card edge (#122): a hairline border on the card (Arc's colour catalogue: TabListOverlapBorder, black 5%
+// in light, white 5% in dark) and, in light mode only, a soft two-layer shadow under it (Arc's card views carry a
+// shadowConfiguration and a secondaryShadowConfiguration), so a white page still stands off a pale Space colour.
+// The view sits behind the card; the card itself clips the page, so its own layer can't cast the shadow.
+@interface CardEdgeView : NSView
+@property(nonatomic, weak) NSView* card;
+@end
+@implementation CardEdgeView
+- (BOOL)wantsUpdateLayer { return YES; }
+- (void)viewDidChangeEffectiveAppearance { self.needsDisplay = YES; }
+- (void)setFrame:(NSRect)f { [super setFrame:f]; self.needsDisplay = YES; }
+- (void)updateLayer {
+  BOOL dark = [self.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
+              NSAppearanceNameDarkAqua;
+  CGFloat radius = self.card.layer.cornerRadius;
+  CGPathRef path = CGPathCreateWithRoundedRect(self.bounds, radius, radius, nullptr);
+  self.layer.backgroundColor = NSColor.whiteColor.CGColor;  // hidden under the card; a shadow needs something to cast it
+  self.layer.cornerRadius = radius;
+  self.layer.shadowPath = path;
+  self.layer.shadowColor = NSColor.blackColor.CGColor;
+  self.layer.shadowOffset = CGSizeMake(0, -1);
+  self.layer.shadowRadius = 4;
+  self.layer.shadowOpacity = dark || radius == 0 ? 0 : 0.10;
+  CALayer* tight = self.layer.sublayers.firstObject;
+  if (!tight) {
+    tight = [CALayer layer];
+    [self.layer addSublayer:tight];
+  }
+  tight.frame = self.bounds;
+  tight.cornerRadius = radius;
+  tight.backgroundColor = NSColor.whiteColor.CGColor;
+  tight.shadowPath = path;
+  tight.shadowColor = NSColor.blackColor.CGColor;
+  tight.shadowOffset = CGSizeZero;
+  tight.shadowRadius = 1;
+  tight.shadowOpacity = dark || radius == 0 ? 0 : 0.06;
+  CGPathRelease(path);
+  self.card.layer.borderWidth = radius == 0 ? 0 : 1;
+  self.card.layer.borderColor = (dark ? [NSColor colorWithWhite:1 alpha:0.05] : [NSColor colorWithWhite:0 alpha:0.05]).CGColor;
+}
+@end
+
 // Arc's sidebar rows: 36 pt rounded pills with Arc's selected / hovered / multi-selected colours
 // (Arc colour catalogue: TabCellBackgroundCurrent, ...PreviousHovered, ...Mutiselected; light mode adds a shadow).
 constexpr CGFloat kRowHeight = 36, kRowRadius = 8;
@@ -351,8 +424,18 @@ static BOOL IsDark(NSView* v) {
 - (NSMenu*)menuForEvent:(NSEvent*)e { return self.menuProvider ? self.menuProvider() : nil; }
 @end
 
+// Arc: "Drag a tab from your sidebar into the middle of the screen to create a Split View" (#37). The page card takes
+// sidebar drags; the side nearest the pointer is where the new pane goes, shown by a tinted half while dragging.
+@interface PageDropView : NSView
+@property(nonatomic, weak) MainWindowController* owner;
+@property(nonatomic, strong) NSView* preview;
+@end
+
 @interface MainWindowController ()
+- (BOOL)canDropOnPage:(id<NSDraggingInfo>)info;
+- (BOOL)dropOnPage:(id<NSDraggingInfo>)info side:(NSInteger)side;
 - (void)favoriteClicked:(ArcItem*)item;
+- (void)favoriteHovered:(ArcItem*)item rect:(NSRect)rect;
 - (NSMenu*)sidebarMenuForItem:(ArcItem*)item;
 - (BOOL)acceptFavoriteDrop:(id<NSDraggingInfo>)info index:(NSUInteger)index;
 - (BOOL)canDropFavorite:(id<NSDraggingInfo>)info;
@@ -488,9 +571,17 @@ NSInteger UnreadCountFromTitle(NSString* title) {
 }
 - (void)mouseMoved:(NSEvent*)e {
   NSInteger i = [self indexAt:[self convertPoint:e.locationInWindow fromView:nil]];
-  if (i != self.hovered) { self.hovered = i; self.needsDisplay = YES; }
+  if (i != self.hovered) {
+    self.hovered = i;
+    self.needsDisplay = YES;
+    [self.owner favoriteHovered:i >= 0 ? self.items[(NSUInteger)i] : nil rect:i >= 0 ? [self tileRect:(NSUInteger)i] : NSZeroRect];
+  }
 }
-- (void)mouseExited:(NSEvent*)e { self.hovered = -1; self.needsDisplay = YES; }
+- (void)mouseExited:(NSEvent*)e {
+  self.hovered = -1;
+  self.needsDisplay = YES;
+  [self.owner favoriteHovered:nil rect:NSZeroRect];
+}
 - (void)mouseUp:(NSEvent*)e {
   NSInteger i = [self indexAt:[self convertPoint:e.locationInWindow fromView:nil]];
   if (i >= 0) [self.owner favoriteClicked:self.items[(NSUInteger)i]];
@@ -514,6 +605,56 @@ NSInteger UnreadCountFromTitle(NSString* title) {
   return [self.owner acceptFavoriteDrop:info index:i >= 0 ? (NSUInteger)i : self.items.count];
 }
 @end
+
+@implementation PageDropView
+- (instancetype)initWithFrame:(NSRect)f {
+  if ((self = [super initWithFrame:f])) [self registerForDraggedTypes:@[ @"io.github.donnadieu.notarc.sidebar-item" ]];
+  return self;
+}
+// 0 right, 1 left, 2 bottom, 3 top: the edge closest to the point (by fraction of width/height).
++ (NSInteger)sideForPoint:(NSPoint)p inSize:(NSSize)s {
+  CGFloat fx = s.width > 0 ? p.x / s.width : 0.5, fy = s.height > 0 ? p.y / s.height : 0.5;
+  CGFloat dRight = 1 - fx, dLeft = fx, dTop = 1 - fy, dBottom = fy;
+  CGFloat m = MIN(MIN(dRight, dLeft), MIN(dTop, dBottom));
+  if (m == dRight) return 0;
+  if (m == dLeft) return 1;
+  return m == dBottom ? 2 : 3;
+}
+- (NSInteger)sideFor:(id<NSDraggingInfo>)info {
+  return [PageDropView sideForPoint:[self convertPoint:info.draggingLocation fromView:nil] inSize:self.bounds.size];
+}
+- (void)showPreview:(NSInteger)side {
+  if (!self.preview) {
+    self.preview = [[NSView alloc] initWithFrame:NSZeroRect];
+    self.preview.wantsLayer = YES;
+    self.preview.layer.backgroundColor = [NSColor.controlAccentColor colorWithAlphaComponent:0.22].CGColor;
+    self.preview.layer.borderColor = [NSColor.controlAccentColor colorWithAlphaComponent:0.6].CGColor;
+    self.preview.layer.borderWidth = 2;
+    self.preview.layer.cornerRadius = 8;
+  }
+  NSRect b = NSInsetRect(self.bounds, 6, 6), r = b;
+  if (side == 0) r = NSMakeRect(NSMidX(b), b.origin.y, b.size.width / 2, b.size.height);
+  if (side == 1) r = NSMakeRect(b.origin.x, b.origin.y, b.size.width / 2, b.size.height);
+  if (side == 2) r = NSMakeRect(b.origin.x, b.origin.y, b.size.width, b.size.height / 2);
+  if (side == 3) r = NSMakeRect(b.origin.x, NSMidY(b), b.size.width, b.size.height / 2);
+  self.preview.frame = r;
+  [self addSubview:self.preview positioned:NSWindowAbove relativeTo:nil];
+}
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info {
+  if (![self.owner canDropOnPage:info]) return NSDragOperationNone;
+  [self showPreview:[self sideFor:info]];
+  return NSDragOperationMove;
+}
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info { return [self draggingEntered:info]; }
+- (void)draggingExited:(id<NSDraggingInfo>)info { [self.preview removeFromSuperview]; }
+- (void)draggingEnded:(id<NSDraggingInfo>)info { [self.preview removeFromSuperview]; }
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)info {
+  [self.preview removeFromSuperview];
+  return [self.owner dropOnPage:info side:[self sideFor:info]];
+}
+@end
+
+NSInteger PageDropSide(NSPoint p, NSSize s) { return [PageDropView sideForPoint:p inSize:s]; }
 
 @interface SplitDividerView : NSView
 @property(nonatomic, weak) MainWindowController* owner;
@@ -628,6 +769,13 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSPopUpButton* _spacePicker;
   NSOutlineView* _outline;
   NSView* _content;
+  CardEdgeView* _cardEdge;
+  __weak ArcItem* _lastTidied;
+  NSMutableSet<NSString*>* _translateOffered;  // hosts offered a translation this launch (#52)
+  NSString* _lastTranslateOffer;
+  NSSize _lastCopiedImageSize;  // tests (#70)
+  ArcItem* _maximizedPane;       // split pane filling the card (#37)
+  NSDictionary* _lastNotification;  // tests (#78)  // for the "Renamed to ..." toast's Undo (#18)  // border and light-mode shadow of the page card (#122)
   id _swipeMonitor;           // two-finger swipe back/forward (#77)
   NSView* _swipeArrow;
   CefRefPtr<BrowserClient> _client;
@@ -653,8 +801,21 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   HistoryStore* _history;
   BOOL _focusMode;
   CAGradientLayer* _themeGradient;
+  CALayer* _themeGrain;  // film grain over the theme (#26)
   NSPopover* _hoverCard;
   NSView* _mediaBar;
+  NSView* _meetingBar;  // next meeting from Calendar (#56)
+  NSTextField* _meetingTitle;
+  NSButton* _meetingJoin;
+  CalendarEvent* _meeting;
+  NSTimer* _meetingTimer;
+  NSArray<CalendarEvent*>* _todayEvents;
+  NSDate* _calendarTestNow;  // tests: fixed clock
+  NSPopover* _favPreview;      // Gmail / Calendar Favorite preview (#57)
+  NSTimer* _favPreviewTimer;
+  __weak ArcItem* _favPreviewItem;
+  id _defaultsObserver;
+  NSArray<NSDictionary*>* _lastFavoritePreview;
   NSButton* _callMic;
   NSButton* _callCam;
   NSMutableDictionary<NSNumber*, NSView*>* _crashViews;
@@ -792,6 +953,12 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _themeGradient.startPoint = CGPointMake(0.5, 1);
   _themeGradient.endPoint = CGPointMake(0.5, 0);
   [_themeView.layer addSublayer:_themeGradient];
+  _themeGrain = [CALayer layer];
+  _themeGrain.frame = _themeView.bounds;
+  _themeGrain.autoresizingMask = kCALayerWidthSizable | kCALayerHeightSizable;
+  _themeGrain.backgroundColor = GrainPatternColor();
+  _themeGrain.opacity = 0;
+  [_themeView.layer addSublayer:_themeGrain];
   _themeView.hidden = YES;
   [root addSubview:_themeView];
   [root addSubview:sidebar];
@@ -827,6 +994,26 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   for (NSView* v in @[ _mediaPlay, _mediaTitle, _mediaMute, _callCam, _callMic ]) [_mediaBar addSubview:v];
   _mediaBar.hidden = YES;
   [sidebar addSubview:_mediaBar];
+  // Arc's next-meeting bar (#56): title, when, and Join for a video-call link; from the Mac's Calendar.
+  _meetingBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 44, kSidebarWidth - 16, 34)];
+  _meetingBar.wantsLayer = YES;
+  _meetingBar.layer.cornerRadius = 8;
+  _meetingBar.layer.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.08].CGColor;
+  NSImageView* calIcon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"calendar" accessibilityDescription:nil]];
+  calIcon.frame = NSMakeRect(8, 8, 18, 18);
+  calIcon.contentTintColor = NSColor.secondaryLabelColor;
+  _meetingTitle = [NSTextField labelWithString:@""];
+  _meetingTitle.lineBreakMode = NSLineBreakByTruncatingTail;
+  _meetingTitle.font = [NSFont systemFontOfSize:12];
+  _meetingTitle.frame = NSMakeRect(32, 8, kSidebarWidth - 16 - 32 - 52, 18);
+  _meetingJoin = [NSButton buttonWithTitle:@"Join" target:self action:@selector(joinMeeting:)];
+  _meetingJoin.bezelStyle = NSBezelStyleRounded;
+  _meetingJoin.controlSize = NSControlSizeSmall;
+  _meetingJoin.font = [NSFont systemFontOfSize:11];
+  _meetingJoin.frame = NSMakeRect(kSidebarWidth - 16 - 52, 5, 46, 24);
+  for (NSView* v in @[ calIcon, _meetingTitle, _meetingJoin ]) [_meetingBar addSubview:v];
+  _meetingBar.hidden = YES;
+  [sidebar addSubview:_meetingBar];
 
   _spacePicker = [[NSPopUpButton alloc]
       initWithFrame:NSMakeRect(8, bounds.size.height - 120, kSidebarWidth - 16, 26) pullsDown:NO];
@@ -984,13 +1171,18 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   [sidebar addSubview:_spaceBar];
   [self rebuildSpaceBar];  // rebuildSpacePicker above ran before the bar existed
 
-  _content = [[NSView alloc] initWithFrame:NSMakeRect(kSidebarWidth, 0,
-                                                      bounds.size.width - kSidebarWidth,
-                                                      bounds.size.height)];
+  PageDropView* pageDrop = [[PageDropView alloc] initWithFrame:NSMakeRect(kSidebarWidth, 0, bounds.size.width - kSidebarWidth,
+                                                                           bounds.size.height)];
+  pageDrop.owner = self;
+  _content = pageDrop;
   _content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   _content.wantsLayer = YES;
   _content.layer.cornerRadius = kCardRadius;
   _content.layer.masksToBounds = YES;
+  _cardEdge = [[CardEdgeView alloc] initWithFrame:_content.frame];
+  _cardEdge.wantsLayer = YES;
+  _cardEdge.card = _content;
+  [root addSubview:_cardEdge];
   [root addSubview:_content];
 
   _toolbar = [[NSView alloc] initWithFrame:NSMakeRect(kSidebarWidth, bounds.size.height - kToolbarHeight,
@@ -1036,6 +1228,10 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _spaceHeader.frame = NSMakeRect(8, H - below - 42, w, 34);
   CGFloat top = _spaceHeader.hidden ? below + 8 : below + 42;
   CGFloat bottom = _mediaBar.hidden ? 42 : 82;
+  NSRect mf = _meetingBar.frame;
+  mf.origin.y = bottom + 2;
+  _meetingBar.frame = mf;
+  if (!_meetingBar.hidden) bottom += 40;
   _sidebarScroll.frame = NSMakeRect(8, bottom, w, MAX(0, H - top - bottom));
 }
 
@@ -1419,8 +1615,36 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   }];
 }
 
+// Arc: a two-finger swipe across the sidebar switches Spaces (#27): fingers moving left go to the next Space, right
+// to the previous one, with the sidebar's slide. Returns NO at either end, like Arc (no wraparound).
+- (BOOL)swipeSpacesBy:(NSInteger)step {
+  NSInteger i = (NSInteger)[_spaces indexOfObject:_space] + step;
+  if (!step || i < 0 || i >= (NSInteger)_spaces.count) return NO;
+  [self selectSpaceAtIndex:(NSUInteger)i];
+  return YES;
+}
+- (BOOL)handleSidebarSwipe:(NSEvent*)e {
+  if (_sidebar.hidden || !NSPointInRect([_sidebar convertPoint:e.locationInWindow fromView:nil], _sidebar.bounds)) return NO;
+  NSInteger dir = SwipeDirectionForScroll(e.scrollingDeltaX, e.scrollingDeltaY, e.hasPreciseScrollingDeltas,
+                                          e.phase == NSEventPhaseBegan);
+  NSInteger here = (NSInteger)[_spaces indexOfObject:_space], step = dir;  // dir -1 (fingers right) = previous Space
+  if (!dir || here + step < 0 || here + step >= (NSInteger)_spaces.count) return NO;
+  __block BOOL done = NO;
+  [e trackSwipeEventWithOptions:NSEventSwipeTrackingLockDirection
+       dampenAmountThresholdMin:dir < 0 ? 0 : -1
+                            max:dir < 0 ? 1 : 0
+                   usingHandler:^(CGFloat amount, NSEventPhase phase, BOOL complete, BOOL* stop) {
+                     if (phase == NSEventPhaseEnded && !done && fabs(amount) >= 0.3) {
+                       done = YES;
+                       [self swipeSpacesBy:step];
+                     }
+                   }];
+  return YES;
+}
+
 - (BOOL)handleSwipeScroll:(NSEvent*)e {
   if (e.window != self.window || !NSEvent.isSwipeTrackingFromScrollEventsEnabled || !_content) return NO;
+  if ([self handleSidebarSwipe:e]) return YES;
   if (!NSPointInRect([_content convertPoint:e.locationInWindow fromView:nil], _content.bounds)) return NO;
   NSInteger dir = SwipeDirectionForScroll(e.scrollingDeltaX, e.scrollingDeltaY, e.hasPreciseScrollingDeltas,
                                           e.phase == NSEventPhaseBegan);
@@ -1468,6 +1692,15 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   if (![gWindows containsObject:self]) [gWindows addObject:self];
   [self installSwipeNavigation];
   __weak MainWindowController* weakSelf = self;
+  [self applyCalendarSetting];
+  if (!_defaultsObserver)  // Settings checkbox for the meeting bar (#56)
+    _defaultsObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSUserDefaultsDidChangeNotification object:nil
+                                                                         queue:NSOperationQueue.mainQueue
+                                                                    usingBlock:^(NSNotification*) {
+                                                                      MainWindowController* me = weakSelf;
+                                                                      if (me && SettingBool(kSettingCalendar) != (me->_meetingTimer != nil))
+                                                                        [me applyCalendarSetting];
+                                                                    }];
   _client = new BrowserClient(
       [weakSelf](int browserId, const std::string& title) {
         [OwnerOf(browserId, weakSelf) browser:browserId title:[NSString stringWithUTF8String:title.c_str()] url:nil];
@@ -1476,9 +1709,12 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
         [OwnerOf(browserId, weakSelf) browser:browserId title:nil url:[NSString stringWithUTF8String:url.c_str()]];
       });
   _client->set_focus_callback([weakSelf](int browserId) { [OwnerOf(browserId, weakSelf) paneFocused:browserId]; });
-  _client->set_link_menu_callback([weakSelf](int browserId, int command, const std::string& url, const std::string&) {
+  _client->set_link_menu_callback([weakSelf](int browserId, int command, const std::string& url, const std::string& text) {
     NSString* target = [NSString stringWithUTF8String:url.c_str()];
-    dispatch_async(dispatch_get_main_queue(), ^{ [OwnerOf(browserId, weakSelf) handleLinkCommand:command url:target fromBrowser:browserId]; });
+    NSString* sel = [NSString stringWithUTF8String:text.c_str()];
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [OwnerOf(browserId, weakSelf) handleLinkCommand:command url:target text:sel fromBrowser:browserId];
+    });
   });
   _client->set_open_callback([weakSelf](int browserId, const std::string& url, int disposition, bool gesture) -> bool {
     MainWindowController* strong = OwnerOf(browserId, weakSelf);
@@ -1510,6 +1746,14 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   _client->set_load_end_callback([weakSelf](int browserId, const std::string& url) {
     [OwnerOf(browserId, weakSelf) applyBoostToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
     [OwnerOf(browserId, weakSelf) installCallHookInBrowser:browserId];
+    [OwnerOf(browserId, weakSelf) detectLanguageInBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
+  });
+  _client->set_notify_callback([weakSelf](int browserId, const std::string& json, const std::string& pageURL) {
+    NSString* j = [NSString stringWithUTF8String:json.c_str()], *u = [NSString stringWithUTF8String:pageURL.c_str()];
+    dispatch_async(dispatch_get_main_queue(), ^{ [OwnerOf(browserId, weakSelf) browser:browserId notification:j pageURL:u]; });
+  });
+  _client->set_lang_callback([weakSelf](int browserId, const std::string& lang) {
+    [OwnerOf(browserId, weakSelf) browser:browserId pageLanguage:[NSString stringWithUTF8String:lang.c_str()]];
   });
   _client->set_capture_callback([weakSelf](int browserId, bool video, bool audio) {
     [OwnerOf(browserId, weakSelf) browser:browserId captureVideo:video audio:audio];
@@ -1791,6 +2035,12 @@ static NSString* const kPiPExitJS =
 - (void)sidebarClicked:(id)sender {
   NSInteger row = _outline.clickedRow;
   ArcItem* a = row >= 0 ? [_outline itemAtRow:row] : nil;
+  NSEventModifierFlags mods = NSApp.currentEvent.modifierFlags & (NSEventModifierFlagCommand | NSEventModifierFlagOption |
+                                                                  NSEventModifierFlagShift | NSEventModifierFlagControl);
+  if (a.url.length && mods == (NSEventModifierFlagCommand | NSEventModifierFlagOption)) {  // Arc: Cmd+Opt+click = Little Arc
+    [self openLittleWindow:[self itemCurrentURL:a] ?: a.url];
+    return;
+  }
   if (a.isFolder) [self toggleFolder:a];
   if (a && a == _space.unpinned) {  // the "+ New Tab" row
     NSPoint p = [_outline convertPoint:NSApp.currentEvent.locationInWindow fromView:nil];
@@ -2109,6 +2359,167 @@ static NSString* const kCallHookJS =
   [self setCallTrack:@"Video" enabled:!item.cameraOff inItem:item];
   [self updateMediaBar];
 }
+
+#pragma mark Calendar (#56)
+
+// Refreshes once a minute while "Show next meeting" is on. The bar shows from 10 minutes before a meeting until it
+// ends (Arc's lead time isn't in its data; 10 minutes is NotArc's call), with Join when the event has a call link.
+- (void)applyCalendarSetting {
+  BOOL on = SettingBool(kSettingCalendar);
+  [_meetingTimer invalidate];
+  _meetingTimer = nil;
+  if (!on) {
+    _todayEvents = nil;
+    [self updateMeetingBar];
+    return;
+  }
+  __weak MainWindowController* weakSelf = self;
+  void (^refresh)(void) = ^{
+    if (weakSelf.selfTestProfiles) return;  // tests feed events directly; never ask macOS for Calendar access
+    CalendarLoadToday(^(NSArray<CalendarEvent*>* events, BOOL allowed) {
+      MainWindowController* me = weakSelf;
+      if (!me) return;
+      me->_todayEvents = events;
+      [me updateMeetingBar];
+    });
+  };
+  refresh();
+  _meetingTimer = [NSTimer scheduledTimerWithTimeInterval:60 repeats:YES block:^(NSTimer*) { refresh(); }];
+}
+- (void)setCalendarEventsForTest:(NSArray<CalendarEvent*>*)events now:(NSDate*)now {
+  _todayEvents = events;
+  _calendarTestNow = now;
+  [self updateMeetingBar];
+}
+- (void)updateMeetingBar {
+  NSDate* now = _calendarTestNow ?: NSDate.date;
+  CalendarEvent* e = SettingBool(kSettingCalendar) ? NextMeeting(_todayEvents, now, 10 * 60) : nil;
+  _meeting = e;
+  if (e) {
+    _meetingTitle.stringValue = [NSString stringWithFormat:@"%@ \u00B7 %@", e.title, MeetingTimeLabel(e, now)];
+    _meetingTitle.toolTip = e.title;
+    _meetingJoin.hidden = !e.meetingURL.length;
+  }
+  if (_meetingBar.hidden == !e) return;
+  _meetingBar.hidden = !e;
+  [self layoutSidebar];
+}
+- (NSString*)meetingBarText { return _meetingBar.hidden ? nil : _meetingTitle.stringValue; }  // tests
+- (BOOL)meetingJoinShown { return !_meetingBar.hidden && !_meetingJoin.hidden; }
+- (IBAction)joinMeeting:(id)sender {
+  NSString* url = _meeting.meetingURL;
+  if (!url.length) return;
+  // Zoom, Teams and FaceTime links hand over to their apps (the site asks first); Meet and the rest open as a tab.
+  [self openInNewTab:url];
+}
+- (IBAction)toggleCalendar:(id)sender {
+  SettingSetBool(kSettingCalendar, !SettingBool(kSettingCalendar));
+  [self applyCalendarSetting];
+}
+- (NSArray<CalendarEvent*>*)todayEvents { return _todayEvents; }
+
+#pragma mark Favorite previews (#57)
+
+// Arc showed a preview when you hovered some Favorites. NotArc does it for Gmail (newest unread emails, from Gmail's
+// own feed with the Space's sign-in; click one to open it in a Peek) and for calendar sites (today's events from
+// the Mac's Calendar, when that's turned on). Other Favorites just get the unread badge (#20).
+NSString* FavoritePreviewKind(NSString* url) {
+  NSURL* u = [NSURL URLWithString:url ?: @""];
+  NSString* host = u.host.lowercaseString ?: @"", *path = u.path.lowercaseString ?: @"";
+  if ([host isEqualToString:@"mail.google.com"]) return @"gmail";
+  if ([host isEqualToString:@"calendar.google.com"] || [host isEqualToString:@"calendar.proton.me"] ||
+      [host hasSuffix:@"cal.com"] || (([host hasPrefix:@"outlook."] || [host hasSuffix:@".icloud.com"] ||
+                                        [host isEqualToString:@"www.icloud.com"]) && [path containsString:@"calendar"]))
+    return @"calendar";
+  return nil;
+}
+- (void)favoriteHovered:(ArcItem*)item rect:(NSRect)rect {
+  if (item == _favPreviewItem) return;
+  _favPreviewItem = item;
+  [_favPreviewTimer invalidate];
+  [_favPreview close];
+  _favPreview = nil;
+  NSString* kind = FavoritePreviewKind([self itemCurrentURL:item]);
+  if (!kind) return;
+  __weak MainWindowController* weakSelf = self;
+  _favPreviewTimer = [NSTimer scheduledTimerWithTimeInterval:0.6 repeats:NO block:^(NSTimer*) {
+    [weakSelf loadFavoritePreview:item kind:kind rect:rect];
+  }];
+}
+- (void)loadFavoritePreview:(ArcItem*)item kind:(NSString*)kind rect:(NSRect)rect {
+  __weak MainWindowController* weakSelf = self;
+  if ([kind isEqualToString:@"gmail"]) {
+    SpaceFetch([self contextForSpace:_space], kGmailFeedURL, nil, ^(NSInteger status, NSData* body, NSString*) {
+      MainWindowController* me = weakSelf;
+      if (!me || me->_favPreviewItem != item) return;
+      [me showFavoritePreviewRows:[me gmailPreviewRows:status body:body] title:@"Gmail" rect:rect];
+    });
+    return;
+  }
+  NSArray* rows = SettingBool(kSettingCalendar) ? [self calendarPreviewRows:_todayEvents now:NSDate.date]
+                                                : @[ @{@"text" : @"Turn on \u201CShow my next meeting from Calendar\u201D in Settings to see today\u2019s events here."} ];
+  [self showFavoritePreviewRows:rows title:@"Today" rect:rect];
+}
+- (NSArray<NSDictionary*>*)gmailPreviewRows:(NSInteger)status body:(NSData*)body {
+  if (status != 200 || ![[[NSString alloc] initWithData:body ?: NSData.data encoding:NSUTF8StringEncoding] containsString:@"<feed"])
+    return @[ @{@"text" : @"Sign in to Gmail in this Space to see your unread email here."} ];
+  NSArray* entries = GmailFeedEntries(body);
+  if (!entries.count) return @[ @{@"text" : @"No unread email."} ];
+  NSMutableArray* rows = [NSMutableArray array];
+  for (NSDictionary* e in [entries subarrayWithRange:NSMakeRange(0, MIN(entries.count, (NSUInteger)6))])
+    [rows addObject:@{@"text" : [NSString stringWithFormat:@"%@ \u2014 %@", e[@"name"] ?: e[@"email"] ?: @"", e[@"title"] ?: @""],
+                      @"url" : e[@"link"] ?: @""}];
+  return rows;
+}
+- (NSArray<NSDictionary*>*)calendarPreviewRows:(NSArray<CalendarEvent*>*)events now:(NSDate*)now {
+  NSMutableArray* rows = [NSMutableArray array];
+  NSDateFormatter* f = [NSDateFormatter new];
+  f.timeStyle = NSDateFormatterShortStyle;
+  for (CalendarEvent* e in events) {
+    if ([e.end compare:now] != NSOrderedDescending) continue;
+    NSString* when = e.allDay ? @"All day" : [f stringFromDate:e.start];
+    [rows addObject:@{@"text" : [NSString stringWithFormat:@"%@  %@", when, e.title], @"url" : e.meetingURL ?: @""}];
+    if (rows.count == 6) break;
+  }
+  return rows.count ? rows : @[ @{@"text" : @"Nothing else today."} ];
+}
+- (void)showFavoritePreviewRows:(NSArray<NSDictionary*>*)rows title:(NSString*)title rect:(NSRect)rect {
+  _lastFavoritePreview = rows;
+  if (self.selfTestProfiles && !self.window.isVisible) return;
+  NSStackView* stack = [NSStackView new];
+  stack.orientation = NSUserInterfaceLayoutOrientationVertical;
+  stack.alignment = NSLayoutAttributeLeading;
+  stack.spacing = 4;
+  stack.edgeInsets = NSEdgeInsetsMake(10, 12, 10, 12);
+  NSTextField* head = [NSTextField labelWithString:title];
+  head.font = [NSFont boldSystemFontOfSize:13];
+  [stack addArrangedSubview:head];
+  for (NSDictionary* r in rows) {
+    NSButton* b = [NSButton buttonWithTitle:r[@"text"] target:self action:@selector(favoritePreviewRowClicked:)];
+    b.bordered = NO;
+    b.alignment = NSTextAlignmentLeft;
+    b.font = [NSFont systemFontOfSize:12];
+    b.lineBreakMode = NSLineBreakByTruncatingTail;
+    b.toolTip = r[@"text"];
+    b.identifier = r[@"url"];
+    b.enabled = [r[@"url"] length] > 0;
+    [b.widthAnchor constraintLessThanOrEqualToConstant:300].active = YES;
+    [stack addArrangedSubview:b];
+  }
+  NSViewController* vc = [NSViewController new];
+  vc.view = stack;
+  stack.frame = NSMakeRect(0, 0, 324, stack.fittingSize.height);
+  _favPreview = [NSPopover new];
+  _favPreview.contentViewController = vc;
+  _favPreview.behavior = NSPopoverBehaviorTransient;
+  _favPreview.animates = NO;
+  [_favPreview showRelativeToRect:rect ofView:_favGrid preferredEdge:NSRectEdgeMaxX];
+}
+- (void)favoritePreviewRowClicked:(NSButton*)sender {
+  [_favPreview close];
+  if (sender.identifier.length) [self openPeek:sender.identifier];
+}
+- (NSArray<NSDictionary*>*)lastFavoritePreview { return _lastFavoritePreview; }  // tests
 
 - (BOOL)callControlsShown { return !_mediaBar.hidden && (!_callMic.hidden || !_callCam.hidden); }
 
@@ -2929,6 +3340,62 @@ static NSString* RelativeAgo(NSDate* d) {
   b->GetHost()->ShowDevTools(info, nullptr, settings, CefPoint());
 }
 
+// Arc offers to translate a page that's in another language (its address bar's translatePrompt). NotArc asks the
+// page for its declared language once it has loaded (the shown tab only) and offers a one-tap Translate toast, once
+// per site per launch. Translating still goes through Google's web translator, only when chosen.
+// Web notifications (#78): shown in Notification Center when the site is allowed (NotArc's own Site Settings answer);
+// clicking one brings NotArc forward on that tab. Test runs count them instead of posting.
+- (BOOL)browser:(int)browserId notification:(NSString*)json pageURL:(NSString*)pageURL {
+  NSDictionary* n = [NSJSONSerialization JSONObjectWithData:[json dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+  NSURL* u = [NSURL URLWithString:pageURL ?: @""];
+  if (![n isKindOfClass:NSDictionary.class] || !u.host.length) return NO;
+  NSString* origin = u.port ? [NSString stringWithFormat:@"%@://%@:%@", u.scheme, u.host, u.port]
+                            : [NSString stringWithFormat:@"%@://%@", u.scheme, u.host];
+  if (![[self sitePermissionsForOrigin:origin][@"notifications"] boolValue]) return NO;
+  ArcItem* item = [self itemForBrowser:browserId];
+  NSString* title = [n[@"title"] description].length ? [n[@"title"] description] : u.host;
+  _lastNotification = @{ @"title" : title, @"body" : [n[@"body"] description] ?: @"", @"origin" : origin };
+  if (self.selfTestProfiles) return YES;
+  PostWebNotification(title, [n[@"body"] description] ?: @"", u.host, [n[@"tag"] description] ?: @"", item.itemID ?: @"");
+  return YES;
+}
+- (NSDictionary*)lastNotification { return _lastNotification; }  // tests
+- (void)showItemWithID:(NSString*)itemID {
+  for (ArcSpace* sp in _spaces)
+    for (ArcItem* section in [self sectionsOfSpace:sp]) {
+      ArcItem* found = [self itemWithID:itemID under:section];
+      if (!found) continue;
+      if (sp != _space) [self switchToSpace:sp];
+      [self showItem:found];
+      if (!self.selfTestProfiles) [self.window makeKeyAndOrderFront:nil];
+      return;
+    }
+}
+
+- (void)detectLanguageInBrowser:(int)browserId url:(NSString*)url {
+  if (!SettingBool(kSettingTranslateOffer) || ![url hasPrefix:@"http"] || [url containsString:@".translate.goog"]) return;
+  ArcItem* item = [self itemForBrowser:browserId];
+  if (!item || item != _shown) return;
+  auto it = _browsers.find(browserId);
+  if (it == _browsers.end()) return;
+  it->second->GetMainFrame()->ExecuteJavaScript(
+      "console.log('__notarc_lang__:'+((document.documentElement&&document.documentElement.lang)||''))", "", 0);
+}
+- (void)browser:(int)browserId pageLanguage:(NSString*)lang {
+  ArcItem* item = [self itemForBrowser:browserId];
+  NSString* offer = TranslateOfferFor(lang, NSLocale.preferredLanguages);
+  NSString* host = [NSURL URLWithString:[self itemCurrentURL:item] ?: @""].host;
+  if (!item || item != _shown || !offer || !host.length) return;
+  if (!_translateOffered) _translateOffered = [NSMutableSet set];
+  if ([_translateOffered containsObject:host]) return;
+  [_translateOffered addObject:host];
+  _lastTranslateOffer = offer;
+  NSString* name = [NSLocale.currentLocale localizedStringForLanguageCode:offer] ?: offer;
+  [self showToast:[NSString stringWithFormat:@"This page is in %@.", name] action:@"Translate" selector:@selector(translatePage:)];
+}
+- (NSString*)lastTranslateOffer { return _lastTranslateOffer; }  // tests
+- (NSSize)lastCopiedImageSize { return _lastCopiedImageSize; }  // tests
+
 - (IBAction)translatePage:(id)sender {
   NSString* url = [self currentURL];
   if (!url.length || !_shown) return;
@@ -3048,21 +3515,24 @@ static const CGFloat kPaneGap = 6;
     [self ensureBrowserForItem:pane];
   }
   NSArray<NSValue*>* frames = [self framesForPaneCount:panes.count];
+  if (_maximizedPane && (panes.count < 2 || ![panes containsObject:_maximizedPane] || _maximizedPane != _shown))
+    _maximizedPane = nil;  // left the split, or focused another pane
+  ArcItem* maxi = _maximizedPane;
   for (auto& kv : _browsers) {
     NSUInteger index = NSNotFound;
     for (NSUInteger i = 0; i < panes.count; ++i)
       if (panes[i].browserId == kv.first) index = i;
     NSView* view = [self pageViewForBrowser:kv.second];
-    BOOL visible = index != NSNotFound;
+    BOOL visible = index != NSNotFound && (!maxi || panes[index] == maxi);
     if (visible) {
-      view.frame = frames[index].rectValue;
+      view.frame = maxi ? _content.bounds : frames[index].rectValue;
       // A single pane follows the window; split panes are re-laid out on resize.
-      view.autoresizingMask = panes.count == 1 ? (NSViewWidthSizable | NSViewHeightSizable) : NSViewNotSizable;
+      view.autoresizingMask = panes.count == 1 || maxi ? (NSViewWidthSizable | NSViewHeightSizable) : NSViewNotSizable;
     }
     view.hidden = !visible;
     kv.second->GetHost()->WasHidden(!visible);
   }
-  [self layoutDividers:panes.count > 1 ? frames : @[]];
+  [self layoutDividers:panes.count > 1 && !maxi ? frames : @[]];
   [self layoutNoteEditor];
   [self layoutEasel];
 }
@@ -3725,6 +4195,60 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 
 - (NSUInteger)indexOfShownInSplit { return [_splitItems indexOfObject:_shown]; }
 
+// Drag to split (#37): a tab dragged from the sidebar onto the page joins the shown page in a split, on the side it was
+// dropped (0 right, 1 left, 2 bottom, 3 top). The tab moves into the split (Arc combines them); a Favorite stays a
+// Favorite and its page opens in the new pane instead.
+- (BOOL)canDropOnPage:(id<NSDraggingInfo>)info {
+  ArcItem* item = [self draggedItem:info];
+  return item && _shown && item != _shown && item.url.length && !item.isFolder && !item.isSplit && !_shown.noteID &&
+         !_shown.easelID && ![_splitItems containsObject:item] && _splitItems.count < 4;
+}
+- (BOOL)dropOnPage:(id<NSDraggingInfo>)info side:(NSInteger)side {
+  if (![self canDropOnPage:info]) return NO;
+  return [self splitShownWithItem:[self draggedItem:info] side:side];
+}
+- (BOOL)splitShownWithItem:(ArcItem*)item side:(NSInteger)side {
+  if (!item || !_shown || item == _shown || !item.url.length || item.isFolder || item.isSplit) return NO;
+  [self syncSplitState];
+  if ([_splitItems containsObject:item] || _splitItems.count >= 4) return NO;
+  BOOL horizontal = side >= 2, before = side == 1 || side == 3;
+  if ([self sectionContaining:item] == _space.favorites) {
+    [self openInSplit:[self itemCurrentURL:item] ?: item.url horizontal:horizontal before:before];
+    return YES;
+  }
+  ArcItem* group = [self ensureSplitGroupFor:_shown];
+  if (!group) return NO;
+  if ([self parentOfItem:item].isSplit) [self detachFromSplit:item keep:YES];
+  BOOL removed = NO;
+  for (ArcItem* section in [self sectionsOfSpace:_space]) removed = removed || RemoveItem(section, item);
+  if (!removed) return NO;
+  group.splitHorizontal = horizontal;
+  group.splitFractions = nil;
+  NSUInteger at = [group.children indexOfObject:_shown] + (before ? 0 : 1);
+  [group.children insertObject:item atIndex:MIN(at, group.children.count)];
+  [_outline reloadData];
+  for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
+  [self scheduleSave];
+  [self showItem:item];
+  return YES;
+}
+
+// Arc's split pane "Maximize": the focused pane fills the page card for a while; the split stays as it is. Toggling
+// again, focusing another pane or leaving the split restores it.
+- (IBAction)toggleMaximizePane:(id)sender {
+  [self syncSplitState];
+  _maximizedPane = _maximizedPane || _splitItems.count < 2 ? nil : _shown;
+  [self layoutPanes];
+}
+- (ArcItem*)maximizedPane { return _maximizedPane; }  // tests
+- (ArcItem*)parentOfItemForTest:(ArcItem*)item { return [self parentOfItem:item]; }
+- (NSRect)frameOfPaneItem:(ArcItem*)item {  // tests: where a pane's page is, or zero if hidden
+  auto it = _browsers.find(item.browserId);
+  if (it == _browsers.end()) return NSZeroRect;
+  NSView* v = [self pageViewForBrowser:it->second];
+  return v.hidden ? NSZeroRect : v.frame;
+}
+
 - (IBAction)addLeftSplit:(id)sender {
   [self beginSplit:NO];
   _splitBefore = YES;
@@ -4062,6 +4586,15 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 }
 
 - (NSUInteger)littleWindowCount { return _littleWindows.count; }
+// Arc's "Show Little Arc Windows" / "Close Little Arc Windows" (Window menu).
+- (IBAction)closeAllLittleWindows:(id)sender {
+  for (LittleWindowController* lw in [_littleWindows copy]) [lw.window close];
+}
+- (IBAction)showAllLittleWindows:(id)sender {
+  for (LittleWindowController* lw in _littleWindows)
+    if (self.selfTestProfiles) [lw.window orderBack:nil];
+    else [lw.window makeKeyAndOrderFront:nil];
+}
 
 - (NSUInteger)archiveIdleLittleWindowsAt:(NSDate*)now {
   double hours = SettingDouble(kSettingLittleArchiveHours);
@@ -4089,10 +4622,24 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   if (index < _littleWindows.count) [_littleWindows[index].window close];
 }
 
+// Arc: "Open Little Arc when clicking on links with <modifier> held". NotArc's modifier is Cmd+Option (Cmd-click alone
+// opens a background tab, Shift-click a Peek, Option-click downloads), the same keys that open a sidebar tab in a
+// Little Window. Read from the keys held at the moment of the click.
+BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture) {
+  NSEventModifierFlags m = mods & (NSEventModifierFlagCommand | NSEventModifierFlagOption | NSEventModifierFlagShift |
+                                   NSEventModifierFlagControl);
+  return gesture && m == (NSEventModifierFlagCommand | NSEventModifierFlagOption) && SettingBool(kSettingLittleModifierClick);
+}
+
 - (BOOL)handleOpenURL:(NSString*)url fromBrowser:(int)browserId disposition:(int)disposition userGesture:(BOOL)gesture {
   if (![url hasPrefix:@"http://"] && ![url hasPrefix:@"https://"]) return NO;
   if (![self itemForBrowser:browserId]) return NO;  // e.g. from a Peek or Little Window: let CEF handle it
   __weak MainWindowController* weakSelf = self;
+  NSEventModifierFlags mods = self.testClickModifiers ?: NSEvent.modifierFlags;
+  if (OpensLittleWindowForClick(mods, gesture)) {
+    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf openLittleWindow:url]; });
+    return YES;
+  }
   if (disposition == CEF_WOD_NEW_WINDOW && gesture && !_peek && SettingBool(kSettingPeekShiftClick)) {
     dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf openPeek:url]; });
     return YES;
@@ -4128,6 +4675,39 @@ static NSString* SiteOf(NSString* url) {
                           : item.url;
   NSString* from = SiteOf(current), *to = SiteOf(url);
   return from.length && to.length && ![from isEqualToString:to];
+}
+
+// Email peeking (#44), Arc's "Peek Email": the newest unread email from the site you're on (sign-in codes, magic
+// links), read from Gmail with this Space's Gmail sign-in. A code is copied; otherwise the email opens in a Peek.
+- (IBAction)peekEmail:(id)sender {
+  NSString* host = [NSURL URLWithString:[self itemCurrentURL:_shown] ?: @""].host;
+  if (!host.length) return;
+  [self showToast:[NSString stringWithFormat:@"Checking for emails from %@", host] action:nil selector:nil];
+  __weak MainWindowController* weakSelf = self;
+  SpaceFetch([self contextForSpace:_space], kGmailFeedURL, nil, ^(NSInteger status, NSData* body, NSString* finalURL) {
+    [weakSelf finishPeekEmail:host status:status body:body];
+  });
+}
+- (NSString*)finishPeekEmail:(NSString*)host status:(NSInteger)status body:(NSData*)body {  // returns what happened (tests)
+  if (status != 200 || ![[[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding] containsString:@"<feed"]) {
+    [self showToast:@"Make sure you're signed in to Gmail in this Space." action:nil selector:nil];
+    return @"signedOut";
+  }
+  NSDictionary* e = EmailPeekMatch(GmailFeedEntries(body), host, NSDate.date, 30 * 60);
+  if (!e) {
+    [self showToast:[NSString stringWithFormat:@"No new email from %@ in the last 30 minutes", host] action:nil selector:nil];
+    return @"none";
+  }
+  NSString* code = AuthCodeInText([NSString stringWithFormat:@"%@ %@", e[@"title"] ?: @"", e[@"summary"] ?: @""]);
+  if (code) {
+    NSPasteboard* pb = [self copyPasteboard];
+    [pb clearContents];
+    [pb setString:code forType:NSPasteboardTypeString];
+    [self showToast:[NSString stringWithFormat:@"Code from %@ copied: %@", host, code] action:nil selector:nil];
+    return [@"code:" stringByAppendingString:code];
+  }
+  if ([e[@"link"] length]) [self openPeek:e[@"link"]];
+  return [@"peek:" stringByAppendingString:e[@"link"] ?: @""];
 }
 
 - (void)openPeek:(NSString*)url {
@@ -4467,6 +5047,7 @@ static ArcItem* NewSection(NSString* title) {
     self.window.appearance = ap;
     _commandBar.appearance = ap;
     [_outline enumerateAvailableRowViewsUsingBlock:^(NSTableRowView* rv, NSInteger r) { rv.needsDisplay = YES; }];
+    _cardEdge.needsDisplay = YES;
   }
 }
 - (void)setColorScheme:(NSString*)scheme forSpace:(ArcSpace*)space {
@@ -4496,6 +5077,7 @@ static ArcItem* NewSection(NSString* title) {
   [CATransaction setDisableActions:YES];
   _themeGradient.colors = cg;
   _themeGradient.opacity = fallback ? 1 : (float)MAX(0.1, MIN(1.0, _space.themeIntensity ?: 0.5));
+  _themeGrain.opacity = fallback ? 0 : (float)(MAX(0.0, MIN(1.0, _space.themeGrain)) * kMaxGrainOpacity);
   [CATransaction commit];
 }
 
@@ -4806,11 +5388,19 @@ static ArcItem* NewSection(NSString* title) {
   [self boostChanged];
 }
 
+- (void)setThemeGrain:(double)grain forSpace:(ArcSpace*)space {
+  space.themeGrain = MAX(0.0, MIN(1.0, grain));
+  if (space == _space) [self applyTheme];
+  [self scheduleSave];
+}
+- (float)themeGrainOpacity { return _themeView.hidden ? 0 : _themeGrain.opacity; }  // tests
+
 - (IBAction)editThemeColor:(id)sender {
   ArcSpace* space = _space;
   if (!space) return;
   NSArray* oldColors = space.themeColors;
   double oldIntensity = space.themeIntensity;
+  double oldGrain = space.themeGrain;
   NSArray* presets = @[
     @[ @"None", @[] ], @[ @"Lavender", @[ @"#B9A8FF", @"#8B7CF6" ] ], @[ @"Ocean", @[ @"#5EC8F2", @"#2F6FDE" ] ],
     @[ @"Mint", @[ @"#9BF0C9", @"#3BB58A" ] ], @[ @"Peach", @[ @"#FFC3A0", @"#FF7A7A" ] ],
@@ -4821,6 +5411,13 @@ static ArcItem* NewSection(NSString* title) {
   NSAlert* a = [NSAlert new];
   a.messageText = [NSString stringWithFormat:@"Edit Theme Color: %@", space.title ?: @"Space"];
   NSView* box = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 300, 96)];
+  NSTextField* grainLabel = [NSTextField labelWithString:@"Grain"];
+  grainLabel.frame = NSMakeRect(0, 6, 70, 20);
+  NSSlider* grain = [NSSlider sliderWithValue:oldGrain minValue:0 maxValue:1 target:self action:@selector(themeControlChanged:)];
+  grain.frame = NSMakeRect(74, 4, 212, 24);
+  grain.continuous = YES;
+  [box addSubview:grainLabel];
+  [box addSubview:grain];
   NSPopUpButton* palette = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 68, 180, 26) pullsDown:NO];
   for (NSArray* p in presets) [palette addItemWithTitle:p[0]];
   NSColorWell* top = [[NSColorWell alloc] initWithFrame:NSMakeRect(190, 68, 44, 26)];
@@ -4852,6 +5449,7 @@ static ArcItem* NewSection(NSString* title) {
       fromPreset = NO;
     }
     [weakSelf setTheme:colors intensity:intensity.doubleValue forSpace:space];
+    [weakSelf setThemeGrain:grain.doubleValue forSpace:space];
   };
   _themePreview = [preview copy];
   palette.target = self;
@@ -4864,7 +5462,10 @@ static ArcItem* NewSection(NSString* title) {
     w.action = @selector(themeWellChanged:);
   }
   _themePalette = palette;
-  if ([a runModal] != NSAlertFirstButtonReturn) [self setTheme:oldColors intensity:oldIntensity forSpace:space];
+  if ([a runModal] != NSAlertFirstButtonReturn) {
+    [self setTheme:oldColors intensity:oldIntensity forSpace:space];
+    [self setThemeGrain:oldGrain forSpace:space];
+  }
   _themePreview = nil;
   _themePalette = nil;
   [NSColorPanel.sharedColorPanel orderOut:nil];
@@ -5099,6 +5700,9 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   CGFloat topInset = card && !bar ? kCardInsetTop : 0;
   _content.layer.cornerRadius = card ? kCardRadius : 0;
   _content.frame = NSMakeRect(x + left, bottom, b.size.width - x - left - right, b.size.height - top - topInset - bottom);
+  _cardEdge.frame = _content.frame;
+  _cardEdge.hidden = !card;
+  _cardEdge.needsDisplay = YES;
   [self updateToolbarAddress];
   [self layoutPanes];
 }
@@ -5157,6 +5761,15 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (BOOL)sidebarHidden { return _sidebar.hidden; }
 - (NSRect)pageCardFrame { return _content.frame; }
 - (CGFloat)pageCardRadius { return _content.layer.cornerRadius; }
+- (NSString*)pageCardEdgeStyle {  // tests: "border=<alpha> shadow=<opacity>" after the window has drawn
+  CGFloat a = _content.layer.borderWidth > 0 ? CGColorGetAlpha(_content.layer.borderColor) : 0;
+  [_cardEdge displayIfNeeded];
+  return [NSString stringWithFormat:@"border=%.2f shadow=%.2f", a, _cardEdge.hidden ? 0 : _cardEdge.layer.shadowOpacity];
+}
+- (NSString*)pageCardEdgeDebug {
+  return [NSString stringWithFormat:@"hidden=%d dark=%d radius=%.0f layerShadow=%.2f super=%d", _cardEdge.hidden, IsDark(_cardEdge),
+                                    _content.layer.cornerRadius, _cardEdge.layer.shadowOpacity, _cardEdge.superview != nil];
+}
 
 - (IBAction)toggleFocusMode:(id)sender {
   _focusMode = !_focusMode;
@@ -5250,7 +5863,72 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 #pragma mark Context menus
 
 - (void)handleLinkCommand:(int)command url:(NSString*)url fromBrowser:(int)browserId {
+  [self handleLinkCommand:command url:url text:nil fromBrowser:browserId];
+}
+// Right-click actions on links, images, the page and selected text (#70).
+- (void)handleLinkCommand:(int)command url:(NSString*)url text:(NSString*)text fromBrowser:(int)browserId {
+  if (command == BrowserClient::kSelectionSearch) {
+    NSString* q = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
+    q = [q stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
+    q = [[q stringByReplacingOccurrencesOfString:@"&" withString:@"%26"] stringByReplacingOccurrencesOfString:@"+" withString:@"%2B"];
+    if (q.length) [self openInNewTab:SearchURLForQuery(q)];
+    return;
+  }
   if (!url.length) return;
+  ArcItem* from = [self itemForBrowser:browserId];
+  NSPasteboard* pb = [self copyPasteboard];
+  switch (command) {
+    case BrowserClient::kImageOpen: [self openInNewTab:url]; return;
+    case BrowserClient::kImageCopyAddress:
+    case BrowserClient::kPageCopyURL:
+      [pb clearContents];
+      [pb setString:url forType:NSPasteboardTypeString];
+      return;
+    case BrowserClient::kPageCopyMarkdown: {
+      NSString* title = [(from.displayTitle ?: url) stringByReplacingOccurrencesOfString:@"]" withString:@"\\]"];
+      [pb clearContents];
+      [pb setString:[NSString stringWithFormat:@"[%@](%@)", title, url] forType:NSPasteboardTypeString];
+      return;
+    }
+    case BrowserClient::kImageSave: {
+      auto it = _browsers.find(browserId);
+      if (it != _browsers.end()) it->second->GetHost()->StartDownload(url.UTF8String);
+      return;
+    }
+    case BrowserClient::kImageCopy: {
+      auto it = _browsers.find(browserId);
+      CefRefPtr<CefRequestContext> ctx = it != _browsers.end() ? it->second->GetHost()->GetRequestContext() : nullptr;
+      __weak MainWindowController* weakSelf = self;
+      void (^got)(NSInteger, NSData*, NSString*) = ^(NSInteger status, NSData* body, NSString*) {
+        NSImage* img = status == 200 && body.length ? [[NSImage alloc] initWithData:body] : nil;
+        MainWindowController* me = weakSelf;
+        if (!img || !me) { NSBeep(); return; }
+        NSPasteboard* p = [me copyPasteboard];
+        [p clearContents];
+        [p writeObjects:@[ img ]];
+        me->_lastCopiedImageSize = img.size;
+      };
+      if ([url hasPrefix:@"data:"]) {  // inline images: no request needed
+        NSData* d = [NSData dataWithContentsOfURL:[NSURL URLWithString:url]];
+        got(d ? 200 : 0, d, url);
+      } else {
+        SpaceFetch(ctx, url, nil, got);
+      }
+      return;
+    }
+    case BrowserClient::kPageCapture:
+      if (from && from != _shown) [self showItem:from];
+      [self captureVisiblePage:nil];
+      return;
+    case BrowserClient::kPageTranslate:
+      if (from && from != _shown) [self showItem:from];
+      [self translatePage:nil];
+      return;
+    case BrowserClient::kPageBoost:
+      if (from && from != _shown) [self showItem:from];
+      [self editBoost:nil];
+      return;
+  }
   switch (command) {
     case BrowserClient::kLinkNewTab: [self openInNewTab:url]; break;
     case BrowserClient::kLinkBackgroundTab: [self openInNewTab:url background:YES]; break;
@@ -5524,7 +6202,13 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   }
   [m addItem:[NSMenuItem separatorItem]];
   if (isTab || item.isFolder) [m addItem:[self menuItem:@"Rename..." action:@selector(menuRename:) item:item]];
+  if (isTab && item.renamed && item.liveTitle.length)
+    [m addItem:[self menuItem:@"Use Page Title" action:@selector(menuUsePageTitle:) item:item]];
+  else if (isTab && ![TidyTabTitle(item.displayTitle, [NSURL URLWithString:item.url ?: @""].host) isEqualToString:item.displayTitle])
+    [m addItem:[self menuItem:@"Tidy Title" action:@selector(menuTidyTitle:) item:item]];
   if (isTab && section == _space.favorites) {
+    [m addItem:[self menuItem:@"Remove from Favorites" action:@selector(menuRemoveFromFavorites:) item:item]];
+    [m addItem:[self menuItem:@"Move to Pinned" action:@selector(menuFavoriteToPinned:) item:item]];
     NSMenuItem* u = [self menuItem:@"Show Unread Badge" action:@selector(menuToggleUnreadBadge:) item:item];
     u.state = item.hideUnreadBadge ? NSControlStateValueOff : NSControlStateValueOn;
     [m addItem:u];
@@ -5542,9 +6226,14 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
     [m addItem:[self menuItem:@"Reset to Pinned URL" action:@selector(menuResetPinned:) item:item]];
     [m addItem:[self menuItem:@"Replace Pinned URL with Current" action:@selector(menuReplacePinned:) item:item]];
   }
-  if ((isToday || isPinned) && _spaces.count > 1) {
+  BOOL canFavorite = isTab && !item.isSplit && (isToday || isPinned) && _space.favorites && ![self parentOfItem:item].isSplit;
+  if ((isToday || isPinned) && (_spaces.count > 1 || canFavorite)) {
     NSMenuItem* move = [[NSMenuItem alloc] initWithTitle:@"Move to" action:nil keyEquivalent:@""];
     NSMenu* sub = [[NSMenu alloc] initWithTitle:@"Move to"];
+    if (canFavorite) {
+      [sub addItem:[self menuItem:@"Favorites" action:@selector(menuMoveToFavorites:) item:item]];
+      if (_spaces.count > 1) [sub addItem:[NSMenuItem separatorItem]];
+    }
     for (ArcSpace* sp in _spaces) {
       if (sp == _space) continue;
       for (int pinned = 0; pinned < 2; ++pinned) {
@@ -5641,7 +6330,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (void)renameItem:(ArcItem*)item to:(NSString*)title {
   if (!item || !title.length) return;
   item.title = title;
-  item.liveTitle = nil;
+  item.renamed = YES;
   [_outline reloadItem:item];
   [self scheduleSave];
 }
@@ -5651,6 +6340,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   copy.itemID = NSUUID.UUID.UUIDString;
   copy.url = item.url.length ? [self itemCurrentURL:item] : nil;
   copy.liveTitle = item.liveTitle;
+  copy.renamed = item.renamed;
   copy.title = item.title;
   copy.isSplit = item.isSplit;
   copy.children = [NSMutableArray array];
@@ -5680,6 +6370,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   copy.itemID = NSUUID.UUID.UUIDString;
   copy.url = [self itemCurrentURL:item];
   copy.liveTitle = item.liveTitle;
+  copy.renamed = item.renamed;
   copy.title = item.title;
   copy.children = [NSMutableArray array];
   ArcItem* parent = [self parentOfItem:item];
@@ -6628,10 +7319,67 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   }
 }
 
+// Arc's "Move to Top Apps" / "Remove from Top Apps" (#13), named Favorites in NotArc as in Arc's newer builds. A tab
+// moved into Favorites keeps its address as the Favorite's home (like pinning); taking it out puts it at the top of
+// Today. Folders and splits can't be Favorites (the grid holds single tabs), the same rule as dragging onto the grid.
+- (BOOL)moveItemToFavorites:(ArcItem*)item {
+  if (!item || !_space.favorites || !item.url.length || item.isFolder || item.isSplit) return NO;
+  if ([self sectionContaining:item] == _space.favorites) return NO;
+  if ([self parentOfItem:item].isSplit) [self detachFromSplit:item keep:YES];
+  if (![self moveItem:item toParent:_space.favorites index:(NSInteger)_space.favorites.children.count]) return NO;
+  [self markPinnedURLs:item];
+  [self updateFavoritesGrid];
+  return YES;
+}
+- (BOOL)removeItemFromFavorites:(ArcItem*)item pinned:(BOOL)pinned {
+  if (!item || [self sectionContaining:item] != _space.favorites) return NO;
+  ArcItem* target = pinned ? _space.pinned : _space.unpinned;
+  if (![self moveItem:item toParent:target index:pinned ? (NSInteger)target.children.count : 0]) return NO;
+  if (!pinned) [self clearPinnedURLs:item];
+  [self updateFavoritesGrid];
+  return YES;
+}
+- (IBAction)toggleFavorite:(id)sender {
+  ArcItem* item = _shown;
+  if ([self sectionContaining:item] == _space.favorites) [self removeItemFromFavorites:item pinned:NO];
+  else [self moveItemToFavorites:item];
+}
+- (void)menuMoveToFavorites:(NSMenuItem*)sender { [self moveItemToFavorites:sender.representedObject]; }
+- (void)menuRemoveFromFavorites:(NSMenuItem*)sender { [self removeItemFromFavorites:sender.representedObject pinned:NO]; }
+- (void)menuFavoriteToPinned:(NSMenuItem*)sender { [self removeItemFromFavorites:sender.representedObject pinned:YES]; }
+
 - (void)markPinnedURLs:(ArcItem*)item {
   if (item.url.length) item.pinnedURL = [self itemCurrentURL:item];
+  if (item.url.length && !item.renamed && SettingBool(kSettingTidyTitles)) [self tidyTitleOfItem:item announce:YES];
   for (ArcItem* c in item.children) [self markPinnedURLs:c];
 }
+
+// Tidy tab titles (#18): pinning renames a tab to the short name TidyTabTitle finds; the toast and the tab menu's
+// "Use Page Title" undo it. Returns YES if the name changed.
+- (BOOL)tidyTitleOfItem:(ArcItem*)item announce:(BOOL)announce {
+  NSString* current = item.displayTitle;
+  NSString* host = [NSURL URLWithString:[self itemCurrentURL:item] ?: @""].host;
+  NSString* tidy = TidyTabTitle(current, host);
+  if (!tidy.length || [tidy isEqualToString:current]) return NO;
+  item.title = tidy;
+  item.renamed = YES;
+  [_outline reloadItem:item];
+  [self scheduleSave];
+  _lastTidied = item;
+  if (announce && !self.selfTestProfiles)
+    [self showToast:[NSString stringWithFormat:@"Renamed to \u201C%@\u201D", tidy] action:@"Undo" selector:@selector(undoLastTidy:)];
+  return YES;
+}
+- (void)undoLastTidy:(id)sender { [self usePageTitleOfItem:_lastTidied]; }
+- (void)usePageTitleOfItem:(ArcItem*)item {
+  if (!item.renamed) return;
+  item.renamed = NO;
+  item.title = nil;
+  [_outline reloadItem:item];
+  [self scheduleSave];
+}
+- (void)menuTidyTitle:(NSMenuItem*)sender { [self tidyTitleOfItem:sender.representedObject announce:NO]; }
+- (void)menuUsePageTitle:(NSMenuItem*)sender { [self usePageTitleOfItem:sender.representedObject]; }
 - (void)clearPinnedURLs:(ArcItem*)item {
   item.pinnedURL = nil;
   for (ArcItem* c in item.children) [self clearPinnedURLs:c];

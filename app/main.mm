@@ -8,6 +8,11 @@
 
 #import "app/arc_import.h"
 #import "app/main_window.h"
+#import "app/tidy_title.h"
+#import "app/global_hotkey.h"
+#import "app/email_peek.h"
+#import "app/web_notifications.h"
+#import "app/calendar_preview.h"
 #import "app/little_window.h"
 #import "app/arc_extensions.h"
 #import "app/link_routing.h"
@@ -136,6 +141,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"Clear Cookies and Refresh" action:@selector(clearCookiesAndRefresh:) keyEquivalent:@""];
   [file addItem:[NSMenuItem separatorItem]];
   [file addItemWithTitle:@"Pin / Unpin Tab" action:@selector(togglePin:) keyEquivalent:@"d"];
+  [file addItemWithTitle:@"Add to / Remove from Favorites" action:@selector(toggleFavorite:) keyEquivalent:@""];
   [file addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@""];
   [file addItemWithTitle:@"New Note" action:@selector(newNote:) keyEquivalent:@"n"].keyEquivalentModifierMask =
       NSEventModifierFlagCommand | NSEventModifierFlagControl;
@@ -162,9 +168,12 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   NSMenuItem* littleItem = [file addItemWithTitle:@"New Little Window" action:@selector(newLittleWindow:)
                                     keyEquivalent:@"n"];
   littleItem.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  [file addItemWithTitle:@"Show Little Windows" action:@selector(showAllLittleWindows:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Close Little Windows" action:@selector(closeAllLittleWindows:) keyEquivalent:@""];
   // Peek and Little Window: move the page into the sidebar (handled by those windows only).
   [file addItemWithTitle:@"Open in Sidebar" action:@selector(openInMainWindow:) keyEquivalent:@"o"];
   [file addItemWithTitle:@"Reopen Closed Peek" action:@selector(reopenClosedPeek:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Peek Email from This Site" action:@selector(peekEmail:) keyEquivalent:@""];
   [file addItemWithTitle:@"Clear Today" action:@selector(clearToday:) keyEquivalent:@"K"];
   [file addItemWithTitle:@"Reset Pinned Tab" action:@selector(resetPinnedTab:) keyEquivalent:@""];
   [file addItemWithTitle:@"Replace Pinned URL with Current" action:@selector(replacePinnedURL:) keyEquivalent:@""];
@@ -200,6 +209,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Hide Space Header" action:@selector(toggleSpaceHeader:) keyEquivalent:@""];
   [view addItemWithTitle:@"Translate Page" action:@selector(translatePage:) keyEquivalent:@""];
+  [view addItemWithTitle:@"Show Next Meeting from Calendar" action:@selector(toggleCalendar:) keyEquivalent:@""];
   [view addItemWithTitle:@"Site Settings..." action:@selector(showSiteSettings:) keyEquivalent:@"i"]
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Reset Site Permissions" action:@selector(resetSitePermissions:) keyEquivalent:@""];
@@ -237,6 +247,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [split addItemWithTitle:@"Add Left Split" action:@selector(addLeftSplit:) keyEquivalent:@""];
   [split addItemWithTitle:@"Add Top Split" action:@selector(addTopSplit:) keyEquivalent:@""];
   [split addItemWithTitle:@"Flip Split Layout" action:@selector(flipSplitLayout:) keyEquivalent:@""];
+  [split addItemWithTitle:@"Maximize Pane" action:@selector(toggleMaximizePane:) keyEquivalent:@"\r"].keyEquivalentModifierMask = cs;
   [split addItemWithTitle:@"Close Split Pane" action:@selector(closeSplitPane:) keyEquivalent:@"-"]
       .keyEquivalentModifierMask = cs;
   [split addItemWithTitle:@"Focus Next Pane" action:@selector(focusNextPane:) keyEquivalent:@"]"]
@@ -317,6 +328,21 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   ApplyShortcutOverrides(bar);  // the user's own shortcuts (Settings > Keyboard Shortcuts...)
 }
 
+// Cmd+Option+N from any app opens a Little Window (#42). Never registered by test runs: a self-test must not take
+// the key away from the person's own apps while it runs.
+- (void)applyLittleHotkey {
+  if (self.selfTest || !SettingBool(kSettingLittleHotkey)) {
+    GlobalHotkeyRemove();
+    return;
+  }
+  if (GlobalHotkeyInstalled()) return;
+  __weak AppDelegate* weakSelf = self;
+  GlobalHotkeyInstall(^{
+    [NSApp activateIgnoringOtherApps:YES];
+    [weakSelf.window newLittleWindow:nil];
+  });
+}
+
 - (void)start {
   [self buildMenu];
   NSString* arcDir = ArcDataDirectory();
@@ -373,6 +399,14 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
     [fm removeItemAtPath:[support stringByAppendingPathComponent:@"SelfTestProfiles.json"] error:nil];
   }
   if (!self.selfTest) [[Updater shared] scheduleDailyChecks];
+  [self applyLittleHotkey];
+  if (!self.selfTest) {
+    __weak AppDelegate* weakSelf = self;
+    WebNotificationsSetClickHandler(^(NSString* itemID) {  // clicking a web notification shows its tab (#78)
+      [NSApp activateIgnoringOtherApps:YES];
+      [weakSelf.window showItemWithID:itemID];
+    });
+  }
   if (self.selfTest) [[NSFileManager defaultManager] removeItemAtPath:self.window.historyPath error:nil];
   if (self.selfTest && !self.selfTestReload)
     [[NSFileManager defaultManager] removeItemAtPath:self.window.archivePath error:nil];
@@ -851,9 +885,18 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         [w setColorScheme:@"light" forSpace:sp];
         [w.window displayIfNeeded];
         BOOL light = !w.sidebarIsDark && [[w sidebarRowStyleForItem:sel] containsString:@"alpha=0.85"];
+        // Arc's card edge (#122): hairline border in both modes, a soft shadow only in light mode.
+        NSString* edgeLight = w.pageCardEdgeStyle;
+        if (![edgeLight hasSuffix:@"0.10"]) std::printf("SELFTEST-FRAME-DEBUG %s\n", [w performSelector:@selector(pageCardEdgeDebug)] ? [(NSString*)[w performSelector:@selector(pageCardEdgeDebug)] UTF8String] : "");
         [w setColorScheme:@"dark" forSpace:sp];
         [w.window displayIfNeeded];
         BOOL dark = w.sidebarIsDark && [[w sidebarRowStyleForItem:sel] containsString:@"alpha=0.20"];
+        NSString* edgeDark = w.pageCardEdgeStyle;
+        BOOL edge = [edgeLight isEqualToString:@"border=0.05 shadow=0.10"] && [edgeDark isEqualToString:@"border=0.05 shadow=0.00"];
+        BOOL frame = w.pageCardRadius == 8 && NSMaxX(w.pageCardFrame) == NSMaxX(w.window.contentView.bounds) - 9 &&
+                     NSMinY(w.pageCardFrame) == 9;
+        std::printf("SELFTEST-FRAME edge=%d frame=%d light=[%s] dark=[%s]\n", edge, frame, edgeLight.UTF8String,
+                    edgeDark.UTF8String);
         [w setColorScheme:nil forSpace:sp];
         BOOL autoOK = w.window.appearance == nil && sp.colorScheme == nil;
         BOOL menu = [w.spaceMenuTitles containsObject:@"Appearance"];
@@ -977,6 +1020,19 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                      SwipeDirectionForScroll(3, 10, YES, YES) == 0 && SwipeDirectionForScroll(12, 0, NO, YES) == 0 &&
                      SwipeDirectionForScroll(12, 0, YES, NO) == 0;
         std::printf("SELFTEST-SWIPE direction=%d installed=%d\n", swipe, w.swipeNavigationInstalled);
+        {  // #27: swiping over the sidebar walks the Spaces, with no wraparound at either end.
+          ArcSpace* start = w.currentSpace;
+          NSUInteger n = w.spaces.count;
+          [w selectSpaceAtIndex:0];
+          BOOL noWrap = ![w swipeSpacesBy:-1] && w.currentSpace == w.spaces.firstObject;
+          BOOL next = n < 2 || ([w swipeSpacesBy:1] && w.currentSpace == w.spaces[1]);
+          BOOL back = n < 2 || ([w swipeSpacesBy:-1] && w.currentSpace == w.spaces[0]);
+          [w selectSpaceAtIndex:n - 1];
+          BOOL endStop = ![w swipeSpacesBy:1];
+          [w switchToSpace:start];
+          std::printf("SELFTEST-SPACESWIPE next=%d back=%d noWrap=%d endStop=%d spaces=%d\n", next, back, noWrap, endStop,
+                      n >= 2);
+        }
         {  // Import bookmarks: Chromium JSON and a Netscape HTML export, into a Pinned folder.
           NSString* tmp = NSTemporaryDirectory();
           NSString* js = [tmp stringByAppendingPathComponent:@"selftest-Bookmarks"];
@@ -1076,6 +1132,18 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                                   !OriginalURLForTranslated(@"https://example.com/");
                       std::printf("SELFTEST-TRANSLATE build=%d back=%d goog=%d skip=%d lang=%d\n", build, back, goog, skip,
                                   PreferredTranslateLanguage().length >= 2);
+                      // Translate offer: other languages only, by primary subtag; once per site per launch.
+                      BOOL rule = [TranslateOfferFor(@"fr", @[ @"en-US" ]) isEqualToString:@"fr"] &&
+                                  !TranslateOfferFor(@"en-GB", @[ @"en-US", @"fr" ]) && !TranslateOfferFor(@"", @[ @"en" ]) &&
+                                  !TranslateOfferFor(@"und", @[ @"en" ]) && [TranslateOfferFor(@"pt_BR", @[ @"de" ]) isEqualToString:@"pt"];
+                      NSString* mine = PreferredTranslateLanguage();
+                      NSString* foreign = [mine hasPrefix:@"ja"] ? @"fr" : @"ja";
+                      ArcItem* shown = w.shownItem;
+                      [w browser:shown.browserId pageLanguage:foreign];
+                      BOOL offered = shown.browserId && [w.lastTranslateOffer isEqualToString:foreign];
+                      [w browser:shown.browserId pageLanguage:@"ko"];
+                      BOOL once = [w.lastTranslateOffer isEqualToString:foreign];
+                      std::printf("SELFTEST-TRANSLATEOFFER rule=%d offered=%d oncePerSite=%d\n", rule, offered, once);
                     }
                     {  // #53 ad & tracker blocking: request filter logic and the per-site exception (memory-only settings)
                       namespace cb = content_blocker;
@@ -1315,6 +1383,16 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         [w switchToSpace:sp];
         perSpace = perSpace && !w.themeView.hidden;
       }
+      // Grain (#26): fades in with the slider, saved with the Space, none on Arc's default theme.
+      [w setThemeGrain:0.6 forSpace:sp];
+      BOOL grainOn = fabsf(w.themeGrainOpacity - 0.6f * 0.35f) < 0.01;
+      NSString* tmp2 = [NSTemporaryDirectory() stringByAppendingPathComponent:@"notarc-grain-test.json"];
+      SidebarStoreSave(@[ sp ], sp.spaceID, tmp2, nil);
+      BOOL grainSaved = fabs(SidebarStoreLoad(tmp2, nil, nil).firstObject.themeGrain - 0.6) < 0.01;
+      [NSFileManager.defaultManager removeItemAtPath:tmp2 error:nil];
+      [w setThemeGrain:0 forSpace:sp];
+      BOOL grainOff = w.themeGrainOpacity == 0;
+      std::printf("SELFTEST-GRAIN on=%d saved=%d off=%d\n", grainOn, grainSaved, grainOff);
       [w setTheme:nil intensity:0.5 forSpace:sp];
       BOOL cleared = w.themeView.hidden == !w.defaultThemeShown;
       [w setIcon:@"" forSpace:sp];
@@ -1490,6 +1568,206 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                   toggled, pressed, sep);
       std::printf("SELFTEST-MULTI selected=%d links=%d markdown=%d folder=%d archived=%d\n", selected, linksOK, md,
                   folderOK, archived);
+    });
+    // #42: Cmd+Option+click on a link opens it in a Little Window; Close Little Windows; the global Cmd+Option+N key is
+    // never registered by a test run.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 75 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSEventModifierFlags cmdOpt = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+      BOOL rule = OpensLittleWindowForClick(cmdOpt, YES) && !OpensLittleWindowForClick(NSEventModifierFlagCommand, YES) &&
+                  !OpensLittleWindowForClick(cmdOpt, NO) && !OpensLittleWindowForClick(cmdOpt | NSEventModifierFlagShift, YES);
+      NSUInteger before = w.littleWindowCount;
+      ArcItem* from = w.shownItem;
+      w.testClickModifiers = cmdOpt;
+      BOOL taken = from.browserId && [w handleOpenURL:@"https://example.org/little-click" fromBrowser:from.browserId
+                                         disposition:CEF_WOD_NEW_BACKGROUND_TAB userGesture:YES];
+      w.testClickModifiers = 0;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        BOOL opened = taken && w.littleWindowCount == before + 1;
+        [w closeAllLittleWindows:nil];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          std::printf("SELFTEST-LITTLECLICK rule=%d opened=%d closedAll=%d noGlobalKeyInTests=%d\n", rule, opened,
+                      w.littleWindowCount == 0, !GlobalHotkeyInstalled());
+        });
+      });
+    });
+    // #44 Email peeking: Gmail's Atom feed (fixture), the sender match, code extraction; a code is copied (test
+    // pasteboard), a link-only email opens in a Peek, a signed-out answer explains itself. No network.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 80 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSDateFormatter* iso = [NSDateFormatter new];
+      iso.locale = [NSLocale localeWithLocaleIdentifier:@"en_US_POSIX"];
+      iso.dateFormat = @"yyyy-MM-dd'T'HH:mm:ss'Z'";
+      iso.timeZone = [NSTimeZone timeZoneWithAbbreviation:@"UTC"];
+      NSString* (^when)(NSTimeInterval) = ^(NSTimeInterval ago) { return [iso stringFromDate:[NSDate dateWithTimeIntervalSinceNow:-ago]]; };
+      NSString* xml = [NSString stringWithFormat:
+          @"<?xml version=\"1.0\"?><feed xmlns=\"http://purl.org/atom/ns#\" version=\"0.3\"><title>Gmail</title>"
+           "<entry><title>Your Example sign-in code</title><summary>Use 482913 to sign in. It expires in 10 minutes.</summary>"
+           "<link rel=\"alternate\" href=\"https://mail.google.com/mail/u/0/?m=1\"/><issued>%@</issued>"
+           "<author><name>Example</name><email>no-reply@accounts.example.com</email></author></entry>"
+           "<entry><title>Sign in to Other</title><summary>Click the link below to sign in.</summary>"
+           "<link rel=\"alternate\" href=\"https://mail.google.com/mail/u/0/?m=2\"/><issued>%@</issued>"
+           "<author><name>Other Team</name><email>hello@other.org</email></author></entry>"
+           "<entry><title>Old code 111111</title><summary>old</summary><link href=\"https://mail.google.com/x\"/>"
+           "<issued>%@</issued><author><name>Stale</name><email>a@stale.net</email></author></entry></feed>",
+          when(60), when(120), when(7200)];
+      NSData* atom = [xml dataUsingEncoding:NSUTF8StringEncoding];
+      NSArray* entries = GmailFeedEntries(atom);
+      BOOL parsed = entries.count == 3 && [entries[0][@"email"] isEqualToString:@"no-reply@accounts.example.com"];
+      BOOL codes = [AuthCodeInText(@"Your verification code is 731 204") isEqualToString:@"731"] == NO &&
+                   [AuthCodeInText(@"Your code: 004512") isEqualToString:@"004512"] &&
+                   [AuthCodeInText(@"G-123456 is your Google verification code") isEqualToString:@"123456"] &&
+                   AuthCodeInText(@"Meeting at 10:30 on 2026") == nil && [AuthCodeInText(@"Code ABC-123") isEqualToString:@"ABC-123"];
+      BOOL stale = EmailPeekMatch(entries, @"stale.net", NSDate.date, 30 * 60) == nil;
+      NSString* copied = [w finishPeekEmail:@"www.example.com" status:200 body:atom];
+      NSString* pb = [[NSPasteboard pasteboardWithName:@"io.github.donnadieu.notarc.selftest"] stringForType:NSPasteboardTypeString];
+      BOOL code = [copied isEqualToString:@"code:482913"] && [pb isEqualToString:@"482913"] &&
+                  ![[NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString] isEqualToString:@"482913"];
+      NSString* peeked = [w finishPeekEmail:@"other.org" status:200 body:atom];
+      BOOL peek = [peeked isEqualToString:@"peek:https://mail.google.com/mail/u/0/?m=2"];
+      BOOL signedOut = [[w finishPeekEmail:@"other.org" status:302 body:nil] isEqualToString:@"signedOut"];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w closePeek];
+        std::printf("SELFTEST-EMAILPEEK parsed=%d codes=%d stale=%d copied=%d peek=%d signedOut=%d\n", parsed, codes, stale,
+                    code, peek, signedOut);
+      });
+    });
+    // #70 Context menus: which NotArc items a right-click on a link, image, selection or the page gets; the image and
+    // page actions copy to the test pasteboard; selected text searches. "Copy Image" fetches with the tab's sign-in.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 85 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      auto titles = [](bool link, bool image, bool sel, bool edit) {
+        NSMutableArray* out = [NSMutableArray array];
+        for (auto& it : BrowserClient::MenuItemsFor(link, image, sel, edit, "a long piece of selected text here"))
+          [out addObject:it.first < 0 ? @"-" : [NSString stringWithUTF8String:it.second.c_str()]];
+        return out;
+      };
+      NSArray* img = titles(false, true, false, false), *page = titles(false, false, false, false);
+      NSArray* linkImg = titles(true, true, false, false), *sel = titles(false, false, true, false);
+      BOOL menus = [img containsObject:@"Copy Image"] && [img containsObject:@"Save Image to Downloads"] &&
+                   ![img containsObject:@"Copy Page URL"] && [page containsObject:@"Capture Page"] &&
+                   [page containsObject:@"Boost This Site..."] && [linkImg containsObject:@"-"] &&
+                   [linkImg containsObject:@"Open Link in Peek"] && [sel.firstObject hasPrefix:@"Search for \u201Ca long piece"] &&
+                   titles(false, false, true, true).count == 0;
+      ArcItem* t = w.shownItem;
+      NSPasteboard* pb = [NSPasteboard pasteboardWithName:@"io.github.donnadieu.notarc.selftest"];
+      [w handleLinkCommand:BrowserClient::kImageCopyAddress url:@"https://example.com/pic.png" text:nil fromBrowser:t.browserId];
+      BOOL address = [[pb stringForType:NSPasteboardTypeString] isEqualToString:@"https://example.com/pic.png"];
+      [w handleLinkCommand:BrowserClient::kPageCopyMarkdown url:@"https://example.org/p" text:nil fromBrowser:t.browserId];
+      BOOL md = [[pb stringForType:NSPasteboardTypeString] hasSuffix:@"](https://example.org/p)"];
+      NSUInteger tabsBefore = w.currentSpace.unpinned.children.count;
+      [w handleLinkCommand:BrowserClient::kSelectionSearch url:nil text:@"notarc selftest query" fromBrowser:t.browserId];
+      ArcItem* search = w.currentSpace.unpinned.children.firstObject;
+      BOOL searched = w.currentSpace.unpinned.children.count == tabsBefore + 1 && [search.url containsString:@"notarc"];
+      // A tiny PNG served from a data: URL stands in for a page image (no network).
+      NSString* png = @"data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAYAAABytg0kAAAAEUlEQVR4nGP4z8DwH4QZYAwAR8oH+WdZbrcAAAAASUVORK5CYII=";
+      [w handleLinkCommand:BrowserClient::kImageCopy url:png text:nil fromBrowser:t.browserId];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        BOOL image = w.lastCopiedImageSize.width == 2 && [pb canReadObjectForClasses:@[ NSImage.class ] options:nil];
+        BOOL general = ![[NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString] isEqualToString:@"https://example.com/pic.png"];
+        if (search) [w deleteSidebarItem:search];
+        std::printf("SELFTEST-CONTEXTMENU menus=%d imageAddress=%d pageMarkdown=%d search=%d copyImage=%d generalUntouched=%d\n",
+                    menus, address, md, searched, image, general);
+      });
+    });
+    // #37: drag a sidebar tab onto the page -> it joins the shown page in a split on that side; Maximize Pane fills
+    // the card with the focused pane and focusing another pane restores the split. Drop-side geometry is pure.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      ArcSpace* sp = w.currentSpace;
+      [w openInNewTab:@"https://example.org/drag-split-b"];
+      ArcItem* b = sp.unpinned.children.firstObject;
+      [w openInNewTab:@"https://example.org/drag-split-a"];
+      ArcItem* a = sp.unpinned.children.firstObject;
+      NSSize sz = NSMakeSize(1000, 600);
+      BOOL sides = PageDropSide(NSMakePoint(950, 300), sz) == 0 &&
+                   PageDropSide(NSMakePoint(40, 300), sz) == 1 &&
+                   PageDropSide(NSMakePoint(500, 20), sz) == 2 &&
+                   PageDropSide(NSMakePoint(500, 590), sz) == 3;
+      [w showItem:a];
+      BOOL joined = [w splitShownWithItem:b side:1];
+      ArcItem* group = [w parentOfItemForTest:a];
+      BOOL placed = joined && group.isSplit && group.children.count == 2 && group.children.firstObject == b &&
+                    ![sp.unpinned.children containsObject:b] && !group.splitHorizontal;
+      BOOL refused = ![w splitShownWithItem:b side:0];  // already in this split
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w showItem:b];
+        [w toggleMaximizePane:nil];
+        NSRect full = [w frameOfPaneItem:b];
+        BOOL maxed = w.maximizedPane == b && NSIsEmptyRect([w frameOfPaneItem:a]) && full.size.width > 0;
+        [w showItem:a];  // focusing the other pane restores the split
+        BOOL restored = w.maximizedPane == nil && !NSIsEmptyRect([w frameOfPaneItem:a]) && !NSIsEmptyRect([w frameOfPaneItem:b]);
+        [w deleteSidebarItem:group ?: a];
+        std::printf("SELFTEST-DRAGSPLIT sides=%d joined=%d placed=%d refusedTwice=%d maximized=%d restored=%d\n", sides,
+                    joined, placed, refused, maxed, restored);
+      });
+    });
+    // #78 Web notifications: a page's new Notification() reaches NotArc (shim injected at load start) and is shown
+    // only for sites allowed in Site Settings; tests record instead of posting to Notification Center.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 95 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      [w openInNewTab:@"https://example.com/notify-test"];
+      ArcItem* t = w.shownItem;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w setSitePermission:@"notifications" value:@YES forOrigin:@"https://example.com"];
+        [w runJS:@"document.title='shim:'+(!!window.__notarcNotify);new Notification('Hello from a page',{body:'It reached macOS'})" inItem:t];
+        WaitUntil(^{ return (BOOL)[w.lastNotification[@"title"] isEqualToString:@"Hello from a page"]; }, 6, ^{
+          BOOL shown = [w.lastNotification[@"body"] isEqualToString:@"It reached macOS"] &&
+                       [w.lastNotification[@"origin"] isEqualToString:@"https://example.com"];
+          BOOL shim = [t.liveTitle isEqualToString:@"shim:true"];
+          BOOL blocked = ![w browser:t.browserId notification:@"{\"title\":\"x\"}" pageURL:@"https://not-allowed.example/"];
+          [w setSitePermission:@"notifications" value:nil forOrigin:@"https://example.com"];
+          [w deleteSidebarItem:t];
+          std::printf("SELFTEST-NOTIFY shim=%d shown=%d onlyAllowedSites=%d\n", shim, shown, blocked);
+        });
+      });
+    });
+    // #56 Calendar: meeting-link finder, which meeting shows (in progress or within 10 min, never all-day), the bar
+    // with Join, off when the setting is off. #57 Favorite previews: kinds by site, Gmail rows from the feed fixture,
+    // calendar rows. Events are fed in; the test never asks macOS for Calendar access.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      BOOL links = [MeetingLinkInText(@"Join: https://us02web.zoom.us/j/123456789?pwd=abc (passcode 1)") hasPrefix:@"https://us02web.zoom.us/j/123456789"] &&
+                   [MeetingLinkInText(@"meet.google.com https://meet.google.com/abc-defg-hij") isEqualToString:@"https://meet.google.com/abc-defg-hij"] &&
+                   [MeetingLinkInText(@"https://teams.microsoft.com/l/meetup-join/19%3ameeting_x") hasPrefix:@"https://teams.microsoft.com/l/meetup-join/"] &&
+                   MeetingLinkInText(@"Room 4B, https://example.com/agenda") == nil;
+      NSDate* now = [NSDate dateWithTimeIntervalSinceReferenceDate:810000000];
+      CalendarEvent* (^ev)(NSString*, NSTimeInterval, NSTimeInterval, NSString*, BOOL) =
+          ^(NSString* t, NSTimeInterval s, NSTimeInterval len, NSString* link, BOOL allDay) {
+            CalendarEvent* e = [CalendarEvent new];
+            e.title = t;
+            e.start = [now dateByAddingTimeInterval:s];
+            e.end = [e.start dateByAddingTimeInterval:len];
+            e.meetingURL = link;
+            e.allDay = allDay;
+            return e;
+          };
+      NSArray* events = @[ ev(@"Holiday", -3600, 86400, nil, YES), ev(@"Later", 3600, 1800, nil, NO),
+                           ev(@"Standup", 300, 900, @"https://meet.google.com/abc-defg-hij", NO) ];
+      BOOL pick = [NextMeeting(events, now, 600).title isEqualToString:@"Standup"] &&
+                  NextMeeting(@[ events[0], events[1] ], now, 600) == nil &&
+                  [NextMeeting(@[ ev(@"Ongoing", -600, 1800, nil, NO) ], now, 600).title isEqualToString:@"Ongoing"];
+      SettingSetBool(kSettingCalendar, YES);
+      [w setCalendarEventsForTest:events now:now];
+      BOOL bar = [w.meetingBarText hasPrefix:@"Standup"] && [w.meetingBarText containsString:@"in 5 min"] && w.meetingJoinShown;
+      SettingSetBool(kSettingCalendar, NO);
+      [w setCalendarEventsForTest:events now:now];
+      BOOL off = w.meetingBarText == nil;
+      [w setCalendarEventsForTest:nil now:nil];
+      BOOL kinds = [FavoritePreviewKind(@"https://mail.google.com/mail/u/0/#inbox") isEqualToString:@"gmail"] &&
+                   [FavoritePreviewKind(@"https://calendar.google.com/calendar/r") isEqualToString:@"calendar"] &&
+                   [FavoritePreviewKind(@"https://outlook.office.com/calendar/view/week") isEqualToString:@"calendar"] &&
+                   FavoritePreviewKind(@"https://outlook.office.com/mail/") == nil && FavoritePreviewKind(@"https://example.com") == nil;
+      NSString* xml = @"<?xml version=\"1.0\"?><feed xmlns=\"http://purl.org/atom/ns#\"><entry><title>Lunch?</title>"
+                       "<link href=\"https://mail.google.com/mail/u/0/?m=9\"/><issued>2026-11-09T10:00:00Z</issued>"
+                       "<author><name>Sam</name><email>sam@example.com</email></author></entry></feed>";
+      NSArray* gm = [w gmailPreviewRows:200 body:[xml dataUsingEncoding:NSUTF8StringEncoding]];
+      BOOL gmail = gm.count == 1 && [gm[0][@"text"] isEqualToString:@"Sam \u2014 Lunch?"] && [gm[0][@"url"] hasSuffix:@"m=9"] &&
+                   [[w gmailPreviewRows:401 body:nil].firstObject[@"text"] hasPrefix:@"Sign in to Gmail"];
+      NSArray* cal = [w calendarPreviewRows:events now:now];
+      BOOL calRows = cal.count == 3 && [cal[0][@"text"] hasPrefix:@"All day"];
+      std::printf("SELFTEST-CALENDAR links=%d pick=%d bar=%d off=%d\n", links, pick, bar, off);
+      std::printf("SELFTEST-FAVPREVIEW kinds=%d gmail=%d calendar=%d\n", kinds, gmail, calRows);
     });
     // Little Window -> another Space via its Move to Space menu.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 62 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -2112,6 +2390,69 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                   "archivedAbove=%lu onlyLeft=%d movedToSpace=%d arrived=%d linkBackgroundTab=%d linkMarkdown=%d\n",
                   menuOK, renamed, dupPlaced, (unsigned long)below, belowOK, (unsigned long)above, onlyB, moved,
                   arrived, linkBg, md);
+      {  // #13: Move to Favorites / Remove from Favorites / Move to Pinned, from the menus and the File menu action
+        ArcSpace* sp = w.currentSpace;
+        [w openInNewTab:@"https://example.org/fav-move"];
+        ArcItem* t = sp.unpinned.children.firstObject;
+        NSMutableArray* sub = [NSMutableArray array];
+        for (NSMenuItem* mi in [w sidebarMenuForItem:t].itemArray)
+          if ([mi.title isEqualToString:@"Move to"]) for (NSMenuItem* s2 in mi.submenu.itemArray) [sub addObject:s2.title];
+        BOOL offered = [sub containsObject:@"Favorites"];
+        NSUInteger favBefore = sp.favorites.children.count;
+        BOOL moved = [w moveItemToFavorites:t] && sp.favorites.children.lastObject == t &&
+                     ![sp.unpinned.children containsObject:t] && [w.favoriteTileTitles count] == favBefore + 1 &&
+                     [t.pinnedURL hasPrefix:@"https://example.org/fav-move"];
+        NSMutableArray* favMenu = [NSMutableArray array];
+        for (NSMenuItem* mi in [w sidebarMenuForItem:t].itemArray) [favMenu addObject:mi.title];
+        BOOL favMenuOK = [favMenu containsObject:@"Remove from Favorites"] && [favMenu containsObject:@"Move to Pinned"];
+        BOOL toPinned = [w removeItemFromFavorites:t pinned:YES] && [sp.pinned.children containsObject:t] &&
+                        sp.favorites.children.count == favBefore;
+        [w moveItem:t toParent:sp.unpinned index:0];
+        [w showItem:t];
+        [w toggleFavorite:nil];
+        BOOL action = [sp.favorites.children containsObject:t];
+        [w toggleFavorite:nil];
+        BOOL removed = sp.unpinned.children.firstObject == t && sp.favorites.children.count == favBefore && !t.pinnedURL;
+        [w deleteSidebarItem:t];
+        std::printf("SELFTEST-FAVORITES offered=%d moved=%d menu=%d toPinned=%d action=%d removed=%d\n", offered, moved,
+                    favMenuOK, toPinned, action, removed);
+      }
+      {  // #18 Tidy tab titles (no AI): the pure function on real-world title shapes, then pin -> tidy -> undo.
+        struct { NSString *in, *host, *out; } cases[] = {
+            {@"Pull requests · GitHub", @"github.com", @"Pull requests"},
+            {@"Inbox (3) - someone@example.com - Gmail", @"mail.google.com", @"Inbox"},
+            {@"(12) Home / X", @"x.com", @"Home / X"},
+            {@"Project plan - Google Docs", @"docs.google.com", @"Project plan"},
+            {@"How to tie a tie - YouTube", @"www.youtube.com", @"How to tie a tie"},
+            {@"Example Domain", @"example.com", @"Example Domain"},
+            {@"Hacker News", @"news.ycombinator.com", @"Hacker News"},
+            {@"Self-driving cars | The Verge", @"www.theverge.com", @"Self-driving cars"},
+        };
+        int good = 0, n = sizeof(cases) / sizeof(cases[0]);
+        for (int i = 0; i < n; ++i) {
+          NSString* got = TidyTabTitle(cases[i].in, cases[i].host);
+          if ([got isEqualToString:cases[i].out]) ++good;
+          else std::printf("SELFTEST-TIDY-DEBUG in=[%s] got=[%s]\n", cases[i].in.UTF8String, got.UTF8String);
+        }
+        ArcSpace* sp = w.currentSpace;
+        [w openInNewTab:@"https://example.org/tidy"];
+        ArcItem* t = sp.unpinned.children.firstObject;
+        t.liveTitle = @"(2) Tidy me - Example";
+        [w showItem:t];
+        [w togglePin:nil];
+        BOOL pinned = [sp.pinned.children containsObject:t];
+        BOOL tidied = pinned && t.renamed && [t.displayTitle isEqualToString:@"Tidy me"];
+        t.liveTitle = @"(3) Tidy me - Example";  // the page's own title changes: the tidy name sticks
+        BOOL sticks = [t.displayTitle isEqualToString:@"Tidy me"];
+        [w usePageTitleOfItem:t];
+        BOOL undone = !t.renamed && [t.displayTitle isEqualToString:@"(3) Tidy me - Example"];
+        [w renameItem:t to:@"My name"];
+        t.liveTitle = @"Something else";
+        BOOL renameSticks = [t.displayTitle isEqualToString:@"My name"];
+        [w deleteSidebarItem:t];
+        std::printf("SELFTEST-TIDY cases=%d pinned=%d tidied=%d sticks=%d undo=%d renameSticks=%d\n", good == n, pinned,
+                    tidied, sticks, undone, renameSticks);
+      }
       [w saveSidebarNow];
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 29 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{

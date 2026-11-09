@@ -40,10 +40,18 @@ NSInteger ReorderHapticsForTest(void);
 extern NSString* const kSettingBlockAds;            // BOOL, default NO (Arc's built-in blocker was opt-in)
 extern NSString* const kSettingAdBlockExceptions;   // NSArray<NSString*> of hosts where blocking is off
 void ApplyContentBlockerSettings(void);            // pushes the settings into the request filter
+extern NSString* const kSettingTidyTitles;
+extern NSString* const kSettingCalendar;  // BOOL, default NO: next meeting from the Mac's Calendar in the sidebar (#56)
+extern NSString* const kSettingLittleHotkey;       // BOOL, default YES: Cmd+Option+N opens a Little Window from any app (#42)
+extern NSString* const kSettingLittleModifierClick;  // BOOL, default YES: Cmd+Option+click on a link opens it in a Little Window  // BOOL, default YES: pinning a tab gives it a short, clean name (#18)
 extern NSString* const kSettingSearchSuggestions;     // BOOL, default YES
 NSString* TranslateURLFor(NSString* url, NSString* lang);  // nil for non-web or already translated pages
 NSString* OriginalURLForTranslated(NSString* url);          // nil when the page isn't a translation
-NSString* PreferredTranslateLanguage(void);                 // first macOS language, e.g. "en", "zh-TW"
+NSString* PreferredTranslateLanguage(void);
+// Translate offer (#52): the page's language code to offer translating from, or nil when it's empty, undetermined or
+// one of the person's own languages (compared by primary subtag: "en-GB" page, "en-US" Mac = no offer).
+NSString* TranslateOfferFor(NSString* pageLang, NSArray<NSString*>* preferredLanguages);
+extern NSString* const kSettingTranslateOffer;  // BOOL, default YES: offer to translate pages in other languages                 // first macOS language, e.g. "en", "zh-TW"
 NSString* SuggestURLForQuery(NSString* encodedQuery);
 NSArray<NSString*>* ParseSearchSuggestions(NSData* json);   // uses the chosen search engine
 BOOL SettingBool(NSString* key);

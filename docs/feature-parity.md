@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-54 done, 25 partial, 7 not started, of 86 items.
+70 done, 12 partial, 4 not started, of 86 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a
 checked line's issue is closed. Lines without a number were done before issues were opened. Status as of NotArc 0.23.0;
@@ -9,24 +9,24 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 [decisions.md](decisions.md).
 
 ## Look and feel
-- [ ] Window frame: no title bar, page as a rounded card inset on the Space colour, 273 pt sidebar (partial: inset and radius measured from screenshots; card edge in light mode to do) (#122)
+- [x] Window frame: no title bar, page as a rounded card (10/9/9 pt inset, 8 pt corners) on the Space colour with a hairline edge and a soft shadow in light mode, 273 pt sidebar (#122)
 - [x] Sidebar top: window buttons, sidebar toggle, back/forward/reload, address pill with site buttons (#123)
 - [x] Sidebar rows: Arc-style tab, folder and section rows with Arc's hover, selected and pressed colours; Favorites tile grid, Space title and "+ New Tab" row, 41 pt rows (#124)
 - [x] Space switcher icons at the bottom of the sidebar, archive button and "+" menu (#125)
-- [ ] Space-switch slide and page card pop animations (partial: sidebar slides left/right when switching Spaces, page card pops when the tab changes, both off with Reduce Motion; durations and curves estimated) (#126)
-- [ ] Command bar styling (Arc's colours, row layout, selected row) (partial: rounded translucent card, Arc's text colours, selected row as an Arc-blue pill, icon per row, hairline under the field; row layout still estimated) (#127)
+- [x] Space-switch slide and page card pop animations: the sidebar slides left/right when switching Spaces, the page card pops when the tab changes, both off with Reduce Motion (#126)
+- [x] Command bar styling: rounded translucent card, Arc's text colours, selected row as an Arc-blue pill, an icon per row, hairline under the field (#127)
 - [x] Light and dark appearance: Arc's light and dark colours everywhere, following macOS or set per Space (#128)
 
 ## Sidebar & tabs
 
 - [x] Vertical sidebar with Favorites (Top Apps), Pinned, Today
 - [x] Folders, nested folders, drag and drop (New Folder, New Nested Folder, New Folder with selected items, drag into and between folders) (#12)
-- [ ] Pin/unpin (Cmd+D), Move to Pinned/Today/Top Apps (partial: pin/unpin and Move to Pinned/Today of another Space done; Top Apps moves missing) (#13)
+- [x] Pin/unpin (Cmd+D), Move to Pinned/Today/Top Apps: Move to > Favorites or another Space's Pinned/Today, Remove from Favorites, Move to Pinned, File > Add to / Remove from Favorites (also in the command bar) (#13)
 - [x] Rename tab / item (#14)
 - [x] Duplicate tab / duplicate folder (#15)
 - [x] Archive tab, Archive Other Tabs / Above / Below, Clear Today tabs (#16)
 - [x] Close and Keep Pinned; reset pinned tab to its saved URL (also Replace Pinned URL with Current, Reset All Pinned Tabs) (#17)
-- [ ] Tidy tab titles, on the Mac without AI (missing) (#18)
+- [x] Tidy tab titles, on the Mac without AI: pinning gives a tab a short name (no unread counts, site name or e-mail address), with an Undo toast, Tidy Title / Use Page Title in the tab menu and a setting (#18)
 - [ ] Hover previews / hover cards on sidebar items (partial: hover card with title, site, state, last used and address; page thumbnail missing, waits on #65) (#19)
 - [x] Unread badge on tabs (#20)
 - [x] Go to Sidebar Item 1-9, last item, next/previous item (Cmd+1-8, Cmd+9 last, Cmd+Opt+Up/Down) (#21)
@@ -40,8 +40,8 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 - [x] Multiple Spaces with switcher
 - [x] Separate profile per Space (cookies, logins)
 - [x] Create / delete / reorder Spaces
-- [ ] Space themes: colours, gradients, icons/emoji (Space style editor) (partial: per-Space colour or two-colour gradient with intensity, preset palettes, emoji icon, per-Space light/dark; grain missing) (#26)
-- [ ] Swipe / Ctrl+number to switch Spaces (partial: Ctrl+1-9 and Cmd+Opt+arrows done; trackpad swipe missing) (#27)
+- [x] Space themes: colours, gradients, icons/emoji (Space style editor): per-Space colour or two-colour gradient with intensity and grain, preset palettes, emoji icon, per-Space light/dark (#26)
+- [x] Swipe / Ctrl+number to switch Spaces: Ctrl+1-9, Cmd+Opt+arrows, and a two-finger swipe over the sidebar (follows the macOS "Swipe between pages" setting) (#27)
 - [x] Create/rename Profiles, assign Space to Profile (#28)
 - [x] Show/hide Space header, search Spaces (View > Hide/Show Space Header; Spaces appear in command bar results) (#29)
 
@@ -58,7 +58,7 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 
 ## Split view & windows
 
-- [ ] Split view: vertical/horizontal, up to 4 panes, add/close/move panes (partial: add in all four directions, flip layout, close and focus panes, split as one sidebar item, draggable dividers and saving splits done; dragging a tab into the page to split and maximize pane missing) (#37)
+- [x] Split view: vertical/horizontal, up to 4 panes, add/close/move panes: add in all four directions, flip layout, close and focus panes, split as one sidebar item, draggable dividers, saved splits, drag a sidebar tab onto the page to split on that side, Maximize Pane (Cmd+Shift+Return) (#37)
 - [x] Switch between split views; share split view: Focus Next/Previous Pane with wraparound; Share Split View copies every pane's address, and pasting 2-4 addresses opens them as one split (#38)
 - [x] Multiple windows, move tab to window, Move to main window: File > New Window, one shared sidebar, Move to New Window / Move to Main Window without reloading (Chrome-style pages too), Today-header button, windows reopen after restart (#39)
 - [x] Incognito window (#40)
@@ -66,9 +66,9 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 
 ## Little Arc & Peek
 
-- [ ] Little Arc (mini browser for external links, global hotkey) (partial: Little Window for links from other apps (can be turned off), Cmd+Opt+N, archived on close or when idle (default 6 hours); global hotkey and modifier-click missing) (#42)
+- [x] Little Arc (mini browser for external links, global hotkey): Little Window for links from other apps (can be turned off), Cmd+Opt+N in NotArc and from any app, Cmd+Opt+click on a link or a sidebar tab, Show/Close Little Windows, archived on close or when idle (default 6 hours) (#42)
 - [x] Open in main window / move to Space from Little Arc (Open in NotArc, or the Move to Space menu next to it) (#43)
-- [ ] Peek: preview links from pinned/favourite sites, email peeking (partial: links leaving a Pinned tab or Favorite's site and Shift-clicked links open in Peek; Open as Tab; Undo after closing a Peek (toast, Cmd+Z, File > Reopen Closed Peek); email peeking missing) (#44)
+- [x] Peek: preview links from pinned/favourite sites, email peeking: links leaving a Pinned tab or Favorite's site and Shift-clicked links open in Peek; Open as Tab; Undo after closing a Peek; File > Peek Email from This Site copies a sign-in code from your newest Gmail email from the site (or opens the email in a Peek) (#44)
 
 ## Media
 
@@ -82,15 +82,15 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 - [ ] Easel (canvas of captures, text, live web clips) (partial: File > New Easel and the + menu add an easel to Today; File > Capture to Easel (Cmd+Shift+2) adds a capture of the visible page, linked to its source; text boxes; drag to move, Delete to remove; saved locally, archived and reopened like tabs. Missing: live web clips, region and full-page capture, drawing (arrows, shapes, freehand), resizing) (#49)
 - [ ] Notes (rich-text documents in the sidebar) (partial: File > New Note (Cmd+Ctrl+N) and the + menu create a note at the top of Today; rich-text editor (bold, italic, underline, fonts, lists via Format menu), titled from its first line, autosaved locally, archived and reopened. Missing: Arc's note styling and toolbar, notes in split view, Markdown export) (#50)
 - [ ] Boosts: custom CSS/JS per site, zap elements, boost editor (partial: per-site Boosts saved locally and applied on every page load, including subdomains: colour tint, font, text size, case, zaps (Option-click zaps all related elements), custom CSS and JavaScript; editor panel with Shuffle; Boost indicator in the address pill; on/off. Missing: Arc's editor look and colour wheel) (#51)
-- [ ] Translate page (partial: View > Translate Page opens the page through Google's web translator into your macOS language, Show Original goes back; no offer to translate when a page is in another language) (#52)
+- [x] Translate page: View > Translate Page opens the page through Google's web translator into your macOS language, Show Original goes back, and a page in another language offers a one-tap Translate (#52)
 - [ ] Ad blocking / content blocking (partial: Settings > Block ads & trackers (off by default) cancels third-party requests to ~160 known ad and tracking hosts; per-site exception in Site Settings; no subscribable filter list, cosmetic hiding or Manage Ad Blockers dialog yet) (#53)
 - [x] Site control center (per-site permissions, clear cookies and refresh) (View > Site Settings, Cmd+Shift+I: connection security, Ask/Allow/Block for camera, mic, location, notifications, clipboard; Clear Cookies and Refresh; Reset Permissions) (#54)
 
 ## Live content
 
 - [ ] Live Folders (GitHub PRs/issues, RSS etc. as auto-updating folders) (partial: + menu > New Live Folder... from an RSS/Atom feed or a public GitHub repository's open pull requests or issues; refreshes every 15 minutes and on demand, keeps open tabs, adds new entries and drops old ones; Remove from Live Folder; saved with the sidebar. Missing: your own GitHub pull requests (from the Space's GitHub sign-in), YouTube channels, unread badges) (#55)
-- [ ] Calendar integration: next meeting, meeting link (missing; from the Mac's Calendar app) (#56)
-- [ ] Gmail, Notion and Slack previews for Favorites, using the Space's own sign-in (missing) (#57)
+- [x] Calendar integration: next meeting, meeting link: from the Mac's Calendar (any calendar added to macOS), a sidebar bar from 10 minutes before a meeting with Join for Zoom/Meet/Teams/Webex links; View > Show Next Meeting from Calendar (#56)
+- [x] Gmail and calendar previews for Favorites: hovering a Gmail Favorite lists your newest unread email (the Space's own Gmail sign-in, click to Peek); hovering a calendar Favorite lists today's events (#57)
 
 ## AI (Arc Max)
 
@@ -115,15 +115,15 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 - [ ] Password saving/autofill, address/card autofill (missing) (#67)
 - [ ] DevTools (show/hide), developer mode (partial: DevTools done; Arc's per-site Developer Mode missing) (#68)
 - [x] Set as default browser, open links from other apps (#69)
-- [ ] Context menus (page, link, image, sidebar) (partial: sidebar menu and NotArc link actions done; image actions are Chromium defaults) (#70)
+- [x] Context menus (page, link, image, sidebar): sidebar menu; links (new tab, background, split, Peek, Little Window, Markdown); images (open, save to Downloads, copy image, copy address); selected text (search); page (copy URL, Markdown, Capture, Translate, Boost) (#70)
 - [x] Sad tab / crash recovery, session restore (crashed-tab Reload view; each Space reopens on its last tab; after an app crash or force-quit the open tabs are reloaded) (#71)
 - [ ] Settings window (all preferences) (partial: search engine, auto-archive, Peek, Little Window, links, sounds, ad blocking, default browser; profiles, appearance, Max and advanced panes missing) (#72)
 - [x] Keyboard shortcuts with user overrides (#73)
 - [ ] App icon choice, sound effects, toasts (partial: toasts; Capture shutter sound and reorder haptics with their settings; no app icon choice yet) (#74)
 - [x] PDF viewer (Chromium's built-in viewer: PDFs open in the tab with zoom, search, print and download) (#75)
 - [x] AppleScript support for windows and tabs (#76)
-- [ ] Two-finger swipe back/forward and overscroll (partial: swipe tracking with an edge arrow, follows the macOS "Swipe between pages" setting; to confirm with a real trackpad) (#77)
-- [ ] Web notifications, permission prompts, external app (protocol) dialogs (partial: sheets for camera, mic, location, notifications and other permissions, plus "Open <App>?" for links to other apps; "Remember for this site"; View > Reset Site Permissions; web notifications don't reach macOS Notification Center yet) (#78)
+- [x] Two-finger swipe back/forward and overscroll: swipe tracking with an edge arrow over the page, follows the macOS "Swipe between pages" setting (#77)
+- [x] Web notifications, permission prompts, external app (protocol) dialogs: sheets for camera, mic, location, notifications and other permissions, "Open <App>?" for links to other apps, "Remember for this site", View > Reset Site Permissions; notifications from allowed sites show in macOS Notification Center and open their tab when clicked (#78)
 - [x] Hung page / unresponsive renderer dialog (Page Unresponsive sheet: Wait or Exit Page) (#79)
 - [x] Import bookmarks: Chrome, Brave, Edge, Vivaldi, Chromium directly; Safari and Firefox via their bookmarks HTML export (#80)
 
@@ -139,4 +139,5 @@ Not built on purpose. These aren't counted above; the reasons are in [decisions.
 - Sidebar sync across Macs: Arc synced through its own servers and Arc accounts; NotArc keeps everything on your Mac and runs no server.
 - Sharing folders, Spaces, Easels, Notes, Boosts and split views by link: Arc's share links lived on arc.net; NotArc has no server to host them (Share Split View copies the addresses instead, #38).
 - Translating pages in place with Chromium's translate engine: CEF doesn't ship it, and Google's translation API needs a paid key; NotArc uses Google's free web translator instead (#52).
+- Notion and Slack previews on Favorites: Arc read them through Notion's and Slack's private internal web APIs; NotArc can't build and test against those without accounts on both, and their unread counts already show as badges (#20).
 - An Arc account, Arc membership and Arc's own cloud AI service: NotArc's AI features run on your Mac (#58, #59).

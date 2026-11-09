@@ -7,6 +7,7 @@
 @property(nonatomic, copy) NSString* itemID;
 @property(nonatomic, copy) NSString* title;      // user rename, else Arc's saved title
 @property(nonatomic, copy) NSString* liveTitle;  // title reported by the loaded page
+@property(nonatomic) BOOL renamed;  // `title` is the user's own name (or a tidied one, #18): it wins over liveTitle
 // Arc's "Show Unread Badge" (Favorites, on by default): turned off per tab.
 @property(nonatomic) BOOL hideUnreadBadge;
 @property(nonatomic, copy) NSString* url;        // nil for folders and section roots; current page
@@ -59,6 +60,7 @@
 // optional emoji shown before the name. Empty = the plain system sidebar.
 @property(nonatomic, copy) NSArray<NSString*>* themeColors;
 @property(nonatomic) double themeIntensity;
+@property(nonatomic) double themeGrain;  // 0-1: film grain over the theme colours (Arc's Space style editor, #26)
 @property(nonatomic, copy) NSString* iconEmoji;
 @property(nonatomic, copy) NSString* colorScheme;  // Arc per-Space appearance: nil/"auto", "light", "dark"
 - (NSArray<ArcItem*>*)allTabs;  // depth-first: favorites, pinned, Today

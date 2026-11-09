@@ -19,6 +19,7 @@ static NSArray<NSDictionary*>* Values(id list) {
 
 @implementation ArcItem
 - (NSString*)displayTitle {
+  if (self.renamed && self.title.length) return self.title;  // a rename sticks, as in Arc
   if (self.liveTitle.length) return self.liveTitle;
   if (self.title.length) return self.title;
   if (self.noteID) return @"Untitled Note";
@@ -58,6 +59,7 @@ static ArcItem* BuildItem(NSString* itemID, NSDictionary<NSString*, NSDictionary
   NSDictionary* data = Dict(raw[@"data"]);
   NSDictionary* tab = Dict(data[@"tab"]);
   NSString* title = Str(raw[@"title"]);
+  item.renamed = tab && title.length > 0;  // Arc keeps the user's rename in `title`, the page's in savedTitle
   if (tab) {
     item.url = Str(tab[@"savedURL"]);
     item.pinnedURL = item.url;  // only kept for pinned tabs and Favorites (see MainWindowController)
