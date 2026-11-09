@@ -1,0 +1,53 @@
+name: Updater and session-restore canary
+
+# WHY a separate, path-filtered workflow: app/updater.mm downloads and installs
+# a new app bundle, and session restore recovers from a crash -- both high-impact,
+# low-visibility to break. scripts/test-update.sh and scripts/test-session-restore.sh
+# already exist but were only ever run by hand. This gates on them automatically,
+# but only for PRs that actually touch the relevant code, since both scripts need
+# a full build.
+on:
+  pull_request:
+    paths:
+      - "app/updater.mm"
+      - "app/updater.h"
+      - "app/sidebar_store.mm"
+      - "app/sidebar_store.h"
+      - "app/archive_store.mm"
+      - "app/archive_store.h"
+      - "scripts/test-update.sh"
+      - "scripts/test-session-restore.sh"
+      - "scripts/make-test-home.py"
+      - "scripts/fetch-cef.sh"
+      - "CMakeLists.txt"
+
+jobs:
+  updater-canary:
+    name: test-update.sh + test-session-restore.sh
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache CEF distribution
+        uses: actions/cache@v4
+        with:
+          path: third_party/std
+          key: cef-macosarm64-${{ hashFiles('scripts/fetch-cef.sh') }}
+
+      - name: Fetch CEF
+        run: scripts/fetch-cef.sh
+
+      - name: Install ninja
+        run: brew install ninja
+
+      - name: Configure
+        run: cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -S . -B build
+
+      - name: Build
+        run: ninja -C build
+
+      - name: scripts/test-update.sh
+        run: scripts/test-update.sh build/Release/NotArc.app
+
+      - name: scripts/test-session-restore.sh
+        run: scripts/test-session-restore.sh build/Release/NotArc.app

@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Format, ratchet, Keychain scope
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+
+      - name: clang-format check
+        run: |
+          bad=0
+          for f in $(git ls-files 'app/*.mm' 'app/*.h' 'app/*.cc'); do
+            diff -q <(clang-format --style=file "$f") "$f" > /dev/null || { echo "NEEDS FORMAT: $f"; bad=1; }
+          done
+          if [ "$bad" -ne 0 ]; then
+            echo "FIX: run 'git ls-files \"app/*.mm\" \"app/*.h\" \"app/*.cc\" | xargs clang-format --style=file -i'"
+            exit 1
+          fi
+
+      - name: File-length ratchet
+        run: scripts/lint/file-length-ratchet.sh
+
+      - name: File-length ratchet did not regress vs origin/main
+        if: github.event_name == 'pull_request'
+        run: scripts/lint/file-length-ratchet.sh --verify-base origin/main
+
+      - name: File-length ratchet canary (proves the check blocks)
+        run: scripts/lint/file-length-ratchet.sh --prove
+
+      - name: Keychain-scope check
+        run: python3 scripts/lint/check-keychain-scope.py
+
+      - name: Keychain-scope canary (proves the check blocks)
+        run: python3 scripts/lint/check-keychain-scope.py --prove
+
+  build-and-selftest:
+    name: Build + --selftest (macOS arm64)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache CEF distribution
+        uses: actions/cache@v4
+        with:
+          path: third_party/std
+          # The cache key is the CEF pin baked into scripts/fetch-cef.sh; bump
+          # that script's CEF_VERSION/CEF_SHA1 to invalidate this cache.
+          key: cef-macosarm64-${{ hashFiles('scripts/fetch-cef.sh') }}
+
+      - name: Fetch CEF
+        run: scripts/fetch-cef.sh
+
+      - name: Install ninja
+        run: brew install ninja
+
+      - name: Configure
+        run: cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -S . -B build
+
+      - name: Build
+        run: ninja -C build
+
+      - name: Run --selftest
+        run: scripts/run-selftest.sh build/Release/NotArc.app 600
