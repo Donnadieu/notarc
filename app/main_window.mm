@@ -1,5 +1,7 @@
 #import <QuartzCore/QuartzCore.h>
 #import "app/main_window.h"
+#import "app/autofill.h"
+#import "app/password_store.h"
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
 #import "app/archive_window.h"
@@ -852,6 +854,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   BOOL _commandOpensIncognito;
   LittleWindowController* _peek;
   NSView* _toast;
+  AutofillController* _autofill;  // passwords and autofill (#67)
   NSView* _toolbar;
   NSMutableArray<NSDictionary*>* _sitePrompts;  // queue; first one is showing
   NSAlert* _siteAlert;
@@ -1767,6 +1770,13 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   });
   _client->set_external_callback([weakSelf](int browserId, const std::string& url) {
     [OwnerOf(browserId, weakSelf) browser:browserId externalURL:[NSString stringWithUTF8String:url.c_str()]];
+  });
+  _client->set_autofill_callback([weakSelf](int browserId, const std::string& nonce, const std::string& origin,
+                                            bool mainFrame, const std::string& json) {
+    MainWindowController* owner = OwnerOf(browserId, weakSelf);
+    [owner.autofill handleMessage:[NSString stringWithUTF8String:json.c_str()] browser:browserId
+                            nonce:[NSString stringWithUTF8String:nonce.c_str()]
+                           origin:[NSString stringWithUTF8String:origin.c_str()] mainFrame:mainFrame];
   });
   _client->set_find_callback([weakSelf](int browserId, int count, int active) {
     [OwnerOf(browserId, weakSelf) findResult:count active:active];
@@ -3649,7 +3659,9 @@ static const CGFloat kPaneGap = 6;
   NSUInteger copied = 0, skipped = 0;
   for (ArcExtensionCopy* c in [self importArcExtensionsInto:extensionsDir fromArcUserData:userData])
     c.skippedMV2 ? ++skipped : ++copied;
-  return @{@"history" : @(history), @"extensions" : @(copied), @"skipped" : @(skipped)};
+  NSDictionary* pw = [self importArcPasswordsFromUserData:userData];
+  return @{@"history" : @(history), @"extensions" : @(copied), @"skipped" : @(skipped),
+           @"passwords" : pw[@"passwords"] ?: @(-1), @"addresses" : pw[@"addresses"] ?: @0, @"cards" : pw[@"cards"] ?: @0};
 }
 
 - (IBAction)importEverythingFromArcMenu:(id)sender {
@@ -3657,11 +3669,16 @@ static const CGFloat kPaneGap = 6;
                                              userData:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]];
   NSAlert* a = [NSAlert new];
   a.messageText = @"Everything from Arc is here";
+  NSString* passwords = [n[@"passwords"] intValue] < 0
+      ? @"Saved passwords, addresses and cards: macOS didn't give NotArc Arc's Keychain key"
+      : [NSString stringWithFormat:@"Saved passwords: %@ added\nAddresses and cards: %@ and %@ added", n[@"passwords"],
+                                   n[@"addresses"], n[@"cards"]];
   a.informativeText = [NSString stringWithFormat:
       @"Spaces, tabs, pinned tabs and Favorites: imported\nLogins: come over as each Space opens\nHistory: %@ visits added\n"
-      @"Extensions: %@ copied%@\n\nSaved passwords, autofill and cards are coming in a later update.",
+      @"Extensions: %@ copied%@\n%@",
       n[@"history"], n[@"extensions"],
-      [n[@"skipped"] intValue] ? [NSString stringWithFormat:@" (%@ too old for current Chromium)", n[@"skipped"]] : @""];
+      [n[@"skipped"] intValue] ? [NSString stringWithFormat:@" (%@ too old for current Chromium)", n[@"skipped"]] : @"",
+      passwords];
   __weak MainWindowController* weakSelf = self;
   [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
     dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf offerDefaultBrowserIfFirstLaunch]; });
@@ -3695,7 +3712,8 @@ static const CGFloat kPaneGap = 6;
   [d setBool:YES forKey:@"arcImportOffered"];
   NSAlert* a = [NSAlert new];
   a.messageText = @"Bring everything over from Arc?";
-  a.informativeText = @"Your Spaces, tabs and logins are already here. This adds your history and extensions. "
+  a.informativeText = @"Your Spaces, tabs and logins are already here. This adds your history, extensions, saved "
+                      @"passwords, addresses and cards. "
                       @"Arc itself isn't changed. You can do this later from File > Import Everything from Arc.";
   [a addButtonWithTitle:@"Import Everything"];
   [a addButtonWithTitle:@"Not Now"];
@@ -4746,14 +4764,19 @@ static NSString* SiteOf(NSString* url) {
 
 // Small toast at the bottom centre of the page area with one action button.
 - (void)showToast:(NSString*)text action:(NSString*)action selector:(SEL)selector {
+  [self showToast:text buttons:action.length ? @[ @[ action, NSStringFromSelector(selector) ] ] : @[] target:self duration:6];
+}
+
+- (void)showToast:(NSString*)text buttons:(NSArray<NSArray<NSString*>*>*)buttons target:(id)target
+         duration:(NSTimeInterval)duration {
   [self hideToast];
   NSTextField* label = [NSTextField labelWithString:text];
   label.textColor = NSColor.whiteColor;
   NSMutableArray* views = [NSMutableArray arrayWithObject:label];
-  if (action.length) {
-    NSButton* b = [NSButton buttonWithTitle:action target:self action:selector];
-    b.bezelStyle = NSBezelStyleRounded;
-    [views addObject:b];
+  for (NSArray<NSString*>* b in buttons) {
+    NSButton* button = [NSButton buttonWithTitle:b[0] target:target action:NSSelectorFromString(b[1])];
+    button.bezelStyle = NSBezelStyleRounded;
+    [views addObject:button];
   }
   NSStackView* stack = [NSStackView stackViewWithViews:views];
   stack.edgeInsets = NSEdgeInsetsMake(6, 14, 6, 8);
@@ -4769,8 +4792,9 @@ static NSString* SiteOf(NSString* url) {
   stack.autoresizingMask = NSViewMinXMargin | NSViewMaxXMargin | NSViewMaxYMargin;
   [self.window.contentView addSubview:stack positioned:NSWindowAbove relativeTo:nil];
   _toast = stack;
+  _toastText = [text copy];
   __weak MainWindowController* weakSelf = self;
-  _toastTimer = [NSTimer scheduledTimerWithTimeInterval:6 repeats:NO block:^(NSTimer*) { [weakSelf hideToast]; }];
+  _toastTimer = [NSTimer scheduledTimerWithTimeInterval:duration repeats:NO block:^(NSTimer*) { [weakSelf hideToast]; }];
 }
 
 - (void)hideToast {
@@ -4778,6 +4802,71 @@ static NSString* SiteOf(NSString* url) {
   _toastTimer = nil;
   [_toast removeFromSuperview];
   _toast = nil;
+  _toastText = nil;
+}
+
+#pragma mark Passwords and autofill (#67)
+
+- (AutofillController*)autofill {
+  if (!_autofill) {
+    _autofill = [[AutofillController alloc] initWithHost:self];
+    _autofill.recordMenusOnly = self.selfTestProfiles;  // hidden runs never pop a menu
+  }
+  return _autofill;
+}
+
+- (BOOL)autofillRun:(NSString*)js nonce:(NSString*)nonce {
+  return _client && _client->AutofillRun(nonce.UTF8String, js.UTF8String);
+}
+
+- (void)autofillRunAllFrames:(NSString*)js browser:(int)browserId {
+  if (_client) _client->AutofillRunAllFrames(browserId, js.UTF8String);
+}
+
+- (NSView*)viewForBrowserId:(int)browserId {
+  CefRefPtr<CefBrowser> b = _client ? _client->BrowserById(browserId) : nullptr;
+  return b ? (__bridge NSView*)b->GetHost()->GetWindowHandle() : nil;
+}
+
+- (IBAction)fillPassword:(id)sender {
+  if (_shown.browserId) [self.autofill fillPasswordInBrowser:_shown.browserId];
+}
+
+- (IBAction)showPasswords:(id)sender {
+  PasswordsWindowController* pw = [PasswordsWindowController shared];
+  __weak MainWindowController* weakSelf = self;
+  pw.pasteboardProvider = ^NSPasteboard* { return [weakSelf copyPasteboard] ?: NSPasteboard.generalPasteboard; };
+  if ([sender isKindOfClass:NSMenuItem.class] && [(NSMenuItem*)sender menu] != NSApp.mainMenu &&
+      [(NSMenuItem*)sender action] == @selector(showPasswords:) && [(NSMenuItem*)sender tag] > 0)
+    pw.section = [(NSMenuItem*)sender tag];  // from the fill menu: Addresses or Cards
+  if (self.selfTestProfiles) [pw reload];  // hidden runs never show it
+  else [pw showWindow:nil];
+}
+
+- (IBAction)importPasswordsFromMenu:(id)sender { [self.autofill importPasswordsFromMenu]; }
+
+// Saved passwords, addresses and cards from each Space's Arc profile ("Login Data", "Web Data"), with Arc's own
+// key ("Arc Safe Storage", the item cookie import already reads). nil when the key isn't available.
+- (NSDictionary<NSString*, NSNumber*>*)importArcPasswordsFromUserData:(NSString*)userData {
+  NSData* key = self.arcSafeStorageKeyOverride;
+  if (!key && !self.selfTestProfiles) {  // tests never read the real Keychain
+    NSString* pw = ArcSafeStoragePassword(nil);
+    if (pw) key = ArcCookieKey(pw);
+  }
+  if (!key) return nil;
+  NSUInteger passwords = 0, addresses = 0, cards = 0;
+  NSMutableSet* done = [NSMutableSet set];
+  for (ArcSpace* s in _spaces) {
+    NSString* p = s.profileDirectory.length ? s.profileDirectory : @"Default";
+    if ([done containsObject:p]) continue;
+    [done addObject:p];
+    NSDictionary* n = [[PasswordStore shared] importChromiumProfile:[userData stringByAppendingPathComponent:p] key:key
+                                                             source:[NSString stringWithFormat:@"Arc (%@)", s.title ?: p]];
+    passwords += [n[@"passwords"] unsignedIntegerValue];
+    addresses += [n[@"addresses"] unsignedIntegerValue];
+    cards += [n[@"cards"] unsignedIntegerValue];
+  }
+  return @{@"passwords" : @(passwords), @"addresses" : @(addresses), @"cards" : @(cards)};
 }
 - (BOOL)isPeeking { return _peek != nil; }
 - (void)promotePeekToTab { [_peek openInMainWindow:nil]; }
@@ -7443,6 +7532,7 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
     mi.title = SettingBool(kSettingShowSpaceHeader) ? @"Hide Space Header" : @"Show Space Header";
   if (mi.action == @selector(resetPinnedTab:) || mi.action == @selector(replacePinnedURL:))
     return _shown && [self isPinnedItem:_shown] && _shown.pinnedURL.length;
+  if (mi.action == @selector(fillPassword:)) return _shown.browserId != 0 && [_shown.url hasPrefix:@"http"];
   return YES;
 }
 

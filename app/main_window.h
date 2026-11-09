@@ -11,6 +11,7 @@
 NSString* CleanLinkURL(NSString* url);
 
 @class Boost;
+@class AutofillController;
 @class EaselView;
 NSInteger UnreadCountFromTitle(NSString* title);
 NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL began);  // -1 back, 1 forward, 0 none  // "Inbox (12)" -> 12
@@ -269,6 +270,24 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (ArcItem*)newNestedFolderIn:(ArcItem*)folder;
 // Closing a Peek without opening it as a tab offers "Undo" (toast for 6 s, and Edit > Undo / Cmd+Z).
 - (IBAction)reopenClosedPeek:(id)sender;
+// Toast with any number of buttons (title, selector name on target); stays `duration` seconds.
+- (void)showToast:(NSString*)text buttons:(NSArray<NSArray<NSString*>*>*)buttons target:(id)target
+         duration:(NSTimeInterval)duration;
+- (void)hideToast;
+@property(nonatomic, readonly) NSString* toastText;  // tests: the toast showing, or nil
+// Passwords and autofill (#67, see autofill.h). Edit > AutoFill > Fill Password, NotArc > Passwords...,
+// File > Import Passwords...
+@property(nonatomic, readonly) AutofillController* autofill;
+- (BOOL)autofillRun:(NSString*)js nonce:(NSString*)nonce;
+- (void)autofillRunAllFrames:(NSString*)js browser:(int)browserId;
+- (NSView*)viewForBrowserId:(int)browserId;
+- (IBAction)fillPassword:(id)sender;
+- (IBAction)showPasswords:(id)sender;
+- (IBAction)importPasswordsFromMenu:(id)sender;
+- (NSPasteboard*)copyPasteboard;  // private pasteboard in self-tests
+// Arc's saved passwords, addresses and cards (part of Import Everything from Arc, #150). Tests set the key.
+@property(nonatomic, copy) NSData* arcSafeStorageKeyOverride;
+- (NSDictionary<NSString*, NSNumber*>*)importArcPasswordsFromUserData:(NSString*)userData;
 // View > Show Toolbar: back/forward/reload and the full address above the page (Enter goes to what you type).
 // View > Hide Space Header: hides the Space picker at the top of the sidebar. Both are remembered.
 - (IBAction)toggleToolbar:(id)sender;

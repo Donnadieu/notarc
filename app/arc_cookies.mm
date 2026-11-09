@@ -11,22 +11,48 @@ static NSError* Err(NSString* msg) {
   return [NSError errorWithDomain:@"ArcCookies" code:1 userInfo:@{NSLocalizedDescriptionKey : msg}];
 }
 
-NSString* ArcSafeStoragePassword(NSError** error) {
-  NSDictionary* query = @{
+static NSData* Decrypt(const uint8_t* blob, int length, NSData* key);
+
+NSString* SafeStoragePassword(NSString* service, NSString* account, NSError** error) {
+  NSMutableDictionary* query = [@{
     (__bridge id)kSecClass : (__bridge id)kSecClassGenericPassword,
-    (__bridge id)kSecAttrService : @"Arc Safe Storage",
-    (__bridge id)kSecAttrAccount : @"Arc",
+    (__bridge id)kSecAttrService : service,
     (__bridge id)kSecReturnData : @YES,
     (__bridge id)kSecMatchLimit : (__bridge id)kSecMatchLimitOne,
-  };
+  } mutableCopy];
+  if (account.length) query[(__bridge id)kSecAttrAccount] = account;
   CFTypeRef result = NULL;
   OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
   if (status != errSecSuccess || !result) {
-    if (error) *error = Err([NSString stringWithFormat:@"Keychain read failed (OSStatus %d)", (int)status]);
+    if (error)
+      *error = [NSError errorWithDomain:@"ArcCookies" code:status
+                               userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:
+                                              @"Keychain read failed (OSStatus %d)", (int)status]}];
     return nil;
   }
   NSData* data = (__bridge_transfer NSData*)result;
   return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+}
+
+NSString* ArcSafeStoragePassword(NSError** error) { return SafeStoragePassword(@"Arc Safe Storage", @"Arc", error); }
+
+NSData* ChromiumDecryptValue(NSData* blob, NSData* key) {
+  if (!blob.length || !key) return nil;
+  return Decrypt((const uint8_t*)blob.bytes, (int)blob.length, key);
+}
+
+NSData* ChromiumEncryptValue(NSData* plain, NSData* key) {
+  if (!plain || key.length != kCCKeySizeAES128) return nil;
+  uint8_t iv[kCCBlockSizeAES128];
+  memset(iv, ' ', sizeof(iv));
+  NSMutableData* out = [NSMutableData dataWithBytes:"v10" length:3];
+  NSMutableData* body = [NSMutableData dataWithLength:plain.length + kCCBlockSizeAES128];
+  size_t moved = 0;
+  if (CCCrypt(kCCEncrypt, kCCAlgorithmAES128, kCCOptionPKCS7Padding, key.bytes, key.length, iv, plain.bytes,
+              plain.length, body.mutableBytes, body.length, &moved) != kCCSuccess)
+    return nil;
+  [out appendBytes:body.bytes length:moved];
+  return out;
 }
 
 NSData* ArcCookieKey(NSString* password) {
