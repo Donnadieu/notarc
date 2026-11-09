@@ -37,6 +37,9 @@
 @property(nonatomic) BOOL mediaPaused;   // has media that was playing and is now paused (not saved)
 @property(nonatomic) BOOL audioMuted;
 // Calls (#47, not saved): the page has the camera / microphone, and whether the user turned them off.
+// Tab thumbnails (#65, not saved): a small picture of the page from when it was last on screen.
+@property(nonatomic, strong) NSImage* thumbnail;
+@property(nonatomic, strong) NSDate* thumbnailTaken;  // when the last copy was started (throttles copies)
 @property(nonatomic) BOOL inPictureInPicture;  // its video is in a floating PiP window (#46, not saved)
 @property(nonatomic) BOOL usingCamera;
 @property(nonatomic) BOOL usingMic;

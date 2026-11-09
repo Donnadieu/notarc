@@ -33,6 +33,7 @@
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
 #import "app/arc_cookies.h"
+#import "app/tab_thumbnails.h"
 #include "include/cef_app.h"
 #include "include/cef_application_mac.h"
 #include "include/wrapper/cef_library_loader.h"
@@ -575,9 +576,9 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                                       BOOL offRespected = !t.inPictureInPicture;
                                       SettingSetObject(kSettingAutoPiP, nil);
                                       if (!log) std::printf("PIP-DEBUG %s\n", t.liveTitle.UTF8String);
-                                      gLateTestsDone = YES;
                                       std::printf("SELFTEST-AUTOPIP playing=%d popped=%d back=%d gesture=%d settingOff=%d\n", playing,
                                                   popped, back, log, offRespected);
+                                      [self runThumbnailSelfTest:other leaving:t];
                                     });
                                   });
                                 });
@@ -706,6 +707,90 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
 - (void)runSelfTestActions {
   [self.window openInNewTab:@"https://example.com"];
   [self runBasicsTestWhenReady:0];
+}
+
+// Tab thumbnails (#65) in hover cards (#19) and the Ctrl+Tab switcher. Runs last in the late chain (sets gLateTestsDone).
+- (void)runThumbnailSelfTest:(ArcItem*)src leaving:(ArcItem*)t {
+  MainWindowController* w = self.window;
+  [w showItem:src];
+  [w runJS:@"document.documentElement.style.background='#3b82f6';document.body.style.background='#3b82f6';"
+           @"document.body.innerHTML='';document.title='thumb:blue'" inItem:src];
+  WaitUntil(^{ return [src.liveTitle isEqualToString:@"thumb:blue"]; }, 5, ^{
+    NSImage* before = src.thumbnail;
+    [w scheduleThumbnailOfShown];  // the page is blue now: copy it 1 s from now
+    WaitUntil(^{
+      if (w.shownItem != src) { [w showItem:src]; }  // other timed checks may switch tabs; showing again restarts the wait
+      return (BOOL)(src.thumbnail != nil && src.thumbnail != before);
+    }, 8, ^{
+      NSImage* th = src.thumbnail;
+      CGImageRef cg = [th CGImageForProposedRect:NULL context:nil hints:nil];
+      NSBitmapImageRep* px = cg ? [[NSBitmapImageRep alloc] initWithCGImage:cg] : nil;
+      BOOL taken = th != nil && th != before;
+      BOOL small = px && px.pixelsWide <= 480 && px.pixelsWide >= 200 && px.pixelsHigh <= px.pixelsWide;
+      NSColor* mid = [[px colorAtX:px.pixelsWide / 2 y:px.pixelsHigh / 2] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+      // The hidden test window is 1% opaque, so the copy keeps the page's hue, not its exact colour: check it's clearly blue.
+      BOOL page = mid && mid.blueComponent - mid.redComponent > 0.15 && mid.blueComponent - mid.greenComponent > 0.15;
+      if (!page) std::printf("THUMB-DEBUG mid=%.2f,%.2f,%.2f %ldx%ld\n", mid.redComponent, mid.greenComponent, mid.blueComponent,
+                             (long)px.pixelsWide, (long)px.pixelsHigh);
+      [w showItem:t];
+      [w showHoverCardForItem:src];
+      BOOL inCard = w.hoverCardHasThumbnail;
+      [w hideHoverCard];
+      [w showHoverCardForItem:t];  // the tab on screen shows no (stale) picture
+      BOOL notShown = !w.hoverCardHasThumbnail;
+      [w hideHoverCard];
+      // Ctrl+Tab held: the shown tab first, the tab just left selected, with its picture; Tab steps, release switches.
+      [w openTabSwitcherHolding:0];
+      NSArray<ArcItem*>* items = w.tabSwitcherItems;
+      BOOL open = w.tabSwitcherShown;
+      BOOL order = items.count >= 2 && items[0] == t && items[1] == src && w.tabSwitcherSelection == src;
+      BOOL thumb = [w tabSwitcherShowsThumbnailFor:src];
+      [w stepTabSwitcher:1];
+      BOOL stepped = w.tabSwitcherSelection == (items.count > 2 ? items[2] : items[0]);
+      [w stepTabSwitcher:-1];
+      [w commitTabSwitcher];
+      BOOL switched = w.shownItem == src && !w.tabSwitcherShown;
+      [w openTabSwitcherHolding:0];
+      [w cancelTabSwitcher];
+      BOOL cancelled = w.shownItem == src && !w.tabSwitcherShown;
+      // Flip between the two tabs every 0.15 s, as someone tapping through tabs would. Each switch only re-arms the
+      // 1 s timer, so no copy may start while flipping, and the thumbnail code's share of a switch must stay tiny.
+      long startedBeforeFlips = TabThumbnailStatsGet().started;
+      NSMutableArray<NSNumber*>* flipMs = [NSMutableArray array];
+      const int kFlips = 10;
+      for (int f = 0; f < kFlips; ++f)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(f * 0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+          CFAbsoluteTime f0 = CFAbsoluteTimeGetCurrent();
+          [w showItem:(f % 2 == 0) ? t : src];
+          [flipMs addObject:@((CFAbsoluteTimeGetCurrent() - f0) * 1000)];
+        });
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((kFlips - 1) * 0.15 * NSEC_PER_SEC + 0.3 * NSEC_PER_SEC)),
+                     dispatch_get_main_queue(), ^{
+        // The point of this design (#176 was reverted for it): starting a copy and receiving it cost the main thread
+        // almost nothing, unlike the synchronous window copy (10-110 ms each).
+        TabThumbnailStats s = TabThumbnailStatsGet();
+        BOOL fast = s.started > 0 && s.maxKickoffMs < 5 && s.maxDeliverMs < 5;
+        BOOL flipNoCopy = flipMs.count == kFlips && s.started == startedBeforeFlips;
+        BOOL switchFast = s.switches >= kFlips && s.maxSwitchHookMs < 1;
+        double flipMax = 0, flipSum = 0;
+        for (NSNumber* n in flipMs) {
+          flipMax = MAX(flipMax, n.doubleValue);
+          flipSum += n.doubleValue;
+        }
+        std::printf("THUMB-TIME copies=%ld done=%ld failed=%ld kickoffMaxMs=%.2f kickoffMeanMs=%.3f deliverMaxMs=%.2f "
+                    "latencyMaxMs=%.0f latencyMeanMs=%.0f switches=%ld switchHookMaxMs=%.3f flipShowItemMaxMs=%.2f "
+                    "flipShowItemMeanMs=%.2f\n",
+                    s.started, s.finished, s.failed, s.maxKickoffMs, s.started ? s.totalKickoffMs / s.started : 0, s.maxDeliverMs,
+                    s.maxLatencyMs, s.finished ? s.totalLatencyMs / s.finished : 0, s.switches, s.maxSwitchHookMs, flipMax,
+                    flipMs.count ? flipSum / flipMs.count : 0);
+        std::printf("SELFTEST-THUMBNAIL taken=%d small=%d page=%d inCard=%d notForShown=%d fast=%d switchFast=%d flipNoCopy=%d\n",
+                    taken, small, page, inCard, notShown, fast, switchFast, flipNoCopy);
+        std::printf("SELFTEST-TABSWITCHER open=%d order=%d thumbnail=%d stepped=%d switched=%d cancelled=%d\n", open, order,
+                    thumb, stepped, switched, cancelled);
+        gLateTestsDone = YES;
+      });
+    });
+  });
 }
 
 - (void)runRemainingSelfTestActions {

@@ -103,3 +103,29 @@ trackpad; everything else is checked by the hidden self-test.
     both, and their unread counts already show as badges (#20). Gmail uses Gmail's own unread feed with the Space's
     sign-in (same as email peeking, #44); calendar Favorites (Google Calendar, Outlook calendar, iCloud, Proton,
     Cal.com) show today's events from the Mac's Calendar.
+
+## 2026-11-09: tab thumbnails (#65, #19)
+
+31. **Thumbnails are copied asynchronously with ScreenCaptureKit, from NotArc's own window.** The 0.19.0 attempt
+    (#176, reverted) copied the window synchronously with `CGWindowListCreateImage`: 10-110 ms of main-thread time per
+    copy made timing-sensitive self-tests fail at random. DevTools `Page.captureScreenshot` stops Chromium reporting
+    frozen pages, and in-process reads (`cacheDisplayInRect`, layer IOSurfaces) are blank because the page is drawn
+    in the GPU process. `SCScreenshotManager` with `SCShareableContent.getCurrentProcessShareableContent` copies the
+    window in the window server and hands the picture back on a background queue: the main thread only starts the
+    request (well under 1 ms) and stores the result. It needs no Screen Recording permission because the app only
+    copies its own window, which needs macOS 14.4; on macOS 13 to 14.3 there are simply no thumbnails. CEF's
+    off-screen rendering was not used: it would load each page a second time.
+32. **When a copy is made:** 1 s after a tab comes on screen or finishes loading (every switch or load restarts the
+    wait, so flipping quickly through tabs copies nothing), when the pointer moves over the sidebar, and when the
+    Ctrl+Tab switcher opens; at most once every 2 s per tab, one at a time. A copy started before a tab switch is
+    thrown away so a picture never shows the wrong page. Pictures are 480 px wide JPEGs of the top of the page (4:3),
+    kept in memory only, never saved, and never shown for the tab already on screen. At most 40 pictures are kept
+    across all windows (oldest dropped first), so memory stays under about 30 MB however many tabs are open. A tab
+    switch itself only bumps a counter and re-arms the 1 s timer; the self-test flips tabs every 0.15 s and checks
+    that no copy starts and that the thumbnail code adds under 1 ms to a switch.
+33. **Ctrl+Tab held opens a recent-tab switcher**, as Arc's "tab switcher, like Command+Tab": the shown tab first,
+    then the most recently used tabs of the Space (up to 8, fewer if the window is narrow), with the previous tab
+    selected. Tab / Shift+Tab or the arrow keys move, releasing Ctrl switches, Esc cancels, a click picks a tile. The
+    panel only appears after 0.12 s, so a quick Ctrl+Tab still flips straight to the previous tab. Choosing the menu
+    item with the mouse switches directly. Ctrl+Shift+Tab to open it backwards wasn't added (no free shortcut was
+    asked for); Shift+Tab works once it is open.

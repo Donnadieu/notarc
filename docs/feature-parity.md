@@ -27,7 +27,7 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 - [x] Archive tab, Archive Other Tabs / Above / Below, Clear Today tabs (#16)
 - [x] Close and Keep Pinned; reset pinned tab to its saved URL (also Replace Pinned URL with Current, Reset All Pinned Tabs) (#17)
 - [x] Tidy tab titles, on the Mac without AI: pinning gives a tab a short name (no unread counts, site name or e-mail address), with an Undo toast, Tidy Title / Use Page Title in the tab menu and a setting (#18)
-- [ ] Hover previews / hover cards on sidebar items (partial: hover card with title, site, state, last used and address; page thumbnail missing, waits on #65) (#19)
+- [x] Hover previews / hover cards on sidebar items (title, site, state, last used, address and a picture of the page) (#19)
 - [x] Unread badge on tabs (#20)
 - [x] Go to Sidebar Item 1-9, last item, next/previous item (Cmd+1-8, Cmd+9 last, Cmd+Opt+Up/Down) (#21)
 - [x] Hide/show sidebar, toolbar mode with full URL (Cmd+S sidebar; View > Show Toolbar (Cmd+Shift+S) with back/forward/reload and the full editable URL) (#22)
@@ -50,7 +50,7 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 - [x] Command bar: new tab, go to URL, search (Cmd+T new tab, Cmd+L current tab)
 - [x] Suggestions: open tabs, history, bookmarks, actions, top domains (open and pinned tabs in every Space, Spaces, history, menu actions, top sites when empty; arrow keys + Enter) (#30)
 - [x] Search engine choice, search suggestions (#31)
-- [x] Switch to a recent tab (Ctrl+Tab) (#32)
+- [x] Switch to a recent tab (Ctrl+Tab; held, it shows a switcher with page pictures) (#32)
 - [x] Back/forward, reload, find in page, zoom, print (#33)
 - [x] Link routing rules (which Space opens which links): Air Traffic Control, Arc rules imported, rule editor (#34)
 - [x] Command bar ranking that learns from what you pick (#35)
@@ -107,7 +107,7 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 - [ ] Import everything from Arc with one button: Spaces, tabs, Favorites, logins, history, extensions, saved passwords, autofill (partial: first-launch offer and File > Import Everything from Arc bring all but saved passwords and autofill, which wait on #67) (#150)
 - [ ] Import from Chrome/Safari/other browsers, password import (partial: File > Import Bookmarks (#80) and File > Import History from Chrome, Brave, Edge, Vivaldi, Chromium, Firefox and Safari (Safari needs Full Disk Access); no password import yet) (#63)
 - [x] Clear browsing data (time range; history, cookies, cache across all Spaces; Clear Cookies and Refresh for the current site) (#64)
-- [ ] Tab thumbnails for switchers and previews (missing; the 0.19.0 attempt was reverted) (#65)
+- [x] Tab thumbnails for switchers and previews (sidebar hover cards, Ctrl+Tab switcher; in memory only) (#65)
 
 ## Browser basics
 

@@ -187,7 +187,7 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (IBAction)toggleSidebar:(id)sender;
 - (IBAction)selectTabFromMenu:(NSMenuItem*)sender;  // tag = index
 - (IBAction)nextTab:(id)sender;
-- (IBAction)switchToRecentTab:(id)sender;  // Ctrl+Tab: the most recently used other tab in this Space
+- (IBAction)switchToRecentTab:(id)sender;  // Ctrl+Tab: the most recently used other tab in this Space (held: switcher)
 - (IBAction)pasteAndGo:(id)sender;          // clipboard URL or search text -> new Today tab
 - (IBAction)printPage:(id)sender;
 // Focus mode: hides the sidebar and the window's title-bar buttons so only the page shows. The
@@ -308,6 +308,18 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (void)answerHungSheet:(BOOL)exitPage;  // page the Wait/Exit sheet is about, nil if none
 - (void)hideHoverCard;
 @property(nonatomic, readonly) BOOL hoverCardShown;
+@property(nonatomic, readonly) BOOL hoverCardHasThumbnail;  // #65
+// Tab thumbnails (#65): copy the shown tab 1 s from now (each switch or load restarts the wait).
+- (void)scheduleThumbnailOfShown;
+// Recent-tab switcher (Ctrl+Tab held, #32/#65). Tests open it with mods = 0 (no key monitoring) and drive it.
+- (void)openTabSwitcherHolding:(NSEventModifierFlags)mods;
+- (void)stepTabSwitcher:(NSInteger)delta;
+- (void)commitTabSwitcher;
+- (void)cancelTabSwitcher;
+@property(nonatomic, readonly) BOOL tabSwitcherShown;
+@property(nonatomic, readonly) NSArray<ArcItem*>* tabSwitcherItems;
+@property(nonatomic, readonly) ArcItem* tabSwitcherSelection;
+- (BOOL)tabSwitcherShowsThumbnailFor:(ArcItem*)item;
 - (IBAction)changeSpaceIcon:(id)sender;
 @property(nonatomic, readonly) NSView* themeView;  // the tint layer over the sidebar (for tests)
 // Clear Browsing Data: history and cookies from `since` on (nil = all time) in every Space's profile;

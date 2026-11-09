@@ -23,6 +23,7 @@
 #import "app/email_peek.h"
 #import "app/web_notifications.h"
 #import "app/calendar_preview.h"
+#import "app/tab_thumbnails.h"
 #include "include/cef_devtools_message_observer.h"
 
 #include <cstdio>
@@ -803,6 +804,19 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   CAGradientLayer* _themeGradient;
   CALayer* _themeGrain;  // film grain over the theme (#26)
   NSPopover* _hoverCard;
+  BOOL _hoverCardHasThumbnail;
+  NSTimer* _thumbTimer;           // tab thumbnails (#65): copy of the shown tab, due 1 s after it settles
+  NSUInteger _showGeneration;     // bumped on every tab switch; a copy started before a switch is dropped
+  NSDate* _thumbPendingSince;     // a copy is in flight
+  NSPanel* _switcher;             // Ctrl+Tab recent-tab switcher
+  NSArray<ArcItem*>* _switcherItems;
+  NSMutableArray<NSView*>* _switcherTiles;
+  NSInteger _switcherIndex;
+  NSEventModifierFlags _switcherMods;
+  unsigned short _switcherKey;
+  id _switcherMonitor;
+  id _switcherResignObserver;
+  NSTimer* _switcherRevealTimer;
   NSView* _mediaBar;
   NSView* _meetingBar;  // next meeting from Calendar (#56)
   NSTextField* _meetingTitle;
@@ -1747,6 +1761,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
     [OwnerOf(browserId, weakSelf) applyBoostToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
     [OwnerOf(browserId, weakSelf) installCallHookInBrowser:browserId];
     [OwnerOf(browserId, weakSelf) detectLanguageInBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
+    [OwnerOf(browserId, weakSelf) thumbnailAfterLoadOfBrowser:browserId];
   });
   _client->set_notify_callback([weakSelf](int browserId, const std::string& json, const std::string& pageURL) {
     NSString* j = [NSString stringWithUTF8String:json.c_str()], *u = [NSString stringWithUTF8String:pageURL.c_str()];
@@ -1889,6 +1904,7 @@ static NSString* const kPiPExitJS =
   if (item.inPictureInPicture && item != _shown) [self pictureInPicture:NO item:item done:nil];
   if (item != _shown && _shown) [self popPageCard];
   _shown.lastActiveAt = [NSDate date];  // the tab we leave was active until now
+  BOOL switched = item != _shown;
   _shown = item;
   ArcSpace* owner = [self spaceOwningItem:item];
   // The Space's last-shown tab (restored at launch) follows the main window only; other windows keep their own.
@@ -1903,6 +1919,12 @@ static NSString* const kPiPExitJS =
   [self selectSidebarRowFor:item];
   [self updateToolbarAddress];
   if (![self isMainWindowController]) [MainWindowController saveWindowState];
+  if (switched) {  // tab thumbnails (#65): only (re)arms a timer here; the copy itself is never on the switch path
+    CFAbsoluteTime t0 = CFAbsoluteTimeGetCurrent();
+    _showGeneration++;
+    [self scheduleThumbnailOfShown];
+    TabThumbnailNoteSwitch((CFAbsoluteTimeGetCurrent() - t0) * 1000);
+  }
 }
 
 - (void)openTabsForSelfTest:(NSUInteger)count {
@@ -3061,6 +3083,7 @@ static NSString* RelativeAgo(NSDate* d) {
 }
 
 - (void)mouseMoved:(NSEvent*)event {
+  [self refreshThumbnailOfShownIfOlderThan:2];  // hover cards may be next: keep the shown tab's picture fresh
   NSPoint p = [_outline convertPoint:event.locationInWindow fromView:nil];
   NSInteger row = [_outline rowAtPoint:p];
   [self setSidebarHoverRow:row];
@@ -3088,6 +3111,7 @@ static NSString* RelativeAgo(NSDate* d) {
 }
 
 - (BOOL)hoverCardShown { return _hoverCard.shown; }
+- (BOOL)hoverCardHasThumbnail { return _hoverCard != nil && _hoverCardHasThumbnail; }
 
 - (void)hideHoverCard {
   [_hoverCard close];
@@ -3116,6 +3140,21 @@ static NSString* RelativeAgo(NSDate* d) {
   stack.alignment = NSLayoutAttributeLeading;
   stack.spacing = 3;
   stack.edgeInsets = NSEdgeInsetsMake(10, 12, 10, 12);
+  // The page as it looked when last on screen (#65); never for the tab you're looking at.
+  _hoverCardHasThumbnail = NO;
+  if (item.thumbnail && item != _shown) {
+    NSImageView* iv = [NSImageView imageViewWithImage:item.thumbnail];
+    iv.imageScaling = NSImageScaleProportionallyUpOrDown;
+    iv.wantsLayer = YES;
+    iv.layer.cornerRadius = 6;
+    iv.layer.masksToBounds = YES;
+    NSSize s = item.thumbnail.size;
+    [iv.widthAnchor constraintEqualToConstant:280].active = YES;
+    [iv.heightAnchor constraintEqualToConstant:s.width > 0 ? 280 * s.height / s.width : 160].active = YES;
+    [stack addArrangedSubview:iv];
+    [stack setCustomSpacing:8 afterView:iv];
+    _hoverCardHasThumbnail = YES;
+  }
   for (NSUInteger i = 0; i < lines.count; ++i) {
     NSTextField* l = [NSTextField wrappingLabelWithString:lines[i]];
     l.preferredMaxLayoutWidth = 280;
@@ -5792,12 +5831,304 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 }
 
 - (IBAction)switchToRecentTab:(id)sender {
+  // From the keyboard with Ctrl (or the user's own modifier) still held: open the switcher, as in Arc. Releasing
+  // the modifier switches; a quick press-and-release ends up on the same tab as before, without the panel.
+  NSEvent* e = NSApp.currentEvent;
+  NSEventModifierFlags held = e.type == NSEventTypeKeyDown
+                                  ? e.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagCommand | NSEventModifierFlagOption)
+                                  : 0;
+  if (sender && held && (NSEvent.modifierFlags & held) == held) {
+    _switcherKey = e.keyCode;
+    [self openTabSwitcherHolding:held];
+    return;
+  }
   ArcItem* best = nil;
   for (ArcItem* t in _space.allTabs) {
     if (t == _shown || !t.lastActiveAt) continue;
     if (!best || [t.lastActiveAt compare:best.lastActiveAt] == NSOrderedDescending) best = t;
   }
   if (best) [self showItem:best];
+}
+
+#pragma mark Tab thumbnails (#65)
+
+// Items holding a picture, oldest copy first (weak: closed tabs drop out). Main thread only. Keeps memory bounded
+// however many tabs are open: past kTabThumbnailMax pictures, the oldest are thrown away.
+static void RememberThumbnailOf(ArcItem* item) {
+  static NSPointerArray* order = [NSPointerArray weakObjectsPointerArray];
+  for (NSUInteger i = order.count; i-- > 0;)
+    if ([order pointerAtIndex:i] == (__bridge void*)item || ![order pointerAtIndex:i]) [order removePointerAtIndex:i];
+  [order addPointer:(__bridge void*)item];
+  while (order.count > kTabThumbnailMax) {
+    ArcItem* oldest = (__bridge ArcItem*)[order pointerAtIndex:0];
+    oldest.thumbnail = nil;
+    [order removePointerAtIndex:0];
+  }
+}
+
+// The picture is copied from NotArc's own window by ScreenCaptureKit, asynchronously (tab_thumbnails.mm): the main
+// thread only starts the copy. Copies happen 1 s after a tab comes on screen or finishes loading (each switch or load
+// restarts the wait, so flipping through tabs copies nothing), when the pointer moves over the sidebar (a hover card
+// may follow) and when the Ctrl+Tab switcher opens, at most once every 2 s for the same tab.
+- (void)scheduleThumbnailOfShown {
+  if (!TabThumbnailsAvailable()) return;
+  [_thumbTimer invalidate];
+  __weak MainWindowController* weakSelf = self;
+  _thumbTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:NO block:^(NSTimer*) {
+    MainWindowController* me = weakSelf;
+    if (!me) return;
+    me->_thumbTimer = nil;
+    [me takeThumbnailOf:me->_shown];
+  }];
+}
+
+- (void)thumbnailAfterLoadOfBrowser:(int)browserId {
+  if (_shown && _shown.browserId == browserId) [self scheduleThumbnailOfShown];
+}
+
+- (void)refreshThumbnailOfShownIfOlderThan:(NSTimeInterval)age {
+  if (!_shown || _thumbTimer) return;  // a copy is already due
+  if (_shown.thumbnailTaken && -_shown.thumbnailTaken.timeIntervalSinceNow < age) return;
+  [self takeThumbnailOf:_shown];
+}
+
+- (void)takeThumbnailOf:(ArcItem*)item {
+  if (!TabThumbnailsAvailable() || !item || item != _shown) return;
+  if (_thumbPendingSince && -_thumbPendingSince.timeIntervalSinceNow < 5) return;  // one copy at a time
+  if (!item.browserId || item.noteID || item.easelID || item.crashed) return;
+  NSView* web = [self webViewForItem:item];
+  NSWindow* win = web.window;
+  if (!win || win != self.window || web.isHiddenOrHasHiddenAncestor || !win.isVisible || win.isMiniaturized || NSApp.isHidden ||
+      !(win.occlusionState & NSWindowOcclusionStateVisible))
+    return;
+  if (web.bounds.size.width < 50 || web.bounds.size.height < 50) return;
+  // The top of the page, 4:3, 480 pixels wide (sharp enough for a 280 pt card; about 20-40 KB as JPEG).
+  NSRect inWin = [web convertRect:web.bounds toView:nil];
+  CGFloat h = MIN(inWin.size.height, inWin.size.width * 0.75);
+  NSRect top = NSMakeRect(inWin.origin.x, NSMaxY(inWin) - h, inWin.size.width, h);
+  NSUInteger gen = _showGeneration;
+  _thumbPendingSince = [NSDate date];
+  item.thumbnailTaken = _thumbPendingSince;
+  __weak MainWindowController* weakSelf = self;
+  __weak ArcItem* weakItem = item;
+  TabThumbnailCapture(win, top, 480, ^(NSImage* image) {
+    MainWindowController* me = weakSelf;
+    if (!me) return;
+    me->_thumbPendingSince = nil;
+    ArcItem* it = weakItem;
+    // A tab switch while the copy was being made may have put another page in the picture: drop it.
+    if (!image || !it || me->_showGeneration != gen) return;
+    it.thumbnail = image;
+    RememberThumbnailOf(it);
+    [me updateTabSwitcherTileFor:it];
+  });
+}
+
+#pragma mark Recent-tab switcher (Ctrl+Tab)
+
+static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap = 10, kSwitcherPad = 14;
+
+// Tabs of this Space, the shown one first, then most recently used first.
+- (NSArray<ArcItem*>*)recentTabsForSwitcherMax:(NSUInteger)max {
+  ArcItem* shown = _shown;
+  NSMutableArray<ArcItem*>* tabs = [NSMutableArray array];
+  for (ArcItem* t in _space.allTabs)
+    if (t.url.length && (t == shown || t.lastActiveAt)) [tabs addObject:t];
+  [tabs sortUsingComparator:^NSComparisonResult(ArcItem* a, ArcItem* b) {
+    if (a == shown) return NSOrderedAscending;
+    if (b == shown) return NSOrderedDescending;
+    return [b.lastActiveAt compare:a.lastActiveAt];
+  }];
+  if (tabs.count > max) [tabs removeObjectsInRange:NSMakeRange(max, tabs.count - max)];
+  return tabs;
+}
+
+- (void)fillSwitcherTile:(NSView*)tile item:(ArcItem*)item {
+  NSImageView* iv = (NSImageView*)[tile viewWithTag:1];
+  if (item.thumbnail) {
+    iv.image = item.thumbnail;
+    iv.imageScaling = NSImageScaleProportionallyUpOrDown;
+    iv.identifier = @"thumbnail";
+  } else {  // no picture yet (never shown since launch): the site's icon
+    iv.image = [self iconImageForItem:item];
+    iv.imageScaling = NSImageScaleNone;
+    iv.identifier = @"icon";
+  }
+}
+
+- (void)openTabSwitcherHolding:(NSEventModifierFlags)mods {
+  if (_switcher) {
+    [self stepTabSwitcher:1];
+    return;
+  }
+  CGFloat avail = _content.bounds.size.width - 2 * kSwitcherPad;
+  NSUInteger fit = (NSUInteger)MAX(2.0, floor((avail + kSwitcherGap) / (kSwitcherTileW + kSwitcherGap)));
+  NSArray<ArcItem*>* items = [self recentTabsForSwitcherMax:MIN((NSUInteger)8, fit)];
+  if (items.count < 2) return;  // nothing to switch to
+  [self hideHoverCard];
+  [self refreshThumbnailOfShownIfOlderThan:1];  // the panel is its own window, so it never shows up in the copy
+  _switcherItems = items;
+  _switcherMods = mods;
+  CGFloat w = items.count * kSwitcherTileW + (items.count - 1) * kSwitcherGap + 2 * kSwitcherPad;
+  CGFloat h = kSwitcherThumbH + 30 + 2 * kSwitcherPad;
+  _switcher = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, w, h)
+                                         styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                                           backing:NSBackingStoreBuffered
+                                             defer:NO];
+  _switcher.backgroundColor = NSColor.clearColor;
+  _switcher.opaque = NO;
+  _switcher.hasShadow = YES;
+  if (self.selfTestProfiles) {  // hidden test runs: never on screen, never clickable
+    _switcher.alphaValue = 0.01;
+    _switcher.ignoresMouseEvents = YES;
+  }
+  NSVisualEffectView* card = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0, 0, w, h)];
+  card.material = NSVisualEffectMaterialHUDWindow;
+  card.state = NSVisualEffectStateActive;
+  card.wantsLayer = YES;
+  card.layer.cornerRadius = 14;
+  card.layer.masksToBounds = YES;
+  _switcher.contentView = card;
+  _switcherTiles = [NSMutableArray array];
+  for (NSUInteger i = 0; i < items.count; ++i) {
+    NSView* tile = [[NSView alloc] initWithFrame:NSMakeRect(kSwitcherPad + i * (kSwitcherTileW + kSwitcherGap), kSwitcherPad - 4,
+                                                            kSwitcherTileW, kSwitcherThumbH + 34)];
+    tile.wantsLayer = YES;
+    tile.layer.cornerRadius = 10;
+    NSImageView* iv = [[NSImageView alloc] initWithFrame:NSMakeRect(6, 30, kSwitcherTileW - 12, kSwitcherThumbH - 2)];
+    iv.tag = 1;
+    iv.wantsLayer = YES;
+    iv.layer.cornerRadius = 6;
+    iv.layer.masksToBounds = YES;
+    iv.layer.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.06].CGColor;
+    [tile addSubview:iv];
+    NSTextField* title = [NSTextField labelWithString:items[i].displayTitle ?: items[i].url];
+    title.frame = NSMakeRect(6, 6, kSwitcherTileW - 12, 18);
+    title.font = [NSFont systemFontOfSize:11];
+    title.lineBreakMode = NSLineBreakByTruncatingTail;
+    title.alignment = NSTextAlignmentCenter;
+    [tile addSubview:title];
+    [self fillSwitcherTile:tile item:items[i]];
+    NSClickGestureRecognizer* click = [[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(switcherTileClicked:)];
+    [tile addGestureRecognizer:click];
+    [card addSubview:tile];
+    [_switcherTiles addObject:tile];
+  }
+  _switcherIndex = 1;
+  [self updateSwitcherSelection];
+  NSRect c = [self.window convertRectToScreen:[_content convertRect:_content.bounds toView:nil]];
+  [_switcher setFrameOrigin:NSMakePoint(round(NSMidX(c) - w / 2), round(NSMidY(c) - h / 2))];
+  if (!mods) {
+    [self revealTabSwitcher];
+    return;
+  }
+  __weak MainWindowController* weakSelf = self;
+  _switcherMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskFlagsChanged | NSEventMaskLeftMouseDown
+                                                            handler:^NSEvent*(NSEvent* ev) {
+    MainWindowController* me = weakSelf;
+    if (!me || !me->_switcher) return ev;
+    if (ev.type == NSEventTypeFlagsChanged) {
+      if ((ev.modifierFlags & me->_switcherMods) != me->_switcherMods) [me commitTabSwitcher];  // let go: switch
+      return ev;
+    }
+    if (ev.type == NSEventTypeLeftMouseDown) {
+      if (ev.window != me->_switcher) [me cancelTabSwitcher];
+      return ev;
+    }
+    BOOL back = (ev.modifierFlags & NSEventModifierFlagShift) != 0;
+    switch (ev.keyCode) {
+      case 53: [me cancelTabSwitcher]; break;                               // Esc
+      case 36: case 76: [me commitTabSwitcher]; break;                      // Return, Enter
+      case 123: case 126: [me stepTabSwitcher:-1]; break;                   // Left, Up
+      case 124: case 125: [me stepTabSwitcher:1]; break;                    // Right, Down
+      default:
+        if (ev.keyCode == 48 || ev.keyCode == me->_switcherKey) [me stepTabSwitcher:back ? -1 : 1];  // Tab again
+        break;
+    }
+    return nil;  // keys never reach the page while the switcher is up
+  }];
+  _switcherResignObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationDidResignActiveNotification
+                                                                            object:nil
+                                                                             queue:NSOperationQueue.mainQueue
+                                                                        usingBlock:^(NSNotification*) { [weakSelf cancelTabSwitcher]; }];
+  // A quick press-and-release switches without the panel ever flashing up.
+  _switcherRevealTimer = [NSTimer scheduledTimerWithTimeInterval:0.12 repeats:NO block:^(NSTimer*) {
+    MainWindowController* me = weakSelf;
+    if (!me || !me->_switcher) return;
+    me->_switcherRevealTimer = nil;
+    if ((NSEvent.modifierFlags & me->_switcherMods) != me->_switcherMods) [me commitTabSwitcher];  // release we missed
+    else [me revealTabSwitcher];
+  }];
+}
+
+- (void)revealTabSwitcher {
+  if (!_switcher || _switcher.parentWindow) return;
+  [self.window addChildWindow:_switcher ordered:NSWindowAbove];
+  [_switcher orderFront:nil];
+}
+
+- (void)updateSwitcherSelection {
+  for (NSUInteger i = 0; i < _switcherTiles.count; ++i) {
+    CALayer* l = _switcherTiles[i].layer;
+    BOOL on = (NSInteger)i == _switcherIndex;
+    l.backgroundColor = on ? [NSColor.controlAccentColor colorWithAlphaComponent:0.25].CGColor : NSColor.clearColor.CGColor;
+    l.borderWidth = on ? 2 : 0;
+    l.borderColor = NSColor.controlAccentColor.CGColor;
+  }
+}
+
+- (void)updateTabSwitcherTileFor:(ArcItem*)item {
+  NSUInteger i = [_switcherItems indexOfObjectIdenticalTo:item];
+  if (_switcher && i != NSNotFound) [self fillSwitcherTile:_switcherTiles[i] item:item];
+}
+
+- (void)stepTabSwitcher:(NSInteger)delta {
+  if (!_switcher) return;
+  NSInteger n = (NSInteger)_switcherItems.count;
+  _switcherIndex = ((_switcherIndex + delta) % n + n) % n;
+  [self updateSwitcherSelection];
+}
+
+- (void)switcherTileClicked:(NSClickGestureRecognizer*)g {
+  NSUInteger i = [_switcherTiles indexOfObjectIdenticalTo:g.view];
+  if (i == NSNotFound) return;
+  _switcherIndex = (NSInteger)i;
+  [self commitTabSwitcher];
+}
+
+- (void)closeTabSwitcher {
+  if (_switcherMonitor) [NSEvent removeMonitor:_switcherMonitor];
+  _switcherMonitor = nil;
+  if (_switcherResignObserver) [NSNotificationCenter.defaultCenter removeObserver:_switcherResignObserver];
+  _switcherResignObserver = nil;
+  [_switcherRevealTimer invalidate];
+  _switcherRevealTimer = nil;
+  if (_switcher.parentWindow) [self.window removeChildWindow:_switcher];
+  [_switcher orderOut:nil];
+  _switcher = nil;
+  _switcherItems = nil;
+  _switcherTiles = nil;
+}
+
+- (void)commitTabSwitcher {
+  if (!_switcher) return;
+  ArcItem* pick = _switcherIndex >= 0 && _switcherIndex < (NSInteger)_switcherItems.count ? _switcherItems[_switcherIndex] : nil;
+  [self closeTabSwitcher];
+  if (pick && pick != _shown && [_space.allTabs containsObject:pick]) [self showItem:pick];
+}
+
+- (void)cancelTabSwitcher { [self closeTabSwitcher]; }
+
+- (BOOL)tabSwitcherShown { return _switcher != nil && _switcher.isVisible; }
+- (NSArray<ArcItem*>*)tabSwitcherItems { return _switcherItems; }
+- (ArcItem*)tabSwitcherSelection {
+  return _switcher && _switcherIndex < (NSInteger)_switcherItems.count ? _switcherItems[_switcherIndex] : nil;
+}
+- (BOOL)tabSwitcherShowsThumbnailFor:(ArcItem*)item {
+  NSUInteger i = [_switcherItems indexOfObjectIdenticalTo:item];
+  if (!_switcher || i == NSNotFound) return NO;
+  NSImageView* iv = (NSImageView*)[_switcherTiles[i] viewWithTag:1];
+  return [iv.identifier isEqualToString:@"thumbnail"] && iv.image == item.thumbnail;
 }
 
 - (IBAction)pasteAndGo:(id)sender {
@@ -8025,6 +8356,9 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 // view on window close is what actually tears the browsers down (DoClose returns false).
 - (void)windowWillClose:(NSNotification*)notification {
   if (notification.object != self.window) return;  // the Archive window closing is not a quit
+  [self closeTabSwitcher];
+  [_thumbTimer invalidate];
+  _thumbTimer = nil;
   if (gMainWindow && gMainWindow != self) {
     [self closeSecondaryWindow];
     return;
