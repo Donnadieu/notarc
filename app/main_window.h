@@ -302,6 +302,13 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (NSRect)pageCardFrame;   // tests: the rounded page card, in window content coordinates
 - (CGFloat)pageCardRadius;
 - (NSString*)sidebarAddressText;   // tests: the site shown in the sidebar address pill
+// Developer Mode (#68, per site): View > Turn On/Off Developer Mode for This Site, Site Settings, and the reset.
+- (IBAction)toggleDeveloperMode:(id)sender;
+- (IBAction)resetDeveloperModeSites:(id)sender;
+- (BOOL)devToolsButtonShown;                        // tests: the pill's Developer Tools button
+- (BOOL)itemKeptFromAutoArchive:(ArcItem*)item;     // Developer Mode tabs are never auto-archived
++ (MainWindowController*)mainController;            // the first browser window (Settings reads profiles from it)
++ (void)settingsDidChange;                          // every window re-reads appearance, toolbar, header, pill
 - (NSRect)sidebarAddressFrame;
 - (NSString*)sidebarRowStyleForItem:(ArcItem*)item;  // tests: "h=36 r=8 sel=1 hover=0 alpha=0.20"
 - (void)hoverSidebarItem:(ArcItem*)item;

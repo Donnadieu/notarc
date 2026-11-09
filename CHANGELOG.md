@@ -4,6 +4,14 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Settings has panes like Arc's: General, Profiles (every profile with its Spaces; new and rename), Appearance (Light,
+  Dark or Automatic for Spaces, and the app icon), Links and Advanced (Chrome-style pages, Developer Mode, Clear
+  Browsing Data, Reset All Settings).
+- App icon: pick one of six NotArc icons in Settings > Appearance. It shows in the Dock while NotArc is open.
+- Developer Mode, per site as in Arc: on by itself for localhost, 127.0.0.1 and .local sites, and for any site from
+  View > Turn On Developer Mode for This Site or Site Settings. The sidebar shows the full address with its port, the
+  tab is never auto-archived, and Developer Tools is one click away in the address pill. View > Reset Developer Mode
+  Sites forgets the sites you turned on.
 - The parity checklist is up to date with 0.23.0, with an Out of scope section and docs/decisions.md for every
   scope call.
 
