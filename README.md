@@ -96,8 +96,9 @@ Current pin: CEF 156.0.7 (Chromium 156.0.8078.17), Apple Silicon.
 Requirements: an Apple Silicon Mac, Apple's Command Line Tools (Xcode isn't needed), `cmake` and `ninja`
 (`brew install cmake ninja`).
 
-1. Download the CEF "Standard Distribution" for macOS ARM64 from https://cef-builds.spotifycdn.com/index.html,
-   unpack it under `third_party/std/`, and link it: `ln -sfn std/<cef_binary_folder> third_party/cef`
+1. `scripts/fetch-cef.sh` downloads, checksums and links the pinned CEF "Standard Distribution" for macOS ARM64.
+   (Or do it by hand: download from https://cef-builds.spotifycdn.com/index.html, unpack it under
+   `third_party/std/`, and link it: `ln -sfn std/<cef_binary_folder> third_party/cef`)
 2. `mkdir -p build && cd build && cmake -G Ninja -DCMAKE_BUILD_TYPE=Release .. && ninja`
 3. Open `build/Release/NotArc.app`
 4. Optional: `scripts/package.sh` makes the release disk image in `dist/`
