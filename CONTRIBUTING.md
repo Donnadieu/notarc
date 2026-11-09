@@ -50,7 +50,7 @@ NotArc is Objective-C++ (AppKit for the window and sidebar) on top of CEF (Chrom
 
 CI builds the app and runs `--selftest` on every pull request (`.github/workflows/ci.yml`); a PR touching
 `app/updater.mm` or session-restore code also runs `scripts/test-update.sh` / `scripts/test-session-restore.sh`
-(`.github/workflows/updater-canary.yml`). To run the self-test yourself:
+in that same job. To run the self-test yourself:
 `build/Release/NotArc.app/Contents/MacOS/NotArc --selftest`. It takes about three minutes, drives the app
 (tabs, split view, Peek, Spaces, shortcuts, command bar, downloads, permissions and more), prints `SELFTEST-...` lines
 and quits. Every value should be 1 (or the expected count); a `0` means a check failed.

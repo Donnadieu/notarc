@@ -27,7 +27,7 @@ distribution (fetched by `scripts/fetch-cef.sh`, not a manual download).
     app/                  # the browser; see the table below
     scripts/              # build, test and lint scripts
     scripts/lint/         # the custom guardrail checks (file-length ratchet, Keychain scope)
-    .github/workflows/    # CI: lint (fast), build-and-selftest (macOS), updater-canary (path-filtered)
+    .github/workflows/    # CI: lint (fast) + build-and-selftest (macOS, also runs the updater canary when touched)
     .hardening/           # ratchet baseline(s); counts may only shrink
     docs/                 # feature-parity.md (Arc parity checklist), arc-data-format.md (Arc's on-disk format)
     third_party/cef       # gitignored symlink to the downloaded CEF build; created by scripts/fetch-cef.sh
@@ -44,7 +44,7 @@ distribution (fetched by `scripts/fetch-cef.sh`, not a manual download).
 | `history_store.mm`, `archive_window.mm` | History and the History/Archive windows |
 | `downloads.mm` | Downloads list and window |
 | `settings.mm` | Settings and the Settings window |
-| `updater.mm` | Update check, download, SHA-256 verification, install. Gated by `.github/workflows/updater-canary.yml`. |
+| `updater.mm` | Update check, download, SHA-256 verification, install. Touching it runs the updater canary in CI (see Guardrails). |
 | `arc_import.mm`, `arc_cookies.mm` | One-time import of a user's Arc sidebar, archive and logins. The only files allowed to call Keychain/Security.framework APIs (enforced by `scripts/lint/check-keychain-scope.py`). |
 
 ## Guardrails
@@ -58,7 +58,7 @@ Every guardrail below runs in three places: `.githooks/pre-commit` (staged files
 | File-length ratchet | `scripts/lint/file-length-ratchet.sh`, baseline in `.hardening/file-length-baseline.txt` | `main_window.mm`/`main.mm` are de facto god-objects; this stops them growing further while a split is planned |
 | Keychain scope | `scripts/lint/check-keychain-scope.py` | Only `arc_import.mm`/`arc_cookies.mm` are reviewed to touch the user's Keychain |
 | Build + `--selftest` | `.github/workflows/ci.yml` (`build-and-selftest`), `scripts/run-selftest.sh` | Nothing ran the build or the self-test automatically before |
-| Updater / session-restore canary | `.github/workflows/updater-canary.yml` running `scripts/test-update.sh` and `scripts/test-session-restore.sh` | High-impact, low-visibility code paths; path-filtered so it only runs when they're touched |
+| Updater / session-restore canary | `.github/workflows/ci.yml` (`build-and-selftest`, conditional steps) running `scripts/test-update.sh` and `scripts/test-session-restore.sh` | High-impact, low-visibility code paths; only runs when they're touched (reuses the same build/runner as --selftest) |
 
 The Keychain-scope and file-length checks are dependency-free scripts rather than a compiled clang-tidy plugin:
 a real out-of-tree clang-tidy check needs LLVM's dev headers and its own build target, which is a lot of CI
