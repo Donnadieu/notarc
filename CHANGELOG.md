@@ -4,6 +4,10 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Ad blocking: Manage Ad Blockers... (Settings and Site Settings) lets you subscribe to filter lists such as
+  EasyList and EasyPrivacy (downloaded only when you turn them on, refreshed daily or with Update Now) or any list by
+  address. Lists block ad and tracker requests and hide ad elements on pages. The built-in list can be turned off, and
+  the sites where blocking is off are listed with a Remove button.
 - The parity checklist is up to date with 0.23.0, with an Out of scope section and docs/decisions.md for every
   scope call.
 

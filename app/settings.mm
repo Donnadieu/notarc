@@ -1,6 +1,8 @@
 #import "app/settings.h"
 #import "app/downloads.h"
 #include "app/content_blocker.h"
+#import "app/filter_lists.h"
+#import "app/ad_blockers_window.h"
 
 NSString* const kSettingAutoArchiveHours = @"autoArchiveThresholdHours";
 NSString* const kSettingSearchEngine = @"searchEngine";
@@ -26,6 +28,7 @@ void SettingsRegisterDefaults(void) {
     kSettingAutoPiP : @YES,
     kSettingSearchSuggestions : @YES,
     kSettingBlockAds : @NO,
+    kSettingAdBlockBuiltIn : @YES,
     kSettingSoundEffects : @YES,
     kSettingReorderHaptics : @YES,
     kSettingShowSpaceHeader : @YES,
@@ -34,6 +37,7 @@ void SettingsRegisterDefaults(void) {
 
 static NSMutableDictionary* g_memorySettings;
 void SettingsUseMemoryOnly(void) { g_memorySettings = [NSMutableDictionary dictionary]; }
+BOOL SettingsMemoryOnly(void) { return g_memorySettings != nil; }
 void SettingSetBool(NSString* key, BOOL value) {
   if (g_memorySettings) g_memorySettings[key] = @(value);
   else [NSUserDefaults.standardUserDefaults setBool:value forKey:key];
@@ -104,6 +108,9 @@ void ApplyContentBlockerSettings(void) {
   for (id h in SettingObject(kSettingAdBlockExceptions))
     if ([h isKindOfClass:NSString.class]) hosts.push_back(((NSString*)h).UTF8String);
   content_blocker::SetExceptions(hosts);
+  content_blocker::SetBuiltInEnabled(SettingBool(kSettingAdBlockBuiltIn));
+  [FilterListManager.shared reloadRules];  // parses subscribed lists in the background (only when blocking is on)
+  [FilterListManager.shared startDailyRefresh];
 }
 
 NSURL* DefaultBrowserAppURL(void) {
@@ -324,7 +331,9 @@ static NSArray* LittleArchiveChoices() {
   NSGridView* general = [NSGridView gridViewWithViews:@[
     @[ [NSTextField labelWithString:@"Search engine:"], _engine ],
     @[ NSGridCell.emptyContentView, [self check:@"Show search suggestions in the command bar" key:kSettingSearchSuggestions] ],
-    @[ NSGridCell.emptyContentView, [self check:@"Block ads & trackers" key:kSettingBlockAds] ],
+    @[ NSGridCell.emptyContentView, [NSStackView stackViewWithViews:@[
+         [self check:@"Block ads & trackers" key:kSettingBlockAds],
+         [NSButton buttonWithTitle:@"Manage Ad Blockers..." target:self action:@selector(showManageAdBlockers:)] ]] ],
     @[ [NSTextField labelWithString:@"Archive Today tabs:"], _archive ],
   ]];
   [general columnAtIndex:0].xPlacement = NSGridCellPlacementTrailing;
@@ -390,9 +399,14 @@ static NSArray* LittleArchiveChoices() {
   _folderLabel.stringValue = panel.URL.path.stringByAbbreviatingWithTildeInPath;
 }
 
+- (void)showManageAdBlockers:(id)sender { [ManageAdBlockersWindowController.shared showWindow:sender]; }
+
 - (void)toggled:(NSButton*)sender {
   [NSUserDefaults.standardUserDefaults setBool:sender.state == NSControlStateValueOn forKey:sender.identifier];
-  if ([sender.identifier isEqualToString:kSettingBlockAds]) ApplyContentBlockerSettings();
+  if ([sender.identifier isEqualToString:kSettingBlockAds]) {
+    ApplyContentBlockerSettings();
+    [NSNotificationCenter.defaultCenter postNotificationName:FilterListsDidChangeNotification object:nil];
+  }
 }
 - (void)engineChanged:(NSPopUpButton*)sender {
   [NSUserDefaults.standardUserDefaults setObject:sender.selectedItem.representedObject forKey:kSettingSearchEngine];

@@ -11,6 +11,7 @@ extern NSString* const kSettingPeekShiftClick;         // BOOL, default YES
 extern NSString* const kSettingExternalLinksLittle;    // BOOL, default YES (NO = open as a Today tab)
 // Self-test runs call SettingsUseMemoryOnly() so SettingSetBool never writes the user's real preferences.
 void SettingsUseMemoryOnly(void);
+BOOL SettingsMemoryOnly(void);  // YES in self-test runs
 void SettingSetBool(NSString* key, BOOL value);
 id SettingObject(NSString* key);
 void SettingSetObject(NSString* key, id value);

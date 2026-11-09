@@ -43,3 +43,23 @@ trackpad; everything else is checked by the hidden self-test.
     listed under "Needs Omar's eyes". The same goes for real-trackpad gestures (#27, #77).
 14. **Self-tests run with a scratch home** (`CFFIXED_USER_HOME`), so a run can never touch Omar's own NotArc data,
     Downloads or Arc folder, and it works from inside One's folder lock.
+
+## 2026-11-09: ad blocker filter lists (#53)
+
+1. **Filter lists are never bundled.** EasyList and EasyPrivacy are shown as suggestions in Manage Ad Blockers...
+   and downloaded from easylist.to only when the person turns one on. Any other list can be added by its http(s) or
+   file address (abp:subscribe links work too). Downloaded copies live in Application Support/NotArc/Filter Lists.
+2. **Only a common subset of Adblock Plus syntax is used:** "||host^" network rules with $third-party, $domain= and
+   resource-type options ($script, $image, $important, ...), "@@" exceptions (including $document, $elemhide and
+   $generichide for whole pages), and "##selector" / "domain##selector" / "~domain##selector" / "#@#" cosmetic rules.
+   Path and wildcard patterns, $popup, $csp, $redirect, scriptlets (##+js) and procedural selectors (:has-text and
+   friends) are skipped; the dialog's rule count only counts rules NotArc understands. This covers the bulk of
+   EasyList (about 68,000 of its rules) and EasyPrivacy (about 47,000).
+3. **The existing safety rules still win over any list:** the page itself (main frame) and requests to the page's own
+   site are never blocked, so first-party-only rules ($~third-party, $1p) are skipped as they could never apply.
+4. **Cosmetic hiding is a style sheet injected when the page finishes loading**, the same way Boosts are, rather than
+   at document start. Ads can show for a moment before they're hidden; network blocking already stops most of them.
+5. **The built-in host list stays, with its own switch** in the dialog (on by default). The master switch is still
+   Settings > Block ads & trackers (off by default, as Arc's was); lists only download, refresh and apply while it's on.
+6. **Daily refresh** checks hourly for turned-on lists last downloaded over 24 hours ago. Self-tests never download:
+   they subscribe to a local file:// fixture and the refresh timer doesn't start in test runs.

@@ -76,6 +76,8 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (IBAction)shareSplitView:(id)sender;
 - (IBAction)translatePage:(id)sender;
 - (BOOL)adBlockingOnForHost:(NSString*)host;          // #53
+- (IBAction)showManageAdBlockers:(id)sender;          // #53: from Site Settings
+- (void)applyAdBlockCosmeticsToBrowser:(int)browserId url:(NSString*)url;  // cosmetic filter rules on page load
 - (void)setAdBlocking:(BOOL)on forHost:(NSString*)host;       // View > Translate Page / Show Original (#52)      // copies every pane's address
 - (NSString*)splitViewShareText;            // tests
 - (NSArray<ArcItem*>*)visiblePanesForTest;  // tests

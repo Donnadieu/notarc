@@ -18,6 +18,8 @@
 #import "app/easel.h"
 #import "app/live_folder.h"
 #import "app/favicons.h"
+#import "app/ad_blockers_window.h"
+#include "app/content_blocker.h"
 #include "include/cef_devtools_message_observer.h"
 
 #include <cstdio>
@@ -1509,6 +1511,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   });
   _client->set_load_end_callback([weakSelf](int browserId, const std::string& url) {
     [OwnerOf(browserId, weakSelf) applyBoostToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
+    [OwnerOf(browserId, weakSelf) applyAdBlockCosmeticsToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
     [OwnerOf(browserId, weakSelf) installCallHookInBrowser:browserId];
   });
   _client->set_capture_callback([weakSelf](int browserId, bool video, bool audio) {
@@ -2452,7 +2455,9 @@ static NSArray<NSArray*>* SiteSettingRows() {
   if (SettingBool(kSettingBlockAds)) {
     NSButton* ads = [NSButton checkboxWithTitle:@"Block Ads & Trackers" target:self action:@selector(siteAdBlockToggled:)];
     ads.state = [self adBlockingOnForHost:u.host] ? NSControlStateValueOn : NSControlStateValueOff;
-    [views addObject:ads];
+    NSButton* manage = [NSButton buttonWithTitle:@"Manage Ad Blockers..." target:self action:@selector(showManageAdBlockers:)];
+    manage.controlSize = NSControlSizeSmall;
+    [views addObject:[NSStackView stackViewWithViews:@[ ads, manage ]]];
   }
   NSButton* clear = [NSButton buttonWithTitle:@"Clear Cookies and Refresh" target:self action:@selector(siteSettingsClearCookies:)];
   NSButton* reset = [NSButton buttonWithTitle:@"Reset Permissions" target:self action:@selector(siteSettingsReset:)];
@@ -2472,6 +2477,48 @@ static NSArray<NSArray*>* SiteSettingRows() {
   NSView* anchor = _toolbar.hidden ? _content : _address;
   NSRect r = _toolbar.hidden ? NSMakeRect(8, NSMaxY(_content.bounds) - 4, 1, 1) : NSMakeRect(8, 0, 20, _address.bounds.size.height);
   [_sitePopover showRelativeToRect:r ofView:anchor preferredEdge:_toolbar.hidden ? NSRectEdgeMinY : NSRectEdgeMaxY];
+}
+
+- (IBAction)showManageAdBlockers:(id)sender {
+  [_sitePopover close];
+  [ManageAdBlockersWindowController.shared showWindow:sender];
+}
+
+// Cosmetic filter-list rules (#53): a style sheet that hides matching elements, injected on page load like Boosts.
+static std::string JSStringLiteral(const std::string& s) {
+  std::string out = "\"";
+  out.reserve(s.size() + 16);
+  for (char c : s) {
+    switch (c) {
+      case '\\': out += "\\\\"; break;
+      case '"': out += "\\\""; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      case '<': out += "\\x3c"; break;
+      default:
+        if ((unsigned char)c < 0x20) out += ' ';
+        else out += c;
+    }
+  }
+  out += "\"";
+  return out;
+}
+
+- (void)applyAdBlockCosmeticsToBrowser:(int)browserId url:(NSString*)url {
+  auto it = _browsers.find(browserId);
+  if (it == _browsers.end()) return;
+  std::string css = content_blocker::CosmeticCSS(url.UTF8String ?: "");
+  static NSMutableSet* styled;  // browsers whose page got a style sheet, so a turned-off list also cleans up
+  if (!styled) styled = [NSMutableSet set];
+  if (css.empty() && ![styled containsObject:@(browserId)]) return;
+  if (css.empty()) [styled removeObject:@(browserId)];
+  else [styled addObject:@(browserId)];
+  std::string js = "(function(){var id='__notarc_adblock__';var s=document.getElementById(id);var css=" +
+                   JSStringLiteral(css) +
+                   ";if(!css){if(s)s.remove();return;}if(!s){s=document.createElement('style');s.id=id;"
+                   "(document.head||document.documentElement).appendChild(s);}s.textContent=css;})();";
+  CefRefPtr<CefFrame> f = it->second->GetMainFrame();
+  f->ExecuteJavaScript(js, f->GetURL(), 0);
 }
 
 static NSString* AdBlockSiteKey(NSString* host) {
