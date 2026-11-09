@@ -15,6 +15,10 @@ NSString* CleanLinkURL(NSString* url);
 NSInteger UnreadCountFromTitle(NSString* title);
 NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL began);  // -1 back, 1 forward, 0 none  // "Inbox (12)" -> 12
 
+NSInteger PageDropSide(NSPoint p, NSSize s);  // 0 right, 1 left, 2 bottom, 3 top (#37 drag to split)
+NSString* FavoritePreviewKind(NSString* url);  // "gmail", "calendar" or nil (#57)
+BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd+Option+click on a link (#42)
+
 @interface MainWindowController : NSWindowController <NSWindowDelegate>
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID;
 // Self-test: Space profiles live in separate "SelfTest Space ..." folders and Arc cookies are not imported,
@@ -37,6 +41,38 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 
 // Sidebar organisation (Arc: drag and drop, Cmd+D pin/unpin, New Folder).
 - (IBAction)togglePin:(id)sender;
+- (BOOL)tidyTitleOfItem:(ArcItem*)item announce:(BOOL)announce;  // #18
+- (void)usePageTitleOfItem:(ArcItem*)item;
+- (void)setThemeGrain:(double)grain forSpace:(ArcSpace*)space;  // #26
+- (float)themeGrainOpacity;
+- (BOOL)swipeSpacesBy:(NSInteger)step;
+- (IBAction)peekEmail:(id)sender;
+- (void)applyCalendarSetting;  // #56
+- (void)setCalendarEventsForTest:(NSArray*)events now:(NSDate*)now;
+- (NSString*)meetingBarText;
+- (BOOL)meetingJoinShown;
+- (IBAction)toggleCalendar:(id)sender;
+- (NSArray<NSDictionary*>*)gmailPreviewRows:(NSInteger)status body:(NSData*)body;  // #57
+- (NSArray<NSDictionary*>*)calendarPreviewRows:(NSArray*)events now:(NSDate*)now;
+- (BOOL)browser:(int)browserId notification:(NSString*)json pageURL:(NSString*)pageURL;  // #78
+- (NSDictionary*)lastNotification;
+- (void)showItemWithID:(NSString*)itemID;
+- (BOOL)splitShownWithItem:(ArcItem*)item side:(NSInteger)side;  // drag a tab onto the page (#37)
+- (IBAction)toggleMaximizePane:(id)sender;
+- (ArcItem*)maximizedPane;
+- (NSRect)frameOfPaneItem:(ArcItem*)item;
+- (ArcItem*)parentOfItemForTest:(ArcItem*)item;
+- (void)handleLinkCommand:(int)command url:(NSString*)url text:(NSString*)text fromBrowser:(int)browserId;  // #70
+- (NSSize)lastCopiedImageSize;
+- (void)browser:(int)browserId pageLanguage:(NSString*)lang;  // #52 translate offer
+- (NSString*)lastTranslateOffer;  // #44
+- (NSString*)finishPeekEmail:(NSString*)host status:(NSInteger)status body:(NSData*)body;
+@property(nonatomic) NSEventModifierFlags testClickModifiers;
+- (IBAction)closeAllLittleWindows:(id)sender;
+- (IBAction)showAllLittleWindows:(id)sender;  // tests: keys "held" for the next link click (#42)  // trackpad swipe over the sidebar (#27)
+- (IBAction)toggleFavorite:(id)sender;  // Move to / Remove from Favorites (#13)
+- (BOOL)moveItemToFavorites:(ArcItem*)item;
+- (BOOL)removeItemFromFavorites:(ArcItem*)item pinned:(BOOL)pinned;
 - (IBAction)newFolder:(id)sender;
 - (ArcItem*)createFolderNamed:(NSString*)name;  // at the top of the current Space's Pinned section
 // Moves item under parent at index (clamped). Refuses sections, cycles and moves across Spaces.
@@ -301,6 +337,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (BOOL)sidebarHidden;   // tests
 - (NSRect)pageCardFrame;   // tests: the rounded page card, in window content coordinates
 - (CGFloat)pageCardRadius;
+- (NSString*)pageCardEdgeStyle;  // tests: border alpha and shadow opacity of the page card (#122)
 - (NSString*)sidebarAddressText;   // tests: the site shown in the sidebar address pill
 - (NSRect)sidebarAddressFrame;
 - (NSString*)sidebarRowStyleForItem:(ArcItem*)item;  // tests: "h=36 r=8 sel=1 hover=0 alpha=0.20"

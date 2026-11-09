@@ -25,6 +25,11 @@ void SettingsRegisterDefaults(void) {
     kSettingShowToolbar : @NO,
     kSettingAutoPiP : @YES,
     kSettingSearchSuggestions : @YES,
+    kSettingTidyTitles : @YES,
+    kSettingCalendar : @NO,
+    kSettingTranslateOffer : @YES,
+    kSettingLittleHotkey : @YES,
+    kSettingLittleModifierClick : @YES,
     kSettingBlockAds : @NO,
     kSettingSoundEffects : @YES,
     kSettingReorderHaptics : @YES,
@@ -63,6 +68,11 @@ static NSArray<NSArray<NSString*>*>* Engines() {
 }
 
 NSString* const kSettingSearchSuggestions = @"searchSuggestions";
+NSString* const kSettingTidyTitles = @"tidyTitles";
+NSString* const kSettingCalendar = @"calendarNextMeeting";
+NSString* const kSettingTranslateOffer = @"translateOffer";
+NSString* const kSettingLittleHotkey = @"littleHotkey";
+NSString* const kSettingLittleModifierClick = @"littleModifierClick";
 NSString* const kSettingBlockAds = @"blockAdsAndTrackers";
 NSString* const kSettingSoundEffects = @"soundEffects";
 NSString* const kSettingReorderHaptics = @"reorderHaptics";
@@ -324,6 +334,9 @@ static NSArray* LittleArchiveChoices() {
   NSGridView* general = [NSGridView gridViewWithViews:@[
     @[ [NSTextField labelWithString:@"Search engine:"], _engine ],
     @[ NSGridCell.emptyContentView, [self check:@"Show search suggestions in the command bar" key:kSettingSearchSuggestions] ],
+    @[ NSGridCell.emptyContentView, [self check:@"Tidy tab titles when pinning" key:kSettingTidyTitles] ],
+    @[ NSGridCell.emptyContentView, [self check:@"Show my next meeting from Calendar in the sidebar" key:kSettingCalendar] ],
+    @[ NSGridCell.emptyContentView, [self check:@"Offer to translate pages in other languages" key:kSettingTranslateOffer] ],
     @[ NSGridCell.emptyContentView, [self check:@"Block ads & trackers" key:kSettingBlockAds] ],
     @[ [NSTextField labelWithString:@"Archive Today tabs:"], _archive ],
   ]];
@@ -351,6 +364,8 @@ static NSArray* LittleArchiveChoices() {
     [self check:@"Open a Peek window when clicking on links to other sites" key:kSettingPeekPinnedLinks],
     [self note:@"Only affects Pinned tabs and Favorites."],
     [self check:@"Open a Peek window when clicking on links with Shift held" key:kSettingPeekShiftClick],
+    [self check:@"Open a Little Window when clicking on links with \u2325\u2318 held" key:kSettingLittleModifierClick],
+    [self check:@"Open a Little Window when I press \u2325\u2318N in any app" key:kSettingLittleHotkey],
     [self check:@"Automatically open picture-in-picture when leaving a tab with a playing video" key:kSettingAutoPiP],
     [self check:@"Play sound effects" key:kSettingSoundEffects],
     [self check:@"Haptic feedback when reordering tabs" key:kSettingReorderHaptics],
@@ -405,3 +420,14 @@ static NSArray* LittleArchiveChoices() {
                                           forKey:kSettingLittleArchiveHours];
 }
 @end
+
+NSString* TranslateOfferFor(NSString* pageLang, NSArray<NSString*>* preferredLanguages) {
+  NSString* (^primary)(NSString*) = ^NSString*(NSString* l) {
+    return [[l.lowercaseString stringByReplacingOccurrencesOfString:@"_" withString:@"-"] componentsSeparatedByString:@"-"].firstObject;
+  };
+  NSString* page = primary([pageLang stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet] ?: @"");
+  if (page.length < 2 || page.length > 3 || [page isEqualToString:@"und"] || [page isEqualToString:@"mul"]) return nil;
+  for (NSString* l in preferredLanguages)
+    if ([primary(l) isEqualToString:page]) return nil;
+  return page;
+}

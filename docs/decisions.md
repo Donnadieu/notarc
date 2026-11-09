@@ -43,3 +43,63 @@ trackpad; everything else is checked by the hidden self-test.
     listed under "Needs Omar's eyes". The same goes for real-trackpad gestures (#27, #77).
 14. **Self-tests run with a scratch home** (`CFFIXED_USER_HOME`), so a run can never touch Omar's own NotArc data,
     Downloads or Arc folder, and it works from inside One's folder lock.
+
+## 2026-11-09: look and feel, Favorites, tidy titles
+
+15. **#122, #126 and #127 are ticked** under decision 13. The light-mode card edge (the last open part of #122) is
+    built: a 1 pt border at Arc's TabListOverlapBorder colour (5%) in both modes and, in light mode only, two soft
+    shadows (10% at 4 pt blur and 6% at 1 pt). Arc stores those shadows as runtime values, so the numbers are
+    estimates. The slide/pop animations and the command bar styling were already built; what was left was a
+    side-by-side look at a real Arc window, which goes under "Needs Omar's eyes".
+16. **Favorites, not Top Apps.** Arc's menus still say "Move to Top Apps" internally, but its sidebar calls them
+    Favorites, and so does NotArc everywhere. Folders and splits can't become Favorites (same rule as dragging).
+17. **Tidy titles (#18) are on by default.** Arc Max's version was opt-in because it sent titles to an AI service;
+    NotArc's runs on the Mac, is instant and has an Undo toast and "Use Page Title", so it starts on. Settings has
+    "Tidy tab titles when pinning" to turn it off. The tidying is one function (`TidyTabTitle`) so the on-device model
+    (#58) can replace it.
+18. **Renames now stick (fix to #14).** A renamed tab used to show the page's title again as soon as the page changed
+    its title or NotArc restarted. Items now remember that they were renamed (Arc's `title` vs `savedTitle`), and
+    the Arc import keeps renames made in Arc.
+19. **Grain (#26)** is NotArc's own noise tile (generated in code, seeded so it looks the same every time), shown at
+    up to 35% over the theme colours. Arc's grain texture isn't copied.
+20. **Swiping between Spaces (#27)** works over the sidebar only (over the page, the same swipe goes back/forward,
+    #77), stops at the first and last Space (no wraparound), and follows the macOS "Swipe between pages" setting.
+    Real-trackpad feel goes under "Needs Omar's eyes".
+21. **Little Window keys (#42):** Cmd+Option+N works from any app through Carbon's hot key API, which needs no
+    Accessibility permission; a self-test never registers it. The link modifier is Cmd+Option-click (Cmd-click is a
+    background tab, Shift-click a Peek, Option-click a download), the same keys Arc uses on sidebar tabs. Both have
+    settings. Arc lets you pick other keys; NotArc doesn't yet (not needed for parity of behaviour).
+22. **Email peeking (#44)** reads Gmail's own unread-mail feed (`mail.google.com/mail/u/0/feed/atom`) with the
+    current Space's Gmail sign-in, through a new read-only `SpaceFetch` helper. Only unread mail from the last 30
+    minutes counts, the sender's domain (or name) has to match the site, a code is copied to the clipboard, and
+    otherwise the email opens in a Peek. Gmail only, as in Arc. Nothing is sent anywhere but Gmail.
+23. **Translate offer (#52)** uses the language the page declares (`<html lang>`), read once the shown tab has
+    loaded, compared with the Mac's preferred languages by primary subtag. It's a toast with a Translate button,
+    once per site per launch, with a setting to turn it off. NotArc doesn't guess undeclared languages.
+24. **Context menu actions (#70)** are NotArc's own list on top of Chromium's: images get Open in New Tab, Save
+    Image to Downloads, Copy Image (fetched with the tab's own sign-in) and Copy Image Address; selected text gets a
+    search with your search engine; a plain right-click on the page gets Copy Page URL, as Markdown, Capture,
+    Translate and Boost. Chromium's own items stay below.
+25. **Drag to split (#37):** dropping a sidebar tab on the page moves that tab into a split with the shown page, on
+    the side nearest the pointer (a tinted half shows where). A Favorite stays a Favorite and opens its page in the
+    new pane. Notes and Easels don't take drops yet (their own split support is #50/#49).
+26. **Maximize Pane (#37)** is Arc's split "Maximize": the focused pane fills the card while the split stays saved;
+    toggling again, focusing another pane or leaving the split restores it. Shortcut Cmd+Shift+Return is NotArc's
+    guess (Arc's isn't in its data).
+27. **#77 is ticked** under decision 13: the swipe code and its self-test were already in place; only a real
+    trackpad can confirm the feel, which goes under "Needs Omar's eyes".
+28. **Web notifications (#78):** CEF's Alloy pages have no notification service, so NotArc injects a small shim as
+    each http(s) document starts. It keeps the page's own permission flow (NotArc's site prompt) and reports each
+    `new Notification()` / `showNotification()` to NotArc, which posts it to Notification Center only for sites
+    allowed in Site Settings. Clicking it shows the tab. Push notifications that arrive while the site's tab is closed
+    (service-worker push) aren't covered; Arc needed the tab open too for most sites. macOS asks once for
+    permission the first time; that prompt, and the banner itself, go under "Needs Omar's eyes".
+29. **Calendar (#56):** off by default (it needs macOS Calendar access, which macOS asks for once when it's turned
+    on). The meeting bar shows from 10 minutes before a meeting until it ends, skips all-day, declined and cancelled
+    events, and offers Join when the event's URL, location or notes hold a Zoom, Meet, Teams, Webex, Whereby, Jitsi,
+    Around, Slack huddle or FaceTime link. Arc's own lead time isn't in its data; 10 minutes is NotArc's call.
+30. **#57 is narrowed to Gmail and calendar Favorites.** Notion and Slack previews moved to Out of scope: Arc read them
+    through those companies' private internal web endpoints, which NotArc can't build and test without accounts on
+    both, and their unread counts already show as badges (#20). Gmail uses Gmail's own unread feed with the Space's
+    sign-in (same as email peeking, #44); calendar Favorites (Google Calendar, Outlook calendar, iCloud, Proton,
+    Cal.com) show today's events from the Mac's Calendar.

@@ -110,13 +110,53 @@ bool BrowserClient::OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFr
 void BrowserClient::OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                         CefRefPtr<CefContextMenuParams> params, CefRefPtr<CefMenuModel> model) {
   CEF_REQUIRE_UI_THREAD();
-  if (!on_link_menu_ || params->GetLinkUrl().empty()) return;
-  static const char* kTitles[kLinkCount] = {"Open Link in New Tab",   "Open Link in Background Tab",
-                                            "Open Link in Split View", "Open Link in Peek",
-                                            "Open Link in Little Window", "Copy Link as Markdown"};
+  if (!on_link_menu_) return;
+  bool image = params->GetMediaType() == CM_MEDIATYPE_IMAGE && !params->GetSourceUrl().empty();
+  bool editable = (params->GetTypeFlags() & CM_TYPEFLAG_EDITABLE) != 0;
+  auto items = MenuItemsFor(!params->GetLinkUrl().empty(), image, !params->GetSelectionText().empty(), editable,
+                            params->GetSelectionText().ToString());
+  if (items.empty()) return;
   int at = 0;
-  for (int i = 0; i < kLinkCount; ++i) model->InsertItemAt(at++, MENU_ID_USER_FIRST + i, kTitles[i]);
+  for (auto& [command, title] : items) {
+    if (command < 0) model->InsertSeparatorAt(at++);
+    else model->InsertItemAt(at++, MENU_ID_USER_FIRST + command, title);
+  }
   model->InsertSeparatorAt(at);
+}
+
+std::vector<std::pair<int, std::string>> BrowserClient::MenuItemsFor(bool link, bool image, bool selection, bool editable,
+                                                                    const std::string& selectionText) {
+  std::vector<std::pair<int, std::string>> out;
+  auto sep = [&] { if (!out.empty() && out.back().first >= 0) out.push_back({-1, ""}); };
+  if (link) {
+    out.push_back({kLinkNewTab, "Open Link in New Tab"});
+    out.push_back({kLinkBackgroundTab, "Open Link in Background Tab"});
+    out.push_back({kLinkSplit, "Open Link in Split View"});
+    out.push_back({kLinkPeek, "Open Link in Peek"});
+    out.push_back({kLinkLittle, "Open Link in Little Window"});
+    out.push_back({kLinkCopyMarkdown, "Copy Link as Markdown"});
+  }
+  if (image) {
+    sep();
+    out.push_back({kImageOpen, "Open Image in New Tab"});
+    out.push_back({kImageSave, "Save Image to Downloads"});
+    out.push_back({kImageCopy, "Copy Image"});
+    out.push_back({kImageCopyAddress, "Copy Image Address"});
+  }
+  if (selection && !editable) {
+    sep();
+    std::string shown = selectionText.size() > 24 ? selectionText.substr(0, 22) + "\u2026" : selectionText;
+    for (auto& c : shown) if (c == '\n' || c == '\t') c = ' ';
+    out.push_back({kSelectionSearch, "Search for \u201C" + shown + "\u201D"});
+  }
+  if (!link && !image && !selection && !editable) {
+    out.push_back({kPageCopyURL, "Copy Page URL"});
+    out.push_back({kPageCopyMarkdown, "Copy Page URL as Markdown"});
+    out.push_back({kPageCapture, "Capture Page"});
+    out.push_back({kPageTranslate, "Translate Page"});
+    out.push_back({kPageBoost, "Boost This Site..."});
+  }
+  return out;
 }
 
 bool BrowserClient::OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
@@ -125,8 +165,10 @@ bool BrowserClient::OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPt
   CEF_REQUIRE_UI_THREAD();
   int command = command_id - MENU_ID_USER_FIRST;
   if (!on_link_menu_ || command < 0 || command >= kLinkCount) return false;
-  on_link_menu_(browser->GetIdentifier(), command, params->GetLinkUrl().ToString(),
-                params->GetSelectionText().ToString());
+  std::string url = command <= kLinkCopyMarkdown ? params->GetLinkUrl().ToString()
+                    : command <= kImageSave      ? params->GetSourceUrl().ToString()
+                                                 : params->GetPageUrl().ToString();
+  on_link_menu_(browser->GetIdentifier(), command, url, params->GetSelectionText().ToString());
   return true;
 }
 
@@ -143,15 +185,49 @@ void BrowserClient::OnDownloadUpdated(CefRefPtr<CefBrowser> browser, CefRefPtr<C
   DownloadsUpdated(download_item, callback);
 }
 
+// CEF's Alloy pages have no notification service, so a page's notifications would vanish. This shim (run as each
+// http(s) document starts) keeps the page's own Notification API and permission flow, and also reports each
+// notification to NotArc, which shows it in Notification Center if the site is allowed.
+const char* BrowserClient::NotificationShimJS() {
+  return "(function(){if(window.__notarcNotify)return;window.__notarcNotify=1;var N=window.Notification;if(!N)return;"
+         "function send(t,o){o=o||{};try{console.log('__notarc_notify__:'+JSON.stringify({title:String(t||''),"
+         "body:String(o.body||''),tag:String(o.tag||'')}));}catch(e){}}"
+         "function S(t,o){send(t,o);this.title=String(t||'');o=o||{};this.body=o.body||'';this.tag=o.tag||'';"
+         "this.data=o.data;this.onclick=null;this.onclose=null;this.onerror=null;this.onshow=null;var s=this;"
+         "setTimeout(function(){if(typeof s.onshow==='function')try{s.onshow();}catch(e){}},0);}"
+         "S.prototype.close=function(){};S.prototype.addEventListener=function(){};"
+         "S.prototype.removeEventListener=function(){};S.prototype.dispatchEvent=function(){return true;};"
+         "Object.defineProperty(S,'permission',{get:function(){return N.permission;}});"
+         "S.requestPermission=function(){return N.requestPermission.apply(N,arguments);};S.maxActions=0;"
+         "window.Notification=S;var R=window.ServiceWorkerRegistration;"
+         "if(R&&R.prototype.showNotification){R.prototype.showNotification=function(t,o){send(t,o);return Promise.resolve();};}"
+         "})();";
+}
+
+void BrowserClient::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType) {
+  std::string url = frame->GetURL().ToString();
+  if (url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0) frame->ExecuteJavaScript(NotificationShimJS(), url, 0);
+}
+
 void BrowserClient::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int) {
   if (frame->IsMain() && on_load_end_) on_load_end_(browser->GetIdentifier(), frame->GetURL().ToString());
 }
 
 bool BrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t, const CefString& message,
-                                     const CefString&, int) {
+                                     const CefString& source, int) {
   static const std::string kPrefix = "__notarc_media__:";
+  static const std::string kNotify = "__notarc_notify__:";
   static const std::string kZap = "__notarc_zap__:";
+  static const std::string kLang = "__notarc_lang__:";
   std::string m = message.ToString();
+  if (m.compare(0, kNotify.size(), kNotify) == 0) {
+    if (on_notify_) on_notify_(browser->GetIdentifier(), m.substr(kNotify.size()), source.ToString());
+    return true;
+  }
+  if (m.compare(0, kLang.size(), kLang) == 0) {
+    if (on_lang_) on_lang_(browser->GetIdentifier(), m.substr(kLang.size()));
+    return true;
+  }
   if (m.compare(0, kZap.size(), kZap) == 0) {
     if (on_zap_) on_zap_(browser->GetIdentifier(), m.substr(kZap.size()));
     return true;

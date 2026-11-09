@@ -4,6 +4,26 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Favorites: Move to > Favorites for any tab, and Remove from Favorites / Move to Pinned on a Favorite (also from the
+  File menu and the command bar).
+- Tidy tab titles: pinning a tab gives it a short, clean name ("Pull requests" instead of "Pull requests · GitHub"),
+  on your Mac, with Undo. Tab menu: Tidy Title / Use Page Title. Settings checkbox to turn it off.
+- Fixed: a renamed tab went back to the page's title when the page changed it or after a restart.
+- Light mode: the page card has a hairline edge and a soft shadow, as in Arc.
+- Space themes: a Grain slider in Edit Theme Color.
+- Two-finger swipe over the sidebar switches Spaces.
+- Next meeting: turn on View > Show Next Meeting from Calendar (or the Settings checkbox) and the sidebar shows your
+  next meeting from the Mac's Calendar 10 minutes before it starts, with Join for Zoom, Meet, Teams and Webex links.
+- Favorite previews: hover a Gmail Favorite for your newest unread email, or a calendar Favorite for today's events.
+- Web notifications from sites you allowed now show in Notification Center; clicking one opens its tab.
+- Split view: drag a tab from the sidebar onto the page to split on that side; Maximize Pane (Cmd+Shift+Return).
+- Little Windows: Cmd+Option+N opens one from any app; Cmd+Option+click a link or a sidebar tab opens it in one;
+  File > Show / Close Little Windows. Both keys can be turned off in Settings.
+- A page in another language offers a one-tap Translate (Settings to turn it off).
+- Right-click menus: images (open, save, copy, copy address), selected text (search) and the page itself (copy URL,
+  Markdown, Capture, Translate, Boost).
+- File > Peek Email from This Site: finds the newest email the site just sent you in Gmail (in this Space's Gmail
+  sign-in), copies the sign-in code or opens the email in a Peek.
 - The parity checklist is up to date with 0.23.0, with an Out of scope section and docs/decisions.md for every
   scope call.
 
