@@ -23,6 +23,8 @@
 #import "app/email_peek.h"
 #import "app/web_notifications.h"
 #import "app/calendar_preview.h"
+#import "app/arc_max.h"
+#import "app/main_window_max.h"
 #include "include/cef_devtools_message_observer.h"
 
 #include <cstdio>
@@ -159,10 +161,11 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
     cell.textField = title;
   }
   static NSDictionary* kinds = @{ @"go" : @"Go", @"tab" : @"Switch to Tab", @"space" : @"Space", @"history" : @"History",
-                                  @"action" : @"Action", @"site" : @"Top Site", @"search" : @"Search" };
+                                  @"action" : @"Action", @"site" : @"Top Site", @"search" : @"Search",
+                                  @"chatgpt" : @"chatgpt.com" };
   static NSDictionary* icons = @{ @"go" : @"magnifyingglass", @"tab" : @"square.on.square", @"space" : @"square.stack",
                                   @"history" : @"clock", @"action" : @"command", @"site" : @"globe",
-                                  @"search" : @"magnifyingglass" };
+                                  @"search" : @"magnifyingglass", @"chatgpt" : @"bubble.left.and.text.bubble.right" };
   BOOL sel = [t.selectedRowIndexes containsIndex:(NSUInteger)row];
   NSColor* primary = sel ? NSColor.whiteColor : [NSColor.labelColor colorWithAlphaComponent:0.80];
   NSColor* secondary = sel ? [NSColor colorWithWhite:1 alpha:0.70] : [NSColor.labelColor colorWithAlphaComponent:0.33];
@@ -1767,6 +1770,9 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   });
   _client->set_external_callback([weakSelf](int browserId, const std::string& url) {
     [OwnerOf(browserId, weakSelf) browser:browserId externalURL:[NSString stringWithUTF8String:url.c_str()]];
+  });
+  _client->set_status_callback([weakSelf](int browserId, const std::string& text) {
+    [OwnerOf(browserId, weakSelf) maxLinkHovered:[NSString stringWithUTF8String:text.c_str()] ?: @"" browser:browserId];
   });
   _client->set_find_callback([weakSelf](int browserId, int count, int active) {
     [OwnerOf(browserId, weakSelf) findResult:count active:active];
@@ -6204,7 +6210,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   if (isTab || item.isFolder) [m addItem:[self menuItem:@"Rename..." action:@selector(menuRename:) item:item]];
   if (isTab && item.renamed && item.liveTitle.length)
     [m addItem:[self menuItem:@"Use Page Title" action:@selector(menuUsePageTitle:) item:item]];
-  else if (isTab && ![TidyTabTitle(item.displayTitle, [NSURL URLWithString:item.url ?: @""].host) isEqualToString:item.displayTitle])
+  else if (isTab && (MaxTidyTitlesUseModel() || ![[self ruleTidyTitleOfItem:item] isEqualToString:item.displayTitle]))
     [m addItem:[self menuItem:@"Tidy Title" action:@selector(menuTidyTitle:) item:item]];
   if (isTab && section == _space.favorites) {
     [m addItem:[self menuItem:@"Remove from Favorites" action:@selector(menuRemoveFromFavorites:) item:item]];
@@ -6723,6 +6729,9 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     if (out.count >= kMaxSuggestions) break;
     [out addObject:d];
   }
+  // Max (#58): "Ask ChatGPT" for typed questions, last so it never pushes tabs or history down.
+  if (!urlOnly)
+    if (NSDictionary* ask = [self maxChatGPTSuggestionFor:text]) [out addObject:ask];
   return out;
 }
 
@@ -6751,6 +6760,8 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     [self showItem:s[@"item"]];
   } else if ([kind isEqualToString:@"space"]) {
     [self switchToSpace:s[@"space"]];
+  } else if ([kind isEqualToString:@"chatgpt"]) {
+    [self openInNewTab:s[@"url"]];  // always a new tab, in this Space's own chatgpt.com sign-in
   } else if ([kind isEqualToString:@"action"]) {
     NSMenuItem* mi = s[@"item"];
     [NSApp sendAction:mi.action to:mi.target from:mi];
@@ -7312,7 +7323,7 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   ArcItem* section = [self sectionContaining:item];
   if (section == _space.unpinned) {
     [self moveItem:item toParent:_space.pinned index:_space.pinned.children.count];
-    [self markPinnedURLs:item];
+    [self markPinnedURLs:item];  // also tidies the title (#18; with Max's on-device model when it's on, #58)
   } else if (section == _space.pinned) {
     [self moveItem:item toParent:_space.unpinned index:0];
     [self clearPinnedURLs:item];
@@ -7355,17 +7366,36 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 }
 
 // Tidy tab titles (#18): pinning renames a tab to the short name TidyTabTitle finds; the toast and the tab menu's
-// "Use Page Title" undo it. Returns YES if the name changed.
+// "Use Page Title" undo it. With Max's on-device model on (#58) the model names the tab instead (a moment later) and
+// TidyTabTitle is the fallback when it gives nothing usable. Returns YES if the name changed (or the model was asked).
 - (BOOL)tidyTitleOfItem:(ArcItem*)item announce:(BOOL)announce {
+  if (MaxTidyTitlesUseModel()) {
+    [self tidyTitleOfItem:item announce:announce done:nil];
+    return YES;
+  }
+  return [self applyTidyTitle:[self ruleTidyTitleOfItem:item] toItem:item announce:announce];
+}
+- (NSString*)ruleTidyTitleOfItem:(ArcItem*)item {
+  return TidyTabTitle(item.displayTitle, [NSURL URLWithString:[self itemCurrentURL:item] ?: item.url ?: @""].host);
+}
+- (BOOL)applyTidyTitle:(NSString*)tidy toItem:(ArcItem*)item announce:(BOOL)announce {
   NSString* current = item.displayTitle;
-  NSString* host = [NSURL URLWithString:[self itemCurrentURL:item] ?: @""].host;
-  NSString* tidy = TidyTabTitle(current, host);
-  if (!tidy.length || [tidy isEqualToString:current]) return NO;
+  if (!item || !tidy.length || [tidy isEqualToString:current]) return NO;
+  NSString* oldTitle = item.title;
+  BOOL oldRenamed = item.renamed;
   item.title = tidy;
   item.renamed = YES;
   [_outline reloadItem:item];
   [self scheduleSave];
   _lastTidied = item;
+  __weak MainWindowController* weakSelf = self;
+  [[self sidebarUndoManager] registerUndoWithTarget:self handler:^(id target) {
+    item.title = oldTitle;
+    item.renamed = oldRenamed;
+    [weakSelf reloadSidebar];
+    [weakSelf scheduleSave];
+  }];
+  [[self sidebarUndoManager] setActionName:@"Tidy Tab Title"];
   if (announce && !self.selfTestProfiles)
     [self showToast:[NSString stringWithFormat:@"Renamed to \u201C%@\u201D", tidy] action:@"Undo" selector:@selector(undoLastTidy:)];
   return YES;
@@ -7432,6 +7462,9 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 - (IBAction)resetAllPinnedTabs:(id)sender { [self resetPinnedTabsInSpace]; }
 
 - (BOOL)validateMenuItem:(NSMenuItem*)mi {
+  BOOL maxHandled = NO;
+  BOOL maxOK = [self maxValidateMenuItem:mi handled:&maxHandled];  // Arc Max items (#58, #59)
+  if (maxHandled) return maxOK;
   if (mi.action == @selector(translatePage:)) {
     NSString* url = [self currentURL];
     BOOL translated = url && OriginalURLForTranslated(url);

@@ -94,8 +94,8 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 
 ## AI (Arc Max)
 
-- [ ] Ask on page, ChatGPT in command bar, tidy titles, 5-second previews (missing; on-device with Apple's built-in model, ChatGPT through your own chatgpt.com sign-in) (#58)
-- [ ] On-device tab categorisation and page summaries / page-to-Markdown (missing) (#59)
+- [x] Ask on page, ChatGPT in command bar, tidy titles, 5-second previews (on-device with Apple's built-in model, non-AI fallbacks without it, tidy titles fall back to #18's rules; ChatGPT through your own chatgpt.com sign-in) (#58)
+- [x] On-device tab categorisation and page summaries / page-to-Markdown (Tidy Tabs with Undo, by site without AI; summaries; Copy Page as Markdown works without AI) (#59)
 
 ## Library & data
 
@@ -117,7 +117,7 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 - [x] Set as default browser, open links from other apps (#69)
 - [x] Context menus (page, link, image, sidebar): sidebar menu; links (new tab, background, split, Peek, Little Window, Markdown); images (open, save to Downloads, copy image, copy address); selected text (search); page (copy URL, Markdown, Capture, Translate, Boost) (#70)
 - [x] Sad tab / crash recovery, session restore (crashed-tab Reload view; each Space reopens on its last tab; after an app crash or force-quit the open tabs are reloaded) (#71)
-- [ ] Settings window (all preferences) (partial: search engine, auto-archive, Peek, Little Window, links, sounds, ad blocking, default browser; profiles, appearance, Max and advanced panes missing) (#72)
+- [ ] Settings window (all preferences) (partial: search engine, auto-archive, Peek, Little Window, links, sounds, ad blocking, default browser; Max as a section until Settings has tabs; profiles, appearance and advanced panes missing) (#72)
 - [x] Keyboard shortcuts with user overrides (#73)
 - [ ] App icon choice, sound effects, toasts (partial: toasts; Capture shutter sound and reorder haptics with their settings; no app icon choice yet) (#74)
 - [x] PDF viewer (Chromium's built-in viewer: PDFs open in the tab with zoom, search, print and download) (#75)

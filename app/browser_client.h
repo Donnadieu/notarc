@@ -135,6 +135,13 @@ class BrowserClient : public CefClient,
                     int active_match_ordinal, bool final_update) override;
 
   void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override;
+  // The link under the pointer (Chromium's status bubble text; empty when the pointer leaves it). Used by Max's
+  // 5-second previews (#58).
+  using StatusCallback = std::function<void(int browser_id, const std::string& text)>;
+  void set_status_callback(StatusCallback cb) { on_status_ = std::move(cb); }
+  void OnStatusMessage(CefRefPtr<CefBrowser> browser, const CefString& value) override {
+    if (on_status_) on_status_(browser->GetIdentifier(), value.ToString());
+  }
   // The page's icon changed (first URL the page offers); the window downloads it for the sidebar.
   using FaviconCallback = std::function<void(int browser_id, const std::string& icon_url)>;
   void set_favicon_callback(FaviconCallback cb) { on_favicon_ = std::move(cb); }
@@ -203,6 +210,7 @@ class BrowserClient : public CefClient,
   LangCallback on_lang_;
   NotifyCallback on_notify_;
   FaviconCallback on_favicon_;
+  StatusCallback on_status_;
   RendererCallback on_renderer_;
   std::map<int, CefRefPtr<CefUnresponsiveProcessCallback>> hung_;
   PermissionCallback on_permission_;

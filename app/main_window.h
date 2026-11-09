@@ -41,7 +41,9 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 
 // Sidebar organisation (Arc: drag and drop, Cmd+D pin/unpin, New Folder).
 - (IBAction)togglePin:(id)sender;
-- (BOOL)tidyTitleOfItem:(ArcItem*)item announce:(BOOL)announce;  // #18
+- (BOOL)tidyTitleOfItem:(ArcItem*)item announce:(BOOL)announce;  // #18 (on-device model first when on, #58)
+- (NSString*)ruleTidyTitleOfItem:(ArcItem*)item;                  // TidyTabTitle for the item's title and host
+- (BOOL)applyTidyTitle:(NSString*)tidy toItem:(ArcItem*)item announce:(BOOL)announce;  // undoable; NO if unchanged
 - (void)usePageTitleOfItem:(ArcItem*)item;
 - (void)setThemeGrain:(double)grain forSpace:(ArcSpace*)space;  // #26
 - (float)themeGrainOpacity;

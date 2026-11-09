@@ -13,6 +13,8 @@
 #import "app/email_peek.h"
 #import "app/web_notifications.h"
 #import "app/calendar_preview.h"
+#import "app/main_window_max.h"
+#import "app/arc_max.h"
 #import "app/little_window.h"
 #import "app/arc_extensions.h"
 #import "app/link_routing.h"
@@ -75,6 +77,7 @@
 @end
 
 static BOOL gCrashTestDone = NO;
+static BOOL gMaxTestDone = NO;    // self-test: the Arc Max checks (#58, #59) printed
 static BOOL gLateTestsDone = NO;  // self-test: the last chained page checks (call, capture, PiP) printed  // self-test: the hang check finished (later page tests wait for it)
 
 // Self-test: poll a condition every 0.25 s instead of a fixed wait, then continue (also on timeout).
@@ -117,6 +120,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [edit addItem:[NSMenuItem separatorItem]];
   [edit addItemWithTitle:@"Copy URL" action:@selector(copyCurrentURL:) keyEquivalent:@"C"];
   [edit addItemWithTitle:@"Copy Clean Link" action:@selector(copyCleanLink:) keyEquivalent:@""];
+  [edit addItemWithTitle:@"Copy Page as Markdown" action:@selector(copyPageAsMarkdown:) keyEquivalent:@""];  // #59
   NSMenuItem* md = [edit addItemWithTitle:@"Copy URL as Markdown" action:@selector(copyCurrentURLAsMarkdown:)
                             keyEquivalent:@"c"];
   md.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption;
@@ -210,6 +214,10 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [view addItemWithTitle:@"Hide Space Header" action:@selector(toggleSpaceHeader:) keyEquivalent:@""];
   [view addItemWithTitle:@"Translate Page" action:@selector(translatePage:) keyEquivalent:@""];
   [view addItemWithTitle:@"Show Next Meeting from Calendar" action:@selector(toggleCalendar:) keyEquivalent:@""];
+  // Arc Max (#58, #59): on-device AI, with non-AI fallbacks (app/arc_max.mm).
+  [view addItemWithTitle:@"Ask on Page..." action:@selector(showAskOnPage:) keyEquivalent:@"A"];
+  [view addItemWithTitle:@"Summarize Page" action:@selector(summarizePage:) keyEquivalent:@""];
+  [view addItemWithTitle:@"Tidy Tab Title" action:@selector(tidyTabTitle:) keyEquivalent:@""];
   [view addItemWithTitle:@"Site Settings..." action:@selector(showSiteSettings:) keyEquivalent:@"i"]
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Reset Site Permissions" action:@selector(resetSitePermissions:) keyEquivalent:@""];
@@ -323,6 +331,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   }
   [tabs addItemWithTitle:@"Switch to Recent Tab" action:@selector(switchToRecentTab:) keyEquivalent:@"\t"]
       .keyEquivalentModifierMask = NSEventModifierFlagControl;
+  [tabs addItemWithTitle:@"Tidy Today Tabs" action:@selector(tidyTodayTabs:) keyEquivalent:@""];  // Arc Max (#59)
   tabsItem.submenu = tabs;
   NSApp.mainMenu = bar;
   ApplyShortcutOverrides(bar);  // the user's own shortcuts (Settings > Keyboard Shortcuts...)
@@ -383,6 +392,8 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   }
   self.window = [[MainWindowController alloc] initWithSpaces:spaces focusedSpaceID:focused];
   self.window.selfTestProfiles = self.selfTest;
+  // Self-tests never use Apple's real on-device model (#58): checks see "unavailable" unless they install a stub.
+  if (self.selfTest) MaxSetTestModel(@"unavailable:selftest", nil);
   self.window.storePath = storePath;
   self.window.archivePath = ArchiveStorePath(self.selfTest);
   self.window.historyPath = HistoryStorePath(self.selfTest);
@@ -595,6 +606,10 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         });
        });
       });
+    // Arc Max (#58, #59): after the late page checks, so its background tab never shares the screen with them.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 135 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      WaitUntil(^{ return gLateTestsDone; }, 40, ^{ [self runMaxSelfTest]; });
+    });
     if (!self.selfTestReload)
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 165 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         [self.window openInNewTab:@"https://example.org/session-restore-marker"];
@@ -604,7 +619,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         [self.window setTestCookie:@"notarc_saved_login" value:@"1" url:@"https://example.org/" session:NO done:nil];
       });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 170 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-     WaitUntil(^{ return (BOOL)(gLateTestsDone || self.selfTestReload); }, 30, ^{
+     WaitUntil(^{ return (BOOL)((gLateTestsDone && gMaxTestDone) || self.selfTestReload); }, 40, ^{
       void (^finish)(void) = ^{
         for (NSDictionary* tab in [self.window tabSnapshot])
           std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
@@ -662,6 +677,280 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
      });
     });
   }
+}
+
+// Arc Max (#58, #59). Pure parts (ChatGPT address, prompts, reply parsing, HTML and fallbacks) first, then a
+// background tab with a known page for page text, Copy Page as Markdown, Ask on Page and summaries, link previews
+// (fake fetcher, no network), Tidy Tabs on a scratch Space that isn't in the sidebar, and tidy titles. The model is a
+// stub here (both "available" and "off"); the real model's state is only reported (model=available|unavailable:...).
+- (void)runMaxSelfTest {
+  MainWindowController* w = self.window;
+  NSString* liveModel = MaxRealModelAvailability();
+  BOOL chatgptURL = [MaxChatGPTURL(@" what is 2+2? & more ") isEqualToString:@"https://chatgpt.com/?q=what%20is%202%2B2%3F%20%26%20more"];
+  NSDictionary* (^chatRow)(NSString*) = ^NSDictionary*(NSString* q) {
+    for (NSDictionary* d in [w commandSuggestionsFor:q])
+      if ([d[@"kind"] isEqualToString:@"chatgpt"]) return d;
+    return nil;
+  };
+  NSDictionary* row = chatRow(@"how tall is mount everest");
+  BOOL chatgptRow = [row[@"url"] isEqualToString:@"https://chatgpt.com/?q=how%20tall%20is%20mount%20everest"] &&
+                    [[w commandSuggestionsFor:@"how tall is mount everest"].lastObject isEqual:row];
+  BOOL urlNoRow = chatRow(@"example.com/page") == nil;
+  SettingSetBool(kSettingMaxChatGPT, NO);
+  BOOL chatgptOff = chatRow(@"how tall is mount everest") == nil;
+  SettingSetObject(kSettingMaxChatGPT, nil);
+  SettingSetBool(kSettingMaxEnabled, NO);
+  BOOL master = chatRow(@"how tall is mount everest") == nil && !MaxFeatureOn(kSettingMaxPreviews);
+  SettingSetObject(kSettingMaxEnabled, nil);
+  master = master && MaxFeatureOn(kSettingMaxPreviews) && chatRow(@"how tall is mount everest") != nil;
+
+  NSArray* groups = MaxParseTidyGroups(@"Here you go:\n- **Reading**: 1, 3\nBad: 9\nDup: 1, 2\nCode: 2, 4 and 5\n", 5);
+  NSArray* labels = MaxParseTidyGroups(@"3: Programming\n2: Shopping\n3: News\n4: news\n5: Programming", 5);  // line order wins
+  BOOL parse = groups.count == 2 && [groups[0][@"name"] isEqualToString:@"Reading"] && [groups[0][@"indexes"] isEqual:(@[ @0, @2 ])] &&
+               [groups[1][@"name"] isEqualToString:@"Code"] && [groups[1][@"indexes"] isEqual:(@[ @3, @4 ])] && labels.count == 2 &&
+               [labels[0][@"name"] isEqualToString:@"Programming"] && [labels[0][@"indexes"] isEqual:(@[ @0, @4 ])] &&
+               [labels[1][@"indexes"] isEqual:(@[ @2, @3 ])] && MaxParseTidyGroups(@"I can't help with that.", 5).count == 0;
+  NSArray* sites = MaxGroupTabsBySite(@[ @{@"url" : @"https://github.com/a"}, @{@"url" : @"https://www.bbc.co.uk/news"},
+                                         @{@"url" : @"https://gist.github.com/b"}, @{@"url" : @"https://bbc.co.uk/sport"},
+                                         @{@"url" : @"https://example.org/"} ]);
+  BOOL bySite = sites.count == 2 && [sites[0][@"name"] isEqualToString:@"Github"] && [sites[0][@"indexes"] isEqual:(@[ @0, @2 ])] &&
+                [sites[1][@"name"] isEqualToString:@"Bbc"];
+  BOOL titles = [MaxCleanModelTitle(@"\"Swift Concurrency Guide.\"\nmore") isEqualToString:@"Swift Concurrency Guide"] &&
+                [MaxCleanSummary(@"Here:\n- **One** point\n* Two") isEqualToString:@"Here:\n• One point\n• Two"];
+  NSString* longText = [@"" stringByPaddingToLength:20000 withString:@"word " startingAtIndex:0];
+  NSString* ask = MaxAskPrompt(@"Who wrote it?", @"T", @"https://example.org/", longText);
+  BOOL prompt = [ask containsString:@"Question: Who wrote it?"] && ask.length < 7300 && [MaxTidyTabsPrompt(@[ @{@"title" : @"A", @"url" : @"https://www.x.org/"} ]) containsString:@"1. A (x.org)"];
+  NSDictionary* html = MaxParseHTML(@"<html><head><title>Fallback</title><meta property=\"og:title\" content=\"Story &amp; More\">"
+                                    @"<meta content='A short description.' name=description><script>var x='<p>no</p>'</script></head>"
+                                    @"<body><nav><p>Menu item</p></nav><p>First paragraph text here.</p><p>Second &#8220;quoted&#8221; one.</p></body></html>");
+  BOOL htmlOK = [html[@"title"] isEqualToString:@"Story & More"] && [html[@"description"] isEqualToString:@"A short description."] &&
+                [html[@"text"] containsString:@"First paragraph text here."] && [html[@"text"] containsString:@"\u201cquoted\u201d"] &&
+                ![html[@"text"] containsString:@"Menu item"] && ![html[@"text"] containsString:@"no"];
+  BOOL menu = NO;
+  for (NSMenuItem* top in NSApp.mainMenu.itemArray)
+    for (NSMenuItem* mi in top.submenu.itemArray)
+      if (mi.action == @selector(showAskOnPage:) && [mi.keyEquivalent isEqualToString:@"A"]) menu = YES;
+  NSView* section = MaxSettingsSection();
+  NSUInteger boxes = 0;
+  NSMutableArray* stack = [NSMutableArray arrayWithObject:section];
+  while (stack.count) {
+    NSView* v = stack.lastObject;
+    [stack removeLastObject];
+    if ([v isKindOfClass:NSButton.class]) ++boxes;
+    [stack addObjectsFromArray:v.subviews];
+  }
+  BOOL settings = boxes == 6;
+
+  // A page we control, loaded in a background tab (never shown, so no other check's tab is disturbed).
+  [w openInNewTab:@"https://example.org/max-selftest" background:YES];
+  ArcItem* t = w.currentSpace.unpinned.children.firstObject;
+  [w maxLoadItemInBackground:t];
+  WaitUntil(^{ return (BOOL)(t.browserId && [t.liveTitle hasPrefix:@"Example"]); }, 15, ^{
+    [w runJS:@"document.body.innerHTML='<article><h1>Max Test</h1><p>Hello <b>bold</b> and <a href=\"/x\">link</a>.</p>"
+             @"<ul><li>one</li><li>two<ul><li>nested</li></ul></li></ul><ol><li>first</li></ol>"
+             @"<pre><code>let a = 1;\\n  b();</code></pre><blockquote>quoted words</blockquote>"
+             @"<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table><img src=\"/i.png\" alt=\"pic\">"
+             @"<p>Ada Lovelace wrote the first published program long ago for the engine.</p>"
+             @"<p>The sample code on this page is written in JavaScript for testing.</p>"
+             @"<p style=\"display:none\">hidden words here</p><script>bad()</script></article>';document.title='Max Test Page'"
+          inItem:t];
+    WaitUntil(^{ return [t.liveTitle isEqualToString:@"Max Test Page"]; }, 5, ^{
+      [w maxPageMarkdownOfItem:t done:^(NSString* md) {
+        NSArray* want = @[ @"# Max Test\n\nSource: https://example.org/max-selftest\n\nHello **bold** and [link](https://example.org/x).",
+                           @"- one\n- two\n  - nested", @"1. first", @"```\nlet a = 1;\n  b();\n```", @"> quoted words",
+                           @"| A | B |\n| --- | --- |\n| 1 | 2 |", @"![pic](https://example.org/i.png)" ];
+        BOOL markdown = md.length > 0 && ![md containsString:@"bad()"] && ![md containsString:@"hidden words"];
+        for (NSString* x in want)
+          if (![md containsString:x]) {
+            markdown = NO;
+            std::printf("SELFTEST-MAX-DEBUG missing=[%s]\n", [x stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"].UTF8String);
+          }
+        if (!markdown) std::printf("SELFTEST-MAX-DEBUG md=[%s]\n", [md stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"].UTF8String ?: "nil");
+        NSInteger general = NSPasteboard.generalPasteboard.changeCount;
+        [w copyMarkdownOfItem:t done:^(NSString* md2) {
+          NSPasteboard* pb = [NSPasteboard pasteboardWithName:@"io.github.donnadieu.notarc.selftest"];
+          BOOL copied = md2.length && [[pb stringForType:NSPasteboardTypeString] isEqualToString:md2];
+          BOOL generalUntouched = NSPasteboard.generalPasteboard.changeCount == general;
+          [pb releaseGlobally];
+          [w maxPageTextOfItem:t done:^(NSDictionary* page) {
+            BOOL pageText = [page[@"text"] containsString:@"Hello bold and link."] && [page[@"title"] isEqualToString:@"Max Test Page"] &&
+                            ![page[@"text"] containsString:@"hidden words"];
+            __block NSString* seenPrompt = nil;
+            MaxSetTestModel(@"available", ^(NSString* ins, NSString* p, MaxReply reply) {
+              seenPrompt = p;
+              reply([p containsString:@"Question: Who wrote the first program?"] && [p containsString:@"Hello bold"] ? @"Ada wrote it." : @"bad", nil);
+            });
+            [w askOnPage:@"Who wrote the first program?" item:t done:^(NSString* a1, BOOL ai1) {
+              BOOL askAI = ai1 && [a1 isEqualToString:@"Ada wrote it."] && w.maxPanelShown && [w.maxPanelAnswer isEqualToString:@"Ada wrote it."];
+              MaxSetTestModel(@"unavailable:off", nil);
+              [w askOnPage:@"Who wrote the first program?" item:t done:^(NSString* a2, BOOL ai2) {
+                BOOL askFallback = !ai2 && [a2 containsString:@"Ada Lovelace wrote"] && [w.maxPanelNote containsString:@"Apple Intelligence is off"];
+                BOOL offersChatGPT = w.maxPanelOffersChatGPT;
+                [w summarizeItem:t done:^(NSString* s1, BOOL ai3) {
+                  BOOL summaryFallback = !ai3 && [s1 hasPrefix:@"• "];
+                  MaxSetTestModel(@"available", ^(NSString* ins, NSString* p, MaxReply reply) {
+                    reply([ins containsString:@"bullet"] ? @"- Point one\n- Point two" : @"bad", nil);
+                  });
+                  [w summarizeItem:t done:^(NSString* s2, BOOL ai4) {
+                    BOOL summaryAI = ai4 && [s2 isEqualToString:@"• Point one\n• Point two"] && [w.maxPanelAnswer isEqualToString:s2];
+                    [w hideMaxPanels];
+                    [self runMaxPreviewAndTidyTest:t
+                                           results:[NSString stringWithFormat:
+                        @"model=%@ chatgptURL=%d chatgptRow=%d urlNoRow=%d chatgptOff=%d master=%d parse=%d bySite=%d titles=%d "
+                        @"prompt=%d html=%d menu=%d settings=%d markdown=%d copied=%d generalUntouched=%d pageText=%d askAI=%d "
+                        @"askFallback=%d offersChatGPT=%d summaryFallback=%d summaryAI=%d",
+                        [liveModel isEqualToString:@"available"] ? @"available" : liveModel, chatgptURL, chatgptRow, urlNoRow,
+                        chatgptOff, master, parse, bySite, titles, prompt, htmlOK, menu, settings, markdown, copied,
+                        generalUntouched, pageText, askAI, askFallback, offersChatGPT, summaryFallback, summaryAI]];
+                    (void)seenPrompt;
+                  }];
+                }];
+              }];
+            }];
+          }];
+        }];
+      }];
+    });
+  });
+}
+
+- (void)runMaxPreviewAndTidyTest:(ArcItem*)t results:(NSString*)first {
+  MainWindowController* w = self.window;
+  std::printf("SELFTEST-MAX %s\n", first.UTF8String);
+  NSMutableArray<NSString*>* fetched = [NSMutableArray array];
+  MaxSetTestFetcher(^(NSString* url, MaxFetchDone done) {
+    [fetched addObject:url];
+    done(@"<html><head><title>Linked Story</title><meta name=description content='About the linked page.'></head>"
+         @"<body><p>The linked page explains how previews work in this browser today.</p></body></html>", nil);
+  });
+  MaxSetTestModel(@"unavailable:off", nil);
+  [w maxLinkHovered:@"https://news.example/story" shiftDown:NO];
+  BOOL noShift = !w.maxPreviewShown;
+  [w maxLinkHovered:@"https://news.example/story" shiftDown:YES];
+  WaitUntil(^{ return (BOOL)(w.maxPreviewShown && [w.maxPreviewText isEqualToString:@"About the linked page."]); }, 3, ^{
+    BOOL previewFallback = w.maxPreviewShown && [w.maxPreviewText isEqualToString:@"About the linked page."];
+    MaxSetTestModel(@"available", ^(NSString* ins, NSString* p, MaxReply reply) {
+      reply([p containsString:@"previews work"] ? @"- AI preview point" : @"bad", nil);
+    });
+    [w maxLinkHovered:@"https://news.example/other" shiftDown:YES];
+    WaitUntil(^{ return [w.maxPreviewText isEqualToString:@"• AI preview point"]; }, 3, ^{
+      BOOL previewAI = [w.maxPreviewText isEqualToString:@"• AI preview point"];
+      [w maxLinkHovered:@"" shiftDown:NO];
+      WaitUntil(^{ return (BOOL)!w.maxPreviewShown; }, 2, ^{
+        BOOL previewHidden = !w.maxPreviewShown;
+        SettingSetBool(kSettingMaxPreviews, NO);
+        [w maxLinkHovered:@"https://news.example/third" shiftDown:YES];
+        BOOL previewOff = !w.maxPreviewShown;
+        SettingSetObject(kSettingMaxPreviews, nil);
+        [w maxLinkHovered:@"" shiftDown:NO];
+        BOOL fetchedOK = [fetched isEqualToArray:(@[ @"https://news.example/story", @"https://news.example/other" ])];
+        BOOL notWeb = !MaxPreviewURLAllowed(@"javascript:alert(1)") && !MaxPreviewURLAllowed(@"file:///etc/hosts");
+        MaxSetTestFetcher(nil);
+
+        // Tidy Tabs on a scratch Space that isn't in the sidebar: by site without the model, by topic with it; Undo.
+        ArcSpace* sp = [ArcSpace new];
+        sp.spaceID = @"max-selftest";
+        sp.title = @"Max SelfTest";
+        sp.unpinned = [ArcItem new];
+        sp.unpinned.isSection = YES;
+        sp.unpinned.children = [NSMutableArray array];
+        for (NSArray* d in @[ @[ @"swiftlang/swift", @"https://github.com/swiftlang/swift" ],
+                               @[ @"Cookie recipe", @"https://cooking.example/cookies" ],
+                               @[ @"Pull requests", @"https://github.com/Donnadieu/notarc/pulls" ],
+                               @[ @"Banana bread", @"https://bread.example/banana" ],
+                               @[ @"Weather", @"https://weather.example/paris" ] ]) {
+          ArcItem* it = [ArcItem new];
+          it.itemID = NSUUID.UUID.UUIDString;
+          it.title = d[0];
+          it.url = d[1];
+          it.children = [NSMutableArray array];
+          [sp.unpinned.children addObject:it];
+        }
+        NSArray* before = [sp.unpinned.children copy];
+        MaxSetTestModel(@"unavailable:off", nil);
+        [w tidyTabsInSpace:sp done:^(NSArray<ArcItem*>* folders, BOOL ai) {
+          NSArray* kids = sp.unpinned.children;
+          BOOL tidySite = !ai && folders.count == 1 && kids.count == 4 && kids[0] == folders[0] &&
+                          [folders[0].title isEqualToString:@"Github"] &&
+                          [folders[0].children isEqualToArray:(@[ before[0], before[2] ])];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 5), dispatch_get_main_queue(), ^{
+            NSUndoManager* undo = [w sidebarUndoManager];
+            BOOL named = [undo.undoActionName isEqualToString:@"Tidy Tabs"];
+            if (named) [undo undo];
+            BOOL tidyUndo = named && [sp.unpinned.children isEqualToArray:before];
+            MaxSetTestModel(@"available", ^(NSString* ins, NSString* p, MaxReply reply) {
+              reply([p containsString:@"5. Weather (weather.example)"] ? @"1: Code\n2: Cooking\n3: code\n4: Cooking\n5: Weather" : @"bad", nil);
+            });
+            [w tidyTabsInSpace:sp done:^(NSArray<ArcItem*>* f2, BOOL ai2) {
+              BOOL tidyAI = ai2 && f2.count == 2 && [f2[0].title isEqualToString:@"Code"] && [f2[1].title isEqualToString:@"Cooking"] &&
+                            [f2[1].children isEqualToArray:(@[ before[1], before[3] ])] && sp.unpinned.children.count == 3 &&
+                            sp.unpinned.children.lastObject == before[4];
+              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 5), dispatch_get_main_queue(), ^{
+                [[w sidebarUndoManager] undo];
+                BOOL tidyAIUndo = [sp.unpinned.children isEqualToArray:before];
+                // Tidy tab title. Without the model: the rule-based TidyTabTitle (#18) through the same command
+                // (the unread count goes), and the command stays visible. With the model (stub): its name; an
+                // unusable reply falls back to the rules; the pin entry point (#18's) asks the model. Undo each time.
+                NSString* oldLive = t.liveTitle;
+                BOOL oldRenamed = t.renamed;
+                NSString* oldTitle = t.title;
+                t.renamed = NO;
+                t.title = nil;
+                t.liveTitle = @"(3) Max Test Page";
+                MaxSetTestModel(@"unavailable:off", nil);
+                NSMenuItem* tidyItem = nil;
+                for (NSMenuItem* top in NSApp.mainMenu.itemArray)
+                  for (NSMenuItem* mi in top.submenu.itemArray)
+                    if (mi.action == @selector(tidyTabTitle:)) tidyItem = mi;
+                BOOL tidyEnabled = tidyItem && [(id<NSMenuItemValidation>)w validateMenuItem:tidyItem] && !tidyItem.hidden;
+                [w tidyTitleOfItem:t announce:NO done:^(NSString* title0, BOOL ai0) {
+                  NSUndoManager* undo2 = [w sidebarUndoManager];
+                  BOOL titleFallback = tidyEnabled && !ai0 && [title0 isEqualToString:@"Max Test Page"] && t.renamed &&
+                                       [t.displayTitle isEqualToString:@"Max Test Page"] &&
+                                       [undo2.undoActionName isEqualToString:@"Tidy Tab Title"];
+                  if (titleFallback) [undo2 undo];
+                  titleFallback = titleFallback && !t.renamed && [t.displayTitle isEqualToString:@"(3) Max Test Page"];
+                  __block int titleCalls = 0;
+                  MaxSetTestModel(@"available", ^(NSString* ins, NSString* p, MaxReply reply) {
+                    BOOL ok = [p containsString:@"Tab title: (3) Max Test Page"];
+                    int call = titleCalls++;
+                    reply(!ok ? @"bad" : (call == 0 ? @"\"Max Test.\"" : call == 1 ? @"" : @"Pinned Name"), nil);
+                  });
+                  [w tidyTitleOfItem:t announce:NO done:^(NSString* title, BOOL ai3) {
+                    BOOL tidyTitle = ai3 && [title isEqualToString:@"Max Test"] && [t.displayTitle isEqualToString:@"Max Test"];
+                    BOOL titleUndo = [undo2.undoActionName isEqualToString:@"Tidy Tab Title"];
+                    if (titleUndo) [undo2 undo];
+                    titleUndo = titleUndo && [t.displayTitle isEqualToString:@"(3) Max Test Page"] && !t.renamed;
+                    [w tidyTitleOfItem:t announce:NO done:^(NSString* title2, BOOL ai4) {  // empty reply -> rules
+                      BOOL titleAIFallback = !ai4 && [title2 isEqualToString:@"Max Test Page"] &&
+                                             [t.displayTitle isEqualToString:@"Max Test Page"];
+                      if ([undo2.undoActionName isEqualToString:@"Tidy Tab Title"]) [undo2 undo];
+                      titleAIFallback = titleAIFallback && !t.renamed;
+                      [w tidyTitleOfItem:t announce:NO];  // what pinning calls (markPinnedURLs)
+                      WaitUntil(^{ return [t.displayTitle isEqualToString:@"Pinned Name"]; }, 2, ^{
+                        BOOL pinTitle = [t.displayTitle isEqualToString:@"Pinned Name"] && t.renamed;
+                        MaxSetTestModel(@"unavailable:selftest", nil);  // the rest of the run never sees the real model
+                        t.title = oldTitle;
+                        t.renamed = oldRenamed;
+                        t.liveTitle = oldLive;
+                        [w hideMaxPanels];
+                        gMaxTestDone = YES;
+                        std::printf("SELFTEST-MAXPAGE previewNoShift=%d previewFallback=%d previewAI=%d previewHidden=%d previewOff=%d "
+                                    "fetched=%d notWeb=%d tidySite=%d tidyUndo=%d tidyAI=%d tidyAIUndo=%d titleFallback=%d tidyTitle=%d "
+                                    "titleUndo=%d titleAIFallback=%d pinTitle=%d\n", noShift, previewFallback, previewAI, previewHidden,
+                                    previewOff, fetchedOK, notWeb, tidySite, tidyUndo, tidyAI, tidyAIUndo, titleFallback, tidyTitle,
+                                    titleUndo, titleAIFallback, pinTitle);
+                      });
+                    }];
+                  }];
+                }];
+              });
+            }];
+          });
+        }];
+      });
+    });
+  });
 }
 
 // Browser-basics test: waits for the new tab's web view (its Space profile may still be starting),

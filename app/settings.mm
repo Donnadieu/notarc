@@ -1,5 +1,6 @@
 #import "app/settings.h"
 #import "app/downloads.h"
+#import "app/arc_max.h"
 #include "app/content_blocker.h"
 
 NSString* const kSettingAutoArchiveHours = @"autoArchiveThresholdHours";
@@ -35,6 +36,7 @@ void SettingsRegisterDefaults(void) {
     kSettingReorderHaptics : @YES,
     kSettingShowSpaceHeader : @YES,
   }];
+  [NSUserDefaults.standardUserDefaults registerDefaults:MaxDefaultSettings()];  // Settings > Max (#58, #59)
 }
 
 static NSMutableDictionary* g_memorySettings;
@@ -374,6 +376,7 @@ static NSArray* LittleArchiveChoices() {
     little,
     [self heading:@"Downloads"],
     downloads,
+    MaxSettingsSection(),  // Arc Max (#58, #59); a section until Settings gets tabs (#72)
   ]];
   stack.orientation = NSUserInterfaceLayoutOrientationVertical;
   stack.alignment = NSLayoutAttributeLeading;
@@ -390,6 +393,7 @@ static NSArray* LittleArchiveChoices() {
   for (NSView* v in stack.views)
     if ([v isKindOfClass:NSTextField.class] && ((NSTextField*)v).cell.wraps)
       [v.widthAnchor constraintEqualToConstant:420].active = YES;
+  [w setContentSize:NSMakeSize(480, MAX(480, ceil(stack.fittingSize.height)))];  // room for every section
   [w center];
   return self;
 }
