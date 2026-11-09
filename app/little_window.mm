@@ -47,7 +47,8 @@ static const CGFloat kToolbarHeight = 34;
 
   NSView* root = window.contentView;
   NSRect b = root.bounds;
-  NSView* toolbar = [[NSView alloc] initWithFrame:NSMakeRect(0, b.size.height - kToolbarHeight, b.size.width, kToolbarHeight)];
+  NSView* toolbar =
+      [[NSView alloc] initWithFrame:NSMakeRect(0, b.size.height - kToolbarHeight, b.size.width, kToolbarHeight)];
   toolbar.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
   _titleLabel = [NSTextField labelWithString:url];
   _titleLabel.frame = NSMakeRect(80, 8, b.size.width - 80 - 150, 18);
@@ -93,7 +94,9 @@ static const CGFloat kToolbarHeight = 34;
   return self;
 }
 
-- (BOOL)incognito { return _incognito; }
+- (BOOL)incognito {
+  return _incognito;
+}
 
 - (void)makeIncognito {
   _incognito = YES;
@@ -103,7 +106,8 @@ static const CGFloat kToolbarHeight = 34;
   w.backgroundColor = [NSColor colorWithSRGBRed:0.13 green:0.12 blue:0.16 alpha:1];
   _openButton.hidden = YES;  // a private page never moves into a saved Space
   _spaceMenu.hidden = YES;
-  NSImageView* mask = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"eyeglasses" accessibilityDescription:@"Incognito"]];
+  NSImageView* mask = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"eyeglasses"
+                                                                accessibilityDescription:@"Incognito"]];
   mask.contentTintColor = NSColor.whiteColor;
   NSView* toolbar = _titleLabel.superview;
   mask.frame = NSMakeRect(toolbar.bounds.size.width - 128, 8, 20, 18);
@@ -130,8 +134,12 @@ static const CGFloat kToolbarHeight = 34;
   [w makeKeyAndOrderFront:nil];
 }
 
-- (void)cancelOperation:(id)sender { [self.window close]; }
-- (IBAction)closeTab:(id)sender { [self.window close]; }  // Cmd+W closes a Peek or Little Window
+- (void)cancelOperation:(id)sender {
+  [self.window close];
+}
+- (IBAction)closeTab:(id)sender {
+  [self.window close];
+}  // Cmd+W closes a Peek or Little Window
 
 - (void)pageTitleChanged:(NSString*)title {
   _pageTitle = [title copy];
@@ -151,24 +159,30 @@ static const CGFloat kToolbarHeight = 34;
   return _lastURL;
 }
 
-- (NSString*)pageTitle { return _pageTitle ?: self.currentURL; }
+- (NSString*)pageTitle {
+  return _pageTitle ?: self.currentURL;
+}
 
 - (void)setSpaceNames:(NSArray<NSString*>*)names {
   if (_incognito) return;
   _spaceNames = [names copy];
   [_spaceMenu removeAllItems];
   [_spaceMenu addItemWithTitle:@""];  // pull-down title slot
-  _spaceMenu.itemArray.firstObject.image = [NSImage imageWithSystemSymbolName:@"rectangle.stack" accessibilityDescription:@"Move to Space"];
+  _spaceMenu.itemArray.firstObject.image = [NSImage imageWithSystemSymbolName:@"rectangle.stack"
+                                                     accessibilityDescription:@"Move to Space"];
   for (NSUInteger i = 0; i < names.count; ++i) {
     NSMenuItem* mi = [_spaceMenu.menu addItemWithTitle:[@"Move to " stringByAppendingString:names[i]]
-                                                action:@selector(spaceChosen:) keyEquivalent:@""];
+                                                action:@selector(spaceChosen:)
+                                         keyEquivalent:@""];
     mi.target = self;
     mi.tag = (NSInteger)i;
   }
   _spaceMenu.hidden = names.count < 2;
 }
 
-- (void)spaceChosen:(NSMenuItem*)sender { [self openInSpaceAtIndex:(NSUInteger)sender.tag]; }
+- (void)spaceChosen:(NSMenuItem*)sender {
+  [self openInSpaceAtIndex:(NSUInteger)sender.tag];
+}
 
 - (void)openInSpaceAtIndex:(NSUInteger)index {
   NSString* url = self.currentURL;
@@ -186,8 +200,12 @@ static const CGFloat kToolbarHeight = 34;
   [self.window close];
 }
 
-- (void)windowDidBecomeKey:(NSNotification*)notification { self.lastUsedAt = [NSDate date]; }
-- (void)windowDidResignKey:(NSNotification*)notification { self.lastUsedAt = [NSDate date]; }
+- (void)windowDidBecomeKey:(NSNotification*)notification {
+  self.lastUsedAt = [NSDate date];
+}
+- (void)windowDidResignKey:(NSNotification*)notification {
+  self.lastUsedAt = [NSDate date];
+}
 
 - (void)windowWillClose:(NSNotification*)notification {
   [self.window.parentWindow removeChildWindow:self.window];

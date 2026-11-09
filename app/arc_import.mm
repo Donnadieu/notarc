@@ -1,12 +1,8 @@
 #import "app/arc_import.h"
 
-static NSString* Str(id value) {
-  return [value isKindOfClass:NSString.class] ? value : nil;
-}
+static NSString* Str(id value) { return [value isKindOfClass:NSString.class] ? value : nil; }
 
-static NSDictionary* Dict(id value) {
-  return [value isKindOfClass:NSDictionary.class] ? value : nil;
-}
+static NSDictionary* Dict(id value) { return [value isKindOfClass:NSDictionary.class] ? value : nil; }
 
 // Arc serialises Swift dictionaries as flat [key, value, key, value] arrays.
 static NSArray<NSDictionary*>* Values(id list) {
@@ -60,7 +56,7 @@ static ArcItem* BuildItem(NSString* itemID, NSDictionary<NSString*, NSDictionary
   NSString* title = Str(raw[@"title"]);
   if (tab) {
     item.url = Str(tab[@"savedURL"]);
-    item.pinnedURL = item.url;  // only kept for pinned tabs and Favorites (see MainWindowController)
+    item.pinnedURL = item.url;           // only kept for pinned tabs and Favorites (see MainWindowController)
     id last = tab[@"timeLastActiveAt"];  // seconds since 2001-01-01
     if ([last isKindOfClass:NSNumber.class])
       item.lastActiveAt = [NSDate dateWithTimeIntervalSinceReferenceDate:[last doubleValue]];
@@ -107,7 +103,8 @@ NSArray<ArcSpace*>* ArcImportSidebar(NSString* sidebarPath, NSError** error) {
   }
   if (!container) {
     if (error)
-      *error = [NSError errorWithDomain:@"ArcImport" code:1
+      *error = [NSError errorWithDomain:@"ArcImport"
+                                   code:1
                                userInfo:@{NSLocalizedDescriptionKey : @"No sidebar container with spaces"}];
     return nil;
   }

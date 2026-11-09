@@ -38,10 +38,16 @@ BOOL ArchiveStoreSave(NSArray<ArchivedTab*>* tabs, NSString* path) {
       @"reason" : t.reason ?: @"manual",
       @"archivedAt" : @(t.archivedAt.timeIntervalSinceReferenceDate)
     }];
-  NSData* bytes = [NSJSONSerialization dataWithJSONObject:@{@"version" : @1, @"items" : items}
-                                                  options:NSJSONWritingPrettyPrinted error:nil];
+  NSData* bytes = [NSJSONSerialization dataWithJSONObject:@{
+    @"version" : @1,
+    @"items" : items
+  }
+                                                  options:NSJSONWritingPrettyPrinted
+                                                    error:nil];
   [[NSFileManager defaultManager] createDirectoryAtPath:path.stringByDeletingLastPathComponent
-                            withIntermediateDirectories:YES attributes:nil error:nil];
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:nil];
   return [bytes writeToFile:path atomically:YES];
 }
 

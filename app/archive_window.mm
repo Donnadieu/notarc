@@ -13,11 +13,11 @@
 }
 
 - (instancetype)initWithProvider:(NSArray<ArchivedTab*>* (^)(void))provider reopen:(void (^)(ArchivedTab*))reopen {
-  NSWindow* w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 760, 520)
-                                            styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                                                      NSWindowStyleMaskResizable
-                                              backing:NSBackingStoreBuffered
-                                                defer:NO];
+  NSWindow* w = [[NSWindow alloc]
+      initWithContentRect:NSMakeRect(0, 0, 760, 520)
+                styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
+                  backing:NSBackingStoreBuffered
+                    defer:NO];
   w.title = @"Archive";
   w.releasedWhenClosed = NO;
   [w center];
@@ -37,7 +37,8 @@
     scroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     scroll.hasVerticalScroller = YES;
     _table = [[NSTableView alloc] initWithFrame:scroll.bounds];
-    for (NSArray* c in @[ @[ @"title", @"Title", @430 ], @[ @"date", @"Archived", @150 ], @[ @"reason", @"How", @80 ] ]) {
+    for (NSArray* c in
+         @[ @[ @"title", @"Title", @430 ], @[ @"date", @"Archived", @150 ], @[ @"reason", @"How", @80 ] ]) {
       NSTableColumn* col = [[NSTableColumn alloc] initWithIdentifier:c[0]];
       col.title = c[1];
       col.width = [c[2] doubleValue];
@@ -57,8 +58,7 @@
 - (void)reload {
   _rows = ArchiveSearch(_provider(), _search.stringValue);
   [_table reloadData];
-  self.window.title =
-      [NSString stringWithFormat:@"%@ (%lu)", self.baseTitle ?: @"Archive", (unsigned long)_rows.count];
+  self.window.title = [NSString stringWithFormat:@"%@ (%lu)", self.baseTitle ?: @"Archive", (unsigned long)_rows.count];
 }
 
 - (void)setPlaceholder:(NSString*)placeholder dateHeader:(NSString*)dateHeader reasonHeader:(NSString*)reasonHeader {
@@ -74,9 +74,13 @@
   [self reload];
 }
 
-- (NSUInteger)visibleCount { return _rows.count; }
+- (NSUInteger)visibleCount {
+  return _rows.count;
+}
 
-- (void)controlTextDidChange:(NSNotification*)note { [self reload]; }
+- (void)controlTextDidChange:(NSNotification*)note {
+  [self reload];
+}
 
 - (BOOL)control:(NSControl*)control textView:(NSTextView*)tv doCommandBySelector:(SEL)cmd {
   if (cmd == @selector(insertNewline:) && _rows.count) {
@@ -94,7 +98,9 @@
   [self reload];
 }
 
-- (NSInteger)numberOfRowsInTableView:(NSTableView*)tv { return _rows.count; }
+- (NSInteger)numberOfRowsInTableView:(NSTableView*)tv {
+  return _rows.count;
+}
 
 - (NSView*)tableView:(NSTableView*)tv viewForTableColumn:(NSTableColumn*)col row:(NSInteger)row {
   NSTextField* f = [tv makeViewWithIdentifier:col.identifier owner:self];

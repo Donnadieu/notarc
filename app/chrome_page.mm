@@ -63,9 +63,15 @@ class PageWindowDelegate : public CefWindowDelegate {
   [super setHidden:hidden];
   [self.host syncFrame];
 }
-- (void)viewDidMoveToWindow { [self.host syncFrame]; }
-- (void)viewDidUnhide { [self.host syncFrame]; }
-- (void)viewDidHide { [self.host syncFrame]; }
+- (void)viewDidMoveToWindow {
+  [self.host syncFrame];
+}
+- (void)viewDidUnhide {
+  [self.host syncFrame];
+}
+- (void)viewDidHide {
+  [self.host syncFrame];
+}
 - (void)resizeWithOldSuperviewSize:(NSSize)size {
   [super resizeWithOldSuperviewSize:size];
   [self.host syncFrame];
@@ -83,7 +89,7 @@ class PageWindowDelegate : public CefWindowDelegate {
 - (instancetype)initWithClient:(CefRefPtr<CefClient>)client
                            url:(NSString*)url
                        context:(CefRefPtr<CefRequestContext>)context
-                     hostView:(NSView*)hostView {
+                      hostView:(NSView*)hostView {
   if (!(self = [super init])) return nil;
   _placeholder = [[ChromePagePlaceholder alloc] initWithFrame:hostView.bounds];
   _placeholder.host = self;
@@ -94,7 +100,8 @@ class PageWindowDelegate : public CefWindowDelegate {
   if (!_view) return self;
   NSRect s = [self screenRect];
   // Created off screen; syncFrame puts it on the card once it's attached.
-  _delegate = new PageWindowDelegate(_view, CefRect(-10000, -10000, MAX(1, (int)s.size.width), MAX(1, (int)s.size.height)));
+  _delegate =
+      new PageWindowDelegate(_view, CefRect(-10000, -10000, MAX(1, (int)s.size.width), MAX(1, (int)s.size.height)));
   CefWindow::CreateTopLevelWindow(_delegate);
   NSWindow* w = [self pageWindow];
   w.opaque = NO;
@@ -105,7 +112,9 @@ class PageWindowDelegate : public CefWindowDelegate {
   return self;
 }
 
-- (NSView*)placeholder { return _placeholder; }
+- (NSView*)placeholder {
+  return _placeholder;
+}
 
 - (NSWindow*)pageWindow {
   CefRefPtr<CefWindow> w = _delegate ? _delegate->window() : nullptr;
@@ -114,7 +123,9 @@ class PageWindowDelegate : public CefWindowDelegate {
   return [v isKindOfClass:NSWindow.class] ? (NSWindow*)v : v.window;
 }
 
-- (CefRefPtr<CefBrowser>)browser { return _view ? _view->GetBrowser() : nullptr; }
+- (CefRefPtr<CefBrowser>)browser {
+  return _view ? _view->GetBrowser() : nullptr;
+}
 
 - (NSRect)screenRect {
   NSWindow* main = _placeholder.window;
@@ -134,10 +145,11 @@ class PageWindowDelegate : public CefWindowDelegate {
     _attachedTo = main;
     if (main) {
       __weak ChromePageHost* weakSelf = self;
-      _moveObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidResizeNotification
-                                                                      object:main
-                                                                       queue:nil
-                                                                  usingBlock:^(NSNotification*) { [weakSelf syncFrame]; }];
+      _moveObserver =
+          [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidResizeNotification
+                                                          object:main
+                                                           queue:nil
+                                                      usingBlock:^(NSNotification*) { [weakSelf syncFrame]; }];
     }
   }
   if (!visible) {

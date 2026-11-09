@@ -3,8 +3,8 @@
 #import "app/settings.h"
 
 static NSString* const kOverrides = @"shortcutOverrides";
-static const NSEventModifierFlags kMods = NSEventModifierFlagCommand | NSEventModifierFlagShift |
-                                          NSEventModifierFlagOption | NSEventModifierFlagControl;
+static const NSEventModifierFlags kMods =
+    NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption | NSEventModifierFlagControl;
 
 static NSMutableDictionary<NSString*, NSDictionary*>* Builtins() {
   static NSMutableDictionary* d;
@@ -25,25 +25,34 @@ NSString* ShortcutDisplay(NSString* key, NSEventModifierFlags mods) {
   if (mods & NSEventModifierFlagOption) [s appendString:@"⌥"];
   if (mods & NSEventModifierFlagShift) [s appendString:@"⇧"];
   if (mods & NSEventModifierFlagCommand) [s appendString:@"⌘"];
-  NSDictionary* names = @{@"\t" : @"Tab", @"\r" : @"Return", @" " : @"Space", @"\x1b" : @"Esc",
-                          [NSString stringWithFormat:@"%C", (unichar)NSLeftArrowFunctionKey] : @"←",
-                          [NSString stringWithFormat:@"%C", (unichar)NSRightArrowFunctionKey] : @"→",
-                          [NSString stringWithFormat:@"%C", (unichar)NSUpArrowFunctionKey] : @"↑",
-                          [NSString stringWithFormat:@"%C", (unichar)NSDownArrowFunctionKey] : @"↓"};
+  NSDictionary* names = @{
+    @"\t" : @"Tab",
+    @"\r" : @"Return",
+    @" " : @"Space",
+    @"\x1b" : @"Esc",
+    [NSString stringWithFormat:@"%C", (unichar)NSLeftArrowFunctionKey] : @"←",
+    [NSString stringWithFormat:@"%C", (unichar)NSRightArrowFunctionKey] : @"→",
+    [NSString stringWithFormat:@"%C", (unichar)NSUpArrowFunctionKey] : @"↑",
+    [NSString stringWithFormat:@"%C", (unichar)NSDownArrowFunctionKey] : @"↓"
+  };
   [s appendString:names[key] ?: key.uppercaseString];
   return s;
 }
 
 static void Walk(NSMenu* menu, void (^f)(NSMenuItem*)) {
   for (NSMenuItem* i in menu.itemArray) {
-    if (i.submenu) Walk(i.submenu, f);
-    else if (!i.isSeparatorItem && i.title.length && i.action) f(i);
+    if (i.submenu)
+      Walk(i.submenu, f);
+    else if (!i.isSeparatorItem && i.title.length && i.action)
+      f(i);
   }
 }
 
 NSMenuItem* MenuItemAtPath(NSMenu* mainMenu, NSString* path) {
   __block NSMenuItem* found = nil;
-  Walk(mainMenu, ^(NSMenuItem* i) { if (!found && [ShortcutPath(i) isEqualToString:path]) found = i; });
+  Walk(mainMenu, ^(NSMenuItem* i) {
+    if (!found && [ShortcutPath(i) isEqualToString:path]) found = i;
+  });
   return found;
 }
 
@@ -56,7 +65,8 @@ void ApplyShortcutOverrides(NSMenu* mainMenu) {
   NSDictionary* overrides = SettingObject(kOverrides);
   Walk(mainMenu, ^(NSMenuItem* i) {
     NSString* p = ShortcutPath(i);
-    if (!Builtins()[p]) Builtins()[p] = @{@"key" : i.keyEquivalent ?: @"", @"mods" : @(i.keyEquivalentModifierMask & kMods)};
+    if (!Builtins()[p])
+      Builtins()[p] = @{@"key" : i.keyEquivalent ?: @"", @"mods" : @(i.keyEquivalentModifierMask & kMods)};
     NSDictionary* o = [overrides isKindOfClass:NSDictionary.class] ? overrides[p] : nil;
     if ([o isKindOfClass:NSDictionary.class]) Apply(i, o);
   });
@@ -65,7 +75,8 @@ void ApplyShortcutOverrides(NSMenu* mainMenu) {
 NSString* SetShortcut(NSMenu* mainMenu, NSString* path, NSString* key, NSEventModifierFlags mods) {
   NSMenuItem* item = MenuItemAtPath(mainMenu, path);
   if (!item) return nil;
-  NSMutableDictionary* overrides = [([SettingObject(kOverrides) isKindOfClass:NSDictionary.class] ? SettingObject(kOverrides) : @{}) mutableCopy];
+  NSMutableDictionary* overrides =
+      [([SettingObject(kOverrides) isKindOfClass:NSDictionary.class] ? SettingObject(kOverrides) : @{}) mutableCopy];
   NSDictionary* want = key ? @{@"key" : key.lowercaseString, @"mods" : @(mods & kMods)} : Builtins()[path];
   __block NSString* cleared = nil;
   if ([want[@"key"] length]) {  // one combination, one command: the other one loses it
@@ -79,8 +90,10 @@ NSString* SetShortcut(NSMenu* mainMenu, NSString* path, NSString* key, NSEventMo
       }
     });
   }
-  if (key) overrides[path] = want;
-  else [overrides removeObjectForKey:path];
+  if (key)
+    overrides[path] = want;
+  else
+    [overrides removeObjectForKey:path];
   Apply(item, want ?: @{@"key" : @"", @"mods" : @0});
   SettingSetObject(kOverrides, overrides);
   return cleared;
@@ -107,9 +120,11 @@ NSString* SetShortcut(NSMenu* mainMenu, NSString* path, NSString* key, NSEventMo
 }
 
 - (instancetype)init {
-  NSWindow* w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 560, 520)
-                                            styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
-                                              backing:NSBackingStoreBuffered defer:NO];
+  NSWindow* w = [[NSWindow alloc]
+      initWithContentRect:NSMakeRect(0, 0, 560, 520)
+                styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
+                  backing:NSBackingStoreBuffered
+                    defer:NO];
   w.title = @"Keyboard Shortcuts";
   w.releasedWhenClosed = NO;
   if (!(self = [super initWithWindow:w])) return nil;
@@ -177,13 +192,16 @@ NSString* SetShortcut(NSMenu* mainMenu, NSString* path, NSString* key, NSEventMo
   [_table reloadData];
 }
 
-- (NSInteger)numberOfRowsInTableView:(NSTableView*)t { return (NSInteger)_items.count; }
+- (NSInteger)numberOfRowsInTableView:(NSTableView*)t {
+  return (NSInteger)_items.count;
+}
 
 - (NSView*)tableView:(NSTableView*)t viewForTableColumn:(NSTableColumn*)col row:(NSInteger)row {
   NSMenuItem* i = _items[(NSUInteger)row];
   NSString* text = [col.identifier isEqualToString:@"cmd"]
-      ? [ShortcutPath(i) stringByReplacingOccurrencesOfString:@"/" withString:@" › "]
-      : (row == _recordingRow ? @"Press keys..." : ShortcutDisplay(i.keyEquivalent, i.keyEquivalentModifierMask & kMods));
+                       ? [ShortcutPath(i) stringByReplacingOccurrencesOfString:@"/" withString:@" › "]
+                       : (row == _recordingRow ? @"Press keys..."
+                                               : ShortcutDisplay(i.keyEquivalent, i.keyEquivalentModifierMask & kMods));
   NSTextField* f = [NSTextField labelWithString:text];
   f.lineBreakMode = NSLineBreakByTruncatingTail;
   return f;
@@ -196,19 +214,26 @@ NSString* SetShortcut(NSMenu* mainMenu, NSString* path, NSString* key, NSEventMo
   _recordingRow = row;
   [_table reloadData];
   __weak ShortcutsWindowController* weakSelf = self;
-  _recorder = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown handler:^NSEvent*(NSEvent* e) {
-    ShortcutsWindowController* me = weakSelf;
-    if (!me || e.window != me.window) return e;
-    if (e.keyCode == 53) { [me stopRecording]; return nil; }  // Esc
-    NSEventModifierFlags mods = e.modifierFlags & kMods;
-    NSString* key = e.charactersIgnoringModifiers.lowercaseString;
-    if (!(mods & (NSEventModifierFlagCommand | NSEventModifierFlagControl | NSEventModifierFlagOption)) || !key.length) {
-      me->_status.stringValue = @"Use at least one of ⌘, ⌃ or ⌥.";
-      return nil;
-    }
-    [me assign:key mods:mods];
-    return nil;
-  }];
+  _recorder =
+      [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown
+                                            handler:^NSEvent*(NSEvent* e) {
+                                              ShortcutsWindowController* me = weakSelf;
+                                              if (!me || e.window != me.window) return e;
+                                              if (e.keyCode == 53) {
+                                                [me stopRecording];
+                                                return nil;
+                                              }  // Esc
+                                              NSEventModifierFlags mods = e.modifierFlags & kMods;
+                                              NSString* key = e.charactersIgnoringModifiers.lowercaseString;
+                                              if (!(mods & (NSEventModifierFlagCommand | NSEventModifierFlagControl |
+                                                            NSEventModifierFlagOption)) ||
+                                                  !key.length) {
+                                                me->_status.stringValue = @"Use at least one of ⌘, ⌃ or ⌥.";
+                                                return nil;
+                                              }
+                                              [me assign:key mods:mods];
+                                              return nil;
+                                            }];
 }
 
 - (void)assign:(NSString*)key mods:(NSEventModifierFlags)mods {
@@ -216,8 +241,10 @@ NSString* SetShortcut(NSMenu* mainMenu, NSString* path, NSString* key, NSEventMo
   [self stopRecording];
   if (row < 0 || row >= (NSInteger)_items.count) return;
   NSString* cleared = SetShortcut(NSApp.mainMenu, ShortcutPath(_items[(NSUInteger)row]), key, mods);
-  _status.stringValue = cleared ? [NSString stringWithFormat:@"Taken from %@.", [cleared stringByReplacingOccurrencesOfString:@"/" withString:@" › "]]
-                                : @"Saved.";
+  _status.stringValue =
+      cleared ? [NSString stringWithFormat:@"Taken from %@.", [cleared stringByReplacingOccurrencesOfString:@"/"
+                                                                                                 withString:@" › "]]
+              : @"Saved.";
   [_table reloadData];
 }
 

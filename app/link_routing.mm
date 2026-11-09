@@ -37,19 +37,23 @@ static NSString* HostOf(NSString* url) { return [NSURL URLWithString:url].host.l
 
 BOOL LinkRuleMatchesURL(LinkRule* r, NSString* url) {
   if (!r.pattern.length) return YES;
-  NSString* u = url.lowercaseString, *p = r.pattern.lowercaseString;
+  NSString *u = url.lowercaseString, *p = r.pattern.lowercaseString;
   NSString* bare = [u stringByReplacingOccurrencesOfString:@"https://" withString:@""];
   bare = [bare stringByReplacingOccurrencesOfString:@"http://" withString:@""];
   if ([bare hasPrefix:@"www."]) bare = [bare substringFromIndex:4];
   if ([r.matchType isEqualToString:@"exact"])
-    return [u isEqualToString:p] || [bare isEqualToString:p] || [[bare stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]] isEqualToString:p];
+    return [u isEqualToString:p] || [bare isEqualToString:p] ||
+           [[bare stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"/"]]
+               isEqualToString:p];
   if ([r.matchType isEqualToString:@"startsWith"]) return [u hasPrefix:p] || [bare hasPrefix:p];
   if ([r.matchType isEqualToString:@"domain"]) {
     NSString* h = HostOf(url);
     return [h isEqualToString:p] || [h hasSuffix:[@"." stringByAppendingString:p]];
   }
   if ([r.matchType isEqualToString:@"regex"]) {
-    NSRegularExpression* re = [NSRegularExpression regularExpressionWithPattern:r.pattern options:NSRegularExpressionCaseInsensitive error:nil];
+    NSRegularExpression* re = [NSRegularExpression regularExpressionWithPattern:r.pattern
+                                                                        options:NSRegularExpressionCaseInsensitive
+                                                                          error:nil];
     return re && [re firstMatchInString:url options:0 range:NSMakeRange(0, url.length)] != nil;
   }
   return [u rangeOfString:p].location != NSNotFound;  // contains
@@ -62,7 +66,7 @@ BOOL LinkRuleMatchesURL(LinkRule* r, NSString* url) {
   NSDictionary* root = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
   if (![root isKindOfClass:NSDictionary.class]) return nil;
   LinkRouting* lr = [LinkRouting new];
-  NSString* kind, *sid;
+  NSString *kind, *sid;
   ParseDestination(root[@"defaultDestination"], &kind, &sid);
   lr.defaultDestination = root[@"defaultDestination"] ? kind : @"little";
   lr.defaultSpaceID = sid;
@@ -80,11 +84,17 @@ BOOL LinkRuleMatchesURL(LinkRule* r, NSString* url) {
       if ([c isEqualToString:@"urlMatch"]) {
         rule.matchType = CaseName(Payload(t, @"_0")) ?: @"contains";
         id pat = Payload(t, @"_1");
-        if ([pat isKindOfClass:NSString.class]) { rule.pattern = pat; ok = YES; }
+        if ([pat isKindOfClass:NSString.class]) {
+          rule.pattern = pat;
+          ok = YES;
+        }
       } else if ([c isEqualToString:@"application"] || [c isEqualToString:@"sourceApplication"]) {
         id a = Payload(t, @"_0");
         if ([a isKindOfClass:NSDictionary.class]) a = a[@"bundleID"] ?: a[@"bundleIdentifier"];
-        if ([a isKindOfClass:NSString.class]) { rule.sourceApp = a; ok = YES; }
+        if ([a isKindOfClass:NSString.class]) {
+          rule.sourceApp = a;
+          ok = YES;
+        }
       }
     }
     if (ok) [rules addObject:rule];
@@ -124,9 +134,12 @@ BOOL LinkRuleMatchesURL(LinkRule* r, NSString* url) {
     if (r.spaceID) d[@"space"] = r.spaceID;
     [rules addObject:d];
   }
-  NSMutableDictionary* root = [@{@"version" : @1, @"default" : self.defaultDestination ?: @"little", @"rules" : rules} mutableCopy];
+  NSMutableDictionary* root =
+      [@{@"version" : @1, @"default" : self.defaultDestination ?: @"little", @"rules" : rules} mutableCopy];
   if (self.defaultSpaceID) root[@"defaultSpace"] = self.defaultSpaceID;
-  NSData* data = [NSJSONSerialization dataWithJSONObject:root options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys error:nil];
+  NSData* data = [NSJSONSerialization dataWithJSONObject:root
+                                                 options:NSJSONWritingPrettyPrinted | NSJSONWritingSortedKeys
+                                                   error:nil];
   return [data writeToFile:path atomically:YES];
 }
 

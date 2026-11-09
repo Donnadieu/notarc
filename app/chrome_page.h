@@ -16,7 +16,7 @@ BOOL ChromePagesEnabled(void);  // user default "chromePages" or --chrome-pages;
 - (instancetype)initWithClient:(CefRefPtr<CefClient>)client
                            url:(NSString*)url
                        context:(CefRefPtr<CefRequestContext>)context
-                     hostView:(NSView*)hostView;
+                      hostView:(NSView*)hostView;
 @property(nonatomic, readonly) NSView* placeholder;  // stands where the page is; its frame drives the page window
 @property(nonatomic, readonly) NSWindow* pageWindow;
 - (CefRefPtr<CefBrowser>)browser;  // null if the page couldn't be created

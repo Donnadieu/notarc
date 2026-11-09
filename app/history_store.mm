@@ -25,7 +25,9 @@ static BOOL Recordable(NSString* url) {
   return self;
 }
 
-- (NSArray<ArchivedTab*>*)visits { return _visits; }
+- (NSArray<ArchivedTab*>*)visits {
+  return _visits;
+}
 
 - (void)recordURL:(NSString*)url title:(NSString*)title space:(NSString*)space {
   if (!Recordable(url)) return;
@@ -76,7 +78,8 @@ static BOOL Recordable(NSString* url) {
 
 - (NSUInteger)mergeVisits:(NSArray<ArchivedTab*>*)visits {
   NSMutableSet* seen = [NSMutableSet set];
-  for (ArchivedTab* v in _visits) [seen addObject:[NSString stringWithFormat:@"%.0f %@", v.archivedAt.timeIntervalSince1970, v.url]];
+  for (ArchivedTab* v in _visits)
+    [seen addObject:[NSString stringWithFormat:@"%.0f %@", v.archivedAt.timeIntervalSince1970, v.url]];
   NSUInteger added = 0;
   for (ArchivedTab* v in visits) {
     if (!Recordable(v.url) || !v.archivedAt) continue;
@@ -87,7 +90,9 @@ static BOOL Recordable(NSString* url) {
     ++added;
   }
   if (!added) return 0;
-  [_visits sortUsingComparator:^NSComparisonResult(ArchivedTab* a, ArchivedTab* b) { return [a.archivedAt compare:b.archivedAt]; }];
+  [_visits sortUsingComparator:^NSComparisonResult(ArchivedTab* a, ArchivedTab* b) {
+    return [a.archivedAt compare:b.archivedAt];
+  }];
   if (_visits.count > kMaxVisits) [_visits removeObjectsInRange:NSMakeRange(0, _visits.count - kMaxVisits)];
   [self saveNow];
   return added;

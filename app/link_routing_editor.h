@@ -13,7 +13,11 @@
 // Editing (the table's controls call these; tests too).
 - (void)addRule;
 - (void)removeRuleAt:(NSUInteger)index;
-- (void)setRuleAt:(NSUInteger)index match:(NSString*)match pattern:(NSString*)pattern app:(NSString*)app
-               to:(NSString*)destination space:(NSString*)spaceID;
+- (void)setRuleAt:(NSUInteger)index
+            match:(NSString*)match
+          pattern:(NSString*)pattern
+              app:(NSString*)app
+               to:(NSString*)destination
+            space:(NSString*)spaceID;
 - (void)setDefaultTo:(NSString*)destination space:(NSString*)spaceID;
 @end

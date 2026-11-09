@@ -13,4 +13,7 @@ NSString* ArcHistoryDBPath(NSString* profileDirectory);
 // Other browsers' history (#63), same read-only way. Firefox: places.sqlite. Safari: History.db (macOS only lets
 // NotArc read it with Full Disk Access; without it this returns nil).
 NSArray<ArchivedTab*>* FirefoxReadHistory(NSString* dbPath, NSString* name, NSUInteger limit, NSError** error);
-NSArray<ArchivedTab*>* SafariReadHistory(NSString* dbPath, NSString* name, NSUInteger limit, NSError** error);  // .../Arc/User Data/<profile>/History
+NSArray<ArchivedTab*>* SafariReadHistory(NSString* dbPath,
+                                         NSString* name,
+                                         NSUInteger limit,
+                                         NSError** error);  // .../Arc/User Data/<profile>/History

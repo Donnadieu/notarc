@@ -60,7 +60,8 @@ static ArcItem* DecodeItem(NSDictionary* d, int depth) {
   item.hideUnreadBadge = [d[@"hideUnread"] boolValue];
   item.isSplit = [d[@"split"] boolValue];
   if ([d[@"note"] isKindOfClass:NSString.class]) item.noteID = d[@"note"];
-  if ([d[@"easel"] isKindOfClass:NSString.class] && [d[@"easel"] rangeOfString:@"/"].location == NSNotFound) item.easelID = d[@"easel"];
+  if ([d[@"easel"] isKindOfClass:NSString.class] && [d[@"easel"] rangeOfString:@"/"].location == NSNotFound)
+    item.easelID = d[@"easel"];
   NSDictionary* live = [d[@"live"] isKindOfClass:NSDictionary.class] ? d[@"live"] : nil;
   if ([live[@"kind"] isKindOfClass:NSString.class] && [live[@"source"] isKindOfClass:NSString.class] && item.isFolder) {
     item.liveKind = live[@"kind"];
@@ -69,7 +70,8 @@ static ArcItem* DecodeItem(NSDictionary* d, int depth) {
       item.liveRefreshedAt = [NSDate dateWithTimeIntervalSinceReferenceDate:[live[@"refreshed"] doubleValue]];
     item.liveDismissed = [NSMutableArray array];
     if ([live[@"dismissed"] isKindOfClass:NSArray.class])
-      for (id u in live[@"dismissed"]) if ([u isKindOfClass:NSString.class]) [item.liveDismissed addObject:u];
+      for (id u in live[@"dismissed"])
+        if ([u isKindOfClass:NSString.class]) [item.liveDismissed addObject:u];
   }
   item.splitHorizontal = [d[@"horizontal"] boolValue];
   if ([d[@"fractions"] isKindOfClass:NSArray.class]) item.splitFractions = d[@"fractions"];
@@ -102,7 +104,8 @@ NSArray<ArcSpace*>* SidebarStoreLoad(NSString* path, NSString** focusedSpaceID, 
   NSDictionary* root = [NSJSONSerialization JSONObjectWithData:bytes options:0 error:error];
   if (![root isKindOfClass:NSDictionary.class] || [root[@"version"] integerValue] != kStoreVersion) {
     if (error && !*error)
-      *error = [NSError errorWithDomain:@"SidebarStore" code:1
+      *error = [NSError errorWithDomain:@"SidebarStore"
+                                   code:1
                                userInfo:@{NSLocalizedDescriptionKey : @"Unknown sidebar store version"}];
     return nil;
   }
@@ -116,7 +119,8 @@ NSArray<ArcSpace*>* SidebarStoreLoad(NSString* path, NSString** focusedSpaceID, 
     space.title = s[@"title"] ?: @"Space";
     space.profileDirectory = s[@"profile"] ?: @"Default";
     if ([s[@"themeColors"] isKindOfClass:NSArray.class]) space.themeColors = s[@"themeColors"];
-    space.themeIntensity = [s[@"themeIntensity"] respondsToSelector:@selector(doubleValue)] ? [s[@"themeIntensity"] doubleValue] : 0.5;
+    space.themeIntensity =
+        [s[@"themeIntensity"] respondsToSelector:@selector(doubleValue)] ? [s[@"themeIntensity"] doubleValue] : 0.5;
     if ([s[@"icon"] isKindOfClass:NSString.class]) space.iconEmoji = s[@"icon"];
     if ([s[@"colorScheme"] isKindOfClass:NSString.class]) space.colorScheme = s[@"colorScheme"];
     if ([s[@"shown"] isKindOfClass:NSString.class]) space.shownItemID = s[@"shown"];
@@ -161,7 +165,9 @@ BOOL SidebarStoreSave(NSArray<ArcSpace*>* spaces, NSString* focusedSpaceID, NSSt
                                                     error:error];
   if (!bytes) return NO;
   [[NSFileManager defaultManager] createDirectoryAtPath:path.stringByDeletingLastPathComponent
-                            withIntermediateDirectories:YES attributes:nil error:nil];
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:nil];
   return [bytes writeToFile:path options:NSDataWritingAtomic error:error];  // atomic: no half-written file
 }
 
@@ -174,7 +180,9 @@ BOOL SessionMarkerBegin(BOOL selfTest) {
   NSString* path = SessionMarkerPath(selfTest);
   BOOL crashed = [[NSFileManager defaultManager] fileExistsAtPath:path];
   [[NSFileManager defaultManager] createDirectoryAtPath:path.stringByDeletingLastPathComponent
-                            withIntermediateDirectories:YES attributes:nil error:nil];
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:nil];
   [[NSData data] writeToFile:path atomically:YES];
   return crashed;
 }

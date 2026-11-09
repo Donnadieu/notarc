@@ -40,7 +40,9 @@
   NSPoint _dragStart;
   BOOL _dragged;
 }
-- (BOOL)isFlipped { return YES; }
+- (BOOL)isFlipped {
+  return YES;
+}
 - (void)drawRect:(NSRect)r {
   NSBezierPath* p = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 1, 1) xRadius:8 yRadius:8];
   if ([self.object.kind isEqualToString:@"image"]) {
@@ -68,7 +70,9 @@
 - (void)mouseUp:(NSEvent*)e {
   if (_dragged) [self.canvas itemDragEnded:self];
 }
-- (void)resetCursorRects { [self addCursorRect:self.bounds cursor:NSCursor.openHandCursor]; }
+- (void)resetCursorRects {
+  [self addCursorRect:self.bounds cursor:NSCursor.openHandCursor];
+}
 @end
 
 @implementation EaselView {
@@ -85,10 +89,18 @@
   }
   return self;
 }
-- (BOOL)isFlipped { return YES; }
-- (BOOL)acceptsFirstResponder { return YES; }
-- (NSMutableArray<EaselObject*>*)objects { return _objects; }
-- (NSString*)directory { return _directory; }
+- (BOOL)isFlipped {
+  return YES;
+}
+- (BOOL)acceptsFirstResponder {
+  return YES;
+}
+- (NSMutableArray<EaselObject*>*)objects {
+  return _objects;
+}
+- (NSString*)directory {
+  return _directory;
+}
 
 // Dotted canvas like Arc's easel background.
 - (void)drawRect:(NSRect)r {
@@ -96,8 +108,7 @@
   NSRectFill(r);
   [[NSColor colorWithWhite:0.5 alpha:0.25] setFill];
   for (CGFloat x = floor(NSMinX(r) / 24) * 24; x < NSMaxX(r); x += 24)
-    for (CGFloat y = floor(NSMinY(r) / 24) * 24; y < NSMaxY(r); y += 24)
-      NSRectFill(NSMakeRect(x, y, 1.5, 1.5));
+    for (CGFloat y = floor(NSMinY(r) / 24) * 24; y < NSMaxY(r); y += 24) NSRectFill(NSMakeRect(x, y, 1.5, 1.5));
 }
 
 - (void)loadFromDirectory:(NSString*)dir {
@@ -118,7 +129,10 @@
 }
 - (BOOL)save {
   if (!_directory) return NO;
-  [[NSFileManager defaultManager] createDirectoryAtPath:_directory withIntermediateDirectories:YES attributes:nil error:nil];
+  [[NSFileManager defaultManager] createDirectoryAtPath:_directory
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:nil];
   NSMutableArray* arr = [NSMutableArray array];
   for (EaselObject* o in _objects) [arr addObject:[o dictionary]];
   NSMutableDictionary* root = [@{@"version" : @1, @"objects" : arr} mutableCopy];
@@ -177,7 +191,8 @@
   return v;
 }
 - (EaselItemView*)viewFor:(EaselObject*)o {
-  for (EaselItemView* v in _views) if (v.object == o) return v;
+  for (EaselItemView* v in _views)
+    if (v.object == o) return v;
   return nil;
 }
 
@@ -201,7 +216,10 @@
 }
 - (EaselObject*)addImagePNG:(NSData*)png link:(NSString*)link {
   if (!png.length || !_directory) return nil;
-  [[NSFileManager defaultManager] createDirectoryAtPath:_directory withIntermediateDirectories:YES attributes:nil error:nil];
+  [[NSFileManager defaultManager] createDirectoryAtPath:_directory
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:nil];
   NSString* name = [NSUUID.UUID.UUIDString stringByAppendingString:@".png"];
   if (![png writeToFile:[_directory stringByAppendingPathComponent:name] atomically:YES]) return nil;
   NSImage* img = [[NSImage alloc] initWithData:png];
@@ -228,13 +246,17 @@
     [v setNeedsDisplay:YES];
   }
 }
-- (EaselObject*)selectedObject { return _selected; }
+- (EaselObject*)selectedObject {
+  return _selected;
+}
 - (void)deleteSelected {
   if (!_selected) return;
   EaselItemView* v = [self viewFor:_selected];
   [v removeFromSuperview];
   if (v) [_views removeObject:v];
-  if (_selected.image) [[NSFileManager defaultManager] removeItemAtPath:[_directory stringByAppendingPathComponent:_selected.image] error:nil];
+  if (_selected.image)
+    [[NSFileManager defaultManager] removeItemAtPath:[_directory stringByAppendingPathComponent:_selected.image]
+                                               error:nil];
   [_objects removeObject:_selected];
   _selected = nil;
   [self changed];
@@ -267,7 +289,9 @@
     if (e.clickCount == 2 && v.object.link.length) [self.delegate easel:self openLink:v.object.link];
   }
 }
-- (void)itemDragged:(EaselItemView*)v by:(NSSize)d { [self moveObject:v.object by:d]; }
+- (void)itemDragged:(EaselItemView*)v by:(NSSize)d {
+  [self moveObject:v.object by:d];
+}
 - (void)itemDragEnded:(EaselItemView*)v {
   [self updateSize];
   [self changed];
@@ -287,7 +311,9 @@
       [self textChanged:v];
     }
 }
-- (void)textChanged:(EaselItemView*)v { [self changed]; }
+- (void)textChanged:(EaselItemView*)v {
+  [self changed];
+}
 - (void)controlTextDidEndEditing:(NSNotification*)n {
   // Empty text boxes disappear when you leave them, like Arc.
   for (EaselItemView* v in [_views copy])

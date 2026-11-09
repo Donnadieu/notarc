@@ -9,7 +9,7 @@
 @property(nonatomic, copy) NSString* liveTitle;  // title reported by the loaded page
 // Arc's "Show Unread Badge" (Favorites, on by default): turned off per tab.
 @property(nonatomic) BOOL hideUnreadBadge;
-@property(nonatomic, copy) NSString* url;        // nil for folders and section roots; current page
+@property(nonatomic, copy) NSString* url;  // nil for folders and section roots; current page
 // Pinned tabs and Favorites: the URL the tab returns to when closed or reset (Arc's saved URL).
 @property(nonatomic, copy) NSString* pinnedURL;
 @property(nonatomic) BOOL isFolder;
@@ -27,9 +27,9 @@
 @property(nonatomic, copy) NSString* liveSource;
 @property(nonatomic, strong) NSDate* liveRefreshedAt;
 @property(nonatomic, strong) NSMutableArray<NSString*>* liveDismissed;
-@property(nonatomic, copy) NSString* liveError;  // last refresh error (not saved)
-@property(nonatomic) BOOL splitHorizontal;                       // stacked instead of side by side
-@property(nonatomic, copy) NSArray<NSNumber*>* splitFractions;   // pane sizes summing to 1; nil = equal
+@property(nonatomic, copy) NSString* liveError;                 // last refresh error (not saved)
+@property(nonatomic) BOOL splitHorizontal;                      // stacked instead of side by side
+@property(nonatomic, copy) NSArray<NSNumber*>* splitFractions;  // pane sizes summing to 1; nil = equal
 @property(nonatomic, strong) NSMutableArray<ArcItem*>* children;
 @property(nonatomic) int browserId;
 @property(nonatomic) BOOL mediaPlaying;  // audio or video playing (not saved)
@@ -42,7 +42,8 @@
 @property(nonatomic) BOOL micMuted;
 @property(nonatomic) BOOL cameraOff;
 @property(nonatomic) BOOL wasOpen;  // had a live page when last saved (restored after a crash)
-@property(nonatomic) BOOL crashed;  // the page's process died; a Reload overlay covers it (not saved)    // tab muted (not saved)  // 0 until a web view exists for this tab
+@property(nonatomic) BOOL crashed;  // the page's process died; a Reload overlay covers it (not saved)    // tab muted
+                                    // (not saved)  // 0 until a web view exists for this tab
 @property(nonatomic, strong) NSDate* lastActiveAt;  // drives auto-archive of Today tabs
 - (NSString*)displayTitle;
 @end
@@ -54,14 +55,14 @@
 @property(nonatomic, strong) ArcItem* pinned;
 @property(nonatomic, strong) ArcItem* unpinned;
 @property(nonatomic, copy) NSString* shownItemID;  // tab last shown in this Space
-@property(nonatomic, strong) ArcItem* favorites;  // Arc "topApps": shared by all Spaces on the same profile
+@property(nonatomic, strong) ArcItem* favorites;   // Arc "topApps": shared by all Spaces on the same profile
 // Space theme: 1-2 hex colours ("#RRGGBB") blended top to bottom over the sidebar, how strongly (0-1), and an
 // optional emoji shown before the name. Empty = the plain system sidebar.
 @property(nonatomic, copy) NSArray<NSString*>* themeColors;
 @property(nonatomic) double themeIntensity;
 @property(nonatomic, copy) NSString* iconEmoji;
 @property(nonatomic, copy) NSString* colorScheme;  // Arc per-Space appearance: nil/"auto", "light", "dark"
-- (NSArray<ArcItem*>*)allTabs;  // depth-first: favorites, pinned, Today
+- (NSArray<ArcItem*>*)allTabs;                     // depth-first: favorites, pinned, Today
 @end
 
 NSString* ArcDataDirectory(void);

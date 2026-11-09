@@ -13,7 +13,9 @@
 @end
 
 // Arc's "User Data" root (or a test fake) and the profiles to read ("Profile 2", ...). Existing copies are refreshed.
-NSArray<ArcExtensionCopy*>* ArcCopyExtensions(NSString* arcUserData, NSArray<NSString*>* profiles, NSString* destination);
+NSArray<ArcExtensionCopy*>* ArcCopyExtensions(NSString* arcUserData,
+                                              NSArray<NSString*>* profiles,
+                                              NSString* destination);
 // Folders already copied (one per extension), for loading at startup.
 NSArray<NSString*>* ArcCopiedExtensionPaths(NSString* destination);
 NSString* NotArcExtensionsDirectory(BOOL selfTest);

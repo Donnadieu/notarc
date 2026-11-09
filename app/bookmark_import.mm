@@ -37,7 +37,8 @@ static void AddChromiumNode(NSDictionary* node, ArcItem* into, NSUInteger* count
     return;
   }
   ArcItem* f = NewFolder(node[@"name"]);
-  for (NSDictionary* c in [node[@"children"] isKindOfClass:NSArray.class] ? node[@"children"] : @[]) AddChromiumNode(c, f, count);
+  for (NSDictionary* c in [node[@"children"] isKindOfClass:NSArray.class] ? node[@"children"] : @[])
+    AddChromiumNode(c, f, count);
   if (f.children.count) [into.children addObject:f];
 }
 
@@ -50,7 +51,8 @@ ArcItem* BookmarksFromChromiumFile(NSString* path, NSString* folderTitle, NSUInt
   ArcItem* top = NewFolder(folderTitle);
   // Bookmarks bar contents go straight in (as in Arc); the other roots become subfolders.
   NSDictionary* bar = roots[@"bookmark_bar"];
-  for (NSDictionary* c in [bar[@"children"] isKindOfClass:NSArray.class] ? bar[@"children"] : @[]) AddChromiumNode(c, top, &n);
+  for (NSDictionary* c in [bar[@"children"] isKindOfClass:NSArray.class] ? bar[@"children"] : @[])
+    AddChromiumNode(c, top, &n);
   for (NSString* k in @[ @"other", @"synced" ]) AddChromiumNode(roots[k], top, &n);
   if (count) *count = n;
   return top;
@@ -71,10 +73,15 @@ ArcItem* BookmarksFromHTMLFile(NSString* path, NSString* folderTitle, NSUInteger
   NSUInteger n = 0;
   NSString* (^text)(NSString*) = ^NSString*(NSString* s) {
     NSMutableString* m = [s mutableCopy];
-    [[NSRegularExpression regularExpressionWithPattern:@"<[^>]+>" options:0 error:nil]
-        replaceMatchesInString:m options:0 range:NSMakeRange(0, m.length) withTemplate:@""];
-    for (NSArray* e in @[ @[ @"&lt;", @"<" ], @[ @"&gt;", @">" ], @[ @"&quot;", @"\"" ], @[ @"&#39;", @"'" ], @[ @"&apos;", @"'" ],
-                          @[ @"&nbsp;", @" " ], @[ @"&amp;", @"&" ] ])
+    [[NSRegularExpression regularExpressionWithPattern:@"<[^>]+>" options:0
+                                                 error:nil] replaceMatchesInString:m
+                                                                           options:0
+                                                                             range:NSMakeRange(0, m.length)
+                                                                      withTemplate:@""];
+    for (NSArray* e in @[
+           @[ @"&lt;", @"<" ], @[ @"&gt;", @">" ], @[ @"&quot;", @"\"" ], @[ @"&#39;", @"'" ], @[ @"&apos;", @"'" ],
+           @[ @"&nbsp;", @" " ], @[ @"&amp;", @"&" ]
+         ])
       [m replaceOccurrencesOfString:e[0] withString:e[1] options:0 range:NSMakeRange(0, m.length)];
     return [m stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
   };
@@ -83,13 +90,18 @@ ArcItem* BookmarksFromHTMLFile(NSString* path, NSString* folderTitle, NSUInteger
     if ([m rangeAtIndex:1].location != NSNotFound) {
       pendingFolder = NewFolder(text([html substringWithRange:[m rangeAtIndex:1]]));
     } else if ([m rangeAtIndex:2].location != NSNotFound) {
-      NSString* url = [[html substringWithRange:[m rangeAtIndex:2]] stringByReplacingOccurrencesOfString:@"&amp;" withString:@"&"];
+      NSString* url = [[html substringWithRange:[m rangeAtIndex:2]] stringByReplacingOccurrencesOfString:@"&amp;"
+                                                                                              withString:@"&"];
       if (Openable(url)) {
         [stack.lastObject.children addObject:NewTab(text([html substringWithRange:[m rangeAtIndex:3]]), url)];
         ++n;
       }
     } else if ([whole hasPrefix:@"<DL"]) {
-      if (!sawFirstDL) { sawFirstDL = YES; pendingFolder = nil; continue; }  // the file's outer list
+      if (!sawFirstDL) {
+        sawFirstDL = YES;
+        pendingFolder = nil;
+        continue;
+      }  // the file's outer list
       ArcItem* f = pendingFolder ?: NewFolder(@"Folder");
       [stack.lastObject.children addObject:f];
       [stack addObject:f];
@@ -111,9 +123,11 @@ NSArray<NSArray<NSString*>*>* DetectedHistorySources(void) {
   NSMutableArray* out = [NSMutableArray array];
   for (NSArray* s in DetectedProfileFiles(@"History")) [out addObject:@[ s[0], s[1], @"chromium" ]];
   NSFileManager* fm = NSFileManager.defaultManager;
-  NSString* support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+  NSString* support =
+      NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
   NSString* ff = [support stringByAppendingPathComponent:@"Firefox/Profiles"];
-  for (NSString* p in [[fm contentsOfDirectoryAtPath:ff error:nil] sortedArrayUsingSelector:@selector(localizedStandardCompare:)]) {
+  for (NSString* p in
+       [[fm contentsOfDirectoryAtPath:ff error:nil] sortedArrayUsingSelector:@selector(localizedStandardCompare:)]) {
     NSString* f = [[ff stringByAppendingPathComponent:p] stringByAppendingPathComponent:@"places.sqlite"];
     if (![fm fileExistsAtPath:f]) continue;
     NSRange dot = [p rangeOfString:@"."];
@@ -127,17 +141,22 @@ NSArray<NSArray<NSString*>*>* DetectedHistorySources(void) {
 }
 
 static NSArray<NSArray<NSString*>*>* DetectedProfileFiles(NSString* file) {
-  NSString* support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-  NSArray* browsers = @[ @[ @"Google Chrome", @"Google/Chrome" ], @[ @"Brave", @"BraveSoftware/Brave-Browser" ],
-                         @[ @"Microsoft Edge", @"Microsoft Edge" ], @[ @"Vivaldi", @"Vivaldi" ], @[ @"Chromium", @"Chromium" ] ];
+  NSString* support =
+      NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
+  NSArray* browsers = @[
+    @[ @"Google Chrome", @"Google/Chrome" ], @[ @"Brave", @"BraveSoftware/Brave-Browser" ],
+    @[ @"Microsoft Edge", @"Microsoft Edge" ], @[ @"Vivaldi", @"Vivaldi" ], @[ @"Chromium", @"Chromium" ]
+  ];
   NSFileManager* fm = NSFileManager.defaultManager;
   NSMutableArray* out = [NSMutableArray array];
   for (NSArray* b in browsers) {
     NSString* dir = [support stringByAppendingPathComponent:b[1]];
     NSDictionary* names = nil;
     NSData* ls = [NSData dataWithContentsOfFile:[dir stringByAppendingPathComponent:@"Local State"]];
-    if (ls) names = [[NSJSONSerialization JSONObjectWithData:ls options:0 error:nil] valueForKeyPath:@"profile.info_cache"];
-    for (NSString* p in [[fm contentsOfDirectoryAtPath:dir error:nil] sortedArrayUsingSelector:@selector(localizedStandardCompare:)]) {
+    if (ls)
+      names = [[NSJSONSerialization JSONObjectWithData:ls options:0 error:nil] valueForKeyPath:@"profile.info_cache"];
+    for (NSString* p in
+         [[fm contentsOfDirectoryAtPath:dir error:nil] sortedArrayUsingSelector:@selector(localizedStandardCompare:)]) {
       NSString* f = [[dir stringByAppendingPathComponent:p] stringByAppendingPathComponent:file];
       if (![fm fileExistsAtPath:f]) continue;
       NSString* pname = [names isKindOfClass:NSDictionary.class] ? names[p][@"name"] : nil;

@@ -4,9 +4,7 @@
 
 int main(int argc, char* argv[]) {
   CefScopedLibraryLoader library_loader;
-  if (!library_loader.LoadInHelper()) {
-    return 1;
-  }
+  if (!library_loader.LoadInHelper()) { return 1; }
   CefMainArgs main_args(argc, argv);
   return CefExecuteProcess(main_args, nullptr, nullptr);
 }

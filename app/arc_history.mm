@@ -4,29 +4,32 @@
 #include <sqlite3.h>
 
 NSString* ArcHistoryDBPath(NSString* profileDirectory) {
-  return [[[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"] stringByAppendingPathComponent:profileDirectory]
-      stringByAppendingPathComponent:@"History"];
+  return [[[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]
+      stringByAppendingPathComponent:profileDirectory] stringByAppendingPathComponent:@"History"];
 }
 
 NSArray<ArchivedTab*>* ArcReadHistory(NSString* dbPath, NSString* spaceName, NSUInteger limit, NSError** error) {
   // immutable=1: never takes a lock or writes a journal, so Arc (even while running) is untouched.
-  NSString* uri = [NSString stringWithFormat:@"file:%@?immutable=1",
-                                             [dbPath stringByAddingPercentEncodingWithAllowedCharacters:
-                                                         NSCharacterSet.URLPathAllowedCharacterSet]];
+  NSString* uri = [NSString
+      stringWithFormat:@"file:%@?immutable=1",
+                       [dbPath stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet
+                                                                                      .URLPathAllowedCharacterSet]];
   sqlite3* db = NULL;
   if (sqlite3_open_v2(uri.UTF8String, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) != SQLITE_OK) {
     if (error)
-      *error = [NSError errorWithDomain:@"ArcHistory" code:1
-                               userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Can't open %@", dbPath]}];
+      *error =
+          [NSError errorWithDomain:@"ArcHistory"
+                              code:1
+                          userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Can't open %@", dbPath]}];
     sqlite3_close(db);
     return nil;
   }
   // Chromium page transitions: core type in the low byte (3 = auto_subframe, 4 = manual_subframe are frames);
   // 0x20000000 / 0x10000000 mark the end / start of a redirect chain - keep only the chain's last hop.
-  const char* sql =
-      "SELECT u.url, u.title, v.visit_time FROM visits v JOIN urls u ON u.id = v.url "
-      "WHERE (v.transition & 255) NOT IN (3, 4) AND ((v.transition & 0x30000000) = 0 OR (v.transition & 0x20000000) != 0) "
-      "ORDER BY v.visit_time DESC LIMIT ?1";
+  const char* sql = "SELECT u.url, u.title, v.visit_time FROM visits v JOIN urls u ON u.id = v.url "
+                    "WHERE (v.transition & 255) NOT IN (3, 4) AND ((v.transition & 0x30000000) = 0 OR (v.transition & "
+                    "0x20000000) != 0) "
+                    "ORDER BY v.visit_time DESC LIMIT ?1";
   sqlite3_stmt* st = NULL;
   NSMutableArray<ArchivedTab*>* out = [NSMutableArray array];
   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) == SQLITE_OK) {
@@ -44,8 +47,10 @@ NSArray<ArchivedTab*>* ArcReadHistory(NSString* dbPath, NSString* spaceName, NSU
       if (v.url) [out addObject:v];
     }
   } else if (error) {
-    *error = [NSError errorWithDomain:@"ArcHistory" code:2
-                             userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithUTF8String:sqlite3_errmsg(db)]}];
+    *error =
+        [NSError errorWithDomain:@"ArcHistory"
+                            code:2
+                        userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithUTF8String:sqlite3_errmsg(db)]}];
   }
   sqlite3_finalize(st);
   sqlite3_close(db);
@@ -53,17 +58,23 @@ NSArray<ArchivedTab*>* ArcReadHistory(NSString* dbPath, NSString* spaceName, NSU
 }
 
 // Shared read-only query runner: columns url, title, seconds-since-1970.
-static NSArray<ArchivedTab*>* ReadVisits(NSString* dbPath, const char* sql, NSString* name, NSUInteger limit,
+static NSArray<ArchivedTab*>* ReadVisits(NSString* dbPath,
+                                         const char* sql,
+                                         NSString* name,
+                                         NSUInteger limit,
                                          NSError** error) {
-  NSString* uri = [NSString stringWithFormat:@"file:%@?immutable=1",
-                                             [dbPath stringByAddingPercentEncodingWithAllowedCharacters:
-                                                         NSCharacterSet.URLPathAllowedCharacterSet]];
+  NSString* uri = [NSString
+      stringWithFormat:@"file:%@?immutable=1",
+                       [dbPath stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet
+                                                                                      .URLPathAllowedCharacterSet]];
   sqlite3* db = NULL;
   if (![NSFileManager.defaultManager isReadableFileAtPath:dbPath] ||
       sqlite3_open_v2(uri.UTF8String, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) != SQLITE_OK) {
     if (error)
-      *error = [NSError errorWithDomain:@"BrowserHistory" code:1
-                               userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Can't open %@", dbPath]}];
+      *error =
+          [NSError errorWithDomain:@"BrowserHistory"
+                              code:1
+                          userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithFormat:@"Can't open %@", dbPath]}];
     sqlite3_close(db);
     return nil;
   }
@@ -85,8 +96,10 @@ static NSArray<ArchivedTab*>* ReadVisits(NSString* dbPath, const char* sql, NSSt
       if (v.url.length && ([v.url hasPrefix:@"http://"] || [v.url hasPrefix:@"https://"])) [out addObject:v];
     }
   } else if (error) {
-    *error = [NSError errorWithDomain:@"BrowserHistory" code:2
-                             userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithUTF8String:sqlite3_errmsg(db)]}];
+    *error =
+        [NSError errorWithDomain:@"BrowserHistory"
+                            code:2
+                        userInfo:@{NSLocalizedDescriptionKey : [NSString stringWithUTF8String:sqlite3_errmsg(db)]}];
   }
   sqlite3_finalize(st);
   sqlite3_close(db);
@@ -103,8 +116,8 @@ NSArray<ArchivedTab*>* FirefoxReadHistory(NSString* dbPath, NSString* name, NSUI
 
 NSArray<ArchivedTab*>* SafariReadHistory(NSString* dbPath, NSString* name, NSUInteger limit, NSError** error) {
   // visit_time: seconds since 2001-01-01; visits that redirected elsewhere are skipped.
-  const char* sql =
-      "SELECT i.url, v.title, v.visit_time + 978307200.0 FROM history_visits v JOIN history_items i ON i.id = v.history_item "
-      "WHERE v.redirect_destination IS NULL ORDER BY v.visit_time DESC LIMIT ?1";
+  const char* sql = "SELECT i.url, v.title, v.visit_time + 978307200.0 FROM history_visits v JOIN history_items i ON "
+                    "i.id = v.history_item "
+                    "WHERE v.redirect_destination IS NULL ORDER BY v.visit_time DESC LIMIT ?1";
   return ReadVisits(dbPath, sql, name, limit, error);
 }

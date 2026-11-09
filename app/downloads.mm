@@ -11,7 +11,9 @@ static NSString* Bytes(int64_t n) {
 }
 
 @implementation DownloadEntry
-- (NSString*)fileName { return self.path.lastPathComponent ?: self.url.lastPathComponent; }
+- (NSString*)fileName {
+  return self.path.lastPathComponent ?: self.url.lastPathComponent;
+}
 - (NSString*)statusText {
   switch (self.state) {
     case DownloadComplete: return Bytes(self.total > 0 ? self.total : self.received);
@@ -26,7 +28,8 @@ static NSString* Bytes(int64_t n) {
 }
 @end
 
-@interface DownloadsWindowController : NSWindowController <NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSMenuDelegate>
+@interface DownloadsWindowController
+    : NSWindowController <NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSMenuDelegate>
 - (void)reload;
 @end
 
@@ -42,13 +45,16 @@ static NSString* Bytes(int64_t n) {
     m = [DownloadManager new];
     m->_entries = [NSMutableArray array];
     [NSUserDefaults.standardUserDefaults registerDefaults:@{
-      kSettingDownloadFolder : [NSSearchPathForDirectoriesInDomains(NSDownloadsDirectory, NSUserDomainMask, YES) firstObject]
+      kSettingDownloadFolder :
+          [NSSearchPathForDirectoriesInDomains(NSDownloadsDirectory, NSUserDomainMask, YES) firstObject]
     }];
   });
   return m;
 }
 
-- (NSArray<DownloadEntry*>*)entries { return _entries; }
+- (NSArray<DownloadEntry*>*)entries {
+  return _entries;
+}
 
 - (NSString*)folder {
   NSString* f = self.folderOverride ?: [NSUserDefaults.standardUserDefaults stringForKey:kSettingDownloadFolder];
@@ -57,13 +63,15 @@ static NSString* Bytes(int64_t n) {
 }
 
 - (NSString*)destinationForSuggestedName:(NSString*)name {
-  name = [[name stringByReplacingOccurrencesOfString:@"/" withString:@"_"] stringByReplacingOccurrencesOfString:@":" withString:@"_"];
+  name = [[name stringByReplacingOccurrencesOfString:@"/" withString:@"_"] stringByReplacingOccurrencesOfString:@":"
+                                                                                                     withString:@"_"];
   if (!name.length || [name hasPrefix:@"."]) name = [@"download" stringByAppendingString:name ?: @""];
   NSString* dir = [self folder];
-  NSString* base = name.stringByDeletingPathExtension, *ext = name.pathExtension;
+  NSString *base = name.stringByDeletingPathExtension, *ext = name.pathExtension;
   NSString* path = [dir stringByAppendingPathComponent:name];
   NSMutableSet* taken = [NSMutableSet set];
-  for (DownloadEntry* e in _entries) if (e.state == DownloadInProgress && e.path) [taken addObject:e.path];
+  for (DownloadEntry* e in _entries)
+    if (e.state == DownloadInProgress && e.path) [taken addObject:e.path];
   for (int i = 1; [NSFileManager.defaultManager fileExistsAtPath:path] || [taken containsObject:path]; ++i) {
     NSString* n = [NSString stringWithFormat:@"%@ (%d)", base, i];
     path = [dir stringByAppendingPathComponent:ext.length ? [n stringByAppendingPathExtension:ext] : n];
@@ -72,7 +80,8 @@ static NSString* Bytes(int64_t n) {
 }
 
 - (DownloadEntry*)entry:(uint32_t)cefId {
-  for (DownloadEntry* e in _entries) if (e.cefId == cefId) return e;
+  for (DownloadEntry* e in _entries)
+    if (e.cefId == cefId) return e;
   return nil;
 }
 
@@ -95,8 +104,12 @@ static NSString* Bytes(int64_t n) {
   [self changed];
 }
 
-- (void)update:(uint32_t)cefId received:(int64_t)received total:(int64_t)total speed:(int64_t)speed
-          path:(NSString*)path state:(DownloadState)state {
+- (void)update:(uint32_t)cefId
+      received:(int64_t)received
+         total:(int64_t)total
+         speed:(int64_t)speed
+          path:(NSString*)path
+         state:(DownloadState)state {
   DownloadEntry* e = [self entry:cefId];
   if (!e) return;
   e.received = received;
@@ -131,8 +144,9 @@ static NSString* Bytes(int64_t n) {
 - (NSArray<DownloadEntry*>*)entriesMatching:(NSString*)query {
   if (!query.length) return _entries;
   return [_entries filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(DownloadEntry* e, NSDictionary*) {
-    return [e.fileName localizedCaseInsensitiveContainsString:query] || [e.url localizedCaseInsensitiveContainsString:query];
-  }]];
+                     return [e.fileName localizedCaseInsensitiveContainsString:query] ||
+                            [e.url localizedCaseInsensitiveContainsString:query];
+                   }]];
 }
 
 - (void)showWindow {
@@ -144,7 +158,8 @@ static NSString* Bytes(int64_t n) {
 @end
 
 std::string DownloadsDestination(const std::string& suggested_name) {
-  return [[DownloadManager shared] destinationForSuggestedName:[NSString stringWithUTF8String:suggested_name.c_str()]].UTF8String;
+  return [[DownloadManager shared] destinationForSuggestedName:[NSString stringWithUTF8String:suggested_name.c_str()]]
+      .UTF8String;
 }
 
 void DownloadsUpdated(CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItemCallback> callback) {
@@ -152,8 +167,9 @@ void DownloadsUpdated(CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItem
   uint32_t cefId = item->GetId();
   if (item->IsInProgress()) g_callbacks[cefId] = callback;
   if (![m entry:cefId])
-    [m begin:cefId url:[NSString stringWithUTF8String:item->GetURL().ToString().c_str()]
-         path:[NSString stringWithUTF8String:item->GetFullPath().ToString().c_str()]];
+    [m begin:cefId
+         url:[NSString stringWithUTF8String:item->GetURL().ToString().c_str()]
+        path:[NSString stringWithUTF8String:item->GetFullPath().ToString().c_str()]];
   if (item->IsInterrupted() && getenv("NOTARC_DOWNLOAD_DEBUG"))
     fprintf(stderr, "DOWNLOAD-INTERRUPTED id=%u reason=%d path=%s\n", cefId, (int)item->GetInterruptReason(),
             item->GetFullPath().ToString().c_str());
@@ -161,8 +177,12 @@ void DownloadsUpdated(CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItem
                         : item->IsCanceled()    ? DownloadCanceled
                         : item->IsInterrupted() ? DownloadFailed
                                                 : DownloadInProgress;
-  [m update:cefId received:item->GetReceivedBytes() total:item->GetTotalBytes() speed:item->GetCurrentSpeed()
-       path:[NSString stringWithUTF8String:item->GetFullPath().ToString().c_str()] state:state];
+  [m update:cefId
+      received:item->GetReceivedBytes()
+         total:item->GetTotalBytes()
+         speed:item->GetCurrentSpeed()
+          path:[NSString stringWithUTF8String:item->GetFullPath().ToString().c_str()]
+         state:state];
 }
 
 @implementation DownloadsWindowController {
@@ -172,11 +192,11 @@ void DownloadsUpdated(CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItem
 }
 
 - (instancetype)init {
-  NSWindow* w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 620, 420)
-                                            styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                                                      NSWindowStyleMaskResizable
-                                              backing:NSBackingStoreBuffered
-                                                defer:NO];
+  NSWindow* w = [[NSWindow alloc]
+      initWithContentRect:NSMakeRect(0, 0, 620, 420)
+                styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable
+                  backing:NSBackingStoreBuffered
+                    defer:NO];
   w.releasedWhenClosed = NO;
   [w center];
   if (!(self = [super initWithWindow:w])) return nil;
@@ -215,11 +235,16 @@ void DownloadsUpdated(CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItem
   _rows = [[DownloadManager shared] entriesMatching:_search.stringValue];
   [_table reloadData];
   NSUInteger active = [DownloadManager shared].inProgressCount;
-  self.window.title = active ? [NSString stringWithFormat:@"Downloads (%lu in progress)", (unsigned long)active] : @"Downloads";
+  self.window.title =
+      active ? [NSString stringWithFormat:@"Downloads (%lu in progress)", (unsigned long)active] : @"Downloads";
 }
 
-- (void)controlTextDidChange:(NSNotification*)n { [self reload]; }
-- (void)clearFinished:(id)sender { [[DownloadManager shared] clearFinished]; }
+- (void)controlTextDidChange:(NSNotification*)n {
+  [self reload];
+}
+- (void)clearFinished:(id)sender {
+  [[DownloadManager shared] clearFinished];
+}
 
 - (DownloadEntry*)clickedEntry {
   NSInteger row = _table.clickedRow >= 0 ? _table.clickedRow : _table.selectedRow;
@@ -256,9 +281,13 @@ void DownloadsUpdated(CefRefPtr<CefDownloadItem> item, CefRefPtr<CefDownloadItem
   [NSPasteboard.generalPasteboard clearContents];
   [NSPasteboard.generalPasteboard setString:[self clickedEntry].url forType:NSPasteboardTypeString];
 }
-- (void)cancelDownload:(id)sender { [[DownloadManager shared] cancel:[self clickedEntry]]; }
+- (void)cancelDownload:(id)sender {
+  [[DownloadManager shared] cancel:[self clickedEntry]];
+}
 
-- (NSInteger)numberOfRowsInTableView:(NSTableView*)tv { return _rows.count; }
+- (NSInteger)numberOfRowsInTableView:(NSTableView*)tv {
+  return _rows.count;
+}
 
 - (NSView*)tableView:(NSTableView*)tv viewForTableColumn:(NSTableColumn*)col row:(NSInteger)row {
   DownloadEntry* e = _rows[row];
