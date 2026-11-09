@@ -11,21 +11,7 @@ cd "$(git rev-parse --show-toplevel)" || exit 1
 fail=0
 
 echo "== clang-format =="
-if command -v clang-format > /dev/null 2>&1; then
-  files=$(git ls-files 'app/*.mm' 'app/*.h' 'app/*.cc')
-  bad=0
-  for f in $files; do
-    diff -q <(clang-format --style=file "$f") "$f" > /dev/null || { echo "NEEDS FORMAT: $f" >&2; bad=1; }
-  done
-  if [ "$bad" -ne 0 ]; then
-    echo "FIX: run 'git ls-files \"app/*.mm\" \"app/*.h\" \"app/*.cc\" | xargs clang-format --style=file -i'" >&2
-    fail=1
-  else
-    echo "clang-format: ok"
-  fi
-else
-  echo "clang-format not installed -- skipping (CI installs it; see .github/workflows/ci.yml)" >&2
-fi
+scripts/lint/check-format.sh $(git ls-files 'app/*.mm' 'app/*.h' 'app/*.cc') || fail=1
 
 echo "== file-length ratchet =="
 scripts/lint/file-length-ratchet.sh || fail=1

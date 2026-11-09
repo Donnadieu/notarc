@@ -18,15 +18,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y clang-format
 
       - name: clang-format check
-        run: |
-          bad=0
-          for f in $(git ls-files 'app/*.mm' 'app/*.h' 'app/*.cc'); do
-            diff -q <(clang-format --style=file "$f") "$f" > /dev/null || { echo "NEEDS FORMAT: $f"; bad=1; }
-          done
-          if [ "$bad" -ne 0 ]; then
-            echo "FIX: run 'git ls-files \"app/*.mm\" \"app/*.h\" \"app/*.cc\" | xargs clang-format --style=file -i'"
-            exit 1
-          fi
+        run: scripts/lint/check-format.sh $(git ls-files 'app/*.mm' 'app/*.h' 'app/*.cc')
 
       - name: File-length ratchet
         run: scripts/lint/file-length-ratchet.sh
