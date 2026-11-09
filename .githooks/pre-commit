@@ -1,0 +1,27 @@
+#!/bin/bash
+# Installed via `scripts/setup-hooks.sh` (git config core.hooksPath .githooks).
+# Runs the same fast checks as `scripts/check.sh`, but only against staged
+# app/ files so a commit touching one file doesn't pay to check the whole tree.
+set -u
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root" || exit 1
+
+staged=$(git diff --cached --name-only --diff-filter=ACMR -- 'app/*.mm' 'app/*.h' 'app/*.cc')
+
+fail=0
+
+if [ -n "$staged" ] && command -v clang-format > /dev/null 2>&1; then
+  bad=0
+  for f in $staged; do
+    diff -q <(clang-format --style=file "$f") "$f" > /dev/null || { echo "NEEDS FORMAT: $f" >&2; bad=1; }
+  done
+  if [ "$bad" -ne 0 ]; then
+    echo "FIX: run 'git ls-files \"app/*.mm\" \"app/*.h\" \"app/*.cc\" | xargs clang-format --style=file -i' and re-add." >&2
+    fail=1
+  fi
+fi
+
+scripts/lint/file-length-ratchet.sh || fail=1
+python3 -I scripts/lint/check-keychain-scope.py || fail=1
+
+exit $fail
