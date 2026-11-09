@@ -11,6 +11,7 @@
 NSString* CleanLinkURL(NSString* url);
 
 @class Boost;
+@class BoostColorWheel;
 @class EaselView;
 NSInteger UnreadCountFromTitle(NSString* title);
 NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL began);  // -1 back, 1 forward, 0 none  // "Inbox (12)" -> 12
@@ -323,6 +324,11 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (void)handleZapSelector:(NSString*)selector browser:(int)browserId;               // tests
 - (NSUInteger)savedBoostCount;                                                      // tests
 - (IBAction)shuffleBoost:(id)sender;
+- (BoostColorWheel*)boostColorWheel;            // tests: the editor's colour wheel (after editBoost:)
+- (Boost*)boostBeingEdited;                     // tests
+- (void)setBoostIntensity:(double)value;        // tests: as if the Intensity slider moved
+- (BOOL)pickBoostFontTile:(NSString*)name;      // tests: as if a font tile (e.g. "Georgia") was clicked
+- (NSArray<NSString*>*)boostPanelSections;      // tests: header, color, font, size, case, zap, code
 // Live Folders
 - (IBAction)newLiveFolder:(id)sender;
 - (ArcItem*)createLiveFolderKind:(NSString*)kind source:(NSString*)source title:(NSString*)title;

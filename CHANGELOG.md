@@ -4,6 +4,9 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Boost editor redesigned after Arc's: a compact card with a colour wheel (drag for hue and how colourful, with an
+  Intensity slider), font tiles, text size, text case (now also Title Case), Zap and Code. Dragging the wheel
+  previews on the page as you go and saves when you let go.
 - The parity checklist is up to date with 0.23.0, with an Out of scope section and docs/decisions.md for every
   scope call.
 

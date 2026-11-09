@@ -17,6 +17,7 @@
 #import "app/chrome_page.h"
 #include <sqlite3.h>
 #import "app/boost_store.h"
+#import "app/boost_color_wheel.h"
 #import "app/easel.h"
 #import "app/live_folder.h"
 #import "app/settings.h"
@@ -1696,7 +1697,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         [w runJS:probe inItem:t];
         WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"boost:"]; }, 5, ^{
           NSString* on = t.liveTitle;
-          BOOL applied = [on isEqualToString:@"boost:none|uppercase|rgb(1, 2, 3)|ran|true|hue"];
+          BOOL applied = [on isEqualToString:@"boost:none|uppercase|rgb(1, 2, 3)|ran|true|color"];
           [w handleZapSelector:@"a:nth-of-type(1)" browser:t.browserId];
           Boost* b = [w boostForURL:@"https://example.org/x"];
           BOOL zapAdded = [b.zaps containsObject:@"a:nth-of-type(1)"];
@@ -1724,10 +1725,50 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
             NSString* indOff = w.boostIndicatorState;
             BOOL saved = w.savedBoostCount == 1;
             if (!applied || !off) std::printf("SELFTEST-BOOST-DEBUG on=[%s] off=[%s]\n", on.UTF8String, t.liveTitle.UTF8String);
-            [w deleteBoostForHost:@"example.org"];
-            std::printf("SELFTEST-BOOST applied=%d zapAdded=%d subdomain=%d off=%d saved=%d deleted=%d related=%d "
-                        "indicatorOn=%d indicatorOff=%d\n", applied, zapAdded, sub, off, saved, w.savedBoostCount == 0, related,
-                        [indOn isEqualToString:@"on"], [indOff isEqualToString:@"off"]);
+            // Editor (#51): the colour wheel's point -> hue/saturation mapping; a pick on the wheel and the Intensity
+            // slider set the Boost's tint, it's saved and the page gets it; a font tile works; the sections are
+            // laid out in Arc's order.
+            [w setBoostForHost:@"example.org" configure:^(Boost* x) { x.enabled = YES; x.hue = -1; x.font = nil; }];
+            if (w.shownItem != t) [w showItem:t];
+            [w editBoost:nil];
+            BoostColorWheel* wheel = w.boostColorWheel;
+            NSRect wr = wheel.wheelRect;
+            double h1 = -1, s1 = -1, h2 = -1, s2 = -1, h3 = -1, s3 = -1, h4 = -1, s4 = -1;
+            BoostWheelPick(NSMakePoint(NSMidX(wr), NSMidY(wr)), wr, &h1, &s1);
+            BoostWheelPick(NSMakePoint(NSMaxX(wr), NSMidY(wr)), wr, &h2, &s2);
+            BoostWheelPick(NSMakePoint(NSMidX(wr) - wr.size.width / 4, NSMidY(wr)), wr, &h3, &s3);
+            BoostWheelPick(NSMakePoint(NSMidX(wr), NSMaxY(wr) + 30), wr, &h4, &s4);  // outside the rim: clamped
+            BOOL math = wr.size.width > 100 && s1 < 0.01 && fabs(h2) < 0.5 && fabs(s2 - 1) < 0.01 && fabs(h3 - 180) < 0.5 &&
+                        fabs(s3 - 0.5) < 0.01 && fabs(h4 - 90) < 0.5 && fabs(s4 - 1) < 0.01;
+            Boost* eb = w.boostBeingEdited;
+            BOOL editing = eb != nil && [eb.host isEqualToString:@"example.org"];
+            [wheel pickPoint:[wheel pointForHue:120 saturation:0.5]];
+            [w setBoostIntensity:0.8];
+            BOOL stored = fabs(eb.hue - 120) < 1 && fabs(eb.saturation - 0.5) < 0.01 && fabs(eb.colorStrength - 0.8) < 0.01 &&
+                          eb.enabled && wheel.hasColor;
+            BOOL wheelSaved = NO;
+            for (Boost* x in BoostStoreLoad(BoostStorePath(YES)))
+              if ([x.host isEqualToString:@"example.org"] && fabs(x.hue - 120) < 1 && fabs(x.saturation - 0.5) < 0.01 &&
+                  fabs(x.colorStrength - 0.8) < 0.01)
+                wheelSaved = YES;
+            BOOL fontTile = [w pickBoostFontTile:@"Georgia"] && [eb.font isEqualToString:@"Georgia"];
+            NSArray* sections = w.boostPanelSections;
+            BOOL sectionsOK = [sections isEqualToArray:@[ @"header", @"color", @"font", @"size", @"case", @"zap", @"code" ]];
+            if (!sectionsOK) std::printf("SELFTEST-BOOST-DEBUG sections=[%s]\n", [sections componentsJoinedByString:@","].UTF8String);
+            [w runJS:@"(function(){var a=getComputedStyle(document.documentElement,'::after');document.title='tint:'+"
+                      "[a.backgroundColor,a.mixBlendMode,a.opacity,getComputedStyle(document.body).fontFamily].join('|')})()"
+              inItem:t];
+            WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"tint:"]; }, 5, ^{
+              NSString* tint = t.liveTitle;  // hsl(120, 50%, 50%) is rgb(64, 191, 64)
+              BOOL pageTint = [tint hasPrefix:@"tint:rgb(64, 191, 64)|color|0.8|"] && [tint containsString:@"Georgia"];
+              if (!pageTint) std::printf("SELFTEST-BOOST-DEBUG tint=[%s]\n", tint.UTF8String);
+              [w deleteBoostForHost:@"example.org"];
+              std::printf("SELFTEST-BOOST applied=%d zapAdded=%d subdomain=%d off=%d saved=%d deleted=%d related=%d "
+                          "indicatorOn=%d indicatorOff=%d\n", applied, zapAdded, sub, off, saved, w.savedBoostCount == 0, related,
+                          [indOn isEqualToString:@"on"], [indOff isEqualToString:@"off"]);
+              std::printf("SELFTEST-BOOSTEDITOR wheelMath=%d editing=%d wheelTint=%d wheelSaved=%d pageTint=%d fontTile=%d "
+                          "sections=%d\n", math, editing, stored, wheelSaved, pageTint, fontTile, sectionsOK);
+            });
           });
           });
         });

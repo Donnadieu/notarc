@@ -26,6 +26,8 @@ set(APP_SRCS
   app/archive_store.h
   app/boost_store.h
   app/boost_store.mm
+  app/boost_color_wheel.h
+  app/boost_color_wheel.mm
   app/easel.h
   app/easel.mm
   app/live_folder.h
