@@ -50,6 +50,14 @@ Run `build/Release/NotArc.app/Contents/MacOS/NotArc --selftest`. It takes about 
 (tabs, split view, Peek, Spaces, shortcuts, command bar, downloads, permissions and more), prints `SELFTEST-...` lines
 and quits. Every value should be 1 (or the expected count); a `0` means a check failed.
 
+To run it without Arc installed, or without it reading your own Arc and NotArc folders at all, give it a throwaway
+home folder with a made-up Arc data folder:
+
+```
+scripts/make-test-home.py /tmp/notarc-home
+CFFIXED_USER_HOME=/tmp/notarc-home build/Release/NotArc.app/Contents/MacOS/NotArc --selftest
+```
+
 The self-test is isolated from your own browsing: it uses separate "SelfTest" profiles and sidebar files, keeps
 setting changes in memory only, uses a throwaway key instead of the Keychain (so no Keychain prompts), and a fake
 camera and microphone. Keep it that way when you add checks.
