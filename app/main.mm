@@ -1758,6 +1758,21 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           NSMutableArray* urls = [NSMutableArray array];
           for (ArcItem* c in f.children) [urls addObject:c.url.lastPathComponent];
           BOOL merged = ok && [[urls componentsJoinedByString:@","] isEqualToString:@"d,b"] && f.children[1] == keep;
+          // Unread (Arc's unread dot): "d" arrived after the first fill, so it's unread and the folder counts it; "b"
+          // was there from the start. It's saved, and opening the tab clears it.
+          ArcItem* fresh = f.children.firstObject;
+          if (![w folderExpanded:f]) [w toggleFolder:f];
+          BOOL marked = fresh.liveUnread && !keep.liveUnread && [w liveUnreadCountOf:f] == 1;
+          BOOL folderCount = [[w liveBadgeForItem:f] isEqualToString:@"1"];
+          BOOL dotShown = [[w liveBadgeForItem:fresh] isEqualToString:@"dot"] && [[w liveBadgeForItem:keep] isEqualToString:@""];
+          [w saveSidebarNow];
+          BOOL unreadSaved = [[NSString stringWithContentsOfFile:SidebarStorePath(YES) encoding:NSUTF8StringEncoding error:nil]
+              containsString:@"\"liveUnread\""];
+          [w showItem:fresh];
+          BOOL cleared = !fresh.liveUnread && [[w liveBadgeForItem:f] isEqualToString:@""] &&
+                         [[w liveBadgeForItem:fresh] isEqualToString:@""];
+          std::printf("SELFTEST-LIVEUNREAD marked=%d folderCount=%d dot=%d saved=%d cleared=%d\n", marked, folderCount,
+                      dotShown, unreadSaved, cleared);
           [w openInNewTab:@"https://example.org/not-in-feed"];
           ArcItem* tab = w.shownItem;
           BOOL noDrop = ![w moveItem:tab toParent:f index:0];
@@ -1787,6 +1802,117 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           [[NSFileManager defaultManager] removeItemAtPath:feed error:nil];
           std::printf("SELFTEST-LIVEFOLDER filled=%d merged=%d noDrop=%d parse=%d input=%d saved=%d\n", filled, merged, noDrop,
                       parse, input, saved);
+        }];
+      });
+    });
+    // Live Folders from GitHub (My Pull Requests, read with the Space's sign-in) and YouTube channels. Every page comes
+    // from local fixture files (LiveFolderSetTestPages), never the network: signed out shows the sign-in entry; signed in
+    // fills the folder from GitHub's search page (server-rendered links) and its embedded page data; a new pull request
+    // comes in unread; a YouTube @handle resolves to its channel id and fills from the channel feed.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 145 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSString* dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"notarc-selftest-live"];
+      [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+      NSString* (^put)(NSString*, NSString*) = ^(NSString* name, NSString* text) {
+        NSString* path = [dir stringByAppendingPathComponent:name];
+        [text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        return path;
+      };
+      NSString* head = @"<!DOCTYPE html><html><head><meta name=\"user-login\" content=\"%@\"></head><body>%@</body></html>";
+      NSString* (^result)(NSString*, NSString*, NSString*) = ^(NSString* repo, NSString* num, NSString* title) {
+        return [NSString stringWithFormat:@"<div class=\"Result\"><h3><div><a href=\"/%@\"><span>%@</span></a></div><div class=\"search-title\">"
+                                           "<a class=\"prc-Link\" href=\"/%@/pull/%@\"><span class=\"search-match\">%@</span></a></div></h3>"
+                                           "<a class=\"issueNumberLink\" href=\"/%@/pull/%@\" target=\"_blank\">#%@</a>"
+                                           "<a href=\"/%@/pull/%@#issuecomment-1\">2 comments</a></div>",
+                                          repo, repo, repo, num, title, repo, num, num, repo, num];
+      };
+      NSString* signedOut = put(@"out.html", [NSString stringWithFormat:head, @"", @"<a href=\"/login\">Sign in</a>"]);
+      NSString* mine1 = put(@"mine1.html", [NSString stringWithFormat:head, @"octo",
+          [result(@"acme/web", @"12", @"Fix login") stringByAppendingString:result(@"acme/web", @"9", @"Faster &lt;b&gt; builds")]]);
+      NSString* mine2 = put(@"mine2.html", [NSString stringWithFormat:head, @"octo",
+          [@[ result(@"acme/web", @"13", @"Dark mode"), result(@"acme/web", @"12", @"Fix login"), result(@"acme/web", @"9", @"Faster &lt;b&gt; builds") ]
+              componentsJoinedByString:@""]]);
+      NSString* review = put(@"review.html", [NSString stringWithFormat:head, @"octo",
+          @"<script type=\"application/json\" data-target=\"react-app.embeddedData\">{\"payload\":{\"pullRequests\":["
+           "{\"number\":30,\"permalink\":\"https://github.com/acme/api/pull/30\",\"title\":\"Add rate limits\"},"
+           "{\"number\":12,\"permalink\":\"https://github.com/acme/web/pull/12\",\"title\":\"Fix login\"}]}}</script>"]);
+      NSArray<NSString*>* urls = LiveFolderGitHubMineURLs();
+      LiveFolderSetTestPages(@{urls[0] : signedOut, urls[1] : signedOut});
+      ArcItem* f = [w createMyPullRequestsFolder];
+      WaitUntil(^{ return (BOOL)(f.children.count == 1 && f.liveSignInNeeded); }, 10, ^{
+        BOOL signInState = f.children.count == 1 && [f.children[0].url isEqualToString:kLiveFolderGitHubSignInURL] &&
+                           [f.children[0].displayTitle containsString:@"Sign in to GitHub"] && [f.liveError containsString:@"GitHub"] &&
+                           !f.children[0].liveUnread && !f.liveFilled;
+        NSMenu* sub = [w newLiveFolderMenuItem].submenu;
+        BOOL menu = [sub itemWithTitle:@"GitHub: My Pull Requests"].action == @selector(newMyPullRequestsFolder:) &&
+                    [sub itemWithTitle:@"YouTube Channel..."].action == @selector(newYouTubeLiveFolder:) &&
+                    [sub itemWithTitle:@"Feed or GitHub Repository..."].action == @selector(newLiveFolder:);
+        LiveFolderSetTestPages(@{urls[0] : mine1, urls[1] : review});
+        [w refreshLiveFolder:f done:^(BOOL ok) {
+          NSMutableArray* titles = [NSMutableArray array];
+          for (ArcItem* c in f.children) [titles addObject:c.displayTitle ?: @""];
+          BOOL signedIn = ok && !f.liveSignInNeeded && !f.liveError && f.children.count == 3 &&
+                          [f.children[0].url isEqualToString:@"https://github.com/acme/web/pull/12"] &&
+                          [titles[0] isEqualToString:@"Fix login · web#12"] && [titles[1] isEqualToString:@"Faster <b> builds · web#9"] &&
+                          [titles[2] isEqualToString:@"Review: Add rate limits · api#30"];
+          BOOL firstFillRead = f.liveFilled && [w liveUnreadCountOf:f] == 0;
+          BOOL once = [w createMyPullRequestsFolder] == f;  // one per Space
+          LiveFolderSetTestPages(@{urls[0] : mine2, urls[1] : review});
+          if (!signedIn) std::printf("SELFTEST-LIVEGITHUB-DEBUG titles=%s\n", [titles componentsJoinedByString:@"|"].UTF8String);
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+          [w refreshLiveFolder:f done:^(BOOL ok2) {
+            ArcItem* added = nil;
+            for (ArcItem* c in f.children)
+              if ([c.url isEqualToString:@"https://github.com/acme/web/pull/13"]) added = c;
+            BOOL newUnread = ok2 && added.liveUnread && [w liveUnreadCountOf:f] == 1 && f.children.count == 4;
+            BOOL badge = [[w liveBadgeForItem:f] isEqualToString:@"1"];
+            BOOL out = YES, in = NO;
+            NSArray* none = LiveFolderParseGitHubHTML([NSString stringWithContentsOfFile:signedOut encoding:NSUTF8StringEncoding error:nil],
+                                                      25, NO, &out);
+            BOOL parse = none.count == 0 && !out && LiveFolderParseGitHubHTML(@"<html>not github</html>", 25, NO, &in) == nil &&
+                         LiveFolderIsGitHubSignedInLanding(@"https://github.com/pulls") &&
+                         !LiveFolderIsGitHubSignedInLanding(@"https://github.com/login?return_to=x") &&
+                         !LiveFolderIsGitHubSignedInLanding(@"https://github.com/sessions/two-factor");
+            [w deleteSidebarItem:f];
+            std::printf("SELFTEST-LIVEGITHUB signInState=%d menu=%d signedIn=%d firstFillRead=%d once=%d newUnread=%d badge=%d "
+                        "parse=%d\n", signInState, menu, signedIn, firstFillRead, once, newUnread, badge, parse);
+            // YouTube: "@handle" -> the channel page (read once) -> channel id -> its public feed.
+            NSString* cid = @"UCabcdefghijklmnopqrstuv";
+            NSString* page = put(@"channel.html", @"<html><head><link rel=\"canonical\" href=\"https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv\">"
+                                                   "<meta property=\"og:title\" content=\"Test &amp; Channel\"></head><body></body></html>");
+            NSString* feed = put(@"videos.xml",
+                @"<?xml version=\"1.0\" encoding=\"UTF-8\"?><feed xmlns:yt=\"http://www.youtube.com/xml/schemas/2015\" "
+                 "xmlns:media=\"http://search.yahoo.com/mrss/\" xmlns=\"http://www.w3.org/2005/Atom\"><title>Test Channel</title>"
+                 "<link rel=\"alternate\" href=\"https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv\"/>"
+                 "<entry><yt:videoId>vid1</yt:videoId><title>First video</title><link rel=\"alternate\" href=\"https://www.youtube.com/watch?v=vid1\"/>"
+                 "<author><name>Test</name><uri>https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv</uri></author>"
+                 "<media:group><media:title>First video</media:title></media:group></entry>"
+                 "<entry><title>Second video</title><link rel=\"alternate\" href=\"https://www.youtube.com/watch?v=vid2\"/></entry></feed>");
+            NSString* feedURL = LiveFolderFetchURL(@"youtube", cid);
+            LiveFolderSetTestPages(@{@"https://www.youtube.com/@notarctest" : page, feedURL : feed});
+            NSDictionary* in1 = LiveFolderSourceFromInput(@"youtube.com/@notarctest", NO);
+            NSDictionary* in2 = LiveFolderSourceFromInput(@"@notarctest", NO);
+            NSDictionary* in3 = LiveFolderSourceFromInput(@"https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv/videos", NO);
+            BOOL input = [in1[@"kind"] isEqualToString:@"youtube"] && [in1[@"resolve"] isEqualToString:@"https://www.youtube.com/@notarctest"] &&
+                         [in2[@"resolve"] isEqualToString:@"https://www.youtube.com/@notarctest"] && [in3[@"source"] isEqualToString:cid] &&
+                         LiveFolderSourceFromInput(@"https://www.youtube.com/", NO) == nil &&
+                         [feedURL isEqualToString:@"https://www.youtube.com/feeds/videos.xml?channel_id=UCabcdefghijklmnopqrstuv"];
+            BOOL fromVideo = [LiveFolderYouTubeChannelIDFromHTML(@"<meta itemprop=\"channelId\" content=\"UCabcdefghijklmnopqrstuv\">", nil)
+                                 isEqualToString:cid] && LiveFolderYouTubeChannelIDFromHTML(@"<html></html>", nil) == nil;
+            [w createLiveFolderFromInput:@"https://www.youtube.com/@notarctest" done:^(ArcItem* yf) {
+              WaitUntil(^{ return (BOOL)(yf.children.count == 2); }, 10, ^{
+                BOOL resolved = [yf.liveKind isEqualToString:@"youtube"] && [yf.liveSource isEqualToString:cid] &&
+                                [yf.displayTitle isEqualToString:@"Test & Channel"];
+                BOOL filled = yf.children.count == 2 && [yf.children[0].url isEqualToString:@"https://www.youtube.com/watch?v=vid1"] &&
+                              [yf.children[0].displayTitle isEqualToString:@"First video"] && !yf.children[0].liveUnread;
+                if (yf) [w deleteSidebarItem:yf];
+                LiveFolderSetTestPages(nil);
+                [[NSFileManager defaultManager] removeItemAtPath:dir error:nil];
+                std::printf("SELFTEST-LIVEYOUTUBE input=%d resolved=%d filled=%d fromVideo=%d\n", input, resolved, filled, fromVideo);
+              });
+            }];
+          }];
+          });
         }];
       });
     });

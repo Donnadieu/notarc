@@ -88,7 +88,7 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 
 ## Live content
 
-- [ ] Live Folders (GitHub PRs/issues, RSS etc. as auto-updating folders) (partial: + menu > New Live Folder... from an RSS/Atom feed or a public GitHub repository's open pull requests or issues; refreshes every 15 minutes and on demand, keeps open tabs, adds new entries and drops old ones; Remove from Live Folder; saved with the sidebar. Missing: your own GitHub pull requests (from the Space's GitHub sign-in), YouTube channels, unread badges) (#55)
+- [x] Live Folders (GitHub PRs/issues, RSS etc. as auto-updating folders) (+ menu > New Live Folder: GitHub: My Pull Requests (yours and ones waiting for your review, read with the Space's own github.com sign-in; a sign-in entry when the Space isn't signed in), YouTube Channel... (a channel address or @handle, from its public feed), or Feed or GitHub Repository... (RSS/Atom, a public repository's open pull requests or issues); refreshes every 15 minutes and on demand, keeps open tabs, adds new entries and drops old ones; new entries come in unread with a dot, the folder row counts them, opening the tab clears it; Remove from Live Folder; saved with the sidebar) (#55)
 - [ ] Calendar integration: next meeting, meeting link (missing; from the Mac's Calendar app) (#56)
 - [ ] Gmail, Notion and Slack previews for Favorites, using the Space's own sign-in (missing) (#57)
 

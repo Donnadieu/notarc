@@ -35,6 +35,7 @@
 #include "include/cef_request_context.h"
 #include "include/cef_request_context_handler.h"
 #include "include/cef_cookie.h"
+#include "include/cef_urlrequest.h"
 
 static NSPasteboardType const kSidebarItemPasteboardType = @"io.github.donnadieu.notarc.sidebar-item";
 
@@ -1654,6 +1655,12 @@ static NSString* const kPiPExitJS =
   }
   [self updateMediaBar];
   item.lastActiveAt = [NSDate date];
+  if (item.liveUnread) {  // opening a new Live Folder entry marks it read (its dot and the folder's count go)
+    item.liveUnread = NO;
+    [_outline reloadItem:item];
+    [_outline reloadItem:[self parentOfItem:item]];
+    [self scheduleSave];
+  }
   [self ensureBrowserForItem:item];
   [self layoutPanes];
   [self selectSidebarRowFor:item];
@@ -1691,6 +1698,11 @@ static NSString* const kPiPExitJS =
   else if (title.length) [_history updateTitle:title forURL:item.url];
   ArcItem* parent = [self parentOfItem:item];
   [_outline reloadItem:parent.isSplit ? parent : item];
+  // My Pull Requests: once its sign-in tab is back on github.com past the login pages, fill the folder.
+  if (url.length && parent.liveSignInNeeded && LiveFolderIsGitHubSignedInLanding(url)) {
+    parent.liveSignInNeeded = NO;
+    [self refreshLiveFolder:parent done:nil];
+  }
   [self scheduleSave];
 }
 
@@ -1849,6 +1861,40 @@ static NSString* const kPiPExitJS =
     chev.image = [NSImage imageWithSystemSymbolName:open ? @"chevron.down" : @"chevron.right"
                            accessibilityDescription:open ? @"Collapse" : @"Expand"];
   }
+  // Live Folders (Arc: SidebarItemUnreadBadgeView): a dot on entries that came in since you last looked, and the
+  // folder's row counts them. Opening the tab clears it.
+  NSImageView* dot = [cell viewWithTag:79];
+  if (!dot) {
+    dot = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"circle.fill" accessibilityDescription:@"Unread"]];
+    dot.tag = 79;
+    dot.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:5 weight:NSFontWeightRegular];
+    dot.frame = NSMakeRect(1, 17.5, 6, 6);
+    dot.autoresizingMask = NSViewMaxXMargin | NSViewMaxYMargin;
+    [cell addSubview:dot];
+  }
+  dot.hidden = !a.liveUnread;
+  dot.contentTintColor = NSColor.controlAccentColor;
+  NSTextField* count = [cell viewWithTag:80];
+  if (!count) {
+    count = [NSTextField labelWithString:@""];
+    count.tag = 80;
+    count.font = [NSFont systemFontOfSize:10 weight:NSFontWeightSemibold];
+    count.alignment = NSTextAlignmentCenter;
+    count.textColor = NSColor.whiteColor;
+    count.wantsLayer = YES;
+    count.layer.cornerRadius = 7;
+    count.autoresizingMask = NSViewMinXMargin | NSViewMaxYMargin;
+    [cell addSubview:count];
+  }
+  NSUInteger unread = a.liveKind ? [self liveUnreadCountOf:a] : 0;
+  count.hidden = unread == 0;
+  CGFloat countWidth = 0;
+  if (unread) {
+    count.stringValue = unread > 99 ? @"99+" : [NSString stringWithFormat:@"%lu", (unsigned long)unread];
+    countWidth = MAX(16, ceil(count.attributedStringValue.size.width) + 8);
+    count.frame = NSMakeRect(cell.bounds.size.width - 28 - countWidth, 13.5, countWidth, 14);
+    count.layer.backgroundColor = NSColor.controlAccentColor.CGColor;
+  }
   NSString* title = a.displayTitle;
   if (a.isSplit) {
     NSMutableArray* names = [NSMutableArray array];
@@ -1869,7 +1915,7 @@ static NSString* const kPiPExitJS =
   NSRect lf = cell.textField.frame;
   lf.origin.x = 37;
   lf.origin.y = 11.5;
-  lf.size.width = cell.bounds.size.width - lf.origin.x - 8;
+  lf.size.width = cell.bounds.size.width - lf.origin.x - 8 - (countWidth ? countWidth + 26 : 0);
   cell.textField.frame = lf;
   NSRect icf = cell.imageView.frame;
   icf.origin.y = 12.5;
@@ -4255,13 +4301,23 @@ static ArcItem* NewSection(NSString* title) {
 - (void)clickSpaceBarIcon:(NSUInteger)index {  // tests
   if (index < _spaceIcons.views.count) [(NSButton*)_spaceIcons.views[index] performClick:nil];
 }
+// + menu > New Live Folder: a feed or repository, your own GitHub pull requests, or a YouTube channel.
+- (NSMenuItem*)newLiveFolderMenuItem {
+  NSMenuItem* item = [[NSMenuItem alloc] initWithTitle:@"New Live Folder" action:nil keyEquivalent:@""];
+  NSMenu* sub = [[NSMenu alloc] initWithTitle:@"New Live Folder"];
+  [sub addItemWithTitle:@"GitHub: My Pull Requests" action:@selector(newMyPullRequestsFolder:) keyEquivalent:@""].target = self;
+  [sub addItemWithTitle:@"YouTube Channel..." action:@selector(newYouTubeLiveFolder:) keyEquivalent:@""].target = self;
+  [sub addItemWithTitle:@"Feed or GitHub Repository..." action:@selector(newLiveFolder:) keyEquivalent:@""].target = self;
+  item.submenu = sub;
+  return item;
+}
 - (IBAction)showNewMenu:(NSButton*)sender {
   NSMenu* m = [[NSMenu alloc] initWithTitle:@"New"];
   [m addItemWithTitle:@"New Tab" action:@selector(newTab:) keyEquivalent:@""].target = self;
   [m addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@""].target = self;
   [m addItemWithTitle:@"New Note" action:@selector(newNote:) keyEquivalent:@""].target = self;
   [m addItemWithTitle:@"New Easel" action:@selector(newEasel:) keyEquivalent:@""].target = self;
-  [m addItemWithTitle:@"New Live Folder..." action:@selector(newLiveFolder:) keyEquivalent:@""].target = self;
+  [m addItem:[self newLiveFolderMenuItem]];
   [m addItem:NSMenuItem.separatorItem];
   [m addItemWithTitle:@"New Space..." action:@selector(newSpace:) keyEquivalent:@""].target = self;
   [m popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, sender.bounds.size.height + 4) inView:sender];
@@ -6395,6 +6451,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
 
 static const NSUInteger kLiveFolderMaxItems = 25;
 static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
+static NSString* const kSpaceStartingError = @"The Space is still starting";
 
 - (ArcItem*)createLiveFolderKind:(NSString*)kind source:(NSString*)source title:(NSString*)title {
   if (!_space || !kind.length || !source.length) return nil;
@@ -6406,27 +6463,89 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   [self refreshLiveFolder:f done:nil];
   return f;
 }
-- (IBAction)newLiveFolder:(id)sender {
+- (NSString*)askLiveFolderSource:(NSString*)message info:(NSString*)info placeholder:(NSString*)placeholder value:(NSString*)value {
   NSAlert* alert = [NSAlert new];
-  alert.messageText = @"New Live Folder";
-  alert.informativeText = @"Enter a feed address (RSS or Atom), or a GitHub repository like github.com/owner/repo for its open "
-                          "pull requests. Add /issues for its issues instead. The folder keeps itself up to date.";
+  alert.messageText = message;
+  alert.informativeText = info;
   [alert addButtonWithTitle:@"Create"];
   [alert addButtonWithTitle:@"Cancel"];
   NSTextField* field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 24)];
-  field.placeholderString = @"github.com/owner/repo or https://example.com/feed.xml";
-  NSString* cur = _shown && !_shown.noteID && !_shown.easelID ? [self itemCurrentURL:_shown] : nil;
-  if ([cur hasPrefix:@"https://github.com/"]) field.stringValue = cur;
+  field.placeholderString = placeholder;
+  if (value.length) field.stringValue = value;
   alert.accessoryView = field;
   alert.window.initialFirstResponder = field;
-  if ([alert runModal] != NSAlertFirstButtonReturn) return;
-  NSDictionary* src = LiveFolderSourceFromInput(field.stringValue, NO);
-  if (!src) { NSBeep(); return; }
+  return [alert runModal] == NSAlertFirstButtonReturn ? field.stringValue : nil;
+}
+- (IBAction)newLiveFolder:(id)sender {
+  NSString* cur = _shown && !_shown.noteID && !_shown.easelID ? [self itemCurrentURL:_shown] : nil;
+  NSString* input = [self askLiveFolderSource:@"New Live Folder"
+                                         info:@"Enter a feed address (RSS or Atom), a GitHub repository like github.com/owner/repo for "
+                                               "its open pull requests (add /issues for its issues instead), or a YouTube channel. "
+                                               "The folder keeps itself up to date."
+                                  placeholder:@"github.com/owner/repo or https://example.com/feed.xml"
+                                        value:[cur hasPrefix:@"https://github.com/"] ? cur : nil];
+  if (input) [self createLiveFolderFromInput:input done:nil];
+}
+- (IBAction)newYouTubeLiveFolder:(id)sender {
+  NSString* cur = _shown && !_shown.noteID && !_shown.easelID ? [self itemCurrentURL:_shown] : nil;
+  NSString* input = [self askLiveFolderSource:@"New YouTube Live Folder"
+                                         info:@"Enter a YouTube channel's address or @handle. Its newest videos show up in the "
+                                               "folder (from YouTube's public channel feed)."
+                                  placeholder:@"youtube.com/@channel"
+                                        value:[[NSURL URLWithString:cur ?: @""].host.lowercaseString hasSuffix:@"youtube.com"] ? cur : nil];
+  if (input) [self createLiveFolderFromInput:input done:nil];
+}
+- (IBAction)newMyPullRequestsFolder:(id)sender { [self createMyPullRequestsFolder]; }
+// Your open pull requests and the ones waiting for your review, read from github.com with this Space's own sign-in.
+// One per Space: asking again shows the existing folder and refreshes it.
+- (ArcItem*)createMyPullRequestsFolder {
+  if (!_space) return nil;
+  NSMutableArray<ArcItem*>* mine = [NSMutableArray array];
+  [self collectLiveFolders:_space.pinned into:mine];
+  [self collectLiveFolders:_space.unpinned into:mine];
+  for (ArcItem* f in mine)
+    if ([f.liveKind isEqualToString:@"github-mine"]) {
+      [_outline expandItem:f];
+      [self refreshLiveFolder:f done:nil];
+      return f;
+    }
+  return [self createLiveFolderKind:@"github-mine" source:@"@me" title:@"My Pull Requests"];
+}
+// Creates a Live Folder from what the user typed. YouTube addresses are read once to find the channel id.
+- (void)createLiveFolderFromInput:(NSString*)input done:(void (^)(ArcItem* folder))done {
+  NSDictionary* src = LiveFolderSourceFromInput(input, NO);
+  if (!src) {
+    if (!self.selfTestProfiles) NSBeep();
+    if (done) done(nil);
+    return;
+  }
   NSString* kind = src[@"kind"], *source = src[@"source"];
+  if ([kind isEqualToString:@"youtube"]) {
+    NSString* page = src[@"resolve"] ?: [@"https://www.youtube.com/channel/" stringByAppendingString:source];
+    __weak MainWindowController* weakSelf = self;
+    LiveFolderResolveYouTube(page, ^(NSString* channelID, NSString* name, NSString* error) {
+      MainWindowController* me = weakSelf;
+      NSString* cid = channelID ?: source;  // a /channel/ address still works if its page couldn't be read
+      if (!me || !cid) {
+        if (me && !me.selfTestProfiles) {
+          NSAlert* a = [NSAlert new];
+          a.messageText = @"Couldn't find that YouTube channel";
+          a.informativeText = error ?: @"";
+          [a runModal];
+        }
+        if (done) done(nil);
+        return;
+      }
+      ArcItem* f = [me createLiveFolderKind:@"youtube" source:cid title:name.length ? name : @"YouTube"];
+      if (done) done(f);
+    });
+    return;
+  }
   NSString* title = [kind isEqualToString:@"feed"] ? ([NSURL URLWithString:source].host ?: source)
                     : [NSString stringWithFormat:@"%@ %@", source.lastPathComponent,
                                                  [kind isEqualToString:@"github-prs"] ? @"Pull Requests" : @"Issues"];
-  [self createLiveFolderKind:kind source:source title:title];
+  ArcItem* f = [self createLiveFolderKind:kind source:source title:title];
+  if (done) done(f);
 }
 - (void)menuRefreshLive:(NSMenuItem*)mi { [self refreshLiveFolder:mi.representedObject done:nil]; }
 - (void)menuDismissLive:(NSMenuItem*)mi {
@@ -6467,6 +6586,9 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
       c.url = e.url;
       c.pinnedURL = e.url;  // like a pinned tab: closing it returns it to the feed's address
       c.children = [NSMutableArray array];
+      // Arc: new entries come in unread once the folder has been filled (not the first fill, not status entries).
+      c.liveUnread = f.liveFilled && ![e.url isEqualToString:kLiveFolderGitHubSignInURL] &&
+                     ![e.url isEqualToString:kLiveFolderGitHubNoneURL];
     }
     c.title = e.title;
     [next addObject:c];
@@ -6488,18 +6610,124 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   if (!f.liveKind) { if (done) done(NO); return; }
   __weak MainWindowController* weakSelf = self;
   f.liveRefreshedAt = [NSDate date];  // also throttles retries after an error
-  LiveFolderFetch(f.liveKind, f.liveSource, kLiveFolderMaxItems, ^(NSArray<LiveFolderEntry*>* entries, NSString* error) {
+  void (^finish)(NSArray<LiveFolderEntry*>*, NSString*) = ^(NSArray<LiveFolderEntry*>* entries, NSString* error) {
     MainWindowController* me = weakSelf;
     if (!me) return;
     f.liveError = error;
     if (entries) [me applyLiveEntries:entries toFolder:f];
+    if (entries && !f.liveSignInNeeded) f.liveFilled = YES;
     if ([me spaceOwningItem:f] == me->_space) {
       [me->_outline reloadItem:f reloadChildren:YES];
       if (me->_shown) [me selectSidebarRowFor:me->_shown];
     }
     [me scheduleSave];
     if (done) done(entries != nil);
-  });
+  };
+  if ([f.liveKind isEqualToString:@"github-mine"]) {
+    [self fetchMyPullRequestsForFolder:f done:^(NSArray<LiveFolderEntry*>* entries, BOOL signedIn, NSString* error) {
+      // Empty states: a sign-in entry while the Space isn't signed in to GitHub, else "No open pull requests".
+      NSArray<LiveFolderEntry*>* shown = entries;
+      if (entries && (!signedIn || !entries.count)) {
+        LiveFolderEntry* e = [LiveFolderEntry new];
+        e.url = signedIn ? kLiveFolderGitHubNoneURL : kLiveFolderGitHubSignInURL;
+        e.title = signedIn ? @"No open pull requests" : @"Sign in to GitHub to see your pull requests";
+        shown = @[ e ];
+      }
+      f.liveSignInNeeded = entries && !signedIn;
+      if (!entries && [error isEqualToString:kSpaceStartingError]) f.liveRefreshedAt = nil;  // retry on the next tick
+      finish(shown, error ?: (f.liveSignInNeeded ? @"Not signed in to GitHub" : nil));
+    }];
+    return;
+  }
+  LiveFolderFetch(f.liveKind, f.liveSource, kLiveFolderMaxItems, finish);
+}
+// Reads a page with a Space's own cookies (its sign-ins), like a tab in that Space would. Main queue callback.
+- (void)fetchPage:(NSString*)url withCookiesOfSpace:(ArcSpace*)space
+             done:(void (^)(NSString* html, NSString* error))done {
+  if (LiveFolderTestPagesActive() || self.selfTestProfiles) {  // self-tests: local files only, never the network
+    NSData* data = LiveFolderTestPage(url);
+    NSString* html = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+    dispatch_async(dispatch_get_main_queue(), ^{ done(html, html ? nil : @"No network in self-tests"); });
+    return;
+  }
+  CefRefPtr<CefRequestContext> ctx = space ? [self contextForSpace:space] : nullptr;
+  if (!ctx || ![self contextIsReady:space.profileDirectory]) {
+    dispatch_async(dispatch_get_main_queue(), ^{ done(nil, kSpaceStartingError); });
+    return;
+  }
+  class PageFetch : public CefURLRequestClient {
+   public:
+    explicit PageFetch(void (^b)(NSString*, NSString*)) : b_([b copy]), data_([NSMutableData data]) {}
+    void OnRequestComplete(CefRefPtr<CefURLRequest> request) override {
+      CefRefPtr<CefResponse> resp = request->GetResponse();
+      int status = resp ? resp->GetStatus() : 0;
+      BOOL ok = request->GetRequestStatus() == UR_SUCCESS && status > 0 && status < 400;
+      NSString* html = ok ? [[NSString alloc] initWithData:data_ encoding:NSUTF8StringEncoding] : nil;
+      NSString* err = ok ? nil
+                         : (status >= 400 ? [NSString stringWithFormat:@"GitHub answered %d", status]
+                                          : @"Couldn't reach GitHub");
+      void (^b)(NSString*, NSString*) = b_;
+      dispatch_async(dispatch_get_main_queue(), ^{ b(html, err); });
+    }
+    void OnUploadProgress(CefRefPtr<CefURLRequest>, int64_t, int64_t) override {}
+    void OnDownloadProgress(CefRefPtr<CefURLRequest>, int64_t, int64_t) override {}
+    void OnDownloadData(CefRefPtr<CefURLRequest>, const void* data, size_t len) override {
+      if (data_.length < 16 * 1024 * 1024) [data_ appendBytes:data length:len];
+    }
+    bool GetAuthCredentials(bool, const CefString&, int, const CefString&, const CefString&,
+                            CefRefPtr<CefAuthCallback>) override { return false; }
+   private:
+    void (^b_)(NSString*, NSString*);
+    NSMutableData* data_;
+    IMPLEMENT_REFCOUNTING(PageFetch);
+  };
+  CefRefPtr<CefRequest> req = CefRequest::Create();
+  req->SetURL(url.UTF8String);
+  req->SetMethod("GET");
+  req->SetFlags(UR_FLAG_ALLOW_STORED_CREDENTIALS | UR_FLAG_SKIP_CACHE);
+  req->SetFirstPartyForCookies(url.UTF8String);  // a top-level visit, so the site's own (SameSite) cookies go along
+  CefRequest::HeaderMap headers;
+  headers.insert(std::make_pair("Accept", "text/html,application/xhtml+xml"));
+  req->SetHeaderMap(headers);
+  CefURLRequest::Create(req, new PageFetch(done), ctx);
+}
+// "github-mine": GitHub's search pages for your open pull requests, then the ones waiting for your review.
+- (void)fetchMyPullRequestsForFolder:(ArcItem*)f
+                                done:(void (^)(NSArray<LiveFolderEntry*>* entries, BOOL signedIn, NSString* error))done {
+  ArcSpace* space = [self spaceOwningItem:f] ?: _space;
+  NSArray<NSString*>* urls = LiveFolderGitHubMineURLs();
+  __weak MainWindowController* weakSelf = self;
+  [self fetchPage:urls[0] withCookiesOfSpace:space done:^(NSString* html, NSString* error) {
+    BOOL signedIn = NO;
+    NSArray<LiveFolderEntry*>* mine = LiveFolderParseGitHubHTML(html, kLiveFolderMaxItems, NO, &signedIn);
+    if (!mine) { done(nil, NO, error ?: @"Couldn't read GitHub's page"); return; }
+    if (!signedIn || !weakSelf) { done(@[], signedIn, nil); return; }
+    [weakSelf fetchPage:urls[1] withCookiesOfSpace:space done:^(NSString* html2, NSString* error2) {
+      BOOL signedIn2 = NO;
+      NSArray<LiveFolderEntry*>* review = LiveFolderParseGitHubHTML(html2, kLiveFolderMaxItems, YES, &signedIn2) ?: @[];
+      NSMutableArray<LiveFolderEntry*>* all = [mine mutableCopy];
+      NSMutableSet* seen = [NSMutableSet set];
+      for (LiveFolderEntry* e in mine) [seen addObject:e.url];
+      for (LiveFolderEntry* e in review)
+        if (![seen containsObject:e.url] && all.count < kLiveFolderMaxItems) { [seen addObject:e.url]; [all addObject:e]; }
+      done(all, YES, nil);
+    }];
+  }];
+}
+// Tests: "dot" on an unread Live Folder tab, the unread count on a Live Folder's row, else "".
+- (NSString*)liveBadgeForItem:(ArcItem*)item {
+  NSInteger row = [_outline rowForItem:item];
+  NSTableCellView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
+  NSImageView* dot = [cell viewWithTag:79];
+  NSTextField* count = [cell viewWithTag:80];
+  if (dot && !dot.hidden) return @"dot";
+  if (count && !count.hidden) return count.stringValue;
+  return @"";
+}
+- (NSUInteger)liveUnreadCountOf:(ArcItem*)folder {
+  NSUInteger n = 0;
+  for (ArcItem* c in folder.children) n += c.liveUnread ? 1 : 0;
+  return n;
 }
 // Tests: write a cookie into the current Space's profile and flush it to disk; read cookie names for a URL.
 - (void)setTestCookie:(NSString*)name value:(NSString*)value url:(NSString*)url session:(BOOL)session done:(void (^)(BOOL))done {

@@ -328,6 +328,13 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (ArcItem*)createLiveFolderKind:(NSString*)kind source:(NSString*)source title:(NSString*)title;
 - (void)refreshLiveFolder:(ArcItem*)folder done:(void (^)(BOOL ok))done;
 - (BOOL)dismissLiveFolderTab:(ArcItem*)item;
+- (IBAction)newMyPullRequestsFolder:(id)sender;
+- (IBAction)newYouTubeLiveFolder:(id)sender;
+- (NSMenuItem*)newLiveFolderMenuItem;                           // the + menu's New Live Folder submenu
+- (ArcItem*)createMyPullRequestsFolder;                          // GitHub: My Pull Requests (one per Space)
+- (void)createLiveFolderFromInput:(NSString*)input done:(void (^)(ArcItem* folder))done;
+- (NSString*)liveBadgeForItem:(ArcItem*)item;                    // tests: "dot", a folder's unread count, or ""
+- (NSUInteger)liveUnreadCountOf:(ArcItem*)folder;
 - (void)deleteSidebarItem:(ArcItem*)item;  // tests
 - (BOOL)writeSidebarSnapshot:(NSString*)path;  // design checks
 - (void)setTestCookie:(NSString*)name value:(NSString*)value url:(NSString*)url session:(BOOL)session done:(void (^)(BOOL ok))done;  // tests
