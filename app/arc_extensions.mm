@@ -9,7 +9,7 @@ NSString* NotArcExtensionsDirectory(BOOL selfTest) {
   return [support stringByAppendingPathComponent:selfTest ? @"SelfTestExtensions" : @"Extensions From Arc"];
 }
 
-static NSString* ResolveName(NSDictionary* manifest, NSString* dir) {
+NSString* ExtensionDisplayName(NSDictionary* manifest, NSString* dir) {
   NSString* name = manifest[@"name"];
   if (![name isKindOfClass:NSString.class]) return @"";
   if (![name hasPrefix:@"__MSG_"]) return name;
@@ -42,7 +42,7 @@ NSArray<ArcExtensionCopy*>* ArcCopyExtensions(NSString* arcUserData, NSArray<NSS
       [seen addObject:extID];
       ArcExtensionCopy* c = [ArcExtensionCopy new];
       c.extensionID = extID;
-      c.name = ResolveName(manifest, src);
+      c.name = ExtensionDisplayName(manifest, src);
       if ([manifest[@"manifest_version"] intValue] < 3) {
         c.skippedMV2 = YES;
         [out addObject:c];

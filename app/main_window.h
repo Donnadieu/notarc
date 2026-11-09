@@ -222,6 +222,20 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (IBAction)moveShownToMainWindow:(id)sender;  // Today header button in other windows
 - (BOOL)moveToMainButtonShown;              // tests
 - (BOOL)chromePageOfItem:(ArcItem*)item isInWindow:(NSWindow*)win;  // tests
+// Chrome extensions (#66). The puzzle-piece button in the address pill (Chrome-style pages on) opens the picker:
+// each extension with Open (its popup page, in a tab), Options, Turn Off/On and Remove, plus Install Extension...
+// (Chrome Web Store link or ID), Chrome Web Store and Manage Extensions (chrome://extensions). Installs, removals
+// and on/off take effect when NotArc relaunches (CEF can only load extensions at startup).
+@property(nonatomic, copy) NSString* extensionsDirectoryOverride;  // tests: picker and installs use this folder
+- (IBAction)showExtensionPicker:(id)sender;
+- (IBAction)installExtension:(id)sender;
+- (IBAction)manageExtensions:(id)sender;
+- (NSMenu*)extensionPickerMenuForURL:(NSString*)url;  // what the picker shows when the shown tab is at `url`
+- (void)installExtensionFromInput:(NSString*)input done:(void (^)(NSString* name, NSError* error))done;
+- (BOOL)setExtension:(NSString*)extensionID enabled:(BOOL)enabled;
+- (BOOL)removeExtensionWithID:(NSString*)extensionID;
+- (BOOL)extensionPickerButtonShown;  // tests
+- (NSInteger)relaunchRequestsForTest;
 // AppleScript (#76): "select", "back", "forward", "reload", "stop", "close", or "loading" (returns it) for a tab.
 - (BOOL)scriptItem:(ArcItem*)item command:(NSString*)command;
 // Call controls (#47): the tab using the camera/mic, and the sidebar's mute / camera-off toggles.

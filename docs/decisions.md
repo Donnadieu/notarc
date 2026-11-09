@@ -103,3 +103,31 @@ trackpad; everything else is checked by the hidden self-test.
     both, and their unread counts already show as badges (#20). Gmail uses Gmail's own unread feed with the Space's
     sign-in (same as email peeking, #44); calendar Favorites (Google Calendar, Outlook calendar, iCloud, Proton,
     Cal.com) show today's events from the Mac's Calendar.
+
+## 2026-11-09: Chrome extensions, Web Store installs and the picker (#66)
+
+31. **Extensions need Chrome-style pages.** CEF 156's default (Alloy) pages have no extension system; it was removed
+    in Chromium 128. The picker button and Manage Extensions only show with Chrome-style pages on (Settings, still
+    off by default until typing, focus and full screen are checked on screen). Install Extension... works either
+    way: the extension is saved and loads once Chrome-style pages are on. The line stays partial until they're the
+    default.
+32. **NotArc installs from the Web Store itself.** CEF has no API to install, load or turn off an extension while
+    running, and Chromium's own "Add to Chrome" flow isn't wired up in CEF. NotArc downloads the extension's signed
+    package from the Web Store's public download address (clients2.google.com, one request per install or update,
+    no sign-in), checks every signature in it and that it belongs to the ID asked for, refuses Manifest V2, and
+    unpacks it into NotArc's own extensions folder with the manifest "key" set, so it keeps its Web Store ID (and
+    its saved settings). Extensions load at startup with `--load-extension`, like the Arc copies.
+33. **Changes apply on relaunch.** Install, Remove and Turn Off/On take effect the next time NotArc starts, so each
+    one offers "Relaunch Now" (tabs come back). Turned-off extensions are a NotArc list (`disabledExtensions`) that
+    is left out of `--load-extension`.
+34. **An extension's popup opens in a tab.** CEF has no extension toolbar to anchor Chromium's popup bubble to, so
+    "Open" shows the popup page as a new tab. Extensions that act on "the current tab" from their popup may act on
+    that tab instead.
+35. **The picker sits in the address pill** (puzzle piece, next to Boost, Copy URL and Site Settings), as in Arc's
+    URL bar. On a Web Store page it offers "Add This Extension to NotArc". Extensions that Chromium installed into a
+    Space's profile by itself are listed too, with "Manage on Extensions Page" (Chromium owns those).
+36. **Updates are manual** ("Update from Chrome Web Store" in each extension's menu): unpacked extensions don't
+    auto-update, and NotArc doesn't check the Web Store in the background.
+37. **Self-test without the network:** the install path is tested with packages NotArc signs in memory during the
+    test (fresh RSA key, never stored) and a stubbed download. A test run can turn Chrome-style pages on with
+    `NOTARC_CHROME_PAGES=1` (only together with `--selftest`), since the shared runner passes no extra arguments.

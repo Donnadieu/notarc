@@ -301,6 +301,17 @@ static NSArray* LittleArchiveChoices() {
 
 - (void)windowDidBecomeKey:(NSNotification*)n { [self refreshDefaultBrowser]; }
 
+- (BOOL)hasCheckboxForKey:(NSString*)key {
+  NSMutableArray<NSView*>* views = [NSMutableArray arrayWithObject:self.window.contentView];
+  while (views.count) {
+    NSView* v = views.lastObject;
+    [views removeLastObject];
+    if ([v isKindOfClass:NSButton.class] && [v.identifier isEqualToString:key]) return YES;
+    [views addObjectsFromArray:v.subviews];
+  }
+  return NO;
+}
+
 - (NSTextField*)heading:(NSString*)text {
   NSTextField* f = [NSTextField labelWithString:text];
   f.font = [NSFont boldSystemFontOfSize:13];
@@ -374,6 +385,11 @@ static NSArray* LittleArchiveChoices() {
     little,
     [self heading:@"Downloads"],
     downloads,
+    [self heading:@"Extensions"],
+    [self check:@"Use Chrome-style pages (needed for Chrome extensions)" key:@"chromePages"],
+    [self note:@"Pages run in Chromium's full browser mode, which Chrome extensions need (the extension picker and "
+               @"installs from the Chrome Web Store). It's still being tested: if typing, focus or full screen act up, "
+               @"turn it off. Takes effect the next time NotArc opens."],
   ]];
   stack.orientation = NSUserInterfaceLayoutOrientationVertical;
   stack.alignment = NSLayoutAttributeLeading;
@@ -390,6 +406,7 @@ static NSArray* LittleArchiveChoices() {
   for (NSView* v in stack.views)
     if ([v isKindOfClass:NSTextField.class] && ((NSTextField*)v).cell.wraps)
       [v.widthAnchor constraintEqualToConstant:420].active = YES;
+  [w setContentSize:NSMakeSize(480, MAX(480, stack.fittingSize.height))];  // everything fits, nothing clipped
   [w center];
   return self;
 }

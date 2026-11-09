@@ -60,4 +60,5 @@ double SettingDouble(NSString* key);
 @interface SettingsWindowController : NSWindowController
 + (instancetype)shared;
 - (BOOL)defaultBrowserRowConsistent;  // tests
+- (BOOL)hasCheckboxForKey:(NSString*)key;  // tests
 @end

@@ -6,6 +6,7 @@
 #import "app/arc_history.h"
 #import "app/chrome_page.h"
 #import "app/arc_extensions.h"
+#import "app/extensions.h"
 #import "app/link_routing.h"
 #import "app/link_routing_editor.h"
 #import "app/bookmark_import.h"
@@ -882,6 +883,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSView* _captureOverlay;
   NSString* _captureDirectory;
   NSButton* _boostButton;   // Arc: Boost indicator in the address pill
+  NSButton* _extensionsButton;  // puzzle piece in the address pill (Chrome-style pages only, #66)
+  NSInteger _relaunchRequests;
   NSString* _boostIndicator; // tests: "on" / "off" / "none"
   NSTextField* _addressPillText;
   NSView* _sidebarNav;
@@ -1129,10 +1132,12 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _addressPillText.lineBreakMode = NSLineBreakByTruncatingTail;
   _addressPillText.frame = NSMakeRect(12, 9, _addressPill.bounds.size.width - 12 - 60, 18);
   [_addressPill addSubview:_addressPillText];
-  NSArray* pillButtons = @[ @[ @"paintbrush.pointed", @"editBoost:", @"Boost This Site" ], @[ @"link", @"copyCurrentURL:", @"Copy URL" ],
-                            @[ @"slider.horizontal.3", @"showSiteSettings:", @"Site Settings" ] ];
-  _addressPillText.frame = NSMakeRect(11, 9, _addressPill.bounds.size.width - 11 - 86, 18);
-  CGFloat px = _addressPill.bounds.size.width - 6 - 3 * 26;
+  NSMutableArray* pillButtons = [@[ @[ @"paintbrush.pointed", @"editBoost:", @"Boost This Site" ], @[ @"link", @"copyCurrentURL:", @"Copy URL" ],
+                                    @[ @"slider.horizontal.3", @"showSiteSettings:", @"Site Settings" ] ] mutableCopy];
+  // Arc's extension picker sits in the address pill; extensions only run in Chrome-style pages.
+  if (ChromePagesEnabled()) [pillButtons addObject:@[ @"puzzlepiece.extension", @"showExtensionPicker:", @"Extensions" ]];
+  _addressPillText.frame = NSMakeRect(11, 9, _addressPill.bounds.size.width - 11 - 8 - 26 * (CGFloat)pillButtons.count, 18);
+  CGFloat px = _addressPill.bounds.size.width - 6 - 26 * (CGFloat)pillButtons.count;
   for (NSArray* n in pillButtons) {
     NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:n[0] accessibilityDescription:n[2]]
                                      target:self action:NSSelectorFromString(n[1])];
@@ -1141,6 +1146,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
     b.contentTintColor = NSColor.secondaryLabelColor;
     b.frame = NSMakeRect(px, 5, 26, 26);
     if ([n[1] isEqualToString:@"editBoost:"]) _boostButton = b;
+    if ([n[1] isEqualToString:@"showExtensionPicker:"]) _extensionsButton = b;
     [_addressPill addSubview:b];
     px += 26;
   }
@@ -3626,6 +3632,243 @@ static const CGFloat kPaneGap = 6;
   return ArcCopyExtensions(userData, profiles, destination);
 }
 
+// --- Chrome extensions (#66): picker, Install Extension..., on/off and Remove ---
+static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since launch wait for a relaunch
+
+- (NSString*)extensionsDirectory {
+  return self.extensionsDirectoryOverride ?: NotArcExtensionsDirectory(self.selfTestProfiles);
+}
+
+- (NSMutableArray<NSString*>*)disabledExtensionIDs {
+  id a = SettingObject(kDisabledExtensionsKey);
+  return [a isKindOfClass:NSArray.class] ? [a mutableCopy] : [NSMutableArray array];
+}
+
+// Each Space's Chromium profile folder: extensions installed by Chromium itself (the Web Store's own button) live there.
+- (NSArray<NSString*>*)chromeProfileFolders {
+  if (self.extensionsDirectoryOverride) return @[];
+  NSString* support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
+      stringByAppendingPathComponent:@"NotArc"];
+  NSString* p = _space.profileDirectory;
+  if (!p.length) return @[];
+  return @[ [support stringByAppendingPathComponent:[(self.selfTestProfiles ? @"SelfTest Space " : @"Space ") stringByAppendingString:p]] ];
+}
+
+- (NSArray<NotArcExtension*>*)installedExtensions {
+  return InstalledExtensions([self extensionsDirectory], [self chromeProfileFolders],
+                             [NSSet setWithArray:[self disabledExtensionIDs]]);
+}
+
+- (BOOL)extensionPickerButtonShown { return _extensionsButton && !_extensionsButton.hidden; }
+- (NSInteger)relaunchRequestsForTest { return _relaunchRequests; }
+
+- (NSMenuItem*)pickerItem:(NSString*)title action:(SEL)action object:(id)object {
+  NSMenuItem* mi = [[NSMenuItem alloc] initWithTitle:title action:action keyEquivalent:@""];
+  mi.target = self;
+  mi.representedObject = object;
+  return mi;
+}
+
+- (NSMenu*)extensionPickerMenuForURL:(NSString*)url {
+  NSMenu* menu = [[NSMenu alloc] initWithTitle:@"Extensions"];
+  menu.autoenablesItems = NO;
+  NSString* pageID = ExtensionIDFromInput(url ?: @"");
+  if (pageID) [menu addItem:[self pickerItem:@"Add This Extension to NotArc" action:@selector(installExtensionFromPage:) object:pageID]];
+  if (gExtensionsChanged)
+    [menu addItem:[self pickerItem:@"Relaunch NotArc to Apply Changes" action:@selector(relaunchToApplyExtensions:) object:nil]];
+  if (menu.numberOfItems) [menu addItem:NSMenuItem.separatorItem];
+  NSArray<NotArcExtension*>* list = [self installedExtensions];
+  for (NotArcExtension* x in list) {
+    NSString* title = x.enabled ? x.name : [x.name stringByAppendingString:@" (off)"];
+    NSMenuItem* row = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
+    row.representedObject = x;
+    NSImage* icon = x.iconPath ? [[NSImage alloc] initWithContentsOfFile:x.iconPath] : nil;
+    if (!icon) icon = [NSImage imageWithSystemSymbolName:@"puzzlepiece.extension" accessibilityDescription:nil];
+    icon.size = NSMakeSize(16, 16);
+    row.image = icon;
+    NSMenu* sub = [[NSMenu alloc] initWithTitle:x.name];
+    sub.autoenablesItems = NO;
+    if (x.popupPage) [sub addItem:[self pickerItem:@"Open" action:@selector(openExtensionPopup:) object:x]];
+    if (x.optionsPage) [sub addItem:[self pickerItem:@"Options" action:@selector(openExtensionOptions:) object:x]];
+    for (NSMenuItem* mi in sub.itemArray) mi.enabled = x.enabled && ChromePagesEnabled();
+    if (sub.numberOfItems) [sub addItem:NSMenuItem.separatorItem];
+    if (x.managedByNotArc) {
+      [sub addItem:[self pickerItem:x.enabled ? @"Turn Off" : @"Turn On" action:@selector(toggleExtension:) object:x]];
+      [sub addItem:[self pickerItem:@"Update from Chrome Web Store" action:@selector(updateExtension:) object:x]];
+      [sub addItem:[self pickerItem:@"Remove..." action:@selector(removeExtension:) object:x]];
+    } else {  // installed by Chromium itself: on/off and Remove live on its Extensions page
+      NSMenuItem* manage = [self pickerItem:@"Manage on Extensions Page" action:@selector(manageChromeExtension:) object:x];
+      manage.enabled = ChromePagesEnabled();
+      [sub addItem:manage];
+    }
+    row.submenu = sub;
+    [menu addItem:row];
+  }
+  if (!list.count) {
+    NSMenuItem* none = [[NSMenuItem alloc] initWithTitle:@"No extensions yet" action:nil keyEquivalent:@""];
+    none.enabled = NO;
+    [menu addItem:none];
+  }
+  [menu addItem:NSMenuItem.separatorItem];
+  [menu addItem:[self pickerItem:@"Install Extension..." action:@selector(installExtension:) object:nil]];
+  [menu addItem:[self pickerItem:@"Chrome Web Store" action:@selector(openChromeWebStore:) object:nil]];
+  NSMenuItem* manage = [self pickerItem:@"Manage Extensions" action:@selector(manageExtensions:) object:nil];
+  manage.enabled = ChromePagesEnabled();
+  [menu addItem:manage];
+  return menu;
+}
+
+- (IBAction)showExtensionPicker:(id)sender {
+  NSMenu* menu = [self extensionPickerMenuForURL:[self currentURL]];
+  NSView* anchor = _extensionsButton ?: _addressPill;
+  [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, NSHeight(anchor.bounds) + 4) inView:anchor];
+}
+
+- (void)openExtensionPage:(NSString*)page of:(NotArcExtension*)x {
+  if (!page.length || !x.extensionID) return;
+  NSString* rel = [page hasPrefix:@"/"] ? [page substringFromIndex:1] : page;
+  [self openInNewTab:[NSString stringWithFormat:@"chrome-extension://%@/%@", x.extensionID, rel]];
+}
+// CEF has no extension toolbar to hang Chromium's popup bubble on, so the popup page opens as a tab.
+- (IBAction)openExtensionPopup:(NSMenuItem*)sender { [self openExtensionPage:((NotArcExtension*)sender.representedObject).popupPage of:sender.representedObject]; }
+- (IBAction)openExtensionOptions:(NSMenuItem*)sender { [self openExtensionPage:((NotArcExtension*)sender.representedObject).optionsPage of:sender.representedObject]; }
+- (IBAction)manageExtensions:(id)sender { [self openInNewTab:@"chrome://extensions"]; }
+- (IBAction)manageChromeExtension:(NSMenuItem*)sender {
+  [self openInNewTab:[@"chrome://extensions/?id=" stringByAppendingString:((NotArcExtension*)sender.representedObject).extensionID]];
+}
+- (IBAction)openChromeWebStore:(id)sender { [self openInNewTab:@"https://chromewebstore.google.com/"]; }
+
+- (BOOL)setExtension:(NSString*)extensionID enabled:(BOOL)enabled {
+  if (!extensionID.length) return NO;
+  NSMutableArray* off = [self disabledExtensionIDs];
+  [off removeObject:extensionID];
+  if (!enabled) [off addObject:extensionID];
+  SettingSetObject(kDisabledExtensionsKey, off);
+  gExtensionsChanged = YES;
+  return YES;
+}
+- (IBAction)toggleExtension:(NSMenuItem*)sender {
+  NotArcExtension* x = sender.representedObject;
+  [self setExtension:x.extensionID enabled:!x.enabled];
+  [self offerRelaunchForExtensions:[NSString stringWithFormat:x.enabled ? @"%@ turns off when NotArc relaunches." :
+                                                                          @"%@ turns on when NotArc relaunches.", x.name]];
+}
+
+- (BOOL)removeExtensionWithID:(NSString*)extensionID {
+  if (!RemoveExtensionFolder([self extensionsDirectory], extensionID)) return NO;
+  NSMutableArray* off = [self disabledExtensionIDs];
+  [off removeObject:extensionID];
+  SettingSetObject(kDisabledExtensionsKey, off);
+  gExtensionsChanged = YES;
+  return YES;
+}
+- (IBAction)removeExtension:(NSMenuItem*)sender {
+  NotArcExtension* x = sender.representedObject;
+  NSAlert* a = [NSAlert new];
+  a.messageText = [NSString stringWithFormat:@"Remove %@?", x.name];
+  a.informativeText = @"It's deleted from NotArc and stops when NotArc relaunches.";
+  [a addButtonWithTitle:@"Remove"];
+  [a addButtonWithTitle:@"Cancel"];
+  __weak MainWindowController* weakSelf = self;
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r == NSAlertFirstButtonReturn && [weakSelf removeExtensionWithID:x.extensionID])
+      dispatch_async(dispatch_get_main_queue(), ^{
+        [weakSelf offerRelaunchForExtensions:[NSString stringWithFormat:@"%@ is removed.", x.name]];
+      });
+  }];
+}
+
+- (void)installExtensionFromInput:(NSString*)input done:(void (^)(NSString* name, NSError* error))done {
+  NSString* extID = ExtensionIDFromInput(input ?: @"");
+  if (!extID) {
+    done(nil, [NSError errorWithDomain:@"NotArcExtensions" code:2 userInfo:@{
+      NSLocalizedDescriptionKey : @"Paste a link to an extension's Chrome Web Store page, or its 32-letter ID."}]);
+    return;
+  }
+  __weak MainWindowController* weakSelf = self;
+  InstallExtensionFromWebStore(extID, [self extensionsDirectory], ^(NSString* installedID, NSString* name, NSError* error) {
+    if (name) [weakSelf setExtension:installedID enabled:YES];  // a reinstall turns it back on
+    done(name, error);
+  });
+}
+
+- (void)reportExtensionInstall:(NSString*)name error:(NSError*)error {
+  if (!name) {
+    NSAlert* a = [NSAlert new];
+    a.messageText = @"Couldn't install the extension";
+    a.informativeText = error.localizedDescription ?: @"";
+    [a beginSheetModalForWindow:self.window completionHandler:nil];
+    return;
+  }
+  [self offerRelaunchForExtensions:[NSString stringWithFormat:@"%@ is installed.", name]];
+}
+
+- (void)offerRelaunchForExtensions:(NSString*)message {
+  NSAlert* a = [NSAlert new];
+  a.messageText = message;
+  if (!ChromePagesEnabled()) {
+    a.informativeText = @"Extensions run once Chrome-style pages are on (Settings) and NotArc relaunches.";
+    [a beginSheetModalForWindow:self.window completionHandler:nil];
+    return;
+  }
+  a.informativeText = @"Changes to extensions take effect when NotArc relaunches. Your tabs come back where they were.";
+  [a addButtonWithTitle:@"Relaunch Now"];
+  [a addButtonWithTitle:@"Later"];
+  __weak MainWindowController* weakSelf = self;
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r == NSAlertFirstButtonReturn)
+      dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf relaunchToApplyExtensions:nil]; });
+  }];
+}
+
+- (IBAction)relaunchToApplyExtensions:(id)sender {
+  ++_relaunchRequests;
+  if (self.selfTestProfiles) return;  // tests count the request; they never quit or reopen anything
+  NSTask* t = [NSTask new];
+  t.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
+  t.arguments = @[ @"-c", @"while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; open \"$2\"", @"notarc-relaunch",
+                   @(getpid()).stringValue, NSBundle.mainBundle.bundlePath ];
+  if ([t launchAndReturnError:nil]) [NSApp terminate:nil];
+}
+
+- (IBAction)installExtensionFromPage:(NSMenuItem*)sender {
+  __weak MainWindowController* weakSelf = self;
+  [self installExtensionFromInput:sender.representedObject done:^(NSString* name, NSError* error) {
+    [weakSelf reportExtensionInstall:name error:error];
+  }];
+}
+- (IBAction)updateExtension:(NSMenuItem*)sender {  // same as a fresh install: the Web Store's current version
+  __weak MainWindowController* weakSelf = self;
+  [self installExtensionFromInput:((NotArcExtension*)sender.representedObject).extensionID done:^(NSString* name, NSError* error) {
+    [weakSelf reportExtensionInstall:name error:error];
+  }];
+}
+
+- (IBAction)installExtension:(id)sender {
+  NSAlert* a = [NSAlert new];
+  a.messageText = @"Install Extension";
+  a.informativeText = @"Paste a Chrome Web Store link or an extension ID. NotArc downloads the extension from the "
+                      @"Chrome Web Store and checks its signature before installing it.";
+  NSTextField* field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 340, 24)];
+  field.placeholderString = @"https://chromewebstore.google.com/detail/...";
+  NSString* here = [self currentURL];
+  if (ExtensionIDFromInput(here ?: @"")) field.stringValue = here;
+  a.accessoryView = field;
+  [a addButtonWithTitle:@"Install"];
+  [a addButtonWithTitle:@"Cancel"];
+  a.window.initialFirstResponder = field;
+  __weak MainWindowController* weakSelf = self;
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r != NSAlertFirstButtonReturn) return;
+    NSString* text = field.stringValue;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [weakSelf installExtensionFromInput:text done:^(NSString* name, NSError* error) {
+        [weakSelf reportExtensionInstall:name error:error];
+      }];
+    });
+  }];
+}
+
 - (IBAction)importArcExtensionsFromMenu:(id)sender {
   NSArray<ArcExtensionCopy*>* copies =
       [self importArcExtensionsInto:NotArcExtensionsDirectory(NO)
@@ -3639,7 +3882,7 @@ static const CGFloat kPaneGap = 6;
   if (skipped.count)
     [info appendFormat:@"\n\nNot supported by current Chromium: %@ (try uBlock Origin Lite).", [skipped componentsJoinedByString:@", "]];
   [info appendString:ChromePagesEnabled() ? @"\n\nThey load the next time NotArc starts. Password managers need one sign-in."
-                                          : @"\n\nThey load once Chrome-style pages are turned on (coming soon)."];
+                                          : @"\n\nThey load once Chrome-style pages are on (Settings) and NotArc relaunches."];
   a.informativeText = info;
   [a beginSheetModalForWindow:self.window completionHandler:nil];
 }
@@ -7432,6 +7675,10 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 - (IBAction)resetAllPinnedTabs:(id)sender { [self resetPinnedTabsInSpace]; }
 
 - (BOOL)validateMenuItem:(NSMenuItem*)mi {
+  // chrome:// and chrome-extension:// pages only open in Chrome-style pages.
+  if (mi.action == @selector(manageExtensions:) || mi.action == @selector(openExtensionPopup:) ||
+      mi.action == @selector(openExtensionOptions:) || mi.action == @selector(manageChromeExtension:))
+    return ChromePagesEnabled();
   if (mi.action == @selector(translatePage:)) {
     NSString* url = [self currentURL];
     BOOL translated = url && OriginalURLForTranslated(url);

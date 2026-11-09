@@ -10,7 +10,7 @@
 #include "include/cef_client.h"
 #include "include/cef_request_context.h"
 
-BOOL ChromePagesEnabled(void);  // user default "chromePages" or --chrome-pages; off by default for now
+BOOL ChromePagesEnabled(void);  // user default "chromePages", --chrome-pages, or NOTARC_CHROME_PAGES=1 with --selftest; off by default
 
 @interface ChromePageHost : NSObject
 - (instancetype)initWithClient:(CefRefPtr<CefClient>)client

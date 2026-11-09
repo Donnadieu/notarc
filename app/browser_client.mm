@@ -3,11 +3,13 @@
 #include "app/content_blocker.h"
 
 #include <cstdio>
+#include <mutex>
 
 #include "include/cef_app.h"
 #include "include/wrapper/cef_closure_task.h"
 #include "include/base/cef_callback.h"
 #include "include/wrapper/cef_helpers.h"
+#include "include/wrapper/cef_stream_resource_handler.h"
 
 BrowserClient::BrowserClient(TitleCallback on_title, UrlCallback on_url)
     : on_title_(std::move(on_title)), on_url_(std::move(on_url)) {}
@@ -48,6 +50,33 @@ CefResourceRequestHandler::ReturnValue BrowserClient::OnBeforeResourceLoad(CefRe
   std::string page = request->GetFirstPartyForCookies().ToString();
   if (page.empty() && frame) page = frame->GetURL().ToString();
   return content_blocker::ShouldBlock(request->GetURL().ToString(), page, main_frame) ? RV_CANCEL : RV_CONTINUE;
+}
+
+namespace {
+std::mutex g_test_responses_lock;
+std::map<std::string, std::string>* g_test_responses = nullptr;  // url prefix -> html (self-tests only)
+}  // namespace
+
+void BrowserClient::SetTestResponse(const std::string& url_prefix, const std::string& html) {
+  std::lock_guard<std::mutex> lock(g_test_responses_lock);
+  if (!g_test_responses) g_test_responses = new std::map<std::string, std::string>();
+  if (html.empty()) g_test_responses->erase(url_prefix);
+  else (*g_test_responses)[url_prefix] = html;
+}
+
+CefRefPtr<CefResourceHandler> BrowserClient::GetResourceHandler(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+                                                                CefRefPtr<CefRequest> request) {
+  std::string body;
+  {
+    std::lock_guard<std::mutex> lock(g_test_responses_lock);
+    if (!g_test_responses || g_test_responses->empty()) return nullptr;
+    std::string url = request->GetURL().ToString();
+    for (auto& [prefix, html] : *g_test_responses)
+      if (url.rfind(prefix, 0) == 0) body = html;
+  }
+  if (body.empty()) return nullptr;
+  CefRefPtr<CefStreamReader> stream = CefStreamReader::CreateForData(body.data(), body.size());  // copies
+  return new CefStreamResourceHandler("text/html", stream);
 }
 
 bool BrowserClient::DoClose(CefRefPtr<CefBrowser> browser) {

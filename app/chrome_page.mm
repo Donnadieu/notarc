@@ -6,8 +6,10 @@
 #include "include/views/cef_window.h"
 
 BOOL ChromePagesEnabled(void) {
-  static BOOL on = [NSUserDefaults.standardUserDefaults boolForKey:@"chromePages"] ||
-                   [NSProcessInfo.processInfo.arguments containsObject:@"--chrome-pages"];
+  // NOTARC_CHROME_PAGES=1 turns it on for a --selftest run (the shared test runner passes no extra arguments).
+  NSArray<NSString*>* args = NSProcessInfo.processInfo.arguments;
+  static BOOL on = [NSUserDefaults.standardUserDefaults boolForKey:@"chromePages"] || [args containsObject:@"--chrome-pages"] ||
+                   ([args containsObject:@"--selftest"] && [NSProcessInfo.processInfo.environment[@"NOTARC_CHROME_PAGES"] isEqualToString:@"1"]);
   return on;
 }
 
