@@ -3,7 +3,12 @@
 #import "app/settings.h"
 #include "app/content_blocker.h"
 
-static NSString* const kListURLKey = @"listURL";
+// Scroll content that starts at the top.
+@interface AdBlockersFlippedView : NSView
+@end
+@implementation AdBlockersFlippedView
+- (BOOL)isFlipped { return YES; }
+@end
 
 @implementation ManageAdBlockersWindowController {
   NSTextField* _status;
@@ -40,19 +45,26 @@ static NSString* const kListURLKey = @"listURL";
   stack.spacing = 6;
   stack.edgeInsets = NSEdgeInsetsMake(6, 8, 6, 8);
   stack.translatesAutoresizingMaskIntoConstraints = NO;
-  NSClipView* clip = [NSClipView new];
-  clip.documentView = stack;
+  AdBlockersFlippedView* doc = [AdBlockersFlippedView new];
+  doc.translatesAutoresizingMaskIntoConstraints = NO;
+  [doc addSubview:stack];
   NSScrollView* scroll = [NSScrollView new];
-  scroll.contentView = clip;
   scroll.hasVerticalScroller = YES;
+  scroll.autohidesScrollers = YES;
   scroll.borderType = NSBezelBorder;
   scroll.drawsBackground = NO;
+  scroll.documentView = doc;
+  NSClipView* clip = scroll.contentView;
   [NSLayoutConstraint activateConstraints:@[
     [scroll.widthAnchor constraintEqualToConstant:452],
     [scroll.heightAnchor constraintEqualToConstant:h],
-    [stack.leadingAnchor constraintEqualToAnchor:clip.leadingAnchor],
-    [stack.trailingAnchor constraintEqualToAnchor:clip.trailingAnchor],
-    [stack.topAnchor constraintEqualToAnchor:clip.topAnchor],
+    [doc.leadingAnchor constraintEqualToAnchor:clip.leadingAnchor],
+    [doc.trailingAnchor constraintEqualToAnchor:clip.trailingAnchor],
+    [doc.topAnchor constraintEqualToAnchor:clip.topAnchor],
+    [stack.leadingAnchor constraintEqualToAnchor:doc.leadingAnchor],
+    [stack.trailingAnchor constraintEqualToAnchor:doc.trailingAnchor],
+    [stack.topAnchor constraintEqualToAnchor:doc.topAnchor],
+    [stack.bottomAnchor constraintEqualToAnchor:doc.bottomAnchor],
   ]];
   return scroll;
 }
@@ -92,13 +104,13 @@ static NSString* const kListURLKey = @"listURL";
     [self heading:@"Filter Lists"],
     [self note:@"Lists from the web, in Adblock Plus format. NotArc downloads a list only when you turn it on, then "
                @"refreshes it once a day. Rules it doesn't understand are skipped."],
-    [self scrollerFor:_lists height:170],
+    [self scrollerFor:_lists height:150],
     [NSStackView stackViewWithViews:@[ _addField, add ]],
     _addError,
     update,
     [self heading:@"Sites Where Blocking Is Off"],
     [self note:@"Turn blocking off for a site in Site Settings (Cmd+Shift+I)."],
-    [self scrollerFor:_sites height:110],
+    [self scrollerFor:_sites height:96],
     done,
   ]];
   stack.orientation = NSUserInterfaceLayoutOrientationVertical;
@@ -117,6 +129,7 @@ static NSString* const kListURLKey = @"listURL";
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(reload)
                                              name:FilterListsDidChangeNotification object:nil];
   [self reload];
+  [w setContentSize:stack.fittingSize];
   [w center];
   return self;
 }
@@ -179,7 +192,9 @@ static NSString* RulesText(NSInteger n) {
       remove.controlSize = NSControlSizeSmall;
       [row addObject:remove];
     }
+    [text setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
     NSStackView* r = [NSStackView stackViewWithViews:row];
+    r.distribution = NSStackViewDistributionFill;
     r.identifier = [@"list=" stringByAppendingString:l.title];
     [r.widthAnchor constraintEqualToConstant:420].active = YES;
     [_lists addArrangedSubview:r];
@@ -193,9 +208,10 @@ static NSString* RulesText(NSInteger n) {
     NSButton* remove = [NSButton buttonWithTitle:@"Remove" target:self action:@selector(removeSite:)];
     remove.identifier = host;
     remove.controlSize = NSControlSizeSmall;
+    [label setContentHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
     NSStackView* r = [NSStackView stackViewWithViews:@[ label, remove ]];
+    r.distribution = NSStackViewDistributionFill;
     r.identifier = [@"site=" stringByAppendingString:host];
-    [r setHuggingPriority:NSLayoutPriorityDefaultLow forOrientation:NSLayoutConstraintOrientationHorizontal];
     [r.widthAnchor constraintEqualToConstant:420].active = YES;
     [_sites addArrangedSubview:r];
   }
