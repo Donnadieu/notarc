@@ -5,7 +5,7 @@
 
 #import <Cocoa/Cocoa.h>
 
-NSString* ShortcutPath(NSMenuItem* item);  // "File/New Tab"
+NSString* ShortcutPath(NSMenuItem* item);                             // "File/New Tab"
 NSString* ShortcutDisplay(NSString* key, NSEventModifierFlags mods);  // "⌘⇧N"; "" when none
 // Remembers each item's built-in shortcut (for Reset), then applies saved overrides. Call after building the menu.
 void ApplyShortcutOverrides(NSMenu* mainMenu);

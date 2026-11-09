@@ -88,9 +88,8 @@ NSArray<ArcCookie*>* ArcReadCookies(NSString* dbPath, NSData* key, ArcCookieStat
     version = atoi((const char*)sqlite3_column_text(st, 0));
   sqlite3_finalize(st);
 
-  const char* sql =
-      "select host_key,name,encrypted_value,path,expires_utc,is_secure,is_httponly,has_expires,"
-      "creation_utc,last_access_utc,samesite,priority from cookies";
+  const char* sql = "select host_key,name,encrypted_value,path,expires_utc,is_secure,is_httponly,has_expires,"
+                    "creation_utc,last_access_utc,samesite,priority from cookies";
   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) != SQLITE_OK) {
     if (error) *error = Err(@"cookie table query failed");
     sqlite3_close(db);
@@ -111,8 +110,10 @@ NSArray<ArcCookie*>* ArcReadCookies(NSString* dbPath, NSData* key, ArcCookieStat
       // First 32 bytes = SHA-256(host_key); verifies the key and binds the value to its domain.
       uint8_t digest[CC_SHA256_DIGEST_LENGTH];
       CC_SHA256(host, (CC_LONG)strlen(host), digest);
-      if (plain.length < 32 || memcmp(plain.bytes, digest, 32) != 0) plain = nil;
-      else plain = [plain subdataWithRange:NSMakeRange(32, plain.length - 32)];
+      if (plain.length < 32 || memcmp(plain.bytes, digest, 32) != 0)
+        plain = nil;
+      else
+        plain = [plain subdataWithRange:NSMakeRange(32, plain.length - 32)];
     }
     NSString* value = plain ? [[NSString alloc] initWithData:plain encoding:NSUTF8StringEncoding] : nil;
     if (!value) {
@@ -136,7 +137,8 @@ NSArray<ArcCookie*>* ArcReadCookies(NSString* dbPath, NSData* key, ArcCookieStat
   }
   sqlite3_finalize(st);
   sqlite3_close(db);
-  for (NSString* ext in @[ @"", @"-wal", @"-journal" ]) [fm removeItemAtPath:[tmp stringByAppendingString:ext] error:nil];
+  for (NSString* ext in @[ @"", @"-wal", @"-journal" ])
+    [fm removeItemAtPath:[tmp stringByAppendingString:ext] error:nil];
   if (stats) *stats = local;
   return out;
 }

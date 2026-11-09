@@ -22,14 +22,18 @@ typedef NS_ENUM(NSInteger, DownloadState) { DownloadInProgress, DownloadComplete
 
 @interface DownloadManager : NSObject
 + (instancetype)shared;
-@property(nonatomic, copy) NSString* folderOverride;  // self-test only
+@property(nonatomic, copy) NSString* folderOverride;              // self-test only
 @property(nonatomic, readonly) NSArray<DownloadEntry*>* entries;  // newest first
 @property(nonatomic, copy) void (^onChange)(void);
 - (NSString*)folder;
 - (NSString*)destinationForSuggestedName:(NSString*)name;  // unique path in folder
 - (void)begin:(uint32_t)cefId url:(NSString*)url path:(NSString*)path;
-- (void)update:(uint32_t)cefId received:(int64_t)received total:(int64_t)total speed:(int64_t)speed
-          path:(NSString*)path state:(DownloadState)state;
+- (void)update:(uint32_t)cefId
+      received:(int64_t)received
+         total:(int64_t)total
+         speed:(int64_t)speed
+          path:(NSString*)path
+         state:(DownloadState)state;
 - (void)cancel:(DownloadEntry*)entry;
 - (NSUInteger)inProgressCount;
 - (void)showWindow;

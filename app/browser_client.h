@@ -48,12 +48,18 @@ class BrowserClient : public CefClient,
       std::function<void(int browser_id, int request_id, const std::string& origin, uint32_t permissions)>;
   void set_permission_callback(PermissionCallback cb) { on_permission_ = std::move(cb); }
   void ResolvePermission(int request_id, bool allow);
-  bool OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
-                                      const CefString& requesting_origin, uint32_t requested_permissions,
+  bool OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser,
+                                      CefRefPtr<CefFrame> frame,
+                                      const CefString& requesting_origin,
+                                      uint32_t requested_permissions,
                                       CefRefPtr<CefMediaAccessCallback> callback) override;
-  bool OnShowPermissionPrompt(CefRefPtr<CefBrowser> browser, uint64_t prompt_id, const CefString& requesting_origin,
-                              uint32_t requested_permissions, CefRefPtr<CefPermissionPromptCallback> callback) override;
-  void OnDismissPermissionPrompt(CefRefPtr<CefBrowser> browser, uint64_t prompt_id,
+  bool OnShowPermissionPrompt(CefRefPtr<CefBrowser> browser,
+                              uint64_t prompt_id,
+                              const CefString& requesting_origin,
+                              uint32_t requested_permissions,
+                              CefRefPtr<CefPermissionPromptCallback> callback) override;
+  void OnDismissPermissionPrompt(CefRefPtr<CefBrowser> browser,
+                                 uint64_t prompt_id,
                                  cef_permission_request_result_t result) override;
 
   // Links to other apps (mailto:, zoommtg:, ...). Chromium never opens them itself; the UI asks first.
@@ -65,30 +71,55 @@ class BrowserClient : public CefClient,
   }
   using ExternalCallback = std::function<void(int browser_id, const std::string& url)>;
   void set_external_callback(ExternalCallback cb) { on_external_ = std::move(cb); }
-  CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
-                                                                 CefRefPtr<CefRequest>, bool, bool, const CefString&,
+  CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser>,
+                                                                 CefRefPtr<CefFrame>,
+                                                                 CefRefPtr<CefRequest>,
+                                                                 bool,
+                                                                 bool,
+                                                                 const CefString&,
                                                                  bool&) override {
     return this;
   }
-  void OnProtocolExecution(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
+  void OnProtocolExecution(CefRefPtr<CefBrowser> browser,
+                           CefRefPtr<CefFrame> frame,
+                           CefRefPtr<CefRequest> request,
                            bool& allow_os_execution) override;
   // Built-in ad & tracker blocking (#53): cancels third-party requests to listed hosts.
-  ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
+  ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser> browser,
+                                   CefRefPtr<CefFrame> frame,
+                                   CefRefPtr<CefRequest> request,
                                    CefRefPtr<CefCallback> callback) override;
   // Downloads save straight into the download folder (no Save dialog), tracked by DownloadManager.
-  bool OnBeforeDownload(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item,
-                        const CefString& suggested_name, CefRefPtr<CefBeforeDownloadCallback> callback) override;
-  void OnDownloadUpdated(CefRefPtr<CefBrowser> browser, CefRefPtr<CefDownloadItem> download_item,
+  bool OnBeforeDownload(CefRefPtr<CefBrowser> browser,
+                        CefRefPtr<CefDownloadItem> download_item,
+                        const CefString& suggested_name,
+                        CefRefPtr<CefBeforeDownloadCallback> callback) override;
+  void OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
+                         CefRefPtr<CefDownloadItem> download_item,
                          CefRefPtr<CefDownloadItemCallback> callback) override;
 
   // Right-clicking a link adds NotArc's link actions on top of Chromium's menu.
-  enum LinkCommand { kLinkNewTab = 0, kLinkBackgroundTab, kLinkSplit, kLinkPeek, kLinkLittle, kLinkCopyMarkdown, kLinkCount };
-  using LinkMenuCallback = std::function<void(int browser_id, int command, const std::string& url, const std::string& text)>;
+  enum LinkCommand {
+    kLinkNewTab = 0,
+    kLinkBackgroundTab,
+    kLinkSplit,
+    kLinkPeek,
+    kLinkLittle,
+    kLinkCopyMarkdown,
+    kLinkCount
+  };
+  using LinkMenuCallback =
+      std::function<void(int browser_id, int command, const std::string& url, const std::string& text)>;
   void set_link_menu_callback(LinkMenuCallback cb) { on_link_menu_ = std::move(cb); }
-  void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
-                           CefRefPtr<CefContextMenuParams> params, CefRefPtr<CefMenuModel> model) override;
-  bool OnContextMenuCommand(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
-                            CefRefPtr<CefContextMenuParams> params, int command_id, EventFlags event_flags) override;
+  void OnBeforeContextMenu(CefRefPtr<CefBrowser> browser,
+                           CefRefPtr<CefFrame> frame,
+                           CefRefPtr<CefContextMenuParams> params,
+                           CefRefPtr<CefMenuModel> model) override;
+  bool OnContextMenuCommand(CefRefPtr<CefBrowser> browser,
+                            CefRefPtr<CefFrame> frame,
+                            CefRefPtr<CefContextMenuParams> params,
+                            int command_id,
+                            EventFlags event_flags) override;
 
   // Asked before a user-initiated main-frame navigation; returning true cancels it (the window
   // shows the link somewhere else instead, e.g. Peek).
@@ -99,16 +130,29 @@ class BrowserClient : public CefClient,
   // e.g. sign-in dialogs) are not routed here.
   using OpenCallback = std::function<bool(int browser_id, const std::string& url, int disposition, bool user_gesture)>;
   void set_open_callback(OpenCallback cb) { on_open_ = std::move(cb); }
-  bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString& target_url,
-                        WindowOpenDisposition target_disposition, bool user_gesture) override;
-  bool OnBeforePopup(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int popup_id,
-                     const CefString& target_url, const CefString& target_frame_name,
-                     WindowOpenDisposition target_disposition, bool user_gesture,
-                     const CefPopupFeatures& popupFeatures, CefWindowInfo& windowInfo, CefRefPtr<CefClient>& client,
-                     CefBrowserSettings& settings, CefRefPtr<CefDictionaryValue>& extra_info,
+  bool OnOpenURLFromTab(CefRefPtr<CefBrowser> browser,
+                        CefRefPtr<CefFrame> frame,
+                        const CefString& target_url,
+                        WindowOpenDisposition target_disposition,
+                        bool user_gesture) override;
+  bool OnBeforePopup(CefRefPtr<CefBrowser> browser,
+                     CefRefPtr<CefFrame> frame,
+                     int popup_id,
+                     const CefString& target_url,
+                     const CefString& target_frame_name,
+                     WindowOpenDisposition target_disposition,
+                     bool user_gesture,
+                     const CefPopupFeatures& popupFeatures,
+                     CefWindowInfo& windowInfo,
+                     CefRefPtr<CefClient>& client,
+                     CefBrowserSettings& settings,
+                     CefRefPtr<CefDictionaryValue>& extra_info,
                      bool* no_javascript_access) override;
-  bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
-                      bool user_gesture, bool is_redirect) override;
+  bool OnBeforeBrowse(CefRefPtr<CefBrowser> browser,
+                      CefRefPtr<CefFrame> frame,
+                      CefRefPtr<CefRequest> request,
+                      bool user_gesture,
+                      bool is_redirect) override;
 
   // Fires when a web view takes keyboard focus (e.g. the user clicks a split view pane).
   using FocusCallback = std::function<void(int browser_id)>;
@@ -117,17 +161,19 @@ class BrowserClient : public CefClient,
 
   using FindCallback = std::function<void(int browser_id, int count, int active)>;
   void set_find_callback(FindCallback cb) { on_find_ = std::move(cb); }
-  void OnFindResult(CefRefPtr<CefBrowser> browser, int identifier, int count, const CefRect& selection_rect,
-                    int active_match_ordinal, bool final_update) override;
+  void OnFindResult(CefRefPtr<CefBrowser> browser,
+                    int identifier,
+                    int count,
+                    const CefRect& selection_rect,
+                    int active_match_ordinal,
+                    bool final_update) override;
 
   void OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) override;
   // The page's icon changed (first URL the page offers); the window downloads it for the sidebar.
   using FaviconCallback = std::function<void(int browser_id, const std::string& icon_url)>;
   void set_favicon_callback(FaviconCallback cb) { on_favicon_ = std::move(cb); }
   void OnFaviconURLChange(CefRefPtr<CefBrowser> browser, const std::vector<CefString>& icon_urls) override;
-  void OnAddressChange(CefRefPtr<CefBrowser> browser,
-                       CefRefPtr<CefFrame> frame,
-                       const CefString& url) override;
+  void OnAddressChange(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, const CefString& url) override;
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
   void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
   // Returning false lets CEF close the parent NSWindow, which would quit the app when one tab
@@ -149,14 +195,19 @@ class BrowserClient : public CefClient,
   using LoadEndCallback = std::function<void(int browser_id, const std::string& url)>;
   void set_load_end_callback(LoadEndCallback cb) { on_load_end_ = std::move(cb); }
   void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override;
-  bool OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t level, const CefString& message,
-                        const CefString& source, int line) override;
+  bool OnConsoleMessage(CefRefPtr<CefBrowser> browser,
+                        cef_log_severity_t level,
+                        const CefString& message,
+                        const CefString& source,
+                        int line) override;
 
   // Renderer health: kind 0 = the page's process crashed or was killed, 1 = it stopped responding,
   // 2 = it recovered. While a page is unresponsive, ResolveHung(id, kill) ends the wait.
   using RendererCallback = std::function<void(int browser_id, int kind, int status)>;
   void set_renderer_callback(RendererCallback cb) { on_renderer_ = std::move(cb); }
-  void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status, int error_code,
+  void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser,
+                                 TerminationStatus status,
+                                 int error_code,
                                  const CefString& error_string) override;
   bool OnRenderProcessUnresponsive(CefRefPtr<CefBrowser> browser,
                                    CefRefPtr<CefUnresponsiveProcessCallback> callback) override;

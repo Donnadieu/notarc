@@ -5,18 +5,18 @@
 #import <Foundation/Foundation.h>
 
 @interface LinkRule : NSObject
-@property(nonatomic, copy) NSString* matchType;   // contains | exact | startsWith | domain | regex
-@property(nonatomic, copy) NSString* pattern;     // URL part to match; nil = any URL
-@property(nonatomic, copy) NSString* sourceApp;   // bundle ID of the app the link came from; nil = any app
-@property(nonatomic, copy) NSString* destination; // "space" | "little"
-@property(nonatomic, copy) NSString* spaceID;     // nil = the most recent Space
+@property(nonatomic, copy) NSString* matchType;    // contains | exact | startsWith | domain | regex
+@property(nonatomic, copy) NSString* pattern;      // URL part to match; nil = any URL
+@property(nonatomic, copy) NSString* sourceApp;    // bundle ID of the app the link came from; nil = any app
+@property(nonatomic, copy) NSString* destination;  // "space" | "little"
+@property(nonatomic, copy) NSString* spaceID;      // nil = the most recent Space
 @end
 
 @interface LinkRouting : NSObject
 @property(nonatomic, copy) NSArray<LinkRule*>* rules;
 @property(nonatomic, copy) NSString* defaultDestination;  // "little" | "space"
 @property(nonatomic, copy) NSString* defaultSpaceID;
-+ (instancetype)fromArcFile:(NSString*)path;               // nil if missing or unreadable
++ (instancetype)fromArcFile:(NSString*)path;  // nil if missing or unreadable
 + (instancetype)loadFrom:(NSString*)path;
 - (BOOL)saveTo:(NSString*)path;
 // First rule that matches, or nil (then defaultDestination applies).

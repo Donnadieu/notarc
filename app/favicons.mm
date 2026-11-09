@@ -19,18 +19,18 @@ static NSImage* ImageFromData(NSData* data) {
 // Best bitmap (closest to 32 px) for the exact page, else any page on the same site. Opened immutable so a
 // database another browser holds open is never locked or changed.
 static NSData* LookupIcon(NSString* dbPath, NSString* url, NSString* site) {
-  NSString* uri = [NSString stringWithFormat:@"file:%@?immutable=1",
-                                             [dbPath stringByAddingPercentEncodingWithAllowedCharacters:
-                                                         NSCharacterSet.URLPathAllowedCharacterSet]];
+  NSString* uri = [NSString
+      stringWithFormat:@"file:%@?immutable=1",
+                       [dbPath stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet
+                                                                                      .URLPathAllowedCharacterSet]];
   sqlite3* db = NULL;
   if (sqlite3_open_v2(uri.UTF8String, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_URI, NULL) != SQLITE_OK) {
     sqlite3_close(db);
     return nil;
   }
-  const char* sql =
-      "SELECT b.image_data FROM icon_mapping m JOIN favicon_bitmaps b ON b.icon_id = m.icon_id "
-      "WHERE m.page_url = ?1 OR m.page_url LIKE ?2 OR m.page_url LIKE ?3 "
-      "ORDER BY (m.page_url = ?1) DESC, ABS(b.width - 32) LIMIT 1";
+  const char* sql = "SELECT b.image_data FROM icon_mapping m JOIN favicon_bitmaps b ON b.icon_id = m.icon_id "
+                    "WHERE m.page_url = ?1 OR m.page_url LIKE ?2 OR m.page_url LIKE ?3 "
+                    "ORDER BY (m.page_url = ?1) DESC, ABS(b.width - 32) LIMIT 1";
   sqlite3_stmt* st = NULL;
   NSData* out = nil;
   if (sqlite3_prepare_v2(db, sql, -1, &st, NULL) == SQLITE_OK) {

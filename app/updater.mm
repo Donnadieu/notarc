@@ -82,7 +82,8 @@ static int Run(NSString* tool, NSArray<NSString*>* args, NSString** output) {
   if (![json isKindOfClass:NSDictionary.class] || [json[@"draft"] boolValue] || [json[@"prerelease"] boolValue])
     return nil;
   UpdateInfo* info = [UpdateInfo new];
-  info.version = [json[@"tag_name"] stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"vV"]];
+  info.version =
+      [json[@"tag_name"] stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@"vV"]];
   info.notes = json[@"body"];
   for (NSDictionary* asset in json[@"assets"]) {
     NSString* name = asset[@"name"];
@@ -100,47 +101,57 @@ static int Run(NSString* tool, NSArray<NSString*>* args, NSString** output) {
   req.cachePolicy = NSURLRequestReloadIgnoringLocalCacheData;
   [[NSURLSession.sharedSession dataTaskWithRequest:req
                                  completionHandler:^(NSData* data, NSURLResponse* resp, NSError* error) {
-    NSDictionary* json = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
-    UpdateInfo* info = [Updater infoFromReleaseJSON:json];
-    NSError* e = error ?: (info ? nil : Err(@"No downloadable release found."));
-    dispatch_async(dispatch_get_main_queue(), ^{ done(info, e); });
-  }] resume];
+                                   NSDictionary* json =
+                                       data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:nil] : nil;
+                                   UpdateInfo* info = [Updater infoFromReleaseJSON:json];
+                                   NSError* e = error ?: (info ? nil : Err(@"No downloadable release found."));
+                                   dispatch_async(dispatch_get_main_queue(), ^{ done(info, e); });
+                                 }] resume];
 }
 
 - (void)prepareUpdate:(UpdateInfo*)info done:(void (^)(NSString*, NSError*))done {
   void (^fail)(NSString*) = ^(NSString* msg) { dispatch_async(dispatch_get_main_queue(), ^{ done(nil, Err(msg)); }); };
-  [[NSURLSession.sharedSession dataTaskWithURL:info.sha256URL
-                             completionHandler:^(NSData* shaData, NSURLResponse* r1, NSError* e1) {
-    NSString* expected = [[[[NSString alloc] initWithData:shaData ?: [NSData data] encoding:NSUTF8StringEncoding]
-        componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet].firstObject lowercaseString];
-    if (expected.length != 64) return fail(@"Couldn't read the update's checksum.");
-    [[NSURLSession.sharedSession downloadTaskWithURL:info.dmgURL
-                                   completionHandler:^(NSURL* tmp, NSURLResponse* r2, NSError* e2) {
-      if (!tmp) return fail(e2.localizedDescription ?: @"Download failed.");
-      NSString* stage = [NSTemporaryDirectory() stringByAppendingPathComponent:
-                                                    [@"NotArcUpdate-" stringByAppendingString:NSUUID.UUID.UUIDString]];
-      NSFileManager* fm = NSFileManager.defaultManager;
-      [fm createDirectoryAtPath:stage withIntermediateDirectories:YES attributes:nil error:nil];
-      NSString* dmg = [stage stringByAppendingPathComponent:@"NotArc.dmg"];
-      [fm moveItemAtPath:tmp.path toPath:dmg error:nil];
-      if (![SHA256OfFile(dmg) isEqualToString:expected]) return fail(@"The download didn't match its checksum.");
-      NSString* mount = [stage stringByAppendingPathComponent:@"mnt"];
-      if (Run(@"/usr/bin/hdiutil", @[ @"attach", @"-nobrowse", @"-readonly", @"-noautoopen", @"-mountpoint", mount, dmg ], nil))
-        return fail(@"Couldn't open the downloaded disk image.");
-      NSString* staged = [stage stringByAppendingPathComponent:@"NotArc.app"];
-      int copied = Run(@"/usr/bin/ditto", @[ [mount stringByAppendingPathComponent:@"NotArc.app"], staged ], nil);
-      Run(@"/usr/bin/hdiutil", @[ @"detach", mount, @"-force" ], nil);
-      [fm removeItemAtPath:dmg error:nil];
-      NSString* got = [NSDictionary dictionaryWithContentsOfFile:
-                                        [staged stringByAppendingPathComponent:@"Contents/Info.plist"]][@"CFBundleShortVersionString"];
-      if (copied || !got) return fail(@"The disk image didn't contain NotArc.");
-      Run(@"/usr/bin/xattr", @[ @"-dr", @"com.apple.quarantine", staged ], nil);
-      dispatch_async(dispatch_get_main_queue(), ^{ done(staged, nil); });
-    }] resume];
-  }] resume];
+  [[NSURLSession.sharedSession
+        dataTaskWithURL:info.sha256URL
+      completionHandler:^(NSData* shaData, NSURLResponse* r1, NSError* e1) {
+        NSString* expected = [[[[NSString alloc] initWithData:shaData ?: [NSData data] encoding:NSUTF8StringEncoding]
+                                  componentsSeparatedByCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet]
+                                  .firstObject lowercaseString];
+        if (expected.length != 64) return fail(@"Couldn't read the update's checksum.");
+        [[NSURLSession.sharedSession
+            downloadTaskWithURL:info.dmgURL
+              completionHandler:^(NSURL* tmp, NSURLResponse* r2, NSError* e2) {
+                if (!tmp) return fail(e2.localizedDescription ?: @"Download failed.");
+                NSString* stage = [NSTemporaryDirectory()
+                    stringByAppendingPathComponent:[@"NotArcUpdate-" stringByAppendingString:NSUUID.UUID.UUIDString]];
+                NSFileManager* fm = NSFileManager.defaultManager;
+                [fm createDirectoryAtPath:stage withIntermediateDirectories:YES attributes:nil error:nil];
+                NSString* dmg = [stage stringByAppendingPathComponent:@"NotArc.dmg"];
+                [fm moveItemAtPath:tmp.path toPath:dmg error:nil];
+                if (![SHA256OfFile(dmg) isEqualToString:expected])
+                  return fail(@"The download didn't match its checksum.");
+                NSString* mount = [stage stringByAppendingPathComponent:@"mnt"];
+                if (Run(@"/usr/bin/hdiutil",
+                        @[ @"attach", @"-nobrowse", @"-readonly", @"-noautoopen", @"-mountpoint", mount, dmg ], nil))
+                  return fail(@"Couldn't open the downloaded disk image.");
+                NSString* staged = [stage stringByAppendingPathComponent:@"NotArc.app"];
+                int copied =
+                    Run(@"/usr/bin/ditto", @[ [mount stringByAppendingPathComponent:@"NotArc.app"], staged ], nil);
+                Run(@"/usr/bin/hdiutil", @[ @"detach", mount, @"-force" ], nil);
+                [fm removeItemAtPath:dmg error:nil];
+                NSString* got = [NSDictionary
+                    dictionaryWithContentsOfFile:[staged stringByAppendingPathComponent:@"Contents/Info.plist"]]
+                    [@"CFBundleShortVersionString"];
+                if (copied || !got) return fail(@"The disk image didn't contain NotArc.");
+                Run(@"/usr/bin/xattr", @[ @"-dr", @"com.apple.quarantine", staged ], nil);
+                dispatch_async(dispatch_get_main_queue(), ^{ done(staged, nil); });
+              }] resume];
+      }] resume];
 }
 
-+ (void)setVersionOverride:(NSString*)version { g_versionOverride = [version copy]; }
++ (void)setVersionOverride:(NSString*)version {
+  g_versionOverride = [version copy];
+}
 
 - (void)installStagedApp:(NSString*)stagedApp {
   [self swapInStagedApp:stagedApp relaunch:YES];
@@ -150,13 +161,13 @@ static int Run(NSString* tool, NSArray<NSString*>* args, NSString** output) {
 - (void)swapInStagedApp:(NSString*)stagedApp relaunch:(BOOL)relaunch {
   NSString* target = NSBundle.mainBundle.bundlePath;
   // Swap after we exit: keep the old copy until the new one is in place, then relaunch.
-  NSString* script =
-      @"while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; "
-       "rm -rf \"$3.old\" && mv \"$3\" \"$3.old\" && mv \"$2\" \"$3\" && rm -rf \"$3.old\" || "
-       "{ [ -d \"$3\" ] || mv \"$3.old\" \"$3\"; }; [ \"$4\" = 1 ] && open \"$3\"; exit 0";
+  NSString* script = @"while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; "
+                      "rm -rf \"$3.old\" && mv \"$3\" \"$3.old\" && mv \"$2\" \"$3\" && rm -rf \"$3.old\" || "
+                      "{ [ -d \"$3\" ] || mv \"$3.old\" \"$3\"; }; [ \"$4\" = 1 ] && open \"$3\"; exit 0";
   NSTask* t = [NSTask new];
   t.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
-  t.arguments = @[ @"-c", script, @"notarc-update", @(getpid()).stringValue, stagedApp, target, relaunch ? @"1" : @"0" ];
+  t.arguments =
+      @[ @"-c", script, @"notarc-update", @(getpid()).stringValue, stagedApp, target, relaunch ? @"1" : @"0" ];
   [t launchAndReturnError:nil];
 }
 
@@ -176,7 +187,8 @@ static int Run(NSString* tool, NSArray<NSString*>* args, NSString** output) {
       [a runModal];
       return;
     }
-    if (!interactive && [[NSUserDefaults.standardUserDefaults stringForKey:kSkipVersionKey] isEqualToString:info.version])
+    if (!interactive &&
+        [[NSUserDefaults.standardUserDefaults stringForKey:kSkipVersionKey] isEqualToString:info.version])
       return;
     NSAlert* a = [NSAlert new];
     a.messageText = [NSString stringWithFormat:@"NotArc %@ is available", info.version];
@@ -186,17 +198,19 @@ static int Run(NSString* tool, NSArray<NSString*>* args, NSString** output) {
     [a addButtonWithTitle:@"Later"];
     [a addButtonWithTitle:@"Skip This Version"];
     NSModalResponse r = [a runModal];
-    if (r == NSAlertThirdButtonReturn) [NSUserDefaults.standardUserDefaults setObject:info.version forKey:kSkipVersionKey];
+    if (r == NSAlertThirdButtonReturn)
+      [NSUserDefaults.standardUserDefaults setObject:info.version forKey:kSkipVersionKey];
     if (r != NSAlertFirstButtonReturn) return;
     self->_busy = YES;
-    [self prepareUpdate:info done:^(NSString* staged, NSError* err) {
-      self->_busy = NO;
-      if (staged) return [self installStagedApp:staged];
-      NSAlert* f = [NSAlert new];
-      f.messageText = @"The update couldn't be installed.";
-      f.informativeText = err.localizedDescription ?: @"";
-      [f runModal];
-    }];
+    [self prepareUpdate:info
+                   done:^(NSString* staged, NSError* err) {
+                     self->_busy = NO;
+                     if (staged) return [self installStagedApp:staged];
+                     NSAlert* f = [NSAlert new];
+                     f.messageText = @"The update couldn't be installed.";
+                     f.informativeText = err.localizedDescription ?: @"";
+                     [f runModal];
+                   }];
   }];
 }
 

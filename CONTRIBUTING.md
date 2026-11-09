@@ -1,6 +1,7 @@
 # Contributing to NotArc
 
 Thanks for helping keep Arc's way of browsing alive. NotArc is a volunteer, non-commercial, MIT-licensed project.
+(Working with a coding agent? [AGENTS.md](AGENTS.md) has the quick commands and guardrails.)
 
 ## Ground rules
 
@@ -20,11 +21,12 @@ Thanks for helping keep Arc's way of browsing alive. NotArc is a volunteer, non-
 
 You need an Apple Silicon Mac, Apple's Command Line Tools (full Xcode isn't required), and `brew install cmake ninja`.
 
-1. Download the CEF "Standard Distribution" for macOS ARM64 (the version in the README) from
-   https://cef-builds.spotifycdn.com/index.html, unpack it under `third_party/std/`, then
-   `ln -sfn std/<cef_binary_folder> third_party/cef`.
+1. `scripts/fetch-cef.sh` downloads, checksums and links the pinned CEF build (or follow the manual steps in
+   README.md if you'd rather fetch it by hand).
 2. `mkdir -p build && cd build && cmake -G Ninja -DCMAKE_BUILD_TYPE=Release .. && ninja`
 3. Run `build/Release/NotArc.app`.
+4. Run `scripts/setup-hooks.sh` once so `git commit` runs the formatting/ratchet/Keychain-scope checks locally
+   (same checks CI runs on every pull request; `scripts/check.sh` or `make check` run them without committing).
 
 ## Code layout
 
@@ -46,7 +48,10 @@ NotArc is Objective-C++ (AppKit for the window and sidebar) on top of CEF (Chrom
 
 ## Testing
 
-Run `build/Release/NotArc.app/Contents/MacOS/NotArc --selftest`. It takes about three minutes, drives the app
+CI builds the app and runs `--selftest` on every pull request (`.github/workflows/ci.yml`); a PR touching
+`app/updater.mm` or session-restore code also runs `scripts/test-update.sh` / `scripts/test-session-restore.sh`
+in that same job. To run the self-test yourself:
+`build/Release/NotArc.app/Contents/MacOS/NotArc --selftest`. It takes about three minutes, drives the app
 (tabs, split view, Peek, Spaces, shortcuts, command bar, downloads, permissions and more), prints `SELFTEST-...` lines
 and quits. Every value should be 1 (or the expected count); a `0` means a check failed.
 

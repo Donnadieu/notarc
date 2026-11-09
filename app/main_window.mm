@@ -85,8 +85,8 @@ NSString* ResolveCommandBarInput(NSString* input) {
   NSString* text = [input stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceAndNewlineCharacterSet];
   if (!text.length) return nil;
   BOOL hasScheme = [text rangeOfString:@"://"].location != NSNotFound || [text hasPrefix:@"about:"];
-  BOOL looksLikeHost = [text rangeOfString:@" "].location == NSNotFound &&
-                       ([text containsString:@"."] || [text hasPrefix:@"localhost"]);
+  BOOL looksLikeHost =
+      [text rangeOfString:@" "].location == NSNotFound && ([text containsString:@"."] || [text hasPrefix:@"localhost"]);
   if (hasScheme) return text;
   if (looksLikeHost) return [@"https://" stringByAppendingString:text];
   NSString* q = [text stringByAddingPercentEncodingWithAllowedCharacters:NSCharacterSet.URLQueryAllowedCharacterSet];
@@ -102,14 +102,17 @@ static NSColor* ColorFromHex(NSString* hex) {
   if (h.length != 6) return nil;
   unsigned v = 0;
   if (![[NSScanner scannerWithString:h] scanHexInt:&v]) return nil;
-  return [NSColor colorWithSRGBRed:((v >> 16) & 0xFF) / 255.0 green:((v >> 8) & 0xFF) / 255.0 blue:(v & 0xFF) / 255.0 alpha:1];
+  return [NSColor colorWithSRGBRed:((v >> 16) & 0xFF) / 255.0
+                             green:((v >> 8) & 0xFF) / 255.0
+                              blue:(v & 0xFF) / 255.0
+                             alpha:1];
 }
 
 static NSString* HexFromColor(NSColor* c) {
   NSColor* s = [c colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
   if (!s) return nil;
-  return [NSString stringWithFormat:@"#%02X%02X%02X", (int)lround(s.redComponent * 255), (int)lround(s.greenComponent * 255),
-                                    (int)lround(s.blueComponent * 255)];
+  return [NSString stringWithFormat:@"#%02X%02X%02X", (int)lround(s.redComponent * 255),
+                                    (int)lround(s.greenComponent * 255), (int)lround(s.blueComponent * 255)];
 }
 
 static const CGFloat kToolbarHeight = 38;
@@ -126,14 +129,18 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
   [CommandSelectedColor() setFill];
   [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 0, 1) xRadius:8 yRadius:8] fill];
 }
-- (BOOL)isEmphasized { return YES; }
+- (BOOL)isEmphasized {
+  return YES;
+}
 @end
 
 @interface CommandSuggestionList : NSObject <NSTableViewDataSource, NSTableViewDelegate>
 @property(nonatomic, copy) NSArray<NSDictionary*>* items;
 @end
 @implementation CommandSuggestionList
-- (NSInteger)numberOfRowsInTableView:(NSTableView*)t { return (NSInteger)self.items.count; }
+- (NSInteger)numberOfRowsInTableView:(NSTableView*)t {
+  return (NSInteger)self.items.count;
+}
 // Arc's command bar rows (colour catalogue): primary text 80%, secondary 33%, selected row in Arc blue with white
 // text, an icon per kind. View-based so the selected row can be drawn as a rounded pill.
 - (NSView*)tableView:(NSTableView*)t viewForTableColumn:(NSTableColumn*)c row:(NSInteger)row {
@@ -153,29 +160,49 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
     [cell addSubview:title];
     cell.textField = title;
   }
-  static NSDictionary* kinds = @{ @"go" : @"Go", @"tab" : @"Switch to Tab", @"space" : @"Space", @"history" : @"History",
-                                  @"action" : @"Action", @"site" : @"Top Site", @"search" : @"Search" };
-  static NSDictionary* icons = @{ @"go" : @"magnifyingglass", @"tab" : @"square.on.square", @"space" : @"square.stack",
-                                  @"history" : @"clock", @"action" : @"command", @"site" : @"globe",
-                                  @"search" : @"magnifyingglass" };
+  static NSDictionary* kinds = @{
+    @"go" : @"Go",
+    @"tab" : @"Switch to Tab",
+    @"space" : @"Space",
+    @"history" : @"History",
+    @"action" : @"Action",
+    @"site" : @"Top Site",
+    @"search" : @"Search"
+  };
+  static NSDictionary* icons = @{
+    @"go" : @"magnifyingglass",
+    @"tab" : @"square.on.square",
+    @"space" : @"square.stack",
+    @"history" : @"clock",
+    @"action" : @"command",
+    @"site" : @"globe",
+    @"search" : @"magnifyingglass"
+  };
   BOOL sel = [t.selectedRowIndexes containsIndex:(NSUInteger)row];
   NSColor* primary = sel ? NSColor.whiteColor : [NSColor.labelColor colorWithAlphaComponent:0.80];
   NSColor* secondary = sel ? [NSColor colorWithWhite:1 alpha:0.70] : [NSColor.labelColor colorWithAlphaComponent:0.33];
   NSMutableAttributedString* a = [[NSMutableAttributedString alloc]
       initWithString:s[@"title"] ?: @""
-          attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:14 weight:NSFontWeightMedium], NSForegroundColorAttributeName : primary}];
+          attributes:@{
+            NSFontAttributeName : [NSFont systemFontOfSize:14 weight:NSFontWeightMedium],
+            NSForegroundColorAttributeName : primary
+          }];
   NSString* sub = [s[@"subtitle"] length] ? [@"  —  " stringByAppendingString:s[@"subtitle"]] : @"";
   NSString* kind = kinds[s[@"kind"]];
   if (kind.length) sub = [sub stringByAppendingFormat:@"  ·  %@", kind];
   [a appendAttributedString:[[NSAttributedString alloc] initWithString:sub
-                                                            attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:12],
-                                                                         NSForegroundColorAttributeName : secondary}]];
+                                                            attributes:@{
+                                                              NSFontAttributeName : [NSFont systemFontOfSize:12],
+                                                              NSForegroundColorAttributeName : secondary
+                                                            }]];
   cell.textField.attributedStringValue = a;
   cell.imageView.image = [NSImage imageWithSystemSymbolName:icons[s[@"kind"]] ?: @"globe" accessibilityDescription:nil];
   cell.imageView.contentTintColor = sel ? NSColor.whiteColor : secondary;
   return cell;
 }
-- (NSTableRowView*)tableView:(NSTableView*)t rowViewForRow:(NSInteger)row { return [CommandRowView new]; }
+- (NSTableRowView*)tableView:(NSTableView*)t rowViewForRow:(NSInteger)row {
+  return [CommandRowView new];
+}
 - (void)tableViewSelectionDidChange:(NSNotification*)n {
   NSTableView* t = n.object;
   [t reloadDataForRowIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, (NSUInteger)t.numberOfRows)]
@@ -183,8 +210,7 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
 }
 @end
 
-@interface MainWindowController () <NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate,
-                                    NSMenuDelegate>
+@interface MainWindowController () <NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate, NSMenuDelegate>
 @end
 
 // The gap between two split panes; dragging it resizes them.
@@ -195,9 +221,12 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
 @property(nonatomic) BOOL hovered;
 @end
 @implementation SidebarPillView
-- (BOOL)wantsUpdateLayer { return YES; }
+- (BOOL)wantsUpdateLayer {
+  return YES;
+}
 - (void)updateLayer {
-  BOOL dark = [self.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
+  BOOL dark = [self.effectiveAppearance
+                  bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
               NSAppearanceNameDarkAqua;
   NSColor* c = dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:self.hovered ? 0.15 : 0.10]
                     : [NSColor colorWithSRGBRed:0.055 green:0.059 blue:0.063 alpha:self.hovered ? 0.10 : 0.05];
@@ -208,13 +237,22 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
   [super updateTrackingAreas];
   for (NSTrackingArea* t in self.trackingAreas) [self removeTrackingArea:t];
   [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
-                                                     options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow |
-                                                             NSTrackingInVisibleRect
-                                                       owner:self userInfo:nil]];
+                                                     options:NSTrackingMouseEnteredAndExited |
+                                                             NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
+                                                       owner:self
+                                                    userInfo:nil]];
 }
-- (void)mouseEntered:(NSEvent*)e { self.hovered = YES; self.needsDisplay = YES; }
-- (void)mouseExited:(NSEvent*)e { self.hovered = NO; self.needsDisplay = YES; }
-- (void)mouseUp:(NSEvent*)e { if (self.onClick) self.onClick(); }
+- (void)mouseEntered:(NSEvent*)e {
+  self.hovered = YES;
+  self.needsDisplay = YES;
+}
+- (void)mouseExited:(NSEvent*)e {
+  self.hovered = NO;
+  self.needsDisplay = YES;
+}
+- (void)mouseUp:(NSEvent*)e {
+  if (self.onClick) self.onClick();
+}
 @end
 
 // Arc's sidebar rows: 36 pt rounded pills with Arc's selected / hovered / multi-selected colours
@@ -224,11 +262,14 @@ constexpr CGFloat kRowHeight = 36, kRowRadius = 8;
 // Pinned section has no label; Today starts with a hairline 10 pt down, then the "+ New Tab" row.
 constexpr CGFloat kRowPitch = 41, kPinnedHeaderHeight = 6, kNewTabHeaderHeight = 64;
 // Arc's default (unthemed) dark Space: deep indigo, slightly lighter at the bottom; text is lavender, not white.
-static NSColor* ArcDefaultTabText() { return [NSColor colorWithSRGBRed:0xda / 255.0 green:0xd9 / 255.0 blue:0xfe / 255.0 alpha:1]; }
+static NSColor* ArcDefaultTabText() {
+  return [NSColor colorWithSRGBRed:0xda / 255.0 green:0xd9 / 255.0 blue:0xfe / 255.0 alpha:1];
+}
 
 static BOOL IsDark(NSView* v) {
-  return [v.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
-         NSAppearanceNameDarkAqua;
+  return
+      [v.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
+      NSAppearanceNameDarkAqua;
 }
 @interface SidebarRowView : NSTableRowView
 @property(nonatomic) BOOL hovered;
@@ -245,8 +286,10 @@ static BOOL IsDark(NSView* v) {
                 : [NSColor colorWithSRGBRed:0.055 green:0.059 blue:0.063 alpha:0.065];
   if (self.selected && self.multi)
     return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.10] : [NSColor colorWithWhite:0 alpha:0.10];
-  if (self.selected) return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.20] : [NSColor colorWithWhite:1 alpha:0.85];
-  if (self.hovered) return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.12] : [NSColor colorWithWhite:1 alpha:0.50];
+  if (self.selected)
+    return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.20] : [NSColor colorWithWhite:1 alpha:0.85];
+  if (self.hovered)
+    return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.12] : [NSColor colorWithWhite:1 alpha:0.50];
   return nil;
 }
 - (void)drawPill {
@@ -272,7 +315,8 @@ static BOOL IsDark(NSView* v) {
 - (NSRect)pillRect {
   if (self.newTabRow) {  // the bottom kRowPitch of the header row
     CGFloat inset = (kRowPitch - kRowHeight) / 2;
-    return NSMakeRect(0, self.flipped ? self.bounds.size.height - kRowPitch + inset : inset, self.bounds.size.width, kRowHeight);
+    return NSMakeRect(0, self.flipped ? self.bounds.size.height - kRowPitch + inset : inset, self.bounds.size.width,
+                      kRowHeight);
   }
   return NSInsetRect(self.bounds, 0, (self.bounds.size.height - kRowHeight) / 2);
 }
@@ -280,17 +324,23 @@ static BOOL IsDark(NSView* v) {
   if (self.separatorAbove) {  // Arc: SidebarSeparator, 15% white (dark) / black (light)
     [(IsDark(self) ? [NSColor colorWithWhite:1 alpha:0.15] : [NSColor colorWithWhite:0 alpha:0.15]) setFill];
     CGFloat y = self.newTabRow ? 10 : 0;
-    NSRectFillUsingOperation(NSMakeRect(10, self.flipped ? y : self.bounds.size.height - 1 - y, self.bounds.size.width - 20, 1),
-                             NSCompositingOperationSourceOver);
+    NSRectFillUsingOperation(
+        NSMakeRect(10, self.flipped ? y : self.bounds.size.height - 1 - y, self.bounds.size.width - 20, 1),
+        NSCompositingOperationSourceOver);
   }
   if (!self.selected) [self drawPill];
 }
-- (void)drawSelectionInRect:(NSRect)r { [self drawPill]; }
-- (BOOL)isEmphasized { return NO; }
+- (void)drawSelectionInRect:(NSRect)r {
+  [self drawPill];
+}
+- (BOOL)isEmphasized {
+  return NO;
+}
 - (NSString*)styleDescription {  // tests
   NSColor* c = [[self fill] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
-  return [NSString stringWithFormat:@"h=%.0f r=%.0f sel=%d hover=%d pressed=%d sep=%d alpha=%.2f", [self pillRect].size.height, kRowRadius,
-                                    self.selected, self.hovered, self.pressed, self.separatorAbove, c ? c.alphaComponent : 0];
+  return [NSString stringWithFormat:@"h=%.0f r=%.0f sel=%d hover=%d pressed=%d sep=%d alpha=%.2f",
+                                    [self pillRect].size.height, kRowRadius, self.selected, self.hovered, self.pressed,
+                                    self.separatorAbove, c ? c.alphaComponent : 0];
 }
 @end
 
@@ -299,7 +349,9 @@ static BOOL IsDark(NSView* v) {
 @end
 @implementation SidebarOutlineView
 // Arc has no disclosure triangles: folders show their own chevron and toggle on click.
-- (NSRect)frameOfOutlineCellAtRow:(NSInteger)row { return NSZeroRect; }
+- (NSRect)frameOfOutlineCellAtRow:(NSInteger)row {
+  return NSZeroRect;
+}
 - (void)mouseDown:(NSEvent*)e {
   NSInteger row = [self rowAtPoint:[self convertPoint:e.locationInWindow fromView:nil]];
   SidebarRowView* rv = row >= 0 ? (SidebarRowView*)[self rowViewAtRow:row makeIfNecessary:NO] : nil;
@@ -319,7 +371,6 @@ static BOOL IsDark(NSView* v) {
   return f;
 }
 @end
-
 
 // The window backdrop's Space tint; tells the window when light/dark changes so the default theme can follow.
 @interface ThemeBackdropView : NSView
@@ -344,11 +395,18 @@ static BOOL IsDark(NSView* v) {
   [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
                                                      options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways |
                                                              NSTrackingInVisibleRect
-                                                       owner:self userInfo:nil]];
+                                                       owner:self
+                                                    userInfo:nil]];
 }
-- (void)mouseEntered:(NSEvent*)e { self.reveal.alphaValue = 1; }
-- (void)mouseExited:(NSEvent*)e { self.reveal.alphaValue = 0; }
-- (NSMenu*)menuForEvent:(NSEvent*)e { return self.menuProvider ? self.menuProvider() : nil; }
+- (void)mouseEntered:(NSEvent*)e {
+  self.reveal.alphaValue = 1;
+}
+- (void)mouseExited:(NSEvent*)e {
+  self.reveal.alphaValue = 0;
+}
+- (NSMenu*)menuForEvent:(NSEvent*)e {
+  return self.menuProvider ? self.menuProvider() : nil;
+}
 @end
 
 @interface MainWindowController ()
@@ -368,13 +426,16 @@ constexpr CGFloat kFavTileHeight = 47, kFavRowGap = 8, kFavColGap = 9, kFavRadiu
 // Outlook ("Mail - 5 unread") do. 0 = none. Arc shows it as a badge on the Favorite's tile.
 NSInteger UnreadCountFromTitle(NSString* title) {
   if (!title.length) return 0;
-  static NSRegularExpression* lead, *paren, *word;
+  static NSRegularExpression *lead, *paren, *word;
   static dispatch_once_t once;
   dispatch_once(&once, ^{
-    lead = [NSRegularExpression regularExpressionWithPattern:@"^\\s*[\\(\\[](\\d{1,5})\\+?[\\)\\]]" options:0 error:nil];
+    lead = [NSRegularExpression regularExpressionWithPattern:@"^\\s*[\\(\\[](\\d{1,5})\\+?[\\)\\]]"
+                                                     options:0
+                                                       error:nil];
     paren = [NSRegularExpression regularExpressionWithPattern:@"\\((\\d{1,5})\\+?\\)" options:0 error:nil];
     word = [NSRegularExpression regularExpressionWithPattern:@"(\\d{1,5})\\s+(unread|new)\\b"
-                                                     options:NSRegularExpressionCaseInsensitive error:nil];
+                                                     options:NSRegularExpressionCaseInsensitive
+                                                       error:nil];
   });
   NSRange all = NSMakeRange(0, title.length);
   for (NSRegularExpression* re in @[ lead, paren, word ]) {
@@ -393,7 +454,9 @@ NSInteger UnreadCountFromTitle(NSString* title) {
 - (CGFloat)heightForWidth:(CGFloat)w;
 @end
 @implementation FavoritesGridView
-+ (NSUInteger)rowsForCount:(NSUInteger)n { return n ? (n + 3) / 4 : 0; }
++ (NSUInteger)rowsForCount:(NSUInteger)n {
+  return n ? (n + 3) / 4 : 0;
+}
 - (instancetype)initWithFrame:(NSRect)f {
   if ((self = [super initWithFrame:f])) {
     _hovered = -1;
@@ -401,7 +464,9 @@ NSInteger UnreadCountFromTitle(NSString* title) {
   }
   return self;
 }
-- (BOOL)isFlipped { return YES; }
+- (BOOL)isFlipped {
+  return YES;
+}
 - (NSUInteger)columns {
   NSUInteger n = self.items.count, rows = [FavoritesGridView rowsForCount:n];
   return rows ? (n + rows - 1) / rows : 0;
@@ -442,7 +507,8 @@ NSInteger UnreadCountFromTitle(NSString* title) {
     ArcItem* it = self.items[i];
     BOOL sel = it == shown, hov = (NSInteger)i == self.hovered;
     CGFloat a = dark ? (sel ? 0.22 : hov ? 0.15 : 0.10) : (sel ? 0.85 : hov ? 0.6 : 0.4);
-    NSColor* fill = dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:a] : [NSColor colorWithWhite:1 alpha:a];
+    NSColor* fill =
+        dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:a] : [NSColor colorWithWhite:1 alpha:a];
     NSRect r = [self tileRect:i];
     [fill setFill];
     [[NSBezierPath bezierPathWithRoundedRect:r xRadius:kFavRadius yRadius:kFavRadius] fill];
@@ -452,28 +518,39 @@ NSInteger UnreadCountFromTitle(NSString* title) {
       NSImage* tinted = [icon copy];
       [tinted lockFocus];
       [(dark ? [NSColor colorWithWhite:1 alpha:0.6] : [NSColor colorWithWhite:0 alpha:0.5]) set];
-      NSRectFillUsingOperation(NSMakeRect(0, 0, tinted.size.width, tinted.size.height), NSCompositingOperationSourceAtop);
+      NSRectFillUsingOperation(NSMakeRect(0, 0, tinted.size.width, tinted.size.height),
+                               NSCompositingOperationSourceAtop);
       [tinted unlockFocus];
       icon = tinted;
     }
-    [icon drawInRect:ir fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:nil];
+    [icon drawInRect:ir
+              fromRect:NSZeroRect
+             operation:NSCompositingOperationSourceOver
+              fraction:1
+        respectFlipped:YES
+                 hints:nil];
     // Arc's unread badge: a small pill over the icon's top-right corner (a dot when there's no room for the number).
     NSInteger unread = it.hideUnreadBadge ? 0 : UnreadCountFromTitle(it.liveTitle);
     if (unread > 0) {
       NSString* text = unread > 99 ? @"99+" : [NSString stringWithFormat:@"%ld", (long)unread];
-      NSDictionary* attrs = @{NSFontAttributeName : [NSFont systemFontOfSize:9 weight:NSFontWeightBold],
-                              NSForegroundColorAttributeName : NSColor.whiteColor};
+      NSDictionary* attrs = @{
+        NSFontAttributeName : [NSFont systemFontOfSize:9 weight:NSFontWeightBold],
+        NSForegroundColorAttributeName : NSColor.whiteColor
+      };
       NSSize ts = [text sizeWithAttributes:attrs];
       CGFloat h = 13, w = MAX(h, ceil(ts.width) + 7);
       NSRect b = NSMakeRect(round(NSMaxX(ir) - 5), round(NSMinY(ir) - 6), w, h);
       [[NSColor colorWithSRGBRed:0.96 green:0.27 blue:0.33 alpha:1] setFill];
       [[NSBezierPath bezierPathWithRoundedRect:b xRadius:h / 2 yRadius:h / 2] fill];
-      [text drawAtPoint:NSMakePoint(round(NSMidX(b) - ts.width / 2), round(NSMidY(b) - ts.height / 2)) withAttributes:attrs];
+      [text drawAtPoint:NSMakePoint(round(NSMidX(b) - ts.width / 2), round(NSMidY(b) - ts.height / 2))
+          withAttributes:attrs];
     }
   }
   if (self.dropTarget) {
     [[NSColor colorWithWhite:dark ? 1 : 0 alpha:0.25] setStroke];
-    NSBezierPath* p = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 1, 1) xRadius:kFavRadius yRadius:kFavRadius];
+    NSBezierPath* p = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 1, 1)
+                                                      xRadius:kFavRadius
+                                                      yRadius:kFavRadius];
     p.lineWidth = 2;
     [p stroke];
   }
@@ -484,13 +561,20 @@ NSInteger UnreadCountFromTitle(NSString* title) {
   [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
                                                      options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited |
                                                              NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
-                                                       owner:self userInfo:nil]];
+                                                       owner:self
+                                                    userInfo:nil]];
 }
 - (void)mouseMoved:(NSEvent*)e {
   NSInteger i = [self indexAt:[self convertPoint:e.locationInWindow fromView:nil]];
-  if (i != self.hovered) { self.hovered = i; self.needsDisplay = YES; }
+  if (i != self.hovered) {
+    self.hovered = i;
+    self.needsDisplay = YES;
+  }
 }
-- (void)mouseExited:(NSEvent*)e { self.hovered = -1; self.needsDisplay = YES; }
+- (void)mouseExited:(NSEvent*)e {
+  self.hovered = -1;
+  self.needsDisplay = YES;
+}
 - (void)mouseUp:(NSEvent*)e {
   NSInteger i = [self indexAt:[self convertPoint:e.locationInWindow fromView:nil]];
   if (i >= 0) [self.owner favoriteClicked:self.items[(NSUInteger)i]];
@@ -505,8 +589,13 @@ NSInteger UnreadCountFromTitle(NSString* title) {
   self.needsDisplay = YES;
   return ok ? NSDragOperationMove : NSDragOperationNone;
 }
-- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info { return self.dropTarget ? NSDragOperationMove : NSDragOperationNone; }
-- (void)draggingExited:(id<NSDraggingInfo>)info { self.dropTarget = NO; self.needsDisplay = YES; }
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info {
+  return self.dropTarget ? NSDragOperationMove : NSDragOperationNone;
+}
+- (void)draggingExited:(id<NSDraggingInfo>)info {
+  self.dropTarget = NO;
+  self.needsDisplay = YES;
+}
 - (BOOL)performDragOperation:(id<NSDraggingInfo>)info {
   self.dropTarget = NO;
   self.needsDisplay = YES;
@@ -526,8 +615,11 @@ NSInteger UnreadCountFromTitle(NSString* title) {
   [self addCursorRect:self.bounds
                cursor:self.horizontal ? NSCursor.resizeUpDownCursor : NSCursor.resizeLeftRightCursor];
 }
-- (BOOL)acceptsFirstMouse:(NSEvent*)event { return YES; }
-- (void)mouseDown:(NSEvent*)event {}
+- (BOOL)acceptsFirstMouse:(NSEvent*)event {
+  return YES;
+}
+- (void)mouseDown:(NSEvent*)event {
+}
 - (void)mouseDragged:(NSEvent*)event {
   NSView* content = self.superview;
   NSPoint p = [content convertPoint:event.locationInWindow fromView:nil];
@@ -548,9 +640,15 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target);
   NSPoint _start;
   NSRect _sel;
 }
-- (BOOL)isFlipped { return YES; }
-- (BOOL)acceptsFirstResponder { return YES; }
-- (void)resetCursorRects { [self addCursorRect:self.bounds cursor:NSCursor.crosshairCursor]; }
+- (BOOL)isFlipped {
+  return YES;
+}
+- (BOOL)acceptsFirstResponder {
+  return YES;
+}
+- (void)resetCursorRects {
+  [self addCursorRect:self.bounds cursor:NSCursor.crosshairCursor];
+}
 - (void)drawRect:(NSRect)dirty {
   NSBezierPath* p = [NSBezierPath bezierPathWithRect:self.bounds];
   if (!NSIsEmptyRect(_sel)) [p appendBezierPathWithRect:_sel];
@@ -558,10 +656,14 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target);
   [[NSColor colorWithWhite:0 alpha:0.35] setFill];
   [p fill];
   if (NSIsEmptyRect(_sel)) {
-    NSDictionary* a = @{NSForegroundColorAttributeName : NSColor.whiteColor, NSFontAttributeName : [NSFont systemFontOfSize:15 weight:NSFontWeightMedium]};
+    NSDictionary* a = @{
+      NSForegroundColorAttributeName : NSColor.whiteColor,
+      NSFontAttributeName : [NSFont systemFontOfSize:15 weight:NSFontWeightMedium]
+    };
     NSString* hint = @"Drag to capture an area. Esc cancels.";
     NSSize s = [hint sizeWithAttributes:a];
-    [hint drawAtPoint:NSMakePoint(NSMidX(self.bounds) - s.width / 2, NSMidY(self.bounds) - s.height / 2) withAttributes:a];
+    [hint drawAtPoint:NSMakePoint(NSMidX(self.bounds) - s.width / 2, NSMidY(self.bounds) - s.height / 2)
+        withAttributes:a];
     return;
   }
   [[NSColor colorWithWhite:1 alpha:0.9] setStroke];
@@ -569,7 +671,10 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target);
   b.lineWidth = 1;
   [b stroke];
   NSString* size = [NSString stringWithFormat:@"%.0f × %.0f", _sel.size.width, _sel.size.height];
-  NSDictionary* a = @{NSForegroundColorAttributeName : NSColor.whiteColor, NSFontAttributeName : [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightMedium]};
+  NSDictionary* a = @{
+    NSForegroundColorAttributeName : NSColor.whiteColor,
+    NSFontAttributeName : [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightMedium]
+  };
   [size drawAtPoint:NSMakePoint(NSMinX(_sel), NSMaxY(_sel) + 4) withAttributes:a];
 }
 - (void)mouseDown:(NSEvent*)e {
@@ -578,15 +683,22 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target);
 }
 - (void)mouseDragged:(NSEvent*)e {
   NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
-  _sel = NSIntersectionRect(NSMakeRect(MIN(p.x, _start.x), MIN(p.y, _start.y), fabs(p.x - _start.x), fabs(p.y - _start.y)), self.bounds);
+  _sel = NSIntersectionRect(
+      NSMakeRect(MIN(p.x, _start.x), MIN(p.y, _start.y), fabs(p.x - _start.x), fabs(p.y - _start.y)), self.bounds);
   self.needsDisplay = YES;
 }
-- (void)mouseUp:(NSEvent*)e { [self finish:(_sel.size.width >= 4 && _sel.size.height >= 4) ? _sel : NSZeroRect]; }
-- (void)keyDown:(NSEvent*)e {
-  if (e.keyCode == 53) [self finish:NSZeroRect];
-  else [super keyDown:e];
+- (void)mouseUp:(NSEvent*)e {
+  [self finish:(_sel.size.width >= 4 && _sel.size.height >= 4) ? _sel : NSZeroRect];
 }
-- (void)cancelOperation:(id)sender { [self finish:NSZeroRect]; }
+- (void)keyDown:(NSEvent*)e {
+  if (e.keyCode == 53)
+    [self finish:NSZeroRect];
+  else
+    [super keyDown:e];
+}
+- (void)cancelOperation:(id)sender {
+  [self finish:NSZeroRect];
+}
 - (void)finish:(NSRect)r {
   void (^f)(NSRect) = self.finished;
   self.finished = nil;
@@ -598,7 +710,10 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target);
 class DevToolsResults : public CefDevToolsMessageObserver {
  public:
   std::map<int, std::function<void(bool, const std::string&)>> pending;
-  void OnDevToolsMethodResult(CefRefPtr<CefBrowser>, int message_id, bool success, const void* result,
+  void OnDevToolsMethodResult(CefRefPtr<CefBrowser>,
+                              int message_id,
+                              bool success,
+                              const void* result,
                               size_t result_size) override {
     auto it = pending.find(message_id);
     if (it == pending.end()) return;
@@ -628,7 +743,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSPopUpButton* _spacePicker;
   NSOutlineView* _outline;
   NSView* _content;
-  id _swipeMonitor;           // two-finger swipe back/forward (#77)
+  id _swipeMonitor;  // two-finger swipe back/forward (#77)
   NSView* _swipeArrow;
   CefRefPtr<BrowserClient> _client;
   std::map<int, CefRefPtr<CefBrowser>> _browsers;
@@ -703,41 +818,41 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   SidebarPillView* _addressPill;
   NSScrollView* _noteScroll;  // Notes editor, shown in the page card
   NSTextView* _noteText;
-  ArcItem* _noteItem;         // note currently in the editor
+  ArcItem* _noteItem;  // note currently in the editor
   NSTimer* _noteSaveTimer;
-  EaselView* _easelView;      // Easel canvas, shown in the page card
+  EaselView* _easelView;  // Easel canvas, shown in the page card
   NSScrollView* _easelScroll;
   ArcItem* _easelItem;
   CefRefPtr<DevToolsResults> _devtoolsResults;
   std::map<int, CefRefPtr<CefRegistration>> _devtoolsRegs;
   int _devtoolsNextId;
   NSData* _lastCapture;
-  NSString* _suggestRequested;               // search suggestions (#31): query last fetched
-  NSString* _suggestQuery;                   // query the current _searchSuggestions belong to
+  NSString* _suggestRequested;  // search suggestions (#31): query last fetched
+  NSString* _suggestQuery;      // query the current _searchSuggestions belong to
   NSArray<NSString*>* _searchSuggestions;
   NSURLSessionDataTask* _suggestTask;
   NSUInteger _suggestToken;
   NSString* _lastCaptureLink;
   NSView* _captureOverlay;
   NSString* _captureDirectory;
-  NSButton* _boostButton;   // Arc: Boost indicator in the address pill
-  NSString* _boostIndicator; // tests: "on" / "off" / "none"
+  NSButton* _boostButton;     // Arc: Boost indicator in the address pill
+  NSString* _boostIndicator;  // tests: "on" / "off" / "none"
   NSTextField* _addressPillText;
   NSView* _sidebarNav;
-  NSView* _spaceBar;        // Arc's bottom bar: archive, Space icons, "+"
+  NSView* _spaceBar;  // Arc's bottom bar: archive, Space icons, "+"
   NSStackView* _spaceIcons;
-  NSView* _spaceHeader;            // Arc's Space title row: icon + name, "..." menu
-  FavoritesGridView* _favGrid;     // Arc's Favorites tiles under the address pill
+  NSView* _spaceHeader;         // Arc's Space title row: icon + name, "..." menu
+  FavoritesGridView* _favGrid;  // Arc's Favorites tiles under the address pill
   BOOL _iconRefreshQueued;
   NSMutableDictionary<NSString*, NSString*>* _profileNames;  // profile folder -> name
   NSTextField* _spaceHeaderTitle;
-  NSString* _lastSpaceSlide;   // tests: "left" / "right" / "none"
+  NSString* _lastSpaceSlide;  // tests: "left" / "right" / "none"
   NSMutableArray<Boost*>* _boosts;
   NSPanel* _boostPanel;
   Boost* _boostEditing;
   NSMutableDictionary<NSString*, NSControl*>* _boostControls;
   int _zapBrowser;
-  NSUInteger _cardPops;        // tests
+  NSUInteger _cardPops;            // tests
   NSHashTable* _sidebarDirtyFrom;  // windows whose sidebar change other windows haven't picked up yet
   BOOL _sidebarRefreshScheduled;
   BOOL _syncingSidebar;
@@ -746,9 +861,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID {
   NSWindow* window = [[NSWindow alloc]
       initWithContentRect:NSMakeRect(0, 0, 1280, 820)
-                styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                          NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable |
-                          NSWindowStyleMaskFullSizeContentView
+                styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable |
+                          NSWindowStyleMaskResizable | NSWindowStyleMaskFullSizeContentView
                   backing:NSBackingStoreBuffered
                     defer:NO];
   window.titlebarAppearsTransparent = YES;
@@ -800,27 +914,36 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _mediaBar.wantsLayer = YES;
   _mediaBar.layer.cornerRadius = 8;
   _mediaBar.layer.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.08].CGColor;
-  _mediaPlay = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"pause.fill" accessibilityDescription:@"Pause"]
-                                  target:self action:@selector(mediaBarPlay:)];
+  _mediaPlay = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"pause.fill"
+                                                   accessibilityDescription:@"Pause"]
+                                  target:self
+                                  action:@selector(mediaBarPlay:)];
   _mediaPlay.bordered = NO;
   _mediaPlay.frame = NSMakeRect(4, 5, 24, 24);
-  _mediaMute = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"speaker.wave.2.fill" accessibilityDescription:@"Mute"]
-                                  target:self action:@selector(mediaBarMute:)];
+  _mediaMute = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"speaker.wave.2.fill"
+                                                   accessibilityDescription:@"Mute"]
+                                  target:self
+                                  action:@selector(mediaBarMute:)];
   _mediaMute.bordered = NO;
   _mediaMute.frame = NSMakeRect(kSidebarWidth - 16 - 28, 5, 24, 24);
   _mediaTitle = [NSTextField labelWithString:@""];
   _mediaTitle.lineBreakMode = NSLineBreakByTruncatingTail;
   _mediaTitle.font = [NSFont systemFontOfSize:12];
   _mediaTitle.frame = NSMakeRect(32, 8, kSidebarWidth - 16 - 64, 18);
-  NSClickGestureRecognizer* go = [[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(mediaBarShowTab:)];
+  NSClickGestureRecognizer* go = [[NSClickGestureRecognizer alloc] initWithTarget:self
+                                                                           action:@selector(mediaBarShowTab:)];
   [_mediaTitle addGestureRecognizer:go];
   // Arc's call controls: in a call, the bar shows microphone and camera toggles instead of play / mute.
-  _callCam = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"video.fill" accessibilityDescription:@"Camera"]
-                                target:self action:@selector(callBarCamera:)];
+  _callCam = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"video.fill"
+                                                 accessibilityDescription:@"Camera"]
+                                target:self
+                                action:@selector(callBarCamera:)];
   _callCam.bordered = NO;
   _callCam.frame = NSMakeRect(kSidebarWidth - 16 - 56, 5, 24, 24);
-  _callMic = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"mic.fill" accessibilityDescription:@"Microphone"]
-                                target:self action:@selector(callBarMic:)];
+  _callMic = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"mic.fill"
+                                                 accessibilityDescription:@"Microphone"]
+                                target:self
+                                action:@selector(callBarMic:)];
   _callMic.bordered = NO;
   _callMic.frame = NSMakeRect(kSidebarWidth - 16 - 28, 5, 24, 24);
   _callCam.hidden = _callMic.hidden = YES;
@@ -828,28 +951,34 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _mediaBar.hidden = YES;
   [sidebar addSubview:_mediaBar];
 
-  _spacePicker = [[NSPopUpButton alloc]
-      initWithFrame:NSMakeRect(8, bounds.size.height - 120, kSidebarWidth - 16, 26) pullsDown:NO];
+  _spacePicker = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 120, kSidebarWidth - 16, 26)
+                                            pullsDown:NO];
   _spacePicker.autoresizingMask = NSViewMinYMargin;
   [self rebuildSpacePicker];
   _spacePicker.target = self;
   _spacePicker.action = @selector(spaceChanged:);
   // The pop-up stays as the Space list model; Arc shows a plain title row instead of a drop-down.
   // Arc's Space title: the name in dim semibold text; "..." shows on hover; right-click opens the Space menu.
-  SpaceHeaderView* header = [[SpaceHeaderView alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 234, kSidebarWidth - 17, 34)];
+  SpaceHeaderView* header =
+      [[SpaceHeaderView alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 234, kSidebarWidth - 17, 34)];
   header.autoresizingMask = NSViewMinYMargin;
   _spaceHeader = header;
   _spaceHeaderTitle = [NSTextField labelWithString:@""];
   _spaceHeaderTitle.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
-  _spaceHeaderTitle.textColor = [NSColor colorWithName:nil dynamicProvider:^NSColor*(NSAppearance* ap) {
-    BOOL dark = [ap bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] == NSAppearanceNameDarkAqua;
-    return [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.45];
-  }];
+  _spaceHeaderTitle.textColor =
+      [NSColor colorWithName:nil
+             dynamicProvider:^NSColor*(NSAppearance* ap) {
+               BOOL dark = [ap bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
+                           NSAppearanceNameDarkAqua;
+               return [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.45];
+             }];
   _spaceHeaderTitle.lineBreakMode = NSLineBreakByTruncatingTail;
   _spaceHeaderTitle.frame = NSMakeRect(7, 8, _spaceHeader.bounds.size.width - 44, 18);
   [_spaceHeader addSubview:_spaceHeaderTitle];
-  NSButton* more = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"ellipsis" accessibilityDescription:@"Space menu"]
-                                      target:self action:@selector(showSpaceMenu:)];
+  NSButton* more = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"ellipsis"
+                                                       accessibilityDescription:@"Space menu"]
+                                      target:self
+                                      action:@selector(showSpaceMenu:)];
   more.bordered = NO;
   more.toolTip = @"Space options";
   more.contentTintColor = NSColor.secondaryLabelColor;
@@ -857,8 +986,9 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   more.alphaValue = 0;
   [_spaceHeader addSubview:more];
   header.reveal = more;
-  header.menuProvider = ^NSMenu*{ return [weakOwner spaceMenu]; };
-  NSClickGestureRecognizer* rename = [[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(renameCurrentSpace:)];
+  header.menuProvider = ^NSMenu* { return [weakOwner spaceMenu]; };
+  NSClickGestureRecognizer* rename = [[NSClickGestureRecognizer alloc] initWithTarget:self
+                                                                               action:@selector(renameCurrentSpace:)];
   rename.numberOfClicksRequired = 2;  // double-click the name to rename, as in Arc
   [_spaceHeaderTitle addGestureRecognizer:rename];
   [sidebar addSubview:_spaceHeader];
@@ -868,8 +998,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   [sidebar addSubview:_favGrid];
   [self updateSpaceHeader];
 
-  NSScrollView* scroll = [[NSScrollView alloc]
-      initWithFrame:NSMakeRect(8, 42, kSidebarWidth - 17, bounds.size.height - 166)];
+  NSScrollView* scroll =
+      [[NSScrollView alloc] initWithFrame:NSMakeRect(8, 42, kSidebarWidth - 17, bounds.size.height - 166)];
   scroll.autoresizingMask = NSViewHeightSizable;
   scroll.drawsBackground = NO;
   scroll.hasVerticalScroller = YES;
@@ -897,12 +1027,12 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _outline.target = self;
   _outline.action = @selector(sidebarClicked:);
   [_outline registerForDraggedTypes:@[ kSidebarItemPasteboardType ]];
-  [_outline addTrackingArea:[[NSTrackingArea alloc]
-                                initWithRect:NSZeroRect
-                                     options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited |
-                                             NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
-                                       owner:self
-                                    userInfo:nil]];
+  [_outline
+      addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                   options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited |
+                                                           NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
+                                                     owner:self
+                                                  userInfo:nil]];
   [_outline setDraggingSourceOperationMask:NSDragOperationMove forLocal:YES];
   _outline.menu = [[NSMenu alloc] initWithTitle:@"Sidebar"];
   _outline.menu.delegate = self;
@@ -915,11 +1045,14 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   // back / forward / reload at 183 / 217 / 251.
   _sidebarNav = [[NSView alloc] initWithFrame:NSMakeRect(0, bounds.size.height - 37, kSidebarWidth, 28)];
   _sidebarNav.autoresizingMask = NSViewMinYMargin;
-  NSArray* nav = @[ @[ @"sidebar.left", @"toggleSidebar:", @81 ], @[ @"arrow.left", @"goBack:", @170 ],
-                    @[ @"arrow.right", @"goForward:", @204 ], @[ @"arrow.clockwise", @"reloadPage:", @238 ] ];
+  NSArray* nav = @[
+    @[ @"sidebar.left", @"toggleSidebar:", @81 ], @[ @"arrow.left", @"goBack:", @170 ],
+    @[ @"arrow.right", @"goForward:", @204 ], @[ @"arrow.clockwise", @"reloadPage:", @238 ]
+  ];
   for (NSArray* n in nav) {
     NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:n[0] accessibilityDescription:nil]
-                                     target:self action:NSSelectorFromString(n[1])];
+                                     target:self
+                                     action:NSSelectorFromString(n[1])];
     b.bordered = NO;
     b.contentTintColor = NSColor.secondaryLabelColor;
     b.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:14 weight:NSFontWeightMedium];
@@ -934,21 +1067,27 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _addressPill.onClick = ^{ [weakSelf openLocation:nil]; };
   _addressPillText = [NSTextField labelWithString:@""];
   _addressPillText.font = [NSFont systemFontOfSize:13];
-  _addressPillText.textColor = [NSColor colorWithName:nil dynamicProvider:^NSColor*(NSAppearance* ap) {
-    BOOL dark = [ap bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] == NSAppearanceNameDarkAqua;
-    return dark ? [NSColor colorWithSRGBRed:0xaa / 255.0 green:0xa8 / 255.0 blue:0xb9 / 255.0 alpha:1]
-                : [NSColor colorWithWhite:0 alpha:0.6];
-  }];
+  _addressPillText.textColor =
+      [NSColor colorWithName:nil
+             dynamicProvider:^NSColor*(NSAppearance* ap) {
+               BOOL dark = [ap bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
+                           NSAppearanceNameDarkAqua;
+               return dark ? [NSColor colorWithSRGBRed:0xaa / 255.0 green:0xa8 / 255.0 blue:0xb9 / 255.0 alpha:1]
+                           : [NSColor colorWithWhite:0 alpha:0.6];
+             }];
   _addressPillText.lineBreakMode = NSLineBreakByTruncatingTail;
   _addressPillText.frame = NSMakeRect(12, 9, _addressPill.bounds.size.width - 12 - 60, 18);
   [_addressPill addSubview:_addressPillText];
-  NSArray* pillButtons = @[ @[ @"paintbrush.pointed", @"editBoost:", @"Boost This Site" ], @[ @"link", @"copyCurrentURL:", @"Copy URL" ],
-                            @[ @"slider.horizontal.3", @"showSiteSettings:", @"Site Settings" ] ];
+  NSArray* pillButtons = @[
+    @[ @"paintbrush.pointed", @"editBoost:", @"Boost This Site" ], @[ @"link", @"copyCurrentURL:", @"Copy URL" ],
+    @[ @"slider.horizontal.3", @"showSiteSettings:", @"Site Settings" ]
+  ];
   _addressPillText.frame = NSMakeRect(11, 9, _addressPill.bounds.size.width - 11 - 86, 18);
   CGFloat px = _addressPill.bounds.size.width - 6 - 3 * 26;
   for (NSArray* n in pillButtons) {
     NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:n[0] accessibilityDescription:n[2]]
-                                     target:self action:NSSelectorFromString(n[1])];
+                                     target:self
+                                     action:NSSelectorFromString(n[1])];
     b.bordered = NO;
     b.toolTip = n[2];
     b.contentTintColor = NSColor.secondaryLabelColor;
@@ -961,15 +1100,18 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
 
   // Bottom bar, as in Arc: archive (Library) at the left, one icon per Space in the middle, "+" menu at the right.
   _spaceBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 8, kSidebarWidth - 17, 30)];  // Arc: centred 23.5 pt up
-  NSButton* lib = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"archivebox" accessibilityDescription:@"Archive"]
-                                     target:self action:@selector(showArchive:)];
+  NSButton* lib = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"archivebox"
+                                                      accessibilityDescription:@"Archive"]
+                                     target:self
+                                     action:@selector(showArchive:)];
   lib.bordered = NO;
   lib.toolTip = @"Archive";
   lib.contentTintColor = NSColor.secondaryLabelColor;
   lib.frame = NSMakeRect(2, 2, 26, 26);
   [_spaceBar addSubview:lib];
   NSButton* plus = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"plus" accessibilityDescription:@"New"]
-                                      target:self action:@selector(showNewMenu:)];
+                                      target:self
+                                      action:@selector(showNewMenu:)];
   plus.bordered = NO;
   plus.toolTip = @"New Tab, Folder or Space";
   plus.contentTintColor = NSColor.secondaryLabelColor;
@@ -984,9 +1126,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   [sidebar addSubview:_spaceBar];
   [self rebuildSpaceBar];  // rebuildSpacePicker above ran before the bar existed
 
-  _content = [[NSView alloc] initWithFrame:NSMakeRect(kSidebarWidth, 0,
-                                                      bounds.size.width - kSidebarWidth,
-                                                      bounds.size.height)];
+  _content = [[NSView alloc]
+      initWithFrame:NSMakeRect(kSidebarWidth, 0, bounds.size.width - kSidebarWidth, bounds.size.height)];
   _content.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   _content.wantsLayer = YES;
   _content.layer.cornerRadius = kCardRadius;
@@ -996,11 +1137,14 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _toolbar = [[NSView alloc] initWithFrame:NSMakeRect(kSidebarWidth, bounds.size.height - kToolbarHeight,
                                                       bounds.size.width - kSidebarWidth, kToolbarHeight)];
   _toolbar.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
-  NSArray* buttons = @[ @[ @"chevron.left", @"goBack:" ], @[ @"chevron.right", @"goForward:" ], @[ @"arrow.clockwise", @"reloadPage:" ] ];
+  NSArray* buttons = @[
+    @[ @"chevron.left", @"goBack:" ], @[ @"chevron.right", @"goForward:" ], @[ @"arrow.clockwise", @"reloadPage:" ]
+  ];
   CGFloat bx = 8;
   for (NSArray* b in buttons) {
     NSButton* btn = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:b[0] accessibilityDescription:nil]
-                                       target:self action:NSSelectorFromString(b[1])];
+                                       target:self
+                                       action:NSSelectorFromString(b[1])];
     btn.bordered = NO;
     btn.frame = NSMakeRect(bx, 6, 26, 26);
     btn.tag = 1;  // shifted right of the window buttons when the sidebar is hidden
@@ -1048,7 +1192,9 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
 }
 
 // Arc's default theme when a Space has no colour of its own: deep indigo in dark mode (top #120C39 to #140D40).
-- (BOOL)usingDefaultTheme { return _space.themeColors.count == 0 && IsDark(self.window.contentView); }
+- (BOOL)usingDefaultTheme {
+  return _space.themeColors.count == 0 && IsDark(self.window.contentView);
+}
 
 // Arc lines the window buttons up with the sidebar icons (centres 19.5 / 42.5 / 66, 23.5 pt down).
 - (void)positionWindowButtons {
@@ -1076,9 +1222,15 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSButton* close = [self.window standardWindowButton:NSWindowCloseButton];
   return [close convertRect:close.bounds toView:nil];
 }
-- (void)windowDidEndLiveResize:(NSNotification*)note { [self positionWindowButtons]; }
-- (void)windowDidExitFullScreen:(NSNotification*)note { [self positionWindowButtons]; }
-- (void)windowDidBecomeMain:(NSNotification*)note { [self positionWindowButtons]; }
+- (void)windowDidEndLiveResize:(NSNotification*)note {
+  [self positionWindowButtons];
+}
+- (void)windowDidExitFullScreen:(NSNotification*)note {
+  [self positionWindowButtons];
+}
+- (void)windowDidBecomeMain:(NSNotification*)note {
+  [self positionWindowButtons];
+}
 
 - (void)reloadSidebar {
   [_outline reloadData];
@@ -1100,6 +1252,7 @@ class BlockDeleteCookies : public CefDeleteCookiesCallback {
     void (^done)(int) = done_;
     if (done) dispatch_async(dispatch_get_main_queue(), ^{ done(n); });
   }
+
  private:
   void (^done_)(int);
   IMPLEMENT_REFCOUNTING(BlockDeleteCookies);
@@ -1109,7 +1262,9 @@ class BlockDeleteCookies : public CefDeleteCookiesCallback {
 // through DeleteCookies (which reports completion) if `remove`, then reports the count on the main queue.
 class MatchCookieVisitor : public CefCookieVisitor {
  public:
-  MatchCookieVisitor(CefRefPtr<CefCookieManager> mgr, std::function<bool(const CefCookie&)> match, bool remove,
+  MatchCookieVisitor(CefRefPtr<CefCookieManager> mgr,
+                     std::function<bool(const CefCookie&)> match,
+                     bool remove,
                      void (^done)(NSUInteger))
       : mgr_(mgr), match_(std::move(match)), remove_(remove), done_([done copy]) {}
   ~MatchCookieVisitor() override {
@@ -1128,10 +1283,11 @@ class MatchCookieVisitor : public CefCookieVisitor {
         dispatch_group_enter(g);
         std::string dbgUrl = h.first, dbgName = h.second;
         if (!mgr->DeleteCookies(h.first, h.second, new BlockDeleteCookies(^(int deleted) {
-              if (getenv("NOTARC_COOKIE_DEBUG"))
-                fprintf(stderr, "COOKIE-DEL %s %s -> %d\n", dbgUrl.c_str(), dbgName.c_str(), deleted);
-              dispatch_group_leave(g);
-            })))
+                                  if (getenv("NOTARC_COOKIE_DEBUG"))
+                                    fprintf(stderr, "COOKIE-DEL %s %s -> %d\n", dbgUrl.c_str(), dbgName.c_str(),
+                                            deleted);
+                                  dispatch_group_leave(g);
+                                })))
           dispatch_group_leave(g);
       }
       dispatch_group_notify(g, dispatch_get_main_queue(), ^{
@@ -1151,6 +1307,7 @@ class MatchCookieVisitor : public CefCookieVisitor {
     }
     return true;
   }
+
  private:
   CefRefPtr<CefCookieManager> mgr_;
   std::function<bool(const CefCookie&)> match_;
@@ -1167,6 +1324,7 @@ class BlockCompletion : public CefCompletionCallback {
     void (^done)(void) = done_;
     if (done) dispatch_async(dispatch_get_main_queue(), done);
   }
+
  private:
   void (^done_)(void);
   IMPLEMENT_REFCOUNTING(BlockCompletion);
@@ -1180,6 +1338,7 @@ class BlockSetCookie : public CefSetCookieCallback {
     void (^done)(void) = done_;
     if (done) dispatch_async(dispatch_get_main_queue(), done);
   }
+
  private:
   void (^done_)(void);
   IMPLEMENT_REFCOUNTING(BlockSetCookie);
@@ -1208,9 +1367,10 @@ NSString* CleanLinkURL(NSString* url) {
   NSURLComponents* c = [NSURLComponents componentsWithString:url ?: @""];
   if (!c || !c.queryItems.count) return url;
   static NSSet* exact = [NSSet setWithArray:@[
-    @"fbclid", @"gclid", @"gclsrc", @"dclid", @"gbraid", @"wbraid", @"msclkid", @"mc_cid", @"mc_eid", @"igshid",
-    @"yclid", @"twclid", @"ttclid", @"li_fat_id", @"_hsenc", @"_hsmi", @"mkt_tok", @"vero_id", @"oly_anon_id",
-    @"oly_enc_id", @"rb_clickid", @"s_cid", @"ref_src", @"ref_url", @"si", @"__s", @"_ga", @"_gl", @"spm"
+    @"fbclid",  @"gclid",   @"gclsrc",      @"dclid",      @"gbraid",     @"wbraid",    @"msclkid", @"mc_cid",
+    @"mc_eid",  @"igshid",  @"yclid",       @"twclid",     @"ttclid",     @"li_fat_id", @"_hsenc",  @"_hsmi",
+    @"mkt_tok", @"vero_id", @"oly_anon_id", @"oly_enc_id", @"rb_clickid", @"s_cid",     @"ref_src", @"ref_url",
+    @"si",      @"__s",     @"_ga",         @"_gl",        @"spm"
   ]];
   NSMutableArray* kept = [NSMutableArray array];
   for (NSURLQueryItem* q in c.queryItems) {
@@ -1238,7 +1398,8 @@ NSString* CleanLinkURL(NSString* url) {
       [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
           stringByAppendingPathComponent:@"NotArc"];
   // Chrome-style CEF only accepts profile dirs that are direct children of root_cache_path.
-  NSString* name = [(self.selfTestProfiles ? @"SelfTest Space " : @"Space ") stringByAppendingString:space.profileDirectory];
+  NSString* name =
+      [(self.selfTestProfiles ? @"SelfTest Space " : @"Space ") stringByAppendingString:space.profileDirectory];
   NSString* path = [support stringByAppendingPathComponent:name];
   [[NSFileManager defaultManager] createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil];
   CefRequestContextSettings settings;
@@ -1260,13 +1421,19 @@ NSString* CleanLinkURL(NSString* url) {
       stringByAppendingPathComponent:@"ArcCookiesImported"];
   if (!self.selfTestProfiles && ![[NSFileManager defaultManager] fileExistsAtPath:marker]) {
     __weak MainWindowController* weakSelf = self;
-    [self importArcCookiesForProfile:profile context:ctx done:^(NSUInteger read, int ok) {
-      std::fprintf(stderr, "imported %d/%lu Arc cookies into %s\n", ok, (unsigned long)read, profile.UTF8String);
-      if (read > 0)
-        [[NSString stringWithFormat:@"%d of %lu\n", ok, (unsigned long)read] writeToFile:marker atomically:YES
-                                                                                  encoding:NSUTF8StringEncoding error:nil];
-      [weakSelf openPendingTabsForProfile:profile];
-    }];
+    [self importArcCookiesForProfile:profile
+                             context:ctx
+                                done:^(NSUInteger read, int ok) {
+                                  std::fprintf(stderr, "imported %d/%lu Arc cookies into %s\n", ok, (unsigned long)read,
+                                               profile.UTF8String);
+                                  if (read > 0)
+                                    [[NSString stringWithFormat:@"%d of %lu\n", ok, (unsigned long)read]
+                                        writeToFile:marker
+                                         atomically:YES
+                                           encoding:NSUTF8StringEncoding
+                                              error:nil];
+                                  [weakSelf openPendingTabsForProfile:profile];
+                                }];
     return;
   }
   [self openPendingTabsForProfile:profile];
@@ -1285,9 +1452,8 @@ NSString* CleanLinkURL(NSString* url) {
     if (!cachedPassword) cachedPassword = ArcSafeStoragePassword(&error);
     NSArray<ArcCookie*>* cookies =
         cachedPassword ? ArcReadCookies(ArcCookieDBPath(profile), ArcCookieKey(cachedPassword), nullptr, &error) : nil;
-    dispatch_async(dispatch_get_main_queue(), ^{
-      [weakSelf setArcCookies:cookies error:error forProfile:profile context:ctx done:done];
-    });
+    dispatch_async(dispatch_get_main_queue(),
+                   ^{ [weakSelf setArcCookies:cookies error:error forProfile:profile context:ctx done:done]; });
   });
 }
 
@@ -1298,17 +1464,19 @@ NSString* CleanLinkURL(NSString* url) {
                  done:(void (^)(NSUInteger read, int ok))done {
   CefRefPtr<CefCookieManager> manager = ctx->GetCookieManager(nullptr);
   if (!cookies.count || !manager) {
-    if (error) std::fprintf(stderr, "Arc cookie import skipped for %s: %s\n", profile.UTF8String,
-                            error.localizedDescription.UTF8String);
+    if (error)
+      std::fprintf(stderr, "Arc cookie import skipped for %s: %s\n", profile.UTF8String,
+                   error.localizedDescription.UTF8String);
     done(0, 0);
     return;
   }
   NSUInteger count = cookies.count;
   void (^finish)(NSUInteger, int) = [done copy];
-  CefRefPtr<CookieImportCallback> cb = new CookieImportCallback(static_cast<int>(count), [finish, count, manager](int ok) {
-    manager->FlushStore(nullptr);
-    dispatch_async(dispatch_get_main_queue(), ^{ finish(count, ok); });
-  });
+  CefRefPtr<CookieImportCallback> cb =
+      new CookieImportCallback(static_cast<int>(count), [finish, count, manager](int ok) {
+        manager->FlushStore(nullptr);
+        dispatch_async(dispatch_get_main_queue(), ^{ finish(count, ok); });
+      });
   for (ArcCookie* c in cookies) {
     NSString* host = [c.host hasPrefix:@"."] ? [c.host substringFromIndex:1] : c.host;
     NSString* url = [NSString stringWithFormat:@"%@://%@%@", c.secure ? @"https" : @"http", host, c.path ?: @"/"];
@@ -1377,14 +1545,16 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (NSString*)routeExternalLink:(NSString*)url sourceApp:(NSString*)bundleID {
   LinkRouting* lr = [self linkRouting];
   LinkRule* rule = [lr ruleForURL:url sourceApp:bundleID];
-  NSString* to = rule ? rule.destination : (lr.defaultDestination ?: (SettingBool(kSettingExternalLinksLittle) ? @"little" : @"space"));
+  NSString* to = rule ? rule.destination
+                      : (lr.defaultDestination ?: (SettingBool(kSettingExternalLinksLittle) ? @"little" : @"space"));
   NSString* spaceID = rule ? rule.spaceID : lr.defaultSpaceID;
   if ([to isEqualToString:@"little"]) {
     [self openLittleWindow:url];
     return @"little";
   }
   ArcSpace* target = _space;  // "most recent Space" = the one in front
-  for (ArcSpace* s in _spaces) if (spaceID && [s.spaceID isEqualToString:spaceID]) target = s;
+  for (ArcSpace* s in _spaces)
+    if (spaceID && [s.spaceID isEqualToString:spaceID]) target = s;
   if (target != _space) [self switchToSpace:target];
   [self openInNewTab:url];
   return target.title ?: @"";
@@ -1397,7 +1567,8 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   if (!path) return nil;
   [self linkRouting];  // first time: seed from Arc
   NSMutableArray* spaces = [NSMutableArray array];
-  for (ArcSpace* s in _spaces) if (s.spaceID.length) [spaces addObject:@[ s.spaceID, s.title ?: @"Space" ]];
+  for (ArcSpace* s in _spaces)
+    if (s.spaceID.length) [spaces addObject:@[ s.spaceID, s.title ?: @"Space" ]];
   LinkRoutingEditor* e = [[LinkRoutingEditor alloc] initWithPath:path spaces:spaces];  // fresh: Spaces may have changed
   editors[path] = e;
   return e;
@@ -1409,14 +1580,16 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   [e.window makeKeyAndOrderFront:nil];
 }
 
-- (BOOL)swipeNavigationInstalled { return _swipeMonitor != nil; }
+- (BOOL)swipeNavigationInstalled {
+  return _swipeMonitor != nil;
+}
 
 - (void)installSwipeNavigation {
   if (_swipeMonitor) return;
   __weak MainWindowController* weakSelf = self;
-  _swipeMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel handler:^NSEvent*(NSEvent* e) {
-    return [weakSelf handleSwipeScroll:e] ? nil : e;
-  }];
+  _swipeMonitor = [NSEvent
+      addLocalMonitorForEventsMatchingMask:NSEventMaskScrollWheel
+                                   handler:^NSEvent*(NSEvent* e) { return [weakSelf handleSwipeScroll:e] ? nil : e; }];
 }
 
 - (BOOL)handleSwipeScroll:(NSEvent*)e {
@@ -1424,7 +1597,9 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   if (!NSPointInRect([_content convertPoint:e.locationInWindow fromView:nil], _content.bounds)) return NO;
   NSInteger dir = SwipeDirectionForScroll(e.scrollingDeltaX, e.scrollingDeltaY, e.hasPreciseScrollingDeltas,
                                           e.phase == NSEventPhaseBegan);
-  if (!dir || (dir < 0 && ![self canGoBack]) || (dir > 0 && !([self currentBrowser] && [self currentBrowser]->CanGoForward()))) return NO;
+  if (!dir || (dir < 0 && ![self canGoBack]) ||
+      (dir > 0 && !([self currentBrowser] && [self currentBrowser]->CanGoForward())))
+    return NO;
   NSView* arrow = [self swipeArrow:dir];
   __block BOOL done = NO;
   [e trackSwipeEventWithOptions:NSEventSwipeTrackingLockDirection
@@ -1478,7 +1653,8 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   _client->set_focus_callback([weakSelf](int browserId) { [OwnerOf(browserId, weakSelf) paneFocused:browserId]; });
   _client->set_link_menu_callback([weakSelf](int browserId, int command, const std::string& url, const std::string&) {
     NSString* target = [NSString stringWithUTF8String:url.c_str()];
-    dispatch_async(dispatch_get_main_queue(), ^{ [OwnerOf(browserId, weakSelf) handleLinkCommand:command url:target fromBrowser:browserId]; });
+    dispatch_async(dispatch_get_main_queue(),
+                   ^{ [OwnerOf(browserId, weakSelf) handleLinkCommand:command url:target fromBrowser:browserId]; });
   });
   _client->set_open_callback([weakSelf](int browserId, const std::string& url, int disposition, bool gesture) -> bool {
     MainWindowController* strong = OwnerOf(browserId, weakSelf);
@@ -1497,7 +1673,8 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
     return true;
   });
   _client->set_media_callback([weakSelf](int browserId, const std::string& state, const std::string& title) {
-    if (getenv("NOTARC_MEDIA_DEBUG") && !title.empty()) std::fprintf(stderr, "MEDIA-DEBUG %d %s %s\n", browserId, state.c_str(), title.c_str());
+    if (getenv("NOTARC_MEDIA_DEBUG") && !title.empty())
+      std::fprintf(stderr, "MEDIA-DEBUG %d %s %s\n", browserId, state.c_str(), title.c_str());
     [OwnerOf(browserId, weakSelf) browser:browserId mediaState:[NSString stringWithUTF8String:state.c_str()]];
   });
   _mediaTimer = [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer*) { [weakSelf pollMediaNow]; }];
@@ -1518,8 +1695,10 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
     [OwnerOf(browserId, weakSelf) handleZapSelector:[NSString stringWithUTF8String:selector.c_str()] browser:browserId];
   });
   _client->set_permission_callback([weakSelf](int browserId, int requestId, const std::string& origin, uint32_t perms) {
-    [OwnerOf(browserId, weakSelf) browser:browserId permissionRequest:requestId origin:[NSString stringWithUTF8String:origin.c_str()]
-                 bits:perms];
+    [OwnerOf(browserId, weakSelf) browser:browserId
+                        permissionRequest:requestId
+                                   origin:[NSString stringWithUTF8String:origin.c_str()]
+                                     bits:perms];
   });
   _client->set_external_callback([weakSelf](int browserId, const std::string& url) {
     [OwnerOf(browserId, weakSelf) browser:browserId externalURL:[NSString stringWithUTF8String:url.c_str()]];
@@ -1548,7 +1727,9 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   return space.allTabs.firstObject;
 }
 
-- (NSUInteger)liveTabCount { return _browsers.size(); }
+- (NSUInteger)liveTabCount {
+  return _browsers.size();
+}
 
 // Web views are created lazily, the first time a tab is opened (Arc does the same).
 - (void)adoptBrowser:(int)browserId {
@@ -1583,7 +1764,10 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
     return;
   }
   if (ChromePagesEnabled()) {
-    ChromePageHost* host = [[ChromePageHost alloc] initWithClient:_client url:item.url context:context hostView:_content];
+    ChromePageHost* host = [[ChromePageHost alloc] initWithClient:_client
+                                                              url:item.url
+                                                          context:context
+                                                         hostView:_content];
     CefRefPtr<CefBrowser> browser = host.browser;
     if (!browser) {
       std::fprintf(stderr, "failed to create Chrome-style page for %s\n", item.url.UTF8String);
@@ -1594,7 +1778,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
     _chromePages[@(browser->GetIdentifier())] = host;
     item.browserId = browser->GetIdentifier();
     _browsers[item.browserId] = browser;
-  [self adoptBrowser:item.browserId];
+    [self adoptBrowser:item.browserId];
     return;
   }
   CefWindowInfo info;
@@ -1602,8 +1786,8 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   info.SetAsChild(CAST_NSVIEW_TO_CEF_WINDOW_HANDLE(_content),
                   CefRect(0, 0, static_cast<int>(r.size.width), static_cast<int>(r.size.height)));
   CefBrowserSettings settings;
-  CefRefPtr<CefBrowser> browser = CefBrowserHost::CreateBrowserSync(
-      info, _client, item.url.UTF8String, settings, nullptr, context);
+  CefRefPtr<CefBrowser> browser =
+      CefBrowserHost::CreateBrowserSync(info, _client, item.url.UTF8String, settings, nullptr, context);
   if (!browser) {
     std::fprintf(stderr, "failed to create browser for %s\n", item.url.UTF8String);
     return;
@@ -1622,26 +1806,37 @@ static NSString* const kPiPEnterJS =
     @"(()=>{if(document.pictureInPictureElement)return 'already';const v=[...document.querySelectorAll('video')]"
     @".find(x=>!x.paused&&!x.ended&&x.readyState>1&&!x.disablePictureInPicture);if(!v)return 'none';"
     @"return v.requestPictureInPicture().then(()=>'pip',e=>'error:'+e.name);})()";
-static NSString* const kPiPExitJS =
-    @"(()=>document.pictureInPictureElement?document.exitPictureInPicture().then(()=>'exited',e=>'error:'+e.name):'none')()";
+static NSString* const kPiPExitJS = @"(()=>document.pictureInPictureElement?document.exitPictureInPicture().then(()=>'"
+                                    @"exited',e=>'error:'+e.name):'none')()";
 
 - (void)pictureInPicture:(BOOL)enter item:(ArcItem*)item done:(void (^)(NSString* result))done {
-  if (!item.browserId) { if (done) done(@"nobrowser"); return; }
-  [self devtools:item method:@"Runtime.evaluate"
-          params:@{@"expression" : enter ? kPiPEnterJS : kPiPExitJS, @"userGesture" : @YES, @"awaitPromise" : @YES,
-                   @"returnByValue" : @YES}
+  if (!item.browserId) {
+    if (done) done(@"nobrowser");
+    return;
+  }
+  [self devtools:item
+          method:@"Runtime.evaluate"
+          params:@{
+            @"expression" : enter ? kPiPEnterJS : kPiPExitJS,
+            @"userGesture" : @YES,
+            @"awaitPromise" : @YES,
+            @"returnByValue" : @YES
+          }
             done:^(NSDictionary* r) {
               id v = r[@"result"][@"value"];
               NSString* res = [v isKindOfClass:NSString.class] ? v : (r ? @"error" : @"failed");
-              if (enter) item.inPictureInPicture = [res isEqualToString:@"pip"] || [res isEqualToString:@"already"];
-              else if (![res hasPrefix:@"error"]) item.inPictureInPicture = NO;
+              if (enter)
+                item.inPictureInPicture = [res isEqualToString:@"pip"] || [res isEqualToString:@"already"];
+              else if (![res hasPrefix:@"error"])
+                item.inPictureInPicture = NO;
               if (done) done(res);
             }];
 }
 
 - (void)showItem:(ArcItem*)item {
   if (!item.url.length) return;
-  if (item != _shown && _shown.mediaPlaying && SettingBool(kSettingAutoPiP)) [self pictureInPicture:YES item:_shown done:nil];
+  if (item != _shown && _shown.mediaPlaying && SettingBool(kSettingAutoPiP))
+    [self pictureInPicture:YES item:_shown done:nil];
   if (item.inPictureInPicture && item != _shown) [self pictureInPicture:NO item:item done:nil];
   if (item != _shown && _shown) [self popPageCard];
   _shown.lastActiveAt = [NSDate date];  // the tab we leave was active until now
@@ -1687,8 +1882,10 @@ static NSString* const kPiPExitJS =
   if (url.length) item.url = url;
   if (url.length && item == _shown) [self updateToolbarAddress];
   if (self.historyPath && !_history) _history = [[HistoryStore alloc] initWithPath:self.historyPath];
-  if (url.length) [_history recordURL:url title:title space:[self spaceOwningItem:item].title];
-  else if (title.length) [_history updateTitle:title forURL:item.url];
+  if (url.length)
+    [_history recordURL:url title:title space:[self spaceOwningItem:item].title];
+  else if (title.length)
+    [_history updateTitle:title forURL:item.url];
   ArcItem* parent = [self parentOfItem:item];
   [_outline reloadItem:parent.isSplit ? parent : item];
   [self scheduleSave];
@@ -1699,8 +1896,12 @@ static NSString* const kPiPExitJS =
   for (ArcSpace* s in _spaces)
     for (ArcItem* t in s.allTabs)
       if (t.browserId)
-        [out addObject:@{@"space" : s.title, @"profile" : s.profileDirectory, @"title" : t.displayTitle,
-                         @"url" : t.url ?: @""}];
+        [out addObject:@{
+          @"space" : s.title,
+          @"profile" : s.profileDirectory,
+          @"title" : t.displayTitle,
+          @"url" : t.url ?: @""
+        }];
   return out;
 }
 
@@ -1779,7 +1980,10 @@ static NSString* const kPiPExitJS =
     SidebarRowView* s = (SidebarRowView*)rv;
     ArcItem* it = [self->_outline itemAtRow:r];
     BOOL h = r == row && (!it.isSection || it == self->_space.unpinned);
-    if (s.hovered != h) { s.hovered = h; s.needsDisplay = YES; }
+    if (s.hovered != h) {
+      s.hovered = h;
+      s.needsDisplay = YES;
+    }
   }];
 }
 - (void)pressSidebarItem:(ArcItem*)item down:(BOOL)down {  // tests
@@ -1799,11 +2003,15 @@ static NSString* const kPiPExitJS =
   }
 }
 - (void)toggleFolder:(ArcItem*)folder {
-  if ([_outline isItemExpanded:folder]) [_outline collapseItem:folder];
-  else [_outline expandItem:folder];
+  if ([_outline isItemExpanded:folder])
+    [_outline collapseItem:folder];
+  else
+    [_outline expandItem:folder];
   [_outline reloadItem:folder];  // chevron direction
 }
-- (BOOL)folderExpanded:(ArcItem*)folder { return [_outline isItemExpanded:folder]; }
+- (BOOL)folderExpanded:(ArcItem*)folder {
+  return [_outline isItemExpanded:folder];
+}
 - (NSString*)folderChevronForItem:(ArcItem*)folder {  // tests: "right" / "down" / ""
   NSInteger row = [_outline rowForItem:folder];
   NSTableCellView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
@@ -1811,8 +2019,12 @@ static NSString* const kPiPExitJS =
   if (!chev || chev.hidden) return @"";
   return [chev.image.accessibilityDescription isEqualToString:@"Collapse"] ? @"down" : @"right";
 }
-- (BOOL)stockDisclosureShown { return !NSIsEmptyRect([_outline frameOfOutlineCellAtRow:0]); }  // tests
-- (void)hoverSidebarItem:(ArcItem*)item { [self setSidebarHoverRow:item ? [_outline rowForItem:item] : -1]; }  // tests
+- (BOOL)stockDisclosureShown {
+  return !NSIsEmptyRect([_outline frameOfOutlineCellAtRow:0]);
+}  // tests
+- (void)hoverSidebarItem:(ArcItem*)item {
+  [self setSidebarHoverRow:item ? [_outline rowForItem:item] : -1];
+}  // tests
 
 - (BOOL)outlineView:(NSOutlineView*)ov shouldSelectItem:(id)item {
   return ((ArcItem*)item).url.length > 0 || ((ArcItem*)item).isSplit;
@@ -1863,8 +2075,8 @@ static NSString* const kPiPExitJS =
   cell.textField.editable = a.isFolder;
   cell.textField.delegate = a.isFolder ? self : nil;
   cell.textField.font = [NSFont systemFontOfSize:14 weight:NSFontWeightMedium];
-  cell.textField.textColor = newTab ? [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.45]
-                                    : (indigo ? ArcDefaultTabText() : NSColor.labelColor);
+  cell.textField.textColor =
+      newTab ? [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.45] : (indigo ? ArcDefaultTabText() : NSColor.labelColor);
   // Cells fill the row; the header row's "+ New Tab" sits in its bottom 41 pt.
   NSRect lf = cell.textField.frame;
   lf.origin.x = 37;
@@ -1880,7 +2092,8 @@ static NSString* const kPiPExitJS =
   if (newTab && !toMain) {
     toMain = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"macwindow.and.cursorarrow"
                                                  accessibilityDescription:@"Move to main window"]
-                                target:self action:@selector(moveShownToMainWindow:)];
+                                target:self
+                                action:@selector(moveShownToMainWindow:)];
     toMain.tag = 78;
     toMain.bordered = NO;
     toMain.toolTip = @"Move to main window";
@@ -1895,14 +2108,20 @@ static NSString* const kPiPExitJS =
     image = [NSImage imageWithSystemSymbolName:@"plus" accessibilityDescription:@"New Tab"];
     cell.imageView.contentTintColor = [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.45];
   } else if (!a.isSection) {
-    NSString* symbol = a.isFolder ? (a.liveKind ? @"dot.radiowaves.up.forward" : ([ov isItemExpanded:a] ? @"folder.fill" : @"folder"))
-                                  : (a.noteID ? @"note.text" : (a.easelID ? @"scribble.variable" : nil));
+    NSString* symbol =
+        a.isFolder ? (a.liveKind ? @"dot.radiowaves.up.forward" : ([ov isItemExpanded:a] ? @"folder.fill" : @"folder"))
+                   : (a.noteID ? @"note.text" : (a.easelID ? @"scribble.variable" : nil));
     if (a.isSplit) symbol = a.splitHorizontal ? @"rectangle.split.1x2" : @"rectangle.split.2x1";
-    if (a.crashed) symbol = @"exclamationmark.triangle";
-    else if (a.audioMuted) symbol = @"speaker.slash.fill";
-    else if (a.mediaPlaying) symbol = @"speaker.wave.2.fill";
-    image = symbol ? [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil] : [self iconImageForItem:a];
-    cell.imageView.contentTintColor = indigo ? [ArcDefaultTabText() colorWithAlphaComponent:0.85] : NSColor.secondaryLabelColor;
+    if (a.crashed)
+      symbol = @"exclamationmark.triangle";
+    else if (a.audioMuted)
+      symbol = @"speaker.slash.fill";
+    else if (a.mediaPlaying)
+      symbol = @"speaker.wave.2.fill";
+    image =
+        symbol ? [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil] : [self iconImageForItem:a];
+    cell.imageView.contentTintColor =
+        indigo ? [ArcDefaultTabText() colorWithAlphaComponent:0.85] : NSColor.secondaryLabelColor;
   }
   cell.imageView.image = image;
   return cell;
@@ -1913,8 +2132,9 @@ static NSString* const kPiPExitJS =
 // Chromium's saved icons: this Space's own profile first, then (read-only) the same profile in Arc.
 - (NSArray<NSString*>*)faviconDatabasesForSpace:(ArcSpace*)space {
   if (!space.profileDirectory.length) return @[];
-  NSString* support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
-      stringByAppendingPathComponent:@"NotArc"];
+  NSString* support =
+      [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
+          stringByAppendingPathComponent:@"NotArc"];
   NSString* prefix = self.selfTestProfiles ? @"SelfTest Space " : @"Space ";
   NSString* mine = [[support stringByAppendingPathComponent:[prefix stringByAppendingString:space.profileDirectory]]
       stringByAppendingPathComponent:@"Favicons"];
@@ -1928,7 +2148,8 @@ static NSString* const kPiPExitJS =
   if (item.isSplit) url = item.children.firstObject.url;
   ArcSpace* space = [self spaceOwningItem:item] ?: _space;
   __weak MainWindowController* weakSelf = self;
-  NSImage* img = [[FaviconStore shared] iconForURL:url databases:[self faviconDatabasesForSpace:space]
+  NSImage* img = [[FaviconStore shared] iconForURL:url
+                                         databases:[self faviconDatabasesForSpace:space]
                                             loaded:^{ [weakSelf queueIconRefresh]; }];
   if (img) return img;
   NSImage* globe = [NSImage imageWithSystemSymbolName:@"globe" accessibilityDescription:nil];
@@ -1973,17 +2194,19 @@ static NSString* const kPiPExitJS =
       void (^cb)(NSData*) = cb_;
       dispatch_async(dispatch_get_main_queue(), ^{ cb(png); });
     }
+
    private:
     void (^cb_)(NSData*);
     IMPLEMENT_REFCOUNTING(Done);
   };
-  it->second->GetHost()->DownloadImage(iconURL.UTF8String, true, 32, false, new Done(^(NSData* png) {
-    if (!png) return;
-    [[FaviconStore shared] setIconData:png forURL:page];
-    if (item.url.length && ![FaviconSiteKey(item.url) isEqualToString:FaviconSiteKey(page)])
-      [[FaviconStore shared] setIconData:png forURL:item.url];
-    [weakSelf queueIconRefresh];
-  }));
+  it->second->GetHost()->DownloadImage(
+      iconURL.UTF8String, true, 32, false, new Done(^(NSData* png) {
+        if (!png) return;
+        [[FaviconStore shared] setIconData:png forURL:page];
+        if (item.url.length && ![FaviconSiteKey(item.url) isEqualToString:FaviconSiteKey(page)])
+          [[FaviconStore shared] setIconData:png forURL:item.url];
+        [weakSelf queueIconRefresh];
+      }));
 }
 
 #pragma mark Favorites grid
@@ -2006,9 +2229,15 @@ static NSString* const kPiPExitJS =
   for (ArcItem* f in _favGrid.items) [out addObject:f.displayTitle ?: @""];
   return out;
 }
-- (NSRect)favoritesGridFrame { return _favGrid.hidden ? NSZeroRect : [_favGrid convertRect:_favGrid.bounds toView:nil]; }  // tests
-- (NSRect)spaceHeaderFrame { return [_spaceHeader convertRect:_spaceHeader.bounds toView:nil]; }  // tests
-- (BOOL)defaultThemeShown { return !_themeView.hidden && [self usingDefaultTheme]; }  // tests
+- (NSRect)favoritesGridFrame {
+  return _favGrid.hidden ? NSZeroRect : [_favGrid convertRect:_favGrid.bounds toView:nil];
+}  // tests
+- (NSRect)spaceHeaderFrame {
+  return [_spaceHeader convertRect:_spaceHeader.bounds toView:nil];
+}  // tests
+- (BOOL)defaultThemeShown {
+  return !_themeView.hidden && [self usingDefaultTheme];
+}  // tests
 
 #pragma mark Media
 
@@ -2091,8 +2320,10 @@ static NSString* const kCallHookJS =
 // Turns the page's own tracks on or off, like the mute buttons in Meet or Zoom: the call keeps the devices,
 // the other side gets silence / a black frame. Streams are the ones the page asked for (see kCallHookJS).
 - (void)setCallTrack:(NSString*)kind enabled:(BOOL)enabled inItem:(ArcItem*)item {
-  [self runJS:[NSString stringWithFormat:@"(()=>{for(const s of window.__notarcStreams||[])for(const t of s.get%@Tracks())"
-                                          @"t.enabled=%@;})()", kind, enabled ? @"true" : @"false"]
+  [self runJS:[NSString
+                  stringWithFormat:@"(()=>{for(const s of window.__notarcStreams||[])for(const t of s.get%@Tracks())"
+                                   @"t.enabled=%@;})()",
+                                   kind, enabled ? @"true" : @"false"]
        inItem:item];
 }
 
@@ -2110,10 +2341,16 @@ static NSString* const kCallHookJS =
   [self updateMediaBar];
 }
 
-- (BOOL)callControlsShown { return !_mediaBar.hidden && (!_callMic.hidden || !_callCam.hidden); }
+- (BOOL)callControlsShown {
+  return !_mediaBar.hidden && (!_callMic.hidden || !_callCam.hidden);
+}
 
-- (IBAction)callBarMic:(id)sender { [self toggleCallMic:[self callItem]]; }
-- (IBAction)callBarCamera:(id)sender { [self toggleCallCamera:[self callItem]]; }
+- (IBAction)callBarMic:(id)sender {
+  [self toggleCallMic:[self callItem]];
+}
+- (IBAction)callBarCamera:(id)sender {
+  [self toggleCallCamera:[self callItem]];
+}
 
 - (void)updateMediaBar {
   ArcItem* call = [self callItem];
@@ -2121,9 +2358,11 @@ static NSString* const kCallHookJS =
   _callCam.hidden = !call || !call.usingCamera;
   _mediaPlay.hidden = _mediaMute.hidden = call != nil;
   if (call) {
-    _callMic.image = [NSImage imageWithSystemSymbolName:call.micMuted ? @"mic.slash.fill" : @"mic.fill" accessibilityDescription:nil];
+    _callMic.image = [NSImage imageWithSystemSymbolName:call.micMuted ? @"mic.slash.fill" : @"mic.fill"
+                               accessibilityDescription:nil];
     _callMic.contentTintColor = call.micMuted ? NSColor.systemRedColor : nil;
-    _callCam.image = [NSImage imageWithSystemSymbolName:call.cameraOff ? @"video.slash.fill" : @"video.fill" accessibilityDescription:nil];
+    _callCam.image = [NSImage imageWithSystemSymbolName:call.cameraOff ? @"video.slash.fill" : @"video.fill"
+                               accessibilityDescription:nil];
     _callCam.contentTintColor = call.cameraOff ? NSColor.systemRedColor : nil;
     _callMic.toolTip = call.micMuted ? @"Unmute microphone" : @"Mute microphone";
     _callCam.toolTip = call.cameraOff ? @"Turn camera on" : @"Turn camera off";
@@ -2137,22 +2376,27 @@ static NSString* const kCallHookJS =
   }
   ArcItem* pick = nil;
   for (ArcItem* t in _space.allTabs)
-    if (t != _shown && t.browserId && (t.mediaPlaying || t.mediaPaused) && (!pick || (t.mediaPlaying && !pick.mediaPlaying)))
+    if (t != _shown && t.browserId && (t.mediaPlaying || t.mediaPaused) &&
+        (!pick || (t.mediaPlaying && !pick.mediaPlaying)))
       pick = t;
   _mediaItem = pick;
   BOOL show = pick != nil;
   if (show) {
     _mediaTitle.stringValue = pick.displayTitle ?: @"";
-    _mediaPlay.image = [NSImage imageWithSystemSymbolName:pick.mediaPlaying ? @"pause.fill" : @"play.fill" accessibilityDescription:nil];
-    _mediaMute.image = [NSImage imageWithSystemSymbolName:pick.audioMuted ? @"speaker.slash.fill" : @"speaker.wave.2.fill"
+    _mediaPlay.image = [NSImage imageWithSystemSymbolName:pick.mediaPlaying ? @"pause.fill" : @"play.fill"
                                  accessibilityDescription:nil];
+    _mediaMute.image =
+        [NSImage imageWithSystemSymbolName:pick.audioMuted ? @"speaker.slash.fill" : @"speaker.wave.2.fill"
+                  accessibilityDescription:nil];
   }
   if (_mediaBar.hidden == !show) return;
   _mediaBar.hidden = !show;
   [self layoutSidebar];
 }
 
-- (ArcItem*)mediaBarItem { return _mediaBar.hidden ? nil : _mediaItem; }
+- (ArcItem*)mediaBarItem {
+  return _mediaBar.hidden ? nil : _mediaItem;
+}
 
 - (void)toggleMuteItem:(ArcItem*)item {
   auto it = _browsers.find(item.browserId);
@@ -2165,15 +2409,28 @@ static NSString* const kCallHookJS =
 
 - (void)togglePlayItem:(ArcItem*)item {
   [self runJS:item.mediaPlaying ? kMediaPauseJS : kMediaResumeJS inItem:item];
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ [self pollMediaNow]; });
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(),
+                 ^{ [self pollMediaNow]; });
 }
 
-- (IBAction)toggleMuteCurrentTab:(id)sender { if (_shown) [self toggleMuteItem:_shown]; }
-- (void)mediaBarPlay:(id)sender { if (_mediaItem) [self togglePlayItem:_mediaItem]; }
-- (void)mediaBarMute:(id)sender { if (_mediaItem) [self toggleMuteItem:_mediaItem]; }
-- (void)mediaBarShowTab:(id)sender { if (_mediaItem) [self showItem:_mediaItem]; }
-- (void)menuToggleMute:(NSMenuItem*)sender { [self toggleMuteItem:sender.representedObject]; }
-- (void)menuTogglePlay:(NSMenuItem*)sender { [self togglePlayItem:sender.representedObject]; }
+- (IBAction)toggleMuteCurrentTab:(id)sender {
+  if (_shown) [self toggleMuteItem:_shown];
+}
+- (void)mediaBarPlay:(id)sender {
+  if (_mediaItem) [self togglePlayItem:_mediaItem];
+}
+- (void)mediaBarMute:(id)sender {
+  if (_mediaItem) [self toggleMuteItem:_mediaItem];
+}
+- (void)mediaBarShowTab:(id)sender {
+  if (_mediaItem) [self showItem:_mediaItem];
+}
+- (void)menuToggleMute:(NSMenuItem*)sender {
+  [self toggleMuteItem:sender.representedObject];
+}
+- (void)menuTogglePlay:(NSMenuItem*)sender {
+  [self togglePlayItem:sender.representedObject];
+}
 
 #pragma mark Crashed and frozen pages
 
@@ -2227,7 +2484,8 @@ static NSArray<NSArray*>* PermissionNames() {
 static NSString* OriginKey(NSString* origin) {
   NSURL* u = [NSURL URLWithString:origin];
   if (!u.host.length) return origin ?: @"";
-  return u.port ? [NSString stringWithFormat:@"%@://%@:%@", u.scheme, u.host, u.port] : [NSString stringWithFormat:@"%@://%@", u.scheme, u.host];
+  return u.port ? [NSString stringWithFormat:@"%@://%@:%@", u.scheme, u.host, u.port]
+                : [NSString stringWithFormat:@"%@://%@", u.scheme, u.host];
 }
 
 - (NSDictionary*)sitePermissionsForOrigin:(NSString*)origin {
@@ -2243,7 +2501,7 @@ static NSString* OriginKey(NSString* origin) {
 }
 
 - (void)browser:(int)browserId permissionRequest:(int)requestId origin:(NSString*)origin bits:(uint32_t)bits {
-  NSMutableArray* names = [NSMutableArray array], *phrases = [NSMutableArray array];
+  NSMutableArray *names = [NSMutableArray array], *phrases = [NSMutableArray array];
   for (NSArray* p in PermissionNames())
     if ((bits & [p[0] unsignedIntValue]) && ![names containsObject:p[1]]) {
       [names addObject:p[1]];
@@ -2267,12 +2525,19 @@ static NSString* OriginKey(NSString* origin) {
     _client->ResolvePermission(requestId, true);
     return;
   }
-  NSString* list = phrases.count == 1 ? phrases[0]
-                 : [[[phrases subarrayWithRange:NSMakeRange(0, phrases.count - 1)] componentsJoinedByString:@", "]
-                       stringByAppendingFormat:@" and %@", phrases.lastObject];
-  [self queueSitePrompt:@{ @"type" : @"permission", @"id" : @(requestId), @"origin" : origin ?: @"", @"names" : names,
-                           @"title" : [NSString stringWithFormat:@"%@ wants to %@", [NSURL URLWithString:origin].host ?: origin, list],
-                           @"allow" : @"Allow", @"deny" : @"Don't Allow" }];
+  NSString* list = phrases.count == 1
+                       ? phrases[0]
+                       : [[[phrases subarrayWithRange:NSMakeRange(0, phrases.count - 1)] componentsJoinedByString:@", "]
+                             stringByAppendingFormat:@" and %@", phrases.lastObject];
+  [self queueSitePrompt:@{
+    @"type" : @"permission",
+    @"id" : @(requestId),
+    @"origin" : origin ?: @"",
+    @"names" : names,
+    @"title" : [NSString stringWithFormat:@"%@ wants to %@", [NSURL URLWithString:origin].host ?: origin, list],
+    @"allow" : @"Allow",
+    @"deny" : @"Don't Allow"
+  }];
 }
 
 - (void)browser:(int)browserId externalURL:(NSString*)url {
@@ -2289,11 +2554,17 @@ static NSString* OriginKey(NSString* origin) {
   }
   NSString* appName = [NSFileManager.defaultManager displayNameAtPath:app.path].stringByDeletingPathExtension;
   NSString* host = [NSURL URLWithString:origin].host;
-  [self queueSitePrompt:@{ @"type" : @"external", @"url" : url, @"origin" : origin, @"names" : @[ name ],
-                           @"title" : [NSString stringWithFormat:@"Open %@?", appName],
-                           @"detail" : host.length ? [NSString stringWithFormat:@"%@ wants to open this link in %@.", host, appName]
-                                                   : [NSString stringWithFormat:@"This link opens in %@.", appName],
-                           @"allow" : [@"Open " stringByAppendingString:appName], @"deny" : @"Cancel" }];
+  [self queueSitePrompt:@{
+    @"type" : @"external",
+    @"url" : url,
+    @"origin" : origin,
+    @"names" : @[ name ],
+    @"title" : [NSString stringWithFormat:@"Open %@?", appName],
+    @"detail" : host.length ? [NSString stringWithFormat:@"%@ wants to open this link in %@.", host, appName]
+                            : [NSString stringWithFormat:@"This link opens in %@.", appName],
+    @"allow" : [@"Open " stringByAppendingString:appName],
+    @"deny" : @"Cancel"
+  }];
 }
 
 - (void)queueSitePrompt:(NSDictionary*)prompt {
@@ -2307,7 +2578,8 @@ static NSString* OriginKey(NSString* origin) {
   if (!p || _siteAlert) return;
   if (_hungAlert || self.window.attachedSheet) {  // wait for the other sheet
     __weak MainWindowController* weakSelf = self;
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ [weakSelf showNextSitePrompt]; });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(),
+                   ^{ [weakSelf showNextSitePrompt]; });
     return;
   }
   NSAlert* a = [NSAlert new];
@@ -2319,11 +2591,13 @@ static NSString* OriginKey(NSString* origin) {
   a.suppressionButton.title = @"Remember for this site";
   _siteAlert = a;
   __weak MainWindowController* weakSelf = self;
-  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
-    MainWindowController* me = weakSelf;
-    if (!me || me->_siteAlert != a) return;
-    [me finishSitePrompt:r == NSAlertFirstButtonReturn remember:a.suppressionButton.state == NSControlStateValueOn];
-  }];
+  [a beginSheetModalForWindow:self.window
+            completionHandler:^(NSModalResponse r) {
+              MainWindowController* me = weakSelf;
+              if (!me || me->_siteAlert != a) return;
+              [me finishSitePrompt:r == NSAlertFirstButtonReturn
+                          remember:a.suppressionButton.state == NSControlStateValueOn];
+            }];
 }
 
 - (void)finishSitePrompt:(BOOL)allow remember:(BOOL)remember {
@@ -2332,8 +2606,10 @@ static NSString* OriginKey(NSString* origin) {
   if (!p) return;
   [_sitePrompts removeObjectAtIndex:0];
   if (remember) [self rememberSite:p[@"origin"] names:p[@"names"] allow:allow];
-  if ([p[@"type"] isEqualToString:@"permission"]) _client->ResolvePermission([p[@"id"] intValue], allow);
-  else if (allow) [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:p[@"url"]]];
+  if ([p[@"type"] isEqualToString:@"permission"])
+    _client->ResolvePermission([p[@"id"] intValue], allow);
+  else if (allow)
+    [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:p[@"url"]]];
   [self showNextSitePrompt];
 }
 
@@ -2364,8 +2640,9 @@ static NSString* OriginKey(NSString* origin) {
   CefRefPtr<CefRequestContext> ctx = it->second->GetHost()->GetRequestContext();
   CefString o([origin stringByAppendingString:@"/"].UTF8String);
   for (cef_content_setting_types_t type :
-       {CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS, CEF_CONTENT_SETTING_TYPE_GEOLOCATION, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC,
-        CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA, CEF_CONTENT_SETTING_TYPE_CLIPBOARD_READ_WRITE})
+       {CEF_CONTENT_SETTING_TYPE_NOTIFICATIONS, CEF_CONTENT_SETTING_TYPE_GEOLOCATION,
+        CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA,
+        CEF_CONTENT_SETTING_TYPE_CLIPBOARD_READ_WRITE})
     ctx->SetContentSetting(o, o, type, CEF_CONTENT_SETTING_VALUE_DEFAULT);
 }
 
@@ -2383,10 +2660,14 @@ static NSArray<NSArray*>* SiteSettingRows() {
   NSString* key = OriginKey(origin);
   NSMutableDictionary* all = [SettingObject(kSettingSitePermissions) mutableCopy] ?: [NSMutableDictionary dictionary];
   NSMutableDictionary* site = [all[key] mutableCopy] ?: [NSMutableDictionary dictionary];
-  if (allow) site[name] = allow;
-  else [site removeObjectForKey:name];
-  if (site.count) all[key] = site;
-  else [all removeObjectForKey:key];
+  if (allow)
+    site[name] = allow;
+  else
+    [site removeObjectForKey:name];
+  if (site.count)
+    all[key] = site;
+  else
+    [all removeObjectForKey:key];
   SettingSetObject(kSettingSitePermissions, all);
   // Keep Chromium's own stored answer in step, so an earlier grant can't bypass a new Block.
   auto it = _browsers.find(_shown.browserId);
@@ -2396,11 +2677,14 @@ static NSArray<NSArray*>* SiteSettingRows() {
       CefString o([key stringByAppendingString:@"/"].UTF8String);
       it->second->GetHost()->GetRequestContext()->SetContentSetting(
           o, o, (cef_content_setting_types_t)[r[2] intValue],
-          !allow ? CEF_CONTENT_SETTING_VALUE_DEFAULT : (allow.boolValue ? CEF_CONTENT_SETTING_VALUE_ALLOW : CEF_CONTENT_SETTING_VALUE_BLOCK));
+          !allow ? CEF_CONTENT_SETTING_VALUE_DEFAULT
+                 : (allow.boolValue ? CEF_CONTENT_SETTING_VALUE_ALLOW : CEF_CONTENT_SETTING_VALUE_BLOCK));
     }
 }
 
-- (BOOL)siteSettingsShown { return _sitePopover.isShown; }
+- (BOOL)siteSettingsShown {
+  return _sitePopover.isShown;
+}
 
 - (NSArray<NSString*>*)siteSettingsRows {
   if (!_siteSettingsOrigin) return @[];
@@ -2429,8 +2713,9 @@ static NSArray<NSArray*>* SiteSettingRows() {
   BOOL secure = [u.scheme isEqualToString:@"https"];
   NSTextField* host = [NSTextField labelWithString:[u.host hasPrefix:@"www."] ? [u.host substringFromIndex:4] : u.host];
   host.font = [NSFont boldSystemFontOfSize:14];
-  NSImageView* lock = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:secure ? @"lock.fill" : @"exclamationmark.triangle"
-                                                             accessibilityDescription:nil]];
+  NSImageView* lock = [NSImageView
+      imageViewWithImage:[NSImage imageWithSystemSymbolName:secure ? @"lock.fill" : @"exclamationmark.triangle"
+                                   accessibilityDescription:nil]];
   lock.contentTintColor = secure ? NSColor.secondaryLabelColor : NSColor.systemOrangeColor;
   NSTextField* sec = [NSTextField labelWithString:secure ? @"Connection is secure" : @"Connection is not secure"];
   sec.textColor = NSColor.secondaryLabelColor;
@@ -2450,11 +2735,15 @@ static NSArray<NSArray*>* SiteSettingRows() {
     [views addObject:[NSStackView stackViewWithViews:@[ label, pop ]]];
   }
   if (SettingBool(kSettingBlockAds)) {
-    NSButton* ads = [NSButton checkboxWithTitle:@"Block Ads & Trackers" target:self action:@selector(siteAdBlockToggled:)];
+    NSButton* ads = [NSButton checkboxWithTitle:@"Block Ads & Trackers"
+                                         target:self
+                                         action:@selector(siteAdBlockToggled:)];
     ads.state = [self adBlockingOnForHost:u.host] ? NSControlStateValueOn : NSControlStateValueOff;
     [views addObject:ads];
   }
-  NSButton* clear = [NSButton buttonWithTitle:@"Clear Cookies and Refresh" target:self action:@selector(siteSettingsClearCookies:)];
+  NSButton* clear = [NSButton buttonWithTitle:@"Clear Cookies and Refresh"
+                                       target:self
+                                       action:@selector(siteSettingsClearCookies:)];
   NSButton* reset = [NSButton buttonWithTitle:@"Reset Permissions" target:self action:@selector(siteSettingsReset:)];
   [views addObject:[NSStackView stackViewWithViews:@[ clear, reset ]]];
   NSStackView* stack = [NSStackView stackViewWithViews:views];
@@ -2470,7 +2759,8 @@ static NSArray<NSArray*>* SiteSettingRows() {
   _sitePopover.contentViewController = vc;
   // Anchor: the address field when the toolbar is shown, else the top-left of the page.
   NSView* anchor = _toolbar.hidden ? _content : _address;
-  NSRect r = _toolbar.hidden ? NSMakeRect(8, NSMaxY(_content.bounds) - 4, 1, 1) : NSMakeRect(8, 0, 20, _address.bounds.size.height);
+  NSRect r = _toolbar.hidden ? NSMakeRect(8, NSMaxY(_content.bounds) - 4, 1, 1)
+                             : NSMakeRect(8, 0, 20, _address.bounds.size.height);
   [_sitePopover showRelativeToRect:r ofView:anchor preferredEdge:_toolbar.hidden ? NSRectEdgeMinY : NSRectEdgeMaxY];
 }
 
@@ -2530,13 +2820,14 @@ static NSString* AdBlockSiteKey(NSString* host) {
   v.wantsLayer = YES;
   v.layer.backgroundColor = NSColor.windowBackgroundColor.CGColor;
   NSImageView* icon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"exclamationmark.triangle"
-                                                                 accessibilityDescription:nil]];
+                                                                accessibilityDescription:nil]];
   icon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:36 weight:NSFontWeightRegular];
   icon.contentTintColor = NSColor.secondaryLabelColor;
   NSTextField* title = [NSTextField labelWithString:@"This page crashed"];
   title.font = [NSFont boldSystemFontOfSize:18];
   // 2 = killed, 3 = crashed, 4 = out of memory (cef_termination_status_t).
-  NSString* why = status == 4 ? @"It ran out of memory." : (status == 2 ? @"Its process was stopped." : @"Something went wrong while showing it.");
+  NSString* why = status == 4 ? @"It ran out of memory."
+                              : (status == 2 ? @"Its process was stopped." : @"Something went wrong while showing it.");
   NSTextField* detail = [NSTextField wrappingLabelWithString:[why stringByAppendingFormat:@"\n%@", item.url ?: @""]];
   detail.alignment = NSTextAlignmentCenter;
   detail.textColor = NSColor.secondaryLabelColor;
@@ -2602,7 +2893,9 @@ static NSString* AdBlockSiteKey(NSString* host) {
   it->second->GetHost()->SendMouseClickEvent(m, MBT_LEFT, true, 1);
 }
 
-- (ArcItem*)hungItem { return _hungItem; }
+- (ArcItem*)hungItem {
+  return _hungItem;
+}
 
 - (void)showHungSheetFor:(ArcItem*)item {
   if (_hungAlert) return;
@@ -2616,14 +2909,15 @@ static NSString* AdBlockSiteKey(NSString* host) {
   _hungAlert = a;
   int browserId = item.browserId;
   __weak MainWindowController* weakSelf = self;
-  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
-    MainWindowController* me = weakSelf;
-    if (!me || me->_hungAlert != a) return;
-    me->_hungAlert = nil;
-    me->_hungItem = nil;
-    if (r == NSAlertFirstButtonReturn || r == NSAlertSecondButtonReturn)
-      me->_client->ResolveHung(browserId, r == NSAlertSecondButtonReturn);
-  }];
+  [a beginSheetModalForWindow:self.window
+            completionHandler:^(NSModalResponse r) {
+              MainWindowController* me = weakSelf;
+              if (!me || me->_hungAlert != a) return;
+              me->_hungAlert = nil;
+              me->_hungItem = nil;
+              if (r == NSAlertFirstButtonReturn || r == NSAlertSecondButtonReturn)
+                me->_client->ResolveHung(browserId, r == NSAlertSecondButtonReturn);
+            }];
 }
 
 - (void)dismissHungSheet {
@@ -2662,10 +2956,12 @@ static NSString* RelativeAgo(NSDate* d) {
   if (_hoverCard.shown) [self hideHoverCard];
   if (!item) return;
   __weak MainWindowController* weakSelf = self;
-  _hoverTimer = [NSTimer scheduledTimerWithTimeInterval:0.7 repeats:NO block:^(NSTimer* t) {
-    MainWindowController* me = weakSelf;
-    if (me && me->_hoverItem == item) [me showHoverCardForItem:item];
-  }];
+  _hoverTimer = [NSTimer scheduledTimerWithTimeInterval:0.7
+                                                repeats:NO
+                                                  block:^(NSTimer* t) {
+                                                    MainWindowController* me = weakSelf;
+                                                    if (me && me->_hoverItem == item) [me showHoverCardForItem:item];
+                                                  }];
 }
 
 - (void)mouseExited:(NSEvent*)event {
@@ -2676,7 +2972,9 @@ static NSString* RelativeAgo(NSDate* d) {
   [self hideHoverCard];
 }
 
-- (BOOL)hoverCardShown { return _hoverCard.shown; }
+- (BOOL)hoverCardShown {
+  return _hoverCard.shown;
+}
 
 - (void)hideHoverCard {
   [_hoverCard close];
@@ -2734,7 +3032,7 @@ static NSString* RelativeAgo(NSDate* d) {
     }
   }];
   [self hideHoverCard];
-  if (_syncingSidebar) return;  // redrawing for another window's change: never switch tabs here
+  if (_syncingSidebar) return;                        // redrawing for another window's change: never switch tabs here
   if (_outline.selectedRowIndexes.count > 1) return;  // multi-select only marks rows; it doesn't switch tabs
   ArcItem* item = [_outline itemAtRow:_outline.selectedRow];
   if (item.isSplit) {
@@ -2763,7 +3061,9 @@ static NSString* RelativeAgo(NSDate* d) {
 #pragma mark Persistence
 
 // Coalesce bursts of changes (page titles arrive several times per load) into one write.
-- (void)scheduleSave { [self scheduleSaveFrom:self]; }
+- (void)scheduleSave {
+  [self scheduleSaveFrom:self];
+}
 
 - (void)scheduleSaveFrom:(MainWindowController*)origin {
   if (gMainWindow && gMainWindow != self) {  // one writer: the main window saves the shared sidebar
@@ -2776,17 +3076,15 @@ static NSString* RelativeAgo(NSDate* d) {
     if (!_sidebarRefreshScheduled) {
       _sidebarRefreshScheduled = YES;
       __weak MainWindowController* weakMain = self;
-      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), ^{
-        [weakMain refreshOtherWindows];
-      });
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(),
+                     ^{ [weakMain refreshOtherWindows]; });
     }
   }
   if (!self.storePath || _saveScheduled) return;
   _saveScheduled = YES;
   __weak MainWindowController* weakSelf = self;
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-    [weakSelf saveSidebarNow];
-  });
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(),
+                 ^{ [weakSelf saveSidebarNow]; });
 }
 
 // Another window changed the shared sidebar: redraw ours. A window that made the change already redrew itself.
@@ -2816,7 +3114,9 @@ static NSString* RelativeAgo(NSDate* d) {
   _syncingSidebar = NO;
 }
 
-- (BOOL)sidebarShowsItem:(ArcItem*)item { return item && [_outline rowForItem:item] >= 0; }  // tests
+- (BOOL)sidebarShowsItem:(ArcItem*)item {
+  return item && [_outline rowForItem:item] >= 0;
+}  // tests
 
 - (void)saveSidebarNow {
   if (gMainWindow && gMainWindow != self) {
@@ -2837,18 +3137,34 @@ static NSString* RelativeAgo(NSDate* d) {
   return it == _browsers.end() ? nullptr : it->second;
 }
 
-- (IBAction)goBack:(id)sender { if (auto b = [self currentBrowser]) b->GoBack(); }
-- (IBAction)goForward:(id)sender { if (auto b = [self currentBrowser]) b->GoForward(); }
-- (IBAction)reloadPage:(id)sender { if (auto b = [self currentBrowser]) b->Reload(); }
-- (IBAction)hardReload:(id)sender { if (auto b = [self currentBrowser]) b->ReloadIgnoreCache(); }
-- (BOOL)hasLiveBrowser { return [self currentBrowser] != nullptr; }
+- (IBAction)goBack:(id)sender {
+  if (auto b = [self currentBrowser]) b->GoBack();
+}
+- (IBAction)goForward:(id)sender {
+  if (auto b = [self currentBrowser]) b->GoForward();
+}
+- (IBAction)reloadPage:(id)sender {
+  if (auto b = [self currentBrowser]) b->Reload();
+}
+- (IBAction)hardReload:(id)sender {
+  if (auto b = [self currentBrowser]) b->ReloadIgnoreCache();
+}
+- (BOOL)hasLiveBrowser {
+  return [self currentBrowser] != nullptr;
+}
 - (void)startDownload:(NSString*)url {
   auto b = [self currentBrowser];
   if (b) b->GetHost()->StartDownload(url.UTF8String);
 }
 
-- (BOOL)isLoading { auto b = [self currentBrowser]; return b && b->IsLoading(); }
-- (BOOL)canGoBack { auto b = [self currentBrowser]; return b && b->CanGoBack(); }
+- (BOOL)isLoading {
+  auto b = [self currentBrowser];
+  return b && b->IsLoading();
+}
+- (BOOL)canGoBack {
+  auto b = [self currentBrowser];
+  return b && b->CanGoBack();
+}
 - (NSString*)currentURL {
   auto b = [self currentBrowser];
   return b ? [NSString stringWithUTF8String:b->GetMainFrame()->GetURL().ToString().c_str()] : _shown.url;
@@ -2861,10 +3177,19 @@ static NSString* RelativeAgo(NSDate* d) {
   double level = delta == 0 ? 0 : b->GetHost()->GetZoomLevel() + delta;
   b->GetHost()->SetZoomLevel(MAX(-7.6, MIN(9.0, level)));
 }
-- (IBAction)zoomIn:(id)sender { [self stepZoom:0.5]; }
-- (IBAction)zoomOut:(id)sender { [self stepZoom:-0.5]; }
-- (IBAction)actualSize:(id)sender { [self stepZoom:0]; }
-- (double)currentZoomLevel { auto b = [self currentBrowser]; return b ? b->GetHost()->GetZoomLevel() : 0; }
+- (IBAction)zoomIn:(id)sender {
+  [self stepZoom:0.5];
+}
+- (IBAction)zoomOut:(id)sender {
+  [self stepZoom:-0.5];
+}
+- (IBAction)actualSize:(id)sender {
+  [self stepZoom:0];
+}
+- (double)currentZoomLevel {
+  auto b = [self currentBrowser];
+  return b ? b->GetHost()->GetZoomLevel() : 0;
+}
 
 - (IBAction)findInPage:(id)sender {
   if (!_findBar) {
@@ -2907,15 +3232,21 @@ static NSString* RelativeAgo(NSDate* d) {
   b->GetHost()->Find(text.UTF8String, forward, false, true);
 }
 
-- (IBAction)findNext:(id)sender { [self findText:_findField.stringValue forward:YES]; }
-- (IBAction)findPrevious:(id)sender { [self findText:_findField.stringValue forward:NO]; }
+- (IBAction)findNext:(id)sender {
+  [self findText:_findField.stringValue forward:YES];
+}
+- (IBAction)findPrevious:(id)sender {
+  [self findText:_findField.stringValue forward:NO];
+}
 
 - (void)findResult:(int)count active:(int)active {
   _lastFindCount = count;
   _findLabel.stringValue = count ? [NSString stringWithFormat:@"%d of %d", active, count] : @"No matches";
 }
 
-- (int)lastFindCount { return _lastFindCount; }
+- (int)lastFindCount {
+  return _lastFindCount;
+}
 
 - (IBAction)toggleDevTools:(id)sender {
   auto b = [self currentBrowser];
@@ -2934,7 +3265,10 @@ static NSString* RelativeAgo(NSDate* d) {
   if (!url.length || !_shown) return;
   NSString* original = OriginalURLForTranslated(url);
   NSString* target = original ?: TranslateURLFor(url, PreferredTranslateLanguage());
-  if (!target) { NSBeep(); return; }
+  if (!target) {
+    NSBeep();
+    return;
+  }
   [self loadURL:target inItem:_shown];
 }
 
@@ -2998,7 +3332,9 @@ static const CGFloat kPaneGap = 6;
   }
 }
 
-- (ArcItem*)splitGroupOfShown { return _splitGroup; }
+- (ArcItem*)splitGroupOfShown {
+  return _splitGroup;
+}
 - (NSUInteger)dividerCount {
   NSUInteger n = 0;
   for (NSView* d in _dividers) n += !d.hidden;
@@ -3026,8 +3362,10 @@ static const CGFloat kPaneGap = 6;
   NSUInteger n = _splitItems.count;
   if (!_splitGroup || index + 1 >= n) return;
   NSMutableArray<NSNumber*>* f = [NSMutableArray array];
-  if (_splitGroup.splitFractions.count == n) [f addObjectsFromArray:_splitGroup.splitFractions];
-  else for (NSUInteger i = 0; i < n; ++i) [f addObject:@(1.0 / n)];
+  if (_splitGroup.splitFractions.count == n)
+    [f addObjectsFromArray:_splitGroup.splitFractions];
+  else
+    for (NSUInteger i = 0; i < n; ++i) [f addObject:@(1.0 / n)];
   double before = 0;
   for (NSUInteger i = 0; i < index; ++i) before += f[i].doubleValue;
   double pair = f[index].doubleValue + f[index + 1].doubleValue;
@@ -3069,8 +3407,9 @@ static const CGFloat kPaneGap = 6;
 
 // MARK: Easels (Arc: easel). A canvas of page captures and text boxes, saved locally per easel.
 - (NSString*)easelsDirectory {
-  NSString* support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
-      stringByAppendingPathComponent:@"NotArc"];
+  NSString* support =
+      [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
+          stringByAppendingPathComponent:@"NotArc"];
   return [support stringByAppendingPathComponent:self.selfTestProfiles ? @"SelfTestEasels" : @"Easels"];
 }
 - (void)layoutEasel {
@@ -3103,14 +3442,19 @@ static const CGFloat kPaneGap = 6;
   // An easel is named from its first text box, like a note from its first line.
   NSString* t = nil;
   for (EaselObject* o in easel.objects)
-    if ([o.kind isEqualToString:@"text"] && o.text.length) { t = o.text; break; }
+    if ([o.kind isEqualToString:@"text"] && o.text.length) {
+      t = o.text;
+      break;
+    }
   if (_easelItem && !(t == _easelItem.liveTitle || [t isEqualToString:_easelItem.liveTitle])) {
     _easelItem.liveTitle = t;
     [_outline reloadItem:_easelItem];
     [self scheduleSave];
   }
 }
-- (void)easel:(EaselView*)easel openLink:(NSString*)url { [self openInNewTab:url]; }
+- (void)easel:(EaselView*)easel openLink:(NSString*)url {
+  [self openInNewTab:url];
+}
 - (ArcItem*)createEaselWithID:(NSString*)easelID {
   if (!_space) return nil;
   ArcItem* n = [ArcItem new];
@@ -3126,7 +3470,9 @@ static const CGFloat kPaneGap = 6;
   if (easelID) [self easelDidChange:_easelView];  // reopened: title from its first text box
   return n;
 }
-- (IBAction)newEasel:(id)sender { [self createEaselWithID:nil]; }
+- (IBAction)newEasel:(id)sender {
+  [self createEaselWithID:nil];
+}
 
 // Arc's history, per profile, into NotArc's History (Cmd+Y), tagged with the Space that uses that profile.
 // Read-only on Arc's side; history isn't encrypted, so no Keychain access.
@@ -3141,8 +3487,11 @@ static const CGFloat kPaneGap = 6;
     [done addObject:p];
     NSError* error = nil;
     NSArray* visits = ArcReadHistory(self.arcHistoryOverride[p] ?: ArcHistoryDBPath(p), s.title, 20000, &error);
-    if (visits) [all addObjectsFromArray:visits];
-    else if (error) std::fprintf(stderr, "Arc history import skipped for %s: %s\n", p.UTF8String, error.localizedDescription.UTF8String);
+    if (visits)
+      [all addObjectsFromArray:visits];
+    else if (error)
+      std::fprintf(stderr, "Arc history import skipped for %s: %s\n", p.UTF8String,
+                   error.localizedDescription.UTF8String);
   }
   return [store mergeVisits:all];
 }
@@ -3160,21 +3509,25 @@ static const CGFloat kPaneGap = 6;
   NSArray<ArcExtensionCopy*>* copies =
       [self importArcExtensionsInto:NotArcExtensionsDirectory(NO)
                     fromArcUserData:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]];
-  NSMutableArray* names = [NSMutableArray array], *skipped = [NSMutableArray array];
+  NSMutableArray *names = [NSMutableArray array], *skipped = [NSMutableArray array];
   for (ArcExtensionCopy* c in copies) [(c.skippedMV2 ? skipped : names) addObject:c.name];
   NSAlert* a = [NSAlert new];
-  a.messageText = names.count ? [NSString stringWithFormat:@"%lu extensions copied from Arc", (unsigned long)names.count]
-                              : @"No extensions to copy";
+  a.messageText = names.count
+                      ? [NSString stringWithFormat:@"%lu extensions copied from Arc", (unsigned long)names.count]
+                      : @"No extensions to copy";
   NSMutableString* info = [NSMutableString stringWithString:[names componentsJoinedByString:@", "]];
   if (skipped.count)
-    [info appendFormat:@"\n\nNot supported by current Chromium: %@ (try uBlock Origin Lite).", [skipped componentsJoinedByString:@", "]];
-  [info appendString:ChromePagesEnabled() ? @"\n\nThey load the next time NotArc starts. Password managers need one sign-in."
-                                          : @"\n\nThey load once Chrome-style pages are turned on (coming soon)."];
+    [info appendFormat:@"\n\nNot supported by current Chromium: %@ (try uBlock Origin Lite).",
+                       [skipped componentsJoinedByString:@", "]];
+  [info appendString:ChromePagesEnabled()
+                         ? @"\n\nThey load the next time NotArc starts. Password managers need one sign-in."
+                         : @"\n\nThey load once Chrome-style pages are turned on (coming soon)."];
   a.informativeText = info;
   [a beginSheetModalForWindow:self.window completionHandler:nil];
 }
 
-- (NSDictionary<NSString*, NSNumber*>*)importEverythingFromArcInto:(NSString*)extensionsDir userData:(NSString*)userData {
+- (NSDictionary<NSString*, NSNumber*>*)importEverythingFromArcInto:(NSString*)extensionsDir
+                                                          userData:(NSString*)userData {
   NSUInteger history = [self importArcHistory];
   NSUInteger copied = 0, skipped = 0;
   for (ArcExtensionCopy* c in [self importArcExtensionsInto:extensionsDir fromArcUserData:userData])
@@ -3187,15 +3540,19 @@ static const CGFloat kPaneGap = 6;
                                              userData:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]];
   NSAlert* a = [NSAlert new];
   a.messageText = @"Everything from Arc is here";
-  a.informativeText = [NSString stringWithFormat:
-      @"Spaces, tabs, pinned tabs and Favorites: imported\nLogins: come over as each Space opens\nHistory: %@ visits added\n"
-      @"Extensions: %@ copied%@\n\nSaved passwords, autofill and cards are coming in a later update.",
-      n[@"history"], n[@"extensions"],
-      [n[@"skipped"] intValue] ? [NSString stringWithFormat:@" (%@ too old for current Chromium)", n[@"skipped"]] : @""];
+  a.informativeText = [NSString
+      stringWithFormat:@"Spaces, tabs, pinned tabs and Favorites: imported\nLogins: come over as each Space "
+                       @"opens\nHistory: %@ visits added\n"
+                       @"Extensions: %@ copied%@\n\nSaved passwords, autofill and cards are coming in a later update.",
+                       n[@"history"], n[@"extensions"],
+                       [n[@"skipped"] intValue]
+                           ? [NSString stringWithFormat:@" (%@ too old for current Chromium)", n[@"skipped"]]
+                           : @""];
   __weak MainWindowController* weakSelf = self;
-  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
-    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf offerDefaultBrowserIfFirstLaunch]; });
-  }];
+  [a beginSheetModalForWindow:self.window
+            completionHandler:^(NSModalResponse r) {
+              dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf offerDefaultBrowserIfFirstLaunch]; });
+            }];
 }
 
 // Arc acceptance: one button the first time NotArc opens, then you keep working like you never moved.
@@ -3210,15 +3567,17 @@ static const CGFloat kPaneGap = 6;
                       @"You can change this later in Settings.";
   [a addButtonWithTitle:@"Make Default"];
   [a addButtonWithTitle:@"Not Now"];
-  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
-    if (r == NSAlertFirstButtonReturn) MakeNotArcDefaultBrowser(nil);
-  }];
+  [a beginSheetModalForWindow:self.window
+            completionHandler:^(NSModalResponse r) {
+              if (r == NSAlertFirstButtonReturn) MakeNotArcDefaultBrowser(nil);
+            }];
 }
 
 - (void)offerArcImportIfFirstLaunch {
   NSUserDefaults* d = NSUserDefaults.standardUserDefaults;
   if ([d boolForKey:@"arcImportOffered"] ||
-      ![NSFileManager.defaultManager fileExistsAtPath:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]]) {
+      ![NSFileManager.defaultManager
+          fileExistsAtPath:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]]) {
     [self offerDefaultBrowserIfFirstLaunch];
     return;
   }
@@ -3230,12 +3589,13 @@ static const CGFloat kPaneGap = 6;
   [a addButtonWithTitle:@"Import Everything"];
   [a addButtonWithTitle:@"Not Now"];
   __weak MainWindowController* weakSelf = self;
-  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
-    if (r == NSAlertFirstButtonReturn)
-      dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf importEverythingFromArcMenu:nil]; });
-    else
-      dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf offerDefaultBrowserIfFirstLaunch]; });
-  }];
+  [a beginSheetModalForWindow:self.window
+            completionHandler:^(NSModalResponse r) {
+              if (r == NSAlertFirstButtonReturn)
+                dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf importEverythingFromArcMenu:nil]; });
+              else
+                dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf offerDefaultBrowserIfFirstLaunch]; });
+            }];
 }
 
 - (IBAction)importArcHistoryFromMenu:(id)sender {
@@ -3247,21 +3607,28 @@ static const CGFloat kPaneGap = 6;
   [a beginSheetModalForWindow:self.window completionHandler:nil];
 }
 - (IBAction)addEaselText:(id)sender {
-  if (!_easelItem) { NSBeep(); return; }
+  if (!_easelItem) {
+    NSBeep();
+    return;
+  }
   EaselObject* o = [_easelView addText:@"" at:NSMakePoint(-1, -1)];
   (void)o;
   for (NSView* v in _easelView.subviews)
     for (NSView* sub in v.subviews)
-      if ([sub isKindOfClass:NSTextField.class] && [(NSTextField*)sub stringValue].length == 0) [self.window makeFirstResponder:sub];
+      if ([sub isKindOfClass:NSTextField.class] && [(NSTextField*)sub stringValue].length == 0)
+        [self.window makeFirstResponder:sub];
 }
 // The most recently used easel in this Space, for captures (Arc adds captures to an easel).
 - (ArcItem*)recentEasel {
   ArcItem* best = nil;
-  NSMutableArray* stack = [NSMutableArray arrayWithObjects:_space.pinned ?: [ArcItem new], _space.unpinned ?: [ArcItem new], nil];
+  NSMutableArray* stack =
+      [NSMutableArray arrayWithObjects:_space.pinned ?: [ArcItem new], _space.unpinned ?: [ArcItem new], nil];
   while (stack.count) {
     ArcItem* it = stack.lastObject;
     [stack removeLastObject];
-    if (it.easelID && (!best || [it.lastActiveAt compare:best.lastActiveAt ?: NSDate.distantPast] == NSOrderedDescending)) best = it;
+    if (it.easelID &&
+        (!best || [it.lastActiveAt compare:best.lastActiveAt ?: NSDate.distantPast] == NSOrderedDescending))
+      best = it;
     if (it.children) [stack addObjectsFromArray:it.children];
   }
   return best;
@@ -3269,10 +3636,14 @@ static const CGFloat kPaneGap = 6;
 // Page capture (Arc: Capture, Cmd+Shift+2): the visible page as a PNG, added to the most recent easel.
 - (void)capturePage:(ArcItem*)page done:(void (^)(NSData* png))done {
   auto it = _browsers.find(page.browserId);
-  if (it == _browsers.end()) { if (done) done(nil); return; }
+  if (it == _browsers.end()) {
+    if (done) done(nil);
+    return;
+  }
   CefRefPtr<CefBrowser> b = it->second;
   if (!_devtoolsResults) _devtoolsResults = new DevToolsResults();
-  if (!_devtoolsRegs.count(page.browserId)) _devtoolsRegs[page.browserId] = b->GetHost()->AddDevToolsMessageObserver(_devtoolsResults);
+  if (!_devtoolsRegs.count(page.browserId))
+    _devtoolsRegs[page.browserId] = b->GetHost()->AddDevToolsMessageObserver(_devtoolsResults);
   int mid = 100000 + (++_devtoolsNextId);
   void (^cb)(NSData*) = [done copy];
   _devtoolsResults->pending[mid] = [cb](bool ok, const std::string& json) {
@@ -3293,27 +3664,40 @@ static CefRefPtr<CefDictionaryValue> CefDict(NSDictionary* d) {
   CefRefPtr<CefDictionaryValue> v = CefDictionaryValue::Create();
   for (NSString* k in d) {
     id o = d[k];
-    if ([o isKindOfClass:NSDictionary.class]) v->SetDictionary(k.UTF8String, CefDict(o));
-    else if ([o isKindOfClass:NSString.class]) v->SetString(k.UTF8String, [o UTF8String]);
-    else if (o == (id)kCFBooleanTrue || o == (id)kCFBooleanFalse) v->SetBool(k.UTF8String, [o boolValue]);
-    else if ([o isKindOfClass:NSNumber.class]) v->SetDouble(k.UTF8String, [o doubleValue]);
+    if ([o isKindOfClass:NSDictionary.class])
+      v->SetDictionary(k.UTF8String, CefDict(o));
+    else if ([o isKindOfClass:NSString.class])
+      v->SetString(k.UTF8String, [o UTF8String]);
+    else if (o == (id)kCFBooleanTrue || o == (id)kCFBooleanFalse)
+      v->SetBool(k.UTF8String, [o boolValue]);
+    else if ([o isKindOfClass:NSNumber.class])
+      v->SetDouble(k.UTF8String, [o doubleValue]);
   }
   return v;
 }
 
 // Any DevTools method on a tab; the result object (or nil on failure) comes back on the main thread.
-- (void)devtools:(ArcItem*)page method:(NSString*)method params:(NSDictionary*)params done:(void (^)(NSDictionary*))done {
+- (void)devtools:(ArcItem*)page
+          method:(NSString*)method
+          params:(NSDictionary*)params
+            done:(void (^)(NSDictionary*))done {
   auto it = _browsers.find(page.browserId);
-  if (it == _browsers.end()) { if (done) done(nil); return; }
+  if (it == _browsers.end()) {
+    if (done) done(nil);
+    return;
+  }
   CefRefPtr<CefBrowser> b = it->second;
   if (!_devtoolsResults) _devtoolsResults = new DevToolsResults();
-  if (!_devtoolsRegs.count(page.browserId)) _devtoolsRegs[page.browserId] = b->GetHost()->AddDevToolsMessageObserver(_devtoolsResults);
+  if (!_devtoolsRegs.count(page.browserId))
+    _devtoolsRegs[page.browserId] = b->GetHost()->AddDevToolsMessageObserver(_devtoolsResults);
   int mid = 100000 + (++_devtoolsNextId);
   void (^cb)(NSDictionary*) = [done copy];
   _devtoolsResults->pending[mid] = [cb](bool ok, const std::string& json) {
     NSDictionary* r = nil;
     if (ok) {
-      id o = [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:json.data() length:json.size()] options:0 error:nil];
+      id o = [NSJSONSerialization JSONObjectWithData:[NSData dataWithBytes:json.data() length:json.size()]
+                                             options:0
+                                               error:nil];
       if ([o isKindOfClass:NSDictionary.class]) r = o;
     }
     if (cb) dispatch_async(dispatch_get_main_queue(), ^{ cb(r); });
@@ -3322,7 +3706,8 @@ static CefRefPtr<CefDictionaryValue> CefDict(NSDictionary* d) {
 }
 
 static NSData* PNGFrom(NSDictionary* r) {
-  return [r[@"data"] isKindOfClass:NSString.class] ? [[NSData alloc] initWithBase64EncodedString:r[@"data"] options:0] : nil;
+  return [r[@"data"] isKindOfClass:NSString.class] ? [[NSData alloc] initWithBase64EncodedString:r[@"data"] options:0]
+                                                   : nil;
 }
 
 static NSBitmapImageRep* RepFrom(NSData* png) { return png ? [NSBitmapImageRep imageRepWithData:png] : nil; }
@@ -3346,14 +3731,22 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   NSBitmapImageRep* rep = RepFrom(png);
   if (!rep) return nil;
   CGFloat w = rep.pixelsWide, h = rep.pixelsHigh, pad = MAX(w, h) * 0.08, radius = MIN(w, h) * 0.02;
-  NSBitmapImageRep* out = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:(NSInteger)(w + 2 * pad)
-      pixelsHigh:(NSInteger)(h + 2 * pad) bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
-      colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+  NSBitmapImageRep* out = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL
+                                                                  pixelsWide:(NSInteger)(w + 2 * pad)
+                                                                  pixelsHigh:(NSInteger)(h + 2 * pad)
+                                                               bitsPerSample:8
+                                                             samplesPerPixel:4
+                                                                    hasAlpha:YES
+                                                                    isPlanar:NO
+                                                              colorSpaceName:NSDeviceRGBColorSpace
+                                                                 bytesPerRow:0
+                                                                bitsPerPixel:0];
   [NSGraphicsContext saveGraphicsState];
   NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithBitmapImageRep:out];
   NSRect all = NSMakeRect(0, 0, w + 2 * pad, h + 2 * pad);
-  NSGradient* g = [[NSGradient alloc] initWithStartingColor:[bg blendedColorWithFraction:0.25 ofColor:NSColor.whiteColor]
-                                                endingColor:[bg blendedColorWithFraction:0.2 ofColor:NSColor.blackColor]];
+  NSGradient* g =
+      [[NSGradient alloc] initWithStartingColor:[bg blendedColorWithFraction:0.25 ofColor:NSColor.whiteColor]
+                                    endingColor:[bg blendedColorWithFraction:0.2 ofColor:NSColor.blackColor]];
   [g drawInRect:all angle:-45];
   NSRect card = NSMakeRect(pad, pad, w, h);
   NSShadow* sh = [NSShadow new];
@@ -3377,7 +3770,10 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   if (hex.length >= 7) {
     unsigned v = 0;
     [[NSScanner scannerWithString:[hex substringFromIndex:1]] scanHexInt:&v];
-    return [NSColor colorWithSRGBRed:((v >> 16) & 255) / 255.0 green:((v >> 8) & 255) / 255.0 blue:(v & 255) / 255.0 alpha:1];
+    return [NSColor colorWithSRGBRed:((v >> 16) & 255) / 255.0
+                               green:((v >> 8) & 255) / 255.0
+                                blue:(v & 255) / 255.0
+                               alpha:1];
   }
   return [NSColor colorWithSRGBRed:0x60 / 255.0 green:0x4f / 255.0 blue:0xd6 / 255.0 alpha:1];
 }
@@ -3385,39 +3781,62 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 // mode: "visible", "full", "portrait" or "area" (rect in page points, top-left origin).
 - (void)capture:(NSString*)mode rect:(NSRect)rect done:(void (^)(NSData* png))done {
   ArcItem* page = _shown;
-  if (!page || page.noteID || page.easelID || !page.browserId) { if (done) done(nil); return; }
+  if (!page || page.noteID || page.easelID || !page.browserId) {
+    if (done) done(nil);
+    return;
+  }
   NSSize viewSize = [self webViewForItem:page].bounds.size;
   NSColor* bg = [self captureBackgroundColor];
   if ([mode isEqualToString:@"full"]) {
     __weak MainWindowController* weakSelf = self;
-    [self devtools:page method:@"Page.getLayoutMetrics" params:nil done:^(NSDictionary* m) {
-      NSDictionary* size = m[@"cssContentSize"] ?: m[@"contentSize"];
-      double w = [size[@"width"] doubleValue], h = MIN([size[@"height"] doubleValue], 16384.0);
-      if (!weakSelf || w <= 0 || h <= 0) { if (done) done(nil); return; }
-      [weakSelf devtools:page method:@"Page.captureScreenshot"
-                  params:@{@"format" : @"png", @"captureBeyondViewport" : @YES,
-                           @"clip" : @{@"x" : @0, @"y" : @0, @"width" : @(w), @"height" : @(h), @"scale" : @1}}
-                    done:^(NSDictionary* r) { if (done) done(PNGFrom(r)); }];
-    }];
+    [self devtools:page
+            method:@"Page.getLayoutMetrics"
+            params:nil
+              done:^(NSDictionary* m) {
+                NSDictionary* size = m[@"cssContentSize"] ?: m[@"contentSize"];
+                double w = [size[@"width"] doubleValue], h = MIN([size[@"height"] doubleValue], 16384.0);
+                if (!weakSelf || w <= 0 || h <= 0) {
+                  if (done) done(nil);
+                  return;
+                }
+                [weakSelf devtools:page
+                    method:@"Page.captureScreenshot"
+                    params:@{
+                      @"format" : @"png",
+                      @"captureBeyondViewport" : @YES,
+                      @"clip" : @{@"x" : @0, @"y" : @0, @"width" : @(w), @"height" : @(h), @"scale" : @1}
+                    }
+                    done:^(NSDictionary* r) {
+                      if (done) done(PNGFrom(r));
+                    }];
+              }];
     return;
   }
-  [self devtools:page method:@"Page.captureScreenshot" params:@{@"format" : @"png"} done:^(NSDictionary* r) {
-    NSData* png = PNGFrom(r);
-    if ([mode isEqualToString:@"area"]) png = CropPNG(png, rect, viewSize);
-    else if ([mode isEqualToString:@"portrait"]) png = PortraitPNG(png, bg);
-    if (done) done(png);
-  }];
+  [self devtools:page
+          method:@"Page.captureScreenshot"
+          params:@{@"format" : @"png"}
+            done:^(NSDictionary* r) {
+              NSData* png = PNGFrom(r);
+              if ([mode isEqualToString:@"area"])
+                png = CropPNG(png, rect, viewSize);
+              else if ([mode isEqualToString:@"portrait"])
+                png = PortraitPNG(png, bg);
+              if (done) done(png);
+            }];
 }
 
 - (NSString*)captureDirectory {
   if (_captureDirectory) return _captureDirectory;
-  return [NSSearchPathForDirectoriesInDomains(NSDownloadsDirectory, NSUserDomainMask, YES).firstObject ?: NSHomeDirectory()
-      stringByAppendingPathComponent:@""];
+  return [NSSearchPathForDirectoriesInDomains(NSDownloadsDirectory, NSUserDomainMask, YES).firstObject
+              ?: NSHomeDirectory() stringByAppendingPathComponent:@""];
 }
 
 // Copies the capture, saves it as a PNG, and offers Add to Easel (Arc's capture actions).
 - (NSString*)deliverCapture:(NSData*)png {
-  if (!png) { NSBeep(); return nil; }
+  if (!png) {
+    NSBeep();
+    return nil;
+  }
   _lastCapture = png;
   _lastCaptureLink = [self itemCurrentURL:_shown];
   NSPasteboard* pb = _captureDirectory ? [NSPasteboard pasteboardWithName:@"io.github.donnadieu.notarc.selftest"]
@@ -3434,7 +3853,8 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   if (![png writeToFile:path atomically:YES]) path = nil;
   PlaySoundEffect(NotArcSoundCapture);  // Arc played a shutter sound on capture
   if (!_captureDirectory)
-    [self showToast:path ? @"Capture copied and saved to Downloads" : @"Capture copied" action:@"Add to Easel"
+    [self showToast:path ? @"Capture copied and saved to Downloads" : @"Capture copied"
+             action:@"Add to Easel"
            selector:@selector(addLastCaptureToEasel:)];
   return path;
 }
@@ -3442,7 +3862,10 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 - (IBAction)addLastCaptureToEasel:(id)sender {
   if (!_lastCapture) return;
   ArcItem* easel = [self recentEasel];
-  if (easel) [self showItem:easel]; else [self createEaselWithID:nil];
+  if (easel)
+    [self showItem:easel];
+  else
+    [self createEaselWithID:nil];
   [_easelView addImagePNG:_lastCapture link:_lastCaptureLink];
 }
 
@@ -3450,14 +3873,23 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   __weak MainWindowController* weakSelf = self;
   [self capture:mode rect:NSZeroRect done:^(NSData* png) { [weakSelf deliverCapture:png]; }];
 }
-- (IBAction)captureVisiblePage:(id)sender { [self captureMode:@"visible"]; }
-- (IBAction)captureFullPage:(id)sender { [self captureMode:@"full"]; }
-- (IBAction)capturePortrait:(id)sender { [self captureMode:@"portrait"]; }
+- (IBAction)captureVisiblePage:(id)sender {
+  [self captureMode:@"visible"];
+}
+- (IBAction)captureFullPage:(id)sender {
+  [self captureMode:@"full"];
+}
+- (IBAction)capturePortrait:(id)sender {
+  [self captureMode:@"portrait"];
+}
 
 // Capture Area: drag a rectangle over the page; Esc or a click without dragging cancels.
 - (IBAction)captureArea:(id)sender {
   NSView* web = [self webViewForItem:_shown];
-  if (!web || _shown.noteID || _shown.easelID) { NSBeep(); return; }
+  if (!web || _shown.noteID || _shown.easelID) {
+    NSBeep();
+    return;
+  }
   [_captureOverlay removeFromSuperview];
   CaptureAreaView* o = [[CaptureAreaView alloc] initWithFrame:_content.frame];
   __weak MainWindowController* weakSelf = self;
@@ -3476,38 +3908,57 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 
 - (IBAction)captureToEasel:(id)sender {
   ArcItem* page = _shown;
-  if (!page || page.noteID || page.easelID) { NSBeep(); return; }
+  if (!page || page.noteID || page.easelID) {
+    NSBeep();
+    return;
+  }
   NSString* link = [self itemCurrentURL:page];
   __weak MainWindowController* weakSelf = self;
-  [self capturePage:page done:^(NSData* png) {
-    MainWindowController* me = weakSelf;
-    if (!me || !png) { NSBeep(); return; }
-    ArcItem* easel = [me recentEasel];
-    if (easel) [me showItem:easel]; else easel = [me createEaselWithID:nil];
-    [me->_easelView addImagePNG:png link:link];
-    if (!me.selfTestProfiles) [me showToast:@"Captured to Easel" action:nil selector:nil];
-  }];
+  [self capturePage:page
+               done:^(NSData* png) {
+                 MainWindowController* me = weakSelf;
+                 if (!me || !png) {
+                   NSBeep();
+                   return;
+                 }
+                 ArcItem* easel = [me recentEasel];
+                 if (easel)
+                   [me showItem:easel];
+                 else
+                   easel = [me createEaselWithID:nil];
+                 [me->_easelView addImagePNG:png link:link];
+                 if (!me.selfTestProfiles) [me showToast:@"Captured to Easel" action:nil selector:nil];
+               }];
 }
 // Tests.
-- (EaselView*)easelView { return _easelScroll.hidden ? nil : _easelView; }
+- (EaselView*)easelView {
+  return _easelScroll.hidden ? nil : _easelView;
+}
 - (void)captureShownPageToEasel:(void (^)(BOOL))done {
   ArcItem* page = _shown;
   NSString* link = [self itemCurrentURL:page];
-  [self capturePage:page done:^(NSData* png) {
-    ArcItem* easel = [self recentEasel];
-    if (easel) [self showItem:easel]; else [self createEaselWithID:nil];
-    BOOL ok = [self->_easelView addImagePNG:png link:link] != nil;
-    if (done) done(ok);
-  }];
+  [self capturePage:page
+               done:^(NSData* png) {
+                 ArcItem* easel = [self recentEasel];
+                 if (easel)
+                   [self showItem:easel];
+                 else
+                   [self createEaselWithID:nil];
+                 BOOL ok = [self->_easelView addImagePNG:png link:link] != nil;
+                 if (done) done(ok);
+               }];
 }
 
 // MARK: Notes (Arc: NoteDocument). Rich text in the page card, saved as RTF next to the sidebar file.
 - (NSString*)notesDirectory {
-  NSString* support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
-      stringByAppendingPathComponent:@"NotArc"];
+  NSString* support =
+      [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
+          stringByAppendingPathComponent:@"NotArc"];
   return [support stringByAppendingPathComponent:self.selfTestProfiles ? @"SelfTestNotes" : @"Notes"];
 }
-- (NSString*)notePathFor:(ArcItem*)note { return [[self notesDirectory] stringByAppendingPathComponent:[note.noteID stringByAppendingString:@".rtf"]]; }
+- (NSString*)notePathFor:(ArcItem*)note {
+  return [[self notesDirectory] stringByAppendingPathComponent:[note.noteID stringByAppendingString:@".rtf"]];
+}
 - (NSAttributedString*)loadNote:(ArcItem*)note {
   NSData* d = [NSData dataWithContentsOfFile:[self notePathFor:note]];
   NSAttributedString* a = d ? [[NSAttributedString alloc] initWithRTF:d documentAttributes:nil] : nil;
@@ -3518,8 +3969,12 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   _noteSaveTimer = nil;
   if (!_noteItem || !_noteText) return;
   NSAttributedString* a = _noteText.textStorage;
-  NSData* rtf = [a RTFFromRange:NSMakeRange(0, a.length) documentAttributes:@{NSDocumentTypeDocumentAttribute : NSRTFTextDocumentType}];
-  [[NSFileManager defaultManager] createDirectoryAtPath:[self notesDirectory] withIntermediateDirectories:YES attributes:nil error:nil];
+  NSData* rtf = [a RTFFromRange:NSMakeRange(0, a.length)
+             documentAttributes:@{NSDocumentTypeDocumentAttribute : NSRTFTextDocumentType}];
+  [[NSFileManager defaultManager] createDirectoryAtPath:[self notesDirectory]
+                            withIntermediateDirectories:YES
+                                             attributes:nil
+                                                  error:nil];
   [rtf writeToFile:[self notePathFor:_noteItem] atomically:YES];
 }
 - (void)layoutNoteEditor {
@@ -3564,7 +4019,8 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 - (void)textDidChange:(NSNotification*)n {
   if (n.object != _noteText || !_noteItem) return;
   // The first line is the note's title in the sidebar, as in Arc.
-  NSString* first = [[_noteText.string componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] firstObject];
+  NSString* first =
+      [[_noteText.string componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] firstObject];
   first = [first stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
   NSString* t = first.length ? (first.length > 80 ? [first substringToIndex:80] : first) : nil;
   if (![t isEqualToString:_noteItem.liveTitle] && !(t == nil && _noteItem.liveTitle == nil)) {
@@ -3574,7 +4030,9 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   }
   [_noteSaveTimer invalidate];
   __weak MainWindowController* weakSelf = self;
-  _noteSaveTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:NO block:^(NSTimer*) { [weakSelf saveNoteNow]; }];
+  _noteSaveTimer = [NSTimer scheduledTimerWithTimeInterval:0.5
+                                                   repeats:NO
+                                                     block:^(NSTimer*) { [weakSelf saveNoteNow]; }];
 }
 - (ArcItem*)createNoteWithID:(NSString*)noteID {
   if (!_space) return nil;
@@ -3595,15 +4053,22 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   [self showItem:n];
   return n;
 }
-- (IBAction)newNote:(id)sender { [self createNoteWithID:nil]; }
+- (IBAction)newNote:(id)sender {
+  [self createNoteWithID:nil];
+}
 // Tests.
 - (void)typeInNote:(NSString*)text {
   if (!_noteText || !_noteItem) return;
   [_noteText setSelectedRange:NSMakeRange(_noteText.string.length, 0)];
   [_noteText insertText:text replacementRange:_noteText.selectedRange];
 }
-- (NSString*)noteEditorText { return _noteScroll.hidden ? nil : _noteText.string; }
-- (NSString*)savedNoteText:(ArcItem*)note { [self saveNoteNow]; return [self loadNote:note].string; }
+- (NSString*)noteEditorText {
+  return _noteScroll.hidden ? nil : _noteText.string;
+}
+- (NSString*)savedNoteText:(ArcItem*)note {
+  [self saveNoteNow];
+  return [self loadNote:note].string;
+}
 - (BOOL)noteRangeIsBold:(ArcItem*)note range:(NSRange)r {  // tests: reads the saved file
   NSAttributedString* a = [self loadNote:note];
   if (NSMaxRange(r) > a.length) return NO;
@@ -3612,7 +4077,8 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 }
 - (void)makeNoteRangeBold:(NSRange)r {  // tests: what Format > Bold does to a selection
   if (NSMaxRange(r) > _noteText.textStorage.length) return;
-  NSFont* f = [_noteText.textStorage attribute:NSFontAttributeName atIndex:r.location effectiveRange:nil] ?: [NSFont systemFontOfSize:15];
+  NSFont* f = [_noteText.textStorage attribute:NSFontAttributeName atIndex:r.location effectiveRange:nil]
+                  ?: [NSFont systemFontOfSize:15];
   NSFont* b = [[NSFontManager sharedFontManager] convertFont:f toHaveTrait:NSBoldFontMask];
   [_noteText shouldChangeTextInRange:r replacementString:nil];
   [_noteText.textStorage addAttribute:NSFontAttributeName value:b range:r];
@@ -3658,8 +4124,10 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   group.splitFractions = nil;
   if (keep && holder) [holder.children insertObject:item atIndex:at + 1];
   if (group.children.count < 2 && holder) {
-    if (group.children.count == 1) holder.children[at] = group.children.firstObject;
-    else [holder.children removeObjectAtIndex:at];
+    if (group.children.count == 1)
+      holder.children[at] = group.children.firstObject;
+    else
+      [holder.children removeObjectAtIndex:at];
   }
   [_outline reloadData];
   for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
@@ -3689,8 +4157,12 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   [self showCommandBarForNewTab:YES];
 }
 
-- (IBAction)addVerticalSplit:(id)sender { [self beginSplit:NO]; }
-- (IBAction)addHorizontalSplit:(id)sender { [self beginSplit:YES]; }
+- (IBAction)addVerticalSplit:(id)sender {
+  [self beginSplit:NO];
+}
+- (IBAction)addHorizontalSplit:(id)sender {
+  [self beginSplit:YES];
+}
 
 // The new pane is a normal Today tab placed next to the focused pane, like Arc.
 - (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal {
@@ -3723,7 +4195,9 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   [self showItem:tab];
 }
 
-- (NSUInteger)indexOfShownInSplit { return [_splitItems indexOfObject:_shown]; }
+- (NSUInteger)indexOfShownInSplit {
+  return [_splitItems indexOfObject:_shown];
+}
 
 - (IBAction)addLeftSplit:(id)sender {
   [self beginSplit:NO];
@@ -3745,8 +4219,10 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 - (IBAction)closeSplitPane:(id)sender {
   if (![_splitItems containsObject:_shown]) return;
   NSUInteger index = [_splitItems indexOfObject:_shown];
-  NSArray<ArcItem*>* rest = [_splitItems filteredArrayUsingPredicate:
-      [NSPredicate predicateWithBlock:^BOOL(ArcItem* t, NSDictionary*) { return t != self->_shown; }]];
+  NSArray<ArcItem*>* rest =
+      [_splitItems filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(ArcItem* t, NSDictionary*) {
+                     return t != self->_shown;
+                   }]];
   ArcItem* next = rest[MIN(index, rest.count - 1)];
   [self detachFromSplit:_shown keep:YES];
   [self showItem:next];
@@ -3775,7 +4251,9 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
                                : NSPasteboard.generalPasteboard;
 }
 
-- (NSArray<ArcItem*>*)visiblePanesForTest { return [self visiblePanes]; }
+- (NSArray<ArcItem*>*)visiblePanesForTest {
+  return [self visiblePanes];
+}
 
 - (NSString*)splitViewShareText {
   if (![_splitItems containsObject:_shown]) return nil;
@@ -3789,7 +4267,10 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 
 - (IBAction)shareSplitView:(id)sender {
   NSString* text = [self splitViewShareText];
-  if (!text) { NSBeep(); return; }
+  if (!text) {
+    NSBeep();
+    return;
+  }
   NSMutableArray* md = [NSMutableArray array];
   for (ArcItem* pane in _splitItems) {
     NSString* url = [self itemCurrentURL:pane];
@@ -3826,9 +4307,8 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   __weak MainWindowController* weakSelf = self;
   if (![self contextIsReady:space.profileDirectory]) {
     // The Space's profile is still starting (e.g. a link arrived at launch); try again shortly.
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
-      [weakSelf openLittleWindow:url];
-    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(),
+                   ^{ [weakSelf openLittleWindow:url]; });
     return;
   }
   LittleWindowController* little = [[LittleWindowController alloc] initWithURL:url
@@ -3888,7 +4368,7 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   if (!store || !db.length) return NSNotFound;
   NSError* error = nil;
   // Chromium-family browsers keep history in the same database format as Arc; Firefox and Safari have their own.
-  NSArray* visits = [kind isEqualToString:@"firefox"] ? FirefoxReadHistory(db, name, 20000, &error)
+  NSArray* visits = [kind isEqualToString:@"firefox"]  ? FirefoxReadHistory(db, name, 20000, &error)
                     : [kind isEqualToString:@"safari"] ? SafariReadHistory(db, name, 20000, &error)
                                                        : ArcReadHistory(db, name, 20000, &error);
   if (!visits) {
@@ -3922,25 +4402,28 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   [a addButtonWithTitle:@"Import"];
   [a addButtonWithTitle:@"Cancel"];
   __weak MainWindowController* weakSelf = self;
-  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
-    if (r != NSAlertFirstButtonReturn) return;
-    NSArray* src = from.selectedItem.representedObject;
-    dispatch_async(dispatch_get_main_queue(), ^{
-      MainWindowController* me = weakSelf;
-      if (!me || !src) return;
-      NSUInteger n = [me importHistoryFromFile:src[1] browser:src[0] kind:src[2]];
-      NSAlert* done = [NSAlert new];
-      if (n == NSNotFound) {
-        done.messageText = [NSString stringWithFormat:@"Couldn't read %@ history", src[0]];
-        if ([src[2] isEqualToString:@"safari"])
-          done.informativeText = @"macOS protects Safari's history. To import it, give NotArc Full Disk Access in System "
-                                 @"Settings > Privacy & Security, then try again.";
-      } else {
-        done.messageText = n ? [NSString stringWithFormat:@"%lu visits imported", (unsigned long)n] : @"No new history to import";
-      }
-      [done beginSheetModalForWindow:me.window completionHandler:nil];
-    });
-  }];
+  [a beginSheetModalForWindow:self.window
+            completionHandler:^(NSModalResponse r) {
+              if (r != NSAlertFirstButtonReturn) return;
+              NSArray* src = from.selectedItem.representedObject;
+              dispatch_async(dispatch_get_main_queue(), ^{
+                MainWindowController* me = weakSelf;
+                if (!me || !src) return;
+                NSUInteger n = [me importHistoryFromFile:src[1] browser:src[0] kind:src[2]];
+                NSAlert* done = [NSAlert new];
+                if (n == NSNotFound) {
+                  done.messageText = [NSString stringWithFormat:@"Couldn't read %@ history", src[0]];
+                  if ([src[2] isEqualToString:@"safari"])
+                    done.informativeText =
+                        @"macOS protects Safari's history. To import it, give NotArc Full Disk Access in System "
+                        @"Settings > Privacy & Security, then try again.";
+                } else {
+                  done.messageText = n ? [NSString stringWithFormat:@"%lu visits imported", (unsigned long)n]
+                                       : @"No new history to import";
+                }
+                [done beginSheetModalForWindow:me.window completionHandler:nil];
+              });
+            }];
 }
 
 - (IBAction)importBookmarksFromMenu:(id)sender {
@@ -3958,29 +4441,30 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   [a addButtonWithTitle:@"Import"];
   [a addButtonWithTitle:@"Cancel"];
   __weak MainWindowController* weakSelf = self;
-  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
-    if (r != NSAlertFirstButtonReturn) return;
-    NSArray* src = from.selectedItem.representedObject;
-    dispatch_async(dispatch_get_main_queue(), ^{
-      MainWindowController* me = weakSelf;
-      if (!me) return;
-      NSUInteger n = 0;
-      ArcItem* folder = nil;
-      if (src) {
-        folder = BookmarksFromChromiumFile(src[1], [@"Bookmarks from " stringByAppendingString:src[0]], &n);
-      } else {
-        NSOpenPanel* p = [NSOpenPanel openPanel];
-        p.allowedContentTypes = @[ UTTypeHTML ];
-        if ([p runModal] != NSModalResponseOK) return;
-        folder = BookmarksFromHTMLFile(p.URL.path, @"Imported Bookmarks", &n);
-      }
-      NSAlert* done = [NSAlert new];
-      done.messageText = folder && n ? [NSString stringWithFormat:@"%lu bookmarks imported", (unsigned long)n]
-                                     : @"No bookmarks found";
-      if (folder && n) [me addImportedBookmarks:folder];
-      [done beginSheetModalForWindow:me.window completionHandler:nil];
-    });
-  }];
+  [a beginSheetModalForWindow:self.window
+            completionHandler:^(NSModalResponse r) {
+              if (r != NSAlertFirstButtonReturn) return;
+              NSArray* src = from.selectedItem.representedObject;
+              dispatch_async(dispatch_get_main_queue(), ^{
+                MainWindowController* me = weakSelf;
+                if (!me) return;
+                NSUInteger n = 0;
+                ArcItem* folder = nil;
+                if (src) {
+                  folder = BookmarksFromChromiumFile(src[1], [@"Bookmarks from " stringByAppendingString:src[0]], &n);
+                } else {
+                  NSOpenPanel* p = [NSOpenPanel openPanel];
+                  p.allowedContentTypes = @[ UTTypeHTML ];
+                  if ([p runModal] != NSModalResponseOK) return;
+                  folder = BookmarksFromHTMLFile(p.URL.path, @"Imported Bookmarks", &n);
+                }
+                NSAlert* done = [NSAlert new];
+                done.messageText = folder && n ? [NSString stringWithFormat:@"%lu bookmarks imported", (unsigned long)n]
+                                               : @"No bookmarks found";
+                if (folder && n) [me addImportedBookmarks:folder];
+                [done beginSheetModalForWindow:me.window completionHandler:nil];
+              });
+            }];
 }
 
 - (BOOL)scriptItem:(ArcItem*)item command:(NSString*)command {
@@ -3988,17 +4472,24 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   auto it = _browsers.find(item.browserId);
   CefRefPtr<CefBrowser> b = it == _browsers.end() ? nullptr : it->second;
   if ([command isEqualToString:@"loading"]) return b && b->IsLoading();
-  if ([command isEqualToString:@"select"]) { [self showItem:item]; return YES; }
+  if ([command isEqualToString:@"select"]) {
+    [self showItem:item];
+    return YES;
+  }
   if ([command isEqualToString:@"close"]) {
     if (_shown != item) [self showItem:item];
     [self closeCurrentTab];
     return YES;
   }
   if (!b) return NO;
-  if ([command isEqualToString:@"back"]) b->GoBack();
-  else if ([command isEqualToString:@"forward"]) b->GoForward();
-  else if ([command isEqualToString:@"reload"]) b->Reload();
-  else if ([command isEqualToString:@"stop"]) b->StopLoad();
+  if ([command isEqualToString:@"back"])
+    b->GoBack();
+  else if ([command isEqualToString:@"forward"])
+    b->GoForward();
+  else if ([command isEqualToString:@"reload"])
+    b->Reload();
+  else if ([command isEqualToString:@"stop"])
+    b->StopLoad();
   return YES;
 }
 
@@ -4017,26 +4508,28 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
     CefRequestContextSettings settings;  // empty cache_path = in memory only
     _incognitoReady = NO;
     _incognitoContext = CefRequestContext::CreateContext(settings, new SpaceContextHandler([weakSelf]() {
-      MainWindowController* me = weakSelf;
-      if (me) me->_incognitoReady = YES;
-    }));
+                                                           MainWindowController* me = weakSelf;
+                                                           if (me) me->_incognitoReady = YES;
+                                                         }));
   }
   if (!_incognitoReady) {
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_main_queue(), ^{
-      [weakSelf openIncognitoWindow:url];
-    });
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_main_queue(),
+                   ^{ [weakSelf openIncognitoWindow:url]; });
     return;
   }
-  LittleWindowController* w = [[LittleWindowController alloc] initWithURL:url context:_incognitoContext onMove:nil
-      onClose:^(LittleWindowController* lw, NSString*, NSString*, BOOL) {
-        MainWindowController* me = weakSelf;
-        if (!me) return;
-        [me->_incognitoWindows removeObject:lw];
-        if (!me->_incognitoWindows.count) {  // last one closed: forget everything
-          me->_incognitoContext = nullptr;
-          me->_incognitoReady = NO;
-        }
-      }];
+  LittleWindowController* w =
+      [[LittleWindowController alloc] initWithURL:url
+                                          context:_incognitoContext
+                                           onMove:nil
+                                          onClose:^(LittleWindowController* lw, NSString*, NSString*, BOOL) {
+                                            MainWindowController* me = weakSelf;
+                                            if (!me) return;
+                                            [me->_incognitoWindows removeObject:lw];
+                                            if (!me->_incognitoWindows.count) {  // last one closed: forget everything
+                                              me->_incognitoContext = nullptr;
+                                              me->_incognitoReady = NO;
+                                            }
+                                          }];
   [w makeIncognito];
   if (!_incognitoWindows) _incognitoWindows = [NSMutableArray array];
   [_incognitoWindows addObject:w];
@@ -4048,7 +4541,9 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   }
 }
 
-- (NSUInteger)incognitoWindowCount { return _incognitoWindows.count; }
+- (NSUInteger)incognitoWindowCount {
+  return _incognitoWindows.count;
+}
 
 - (BOOL)incognitoContextIsOnDisk {
   return _incognitoContext && !_incognitoContext->GetCachePath().ToString().empty();
@@ -4061,7 +4556,9 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   [self showCommandBarForNewTab:YES];
 }
 
-- (NSUInteger)littleWindowCount { return _littleWindows.count; }
+- (NSUInteger)littleWindowCount {
+  return _littleWindows.count;
+}
 
 - (NSUInteger)archiveIdleLittleWindowsAt:(NSDate*)now {
   double hours = SettingDouble(kSettingLittleArchiveHours);
@@ -4126,7 +4623,7 @@ static NSString* SiteOf(NSString* url) {
   NSString* current = it != _browsers.end()
                           ? [NSString stringWithUTF8String:it->second->GetMainFrame()->GetURL().ToString().c_str()]
                           : item.url;
-  NSString* from = SiteOf(current), *to = SiteOf(url);
+  NSString *from = SiteOf(current), *to = SiteOf(url);
   return from.length && to.length && ![from isEqualToString:to];
 }
 
@@ -4153,8 +4650,12 @@ static NSString* SiteOf(NSString* url) {
   [self showToast:@"Peek closed" action:@"Undo" selector:@selector(reopenClosedPeek:)];
 }
 
-- (NSString*)lastClosedPeekURL { return _lastClosedPeekURL; }
-- (BOOL)peekToastShown { return _toast != nil; }
+- (NSString*)lastClosedPeekURL {
+  return _lastClosedPeekURL;
+}
+- (BOOL)peekToastShown {
+  return _toast != nil;
+}
 
 - (IBAction)reopenClosedPeek:(id)sender {
   NSString* url = _lastClosedPeekURL;
@@ -4199,9 +4700,15 @@ static NSString* SiteOf(NSString* url) {
   [_toast removeFromSuperview];
   _toast = nil;
 }
-- (BOOL)isPeeking { return _peek != nil; }
-- (void)promotePeekToTab { [_peek openInMainWindow:nil]; }
-- (void)closePeek { [_peek.window close]; }
+- (BOOL)isPeeking {
+  return _peek != nil;
+}
+- (void)promotePeekToTab {
+  [_peek openInMainWindow:nil];
+}
+- (void)closePeek {
+  [_peek.window close];
+}
 
 #pragma mark Spaces
 
@@ -4226,8 +4733,9 @@ static ArcItem* NewSection(NSString* title) {
       b.alphaValue = current ? 1 : 0.55;
     } else {
       b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:current ? @"circle.fill" : @"circle"
-                                                 accessibilityDescription:sp.title]
-                             target:self action:@selector(spaceIconClicked:)];
+                                              accessibilityDescription:sp.title]
+                             target:self
+                             action:@selector(spaceIconClicked:)];
       b.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:8 weight:NSFontWeightRegular];
       b.contentTintColor = current ? NSColor.labelColor : NSColor.tertiaryLabelColor;
     }
@@ -4245,11 +4753,14 @@ static ArcItem* NewSection(NSString* title) {
   _spaceIcons.frame = NSMakeRect(round((_spaceBar.bounds.size.width - sw) / 2), 0, sw, 30);
   for (NSView* v in _spaceIcons.views) [v.heightAnchor constraintEqualToConstant:30].active = YES;
 }
-- (void)spaceIconClicked:(NSButton*)sender { [self selectSpaceAtIndex:(NSUInteger)sender.tag]; }
+- (void)spaceIconClicked:(NSButton*)sender {
+  [self selectSpaceAtIndex:(NSUInteger)sender.tag];
+}
 - (NSArray<NSString*>*)spaceBarIcons {  // tests: "*Title" for the current Space
   NSMutableArray* out = [NSMutableArray array];
   for (NSButton* b in _spaceIcons.views)
-    [out addObject:[NSString stringWithFormat:@"%@%@", b.tag == (NSInteger)[_spaces indexOfObject:_space] ? @"*" : @"", b.toolTip]];
+    [out addObject:[NSString stringWithFormat:@"%@%@", b.tag == (NSInteger)[_spaces indexOfObject:_space] ? @"*" : @"",
+                                              b.toolTip]];
   return out;
 }
 - (void)clickSpaceBarIcon:(NSUInteger)index {  // tests
@@ -4269,15 +4780,23 @@ static ArcItem* NewSection(NSString* title) {
 
 - (void)updateSpaceHeader {
   NSString* name = _space.title ?: @"Space";
-  _spaceHeaderTitle.stringValue = _space.iconEmoji.length ? [NSString stringWithFormat:@"%@  %@", _space.iconEmoji, name] : name;
+  _spaceHeaderTitle.stringValue =
+      _space.iconEmoji.length ? [NSString stringWithFormat:@"%@  %@", _space.iconEmoji, name] : name;
 }
-- (NSString*)spaceHeaderText { return _spaceHeaderTitle.stringValue; }  // tests
+- (NSString*)spaceHeaderText {
+  return _spaceHeaderTitle.stringValue;
+}  // tests
 - (NSMenu*)spaceMenu {
   NSMenu* m = [[NSMenu alloc] initWithTitle:@"Space"];
-  for (NSArray* e in @[ @[ @"Rename Space...", @"renameCurrentSpace:" ], @[ @"Edit Theme Color...", @"editThemeColor:" ],
-                        @[ @"Change Space Icon...", @"changeSpaceIcon:" ], @[ @"-", @"" ], @[ @"New Space...", @"newSpace:" ],
-                        @[ @"Delete Space...", @"deleteCurrentSpace:" ] ]) {
-    if ([e[0] isEqualToString:@"-"]) { [m addItem:NSMenuItem.separatorItem]; continue; }
+  for (NSArray* e in @[
+         @[ @"Rename Space...", @"renameCurrentSpace:" ], @[ @"Edit Theme Color...", @"editThemeColor:" ],
+         @[ @"Change Space Icon...", @"changeSpaceIcon:" ], @[ @"-", @"" ], @[ @"New Space...", @"newSpace:" ],
+         @[ @"Delete Space...", @"deleteCurrentSpace:" ]
+       ]) {
+    if ([e[0] isEqualToString:@"-"]) {
+      [m addItem:NSMenuItem.separatorItem];
+      continue;
+    }
     [m addItemWithTitle:e[0] action:NSSelectorFromString(e[1]) keyEquivalent:@""].target = self;
     if ([e[1] isEqualToString:@"changeSpaceIcon:"]) {
       NSMenuItem* ap = [m addItemWithTitle:@"Appearance" action:nil keyEquivalent:@""];
@@ -4326,7 +4845,8 @@ static ArcItem* NewSection(NSString* title) {
   }
   for (ArcSpace* s in _spaces)  // every profile a Space uses has a name
     if (s.profileDirectory.length && !_profileNames[s.profileDirectory])
-      _profileNames[s.profileDirectory] = [s.profileDirectory isEqualToString:@"Default"] ? @"Default" : (s.title ?: s.profileDirectory);
+      _profileNames[s.profileDirectory] =
+          [s.profileDirectory isEqualToString:@"Default"] ? @"Default" : (s.title ?: s.profileDirectory);
   return _profileNames;
 }
 
@@ -4346,7 +4866,8 @@ static ArcItem* NewSection(NSString* title) {
     if (s.profileDirectory.length && ![out containsObject:s.profileDirectory]) [out addObject:s.profileDirectory];
   NSDictionary* names = [self profileNames];
   NSMutableArray* rest = [NSMutableArray array];
-  for (NSString* k in names) if (![out containsObject:k]) [rest addObject:k];
+  for (NSString* k in names)
+    if (![out containsObject:k]) [rest addObject:k];
   [rest sortUsingComparator:^NSComparisonResult(NSString* a, NSString* b) {
     return [names[a] localizedCaseInsensitiveCompare:names[b]];
   }];
@@ -4354,7 +4875,9 @@ static ArcItem* NewSection(NSString* title) {
   return out;
 }
 
-- (NSString*)nameOfProfile:(NSString*)dir { return [self profileNames][dir] ?: dir; }
+- (NSString*)nameOfProfile:(NSString*)dir {
+  return [self profileNames][dir] ?: dir;
+}
 
 - (NSString*)createProfileNamed:(NSString*)name {
   NSMutableDictionary* names = [self profileNames];
@@ -4381,15 +4904,20 @@ static ArcItem* NewSection(NSString* title) {
   BOOL current = space == _space;
   ArcItem* shown = current ? _shown : nil;
   NSArray<ArcItem*>* tabs = [self tabsIn:@[ space.pinned, space.unpinned ]];
-  for (ArcItem* t in tabs) if (t.browserId) [self unloadItem:t];
+  for (ArcItem* t in tabs)
+    if (t.browserId) [self unloadItem:t];
   if (space.favorites) {
     BOOL shared = NO;
-    for (ArcSpace* s in _spaces) if (s != space && s.favorites == space.favorites) shared = YES;
-    if (!shared) for (ArcItem* t in [self tabsIn:@[ space.favorites ]]) if (t.browserId) [self unloadItem:t];
+    for (ArcSpace* s in _spaces)
+      if (s != space && s.favorites == space.favorites) shared = YES;
+    if (!shared)
+      for (ArcItem* t in [self tabsIn:@[ space.favorites ]])
+        if (t.browserId) [self unloadItem:t];
   }
   space.profileDirectory = dir;
   ArcItem* fav = nil;
-  for (ArcSpace* s in _spaces) if (s != space && [s.profileDirectory isEqualToString:dir] && s.favorites) fav = s.favorites;
+  for (ArcSpace* s in _spaces)
+    if (s != space && [s.profileDirectory isEqualToString:dir] && s.favorites) fav = s.favorites;
   space.favorites = fav ?: NewSection(@"Favorites");
   if (![self profileNames][dir]) {
     [self profileNames][dir] = dir;
@@ -4405,7 +4933,9 @@ static ArcItem* NewSection(NSString* title) {
   [self scheduleSave];
 }
 
-- (IBAction)assignProfileFromMenu:(NSMenuItem*)sender { [self assignSpace:_space toProfile:sender.representedObject]; }
+- (IBAction)assignProfileFromMenu:(NSMenuItem*)sender {
+  [self assignSpace:_space toProfile:sender.representedObject];
+}
 
 - (IBAction)newProfileForSpace:(id)sender {
   NSString* name = [self askForSpaceName:@"New Profile" initial:@""];
@@ -4423,24 +4953,31 @@ static ArcItem* NewSection(NSString* title) {
   NSMenuItem* top = [[NSMenuItem alloc] initWithTitle:@"Profile" action:nil keyEquivalent:@""];
   top.submenu = [[NSMenu alloc] initWithTitle:@"Profile"];
   for (NSString* dir in [self profileDirectories]) {
-    NSMenuItem* i = [top.submenu addItemWithTitle:[self nameOfProfile:dir] action:@selector(assignProfileFromMenu:) keyEquivalent:@""];
+    NSMenuItem* i = [top.submenu addItemWithTitle:[self nameOfProfile:dir]
+                                           action:@selector(assignProfileFromMenu:)
+                                    keyEquivalent:@""];
     i.target = self;
     i.representedObject = dir;
     i.state = [dir isEqualToString:_space.profileDirectory] ? NSControlStateValueOn : NSControlStateValueOff;
   }
   [top.submenu addItem:NSMenuItem.separatorItem];
-  [top.submenu addItemWithTitle:@"New Profile..." action:@selector(newProfileForSpace:) keyEquivalent:@""].target = self;
-  [top.submenu addItemWithTitle:@"Rename Profile..." action:@selector(renameCurrentProfile:) keyEquivalent:@""].target = self;
+  [top.submenu addItemWithTitle:@"New Profile..." action:@selector(newProfileForSpace:) keyEquivalent:@""].target =
+      self;
+  [top.submenu addItemWithTitle:@"Rename Profile..." action:@selector(renameCurrentProfile:) keyEquivalent:@""].target =
+      self;
   return top;
 }
 
 - (NSArray<NSString*>*)spaceMenuTitles {  // tests
   NSMutableArray* out = [NSMutableArray array];
-  for (NSMenuItem* i in [self spaceMenu].itemArray) if (!i.isSeparatorItem) [out addObject:i.title];
+  for (NSMenuItem* i in [self spaceMenu].itemArray)
+    if (!i.isSeparatorItem) [out addObject:i.title];
   return out;
 }
 - (IBAction)showSpaceMenu:(NSButton*)sender {
-  [[self spaceMenu] popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, sender.bounds.size.height + 4) inView:sender];
+  [[self spaceMenu] popUpMenuPositioningItem:nil
+                                  atLocation:NSMakePoint(0, sender.bounds.size.height + 4)
+                                      inView:sender];
 }
 
 - (void)rebuildSpacePicker {
@@ -4449,8 +4986,9 @@ static ArcItem* NewSection(NSString* title) {
   [self updateSpaceHeader];
   [_spacePicker removeAllItems];
   for (ArcSpace* s in _spaces) {
-    [_spacePicker addItemWithTitle:s.iconEmoji.length ? [NSString stringWithFormat:@"%@  %@", s.iconEmoji, s.title ?: @"Space"]
-                                                    : (s.title ?: @"Space")];
+    [_spacePicker addItemWithTitle:s.iconEmoji.length
+                                       ? [NSString stringWithFormat:@"%@  %@", s.iconEmoji, s.title ?: @"Space"]
+                                       : (s.title ?: @"Space")];
     _spacePicker.lastItem.representedObject = s;  // titles may repeat
   }
   if (_space) [_spacePicker selectItemAtIndex:[_spaces indexOfObject:_space]];
@@ -4474,8 +5012,12 @@ static ArcItem* NewSection(NSString* title) {
   if (space == _space) [self applyColorScheme];
   [self scheduleSave];
 }
-- (IBAction)setSpaceAppearance:(NSMenuItem*)sender { [self setColorScheme:sender.representedObject forSpace:_space]; }
-- (BOOL)sidebarIsDark { return IsDark(_sidebarScroll); }  // tests
+- (IBAction)setSpaceAppearance:(NSMenuItem*)sender {
+  [self setColorScheme:sender.representedObject forSpace:_space];
+}
+- (BOOL)sidebarIsDark {
+  return IsDark(_sidebarScroll);
+}  // tests
 
 - (void)applyTheme {
   [self applyColorScheme];
@@ -4488,8 +5030,9 @@ static ArcItem* NewSection(NSString* title) {
     [cg addObject:(id)ColorFromHex(@"#140D40").CGColor];
   }
   _themeView.hidden = cg.count == 0;
-  [_outline reloadDataForRowIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, (NSUInteger)_outline.numberOfRows)]
-                      columnIndexes:[NSIndexSet indexSetWithIndex:0]];  // tab text colour follows the theme
+  [_outline
+      reloadDataForRowIndexes:[NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, (NSUInteger)_outline.numberOfRows)]
+                columnIndexes:[NSIndexSet indexSetWithIndex:0]];  // tab text colour follows the theme
   if (!cg.count) return;
   if (cg.count == 1) [cg addObject:cg[0]];
   [CATransaction begin];
@@ -4526,7 +5069,9 @@ static ArcItem* NewSection(NSString* title) {
     if ([b matchesURL:url] && (!best || b.host.length > best.host.length)) best = b;  // most specific host wins
   return best;
 }
-- (void)saveBoosts { BoostStoreSave([self boostList], BoostStorePath(self.selfTestProfiles)); }
+- (void)saveBoosts {
+  BoostStoreSave([self boostList], BoostStorePath(self.selfTestProfiles));
+}
 - (void)applyBoostToBrowser:(int)browserId url:(NSString*)url {
   auto it = _browsers.find(browserId);
   if (it == _browsers.end()) return;
@@ -4534,19 +5079,25 @@ static ArcItem* NewSection(NSString* title) {
   static NSMutableSet* boosted;  // browsers that had a Boost, so removing one also cleans the page
   if (!boosted) boosted = [NSMutableSet set];
   if (!b && ![boosted containsObject:@(browserId)]) return;
-  if (b) [boosted addObject:@(browserId)]; else [boosted removeObject:@(browserId)];
+  if (b)
+    [boosted addObject:@(browserId)];
+  else
+    [boosted removeObject:@(browserId)];
   CefRefPtr<CefFrame> f = it->second->GetMainFrame();
   f->ExecuteJavaScript(BoostApplyScript(b).UTF8String, f->GetURL(), 0);
 }
 - (void)applyBoostsEverywhere {
-  for (auto& kv : _browsers) [self applyBoostToBrowser:kv.first url:[NSString stringWithUTF8String:kv.second->GetMainFrame()->GetURL().ToString().c_str()]];
+  for (auto& kv : _browsers)
+    [self applyBoostToBrowser:kv.first
+                          url:[NSString stringWithUTF8String:kv.second->GetMainFrame()->GetURL().ToString().c_str()]];
   [self updateBoostIndicator];
 }
 - (Boost*)boostForCurrentSiteCreate:(BOOL)create {
   NSString* url = [self currentURL];
   NSString* host = BoostHostForURL(url);
   if (!host) return nil;
-  for (Boost* b in [self boostList]) if ([b.host isEqualToString:host]) return b;
+  for (Boost* b in [self boostList])
+    if ([b.host isEqualToString:host]) return b;
   if (!create) return [self boostForURL:url];
   Boost* b = [Boost new];
   b.host = host;
@@ -4564,18 +5115,27 @@ static ArcItem* NewSection(NSString* title) {
   BOOL on = b && b.enabled;
   _boostButton.image = [NSImage imageWithSystemSymbolName:on ? @"paintbrush.pointed.fill" : @"paintbrush.pointed"
                                  accessibilityDescription:@"Boost This Site"];
-  _boostButton.contentTintColor = on ? (b.hue >= 0 ? [NSColor colorWithHue:fmod(b.hue, 360) / 360 saturation:0.75 brightness:0.95 alpha:1]
-                                                    : NSColor.controlAccentColor)
+  _boostButton.contentTintColor = on ? (b.hue >= 0 ? [NSColor colorWithHue:fmod(b.hue, 360) / 360
+                                                                saturation:0.75
+                                                                brightness:0.95
+                                                                     alpha:1]
+                                                   : NSColor.controlAccentColor)
                                      : NSColor.secondaryLabelColor;
   _boostButton.toolTip = on ? @"Boost on: edit Boost" : (b ? @"Boost off: edit Boost" : @"Boost This Site");
   _boostIndicator = on ? @"on" : (b ? @"off" : @"none");
 }
-- (NSString*)boostIndicatorState { return _boostIndicator ?: @"none"; }  // tests
+- (NSString*)boostIndicatorState {
+  return _boostIndicator ?: @"none";
+}  // tests
 // Arc's shuffle: a random colour and font for the site.
 - (IBAction)shuffleBoost:(id)sender {
   Boost* b = _boostEditing ?: [self boostForCurrentSiteCreate:YES];
-  if (!b) { NSBeep(); return; }
-  NSArray* fonts = @[ @"Georgia", @"Helvetica Neue", @"Avenir Next", @"Menlo", @"Futura", @"Baskerville", @"Gill Sans" ];
+  if (!b) {
+    NSBeep();
+    return;
+  }
+  NSArray* fonts =
+      @[ @"Georgia", @"Helvetica Neue", @"Avenir Next", @"Menlo", @"Futura", @"Baskerville", @"Gill Sans" ];
   double old = b.hue;
   do { b.hue = arc4random_uniform(360); } while (fabs(b.hue - old) < 30);
   b.colorStrength = 0.5 + arc4random_uniform(40) / 100.0;
@@ -4588,22 +5148,33 @@ static ArcItem* NewSection(NSString* title) {
 // Tests / scripting.
 - (Boost*)setBoostForHost:(NSString*)host configure:(void (^)(Boost*))configure {
   Boost* b = nil;
-  for (Boost* x in [self boostList]) if ([x.host isEqualToString:host]) b = x;
-  if (!b) { b = [Boost new]; b.host = host; [[self boostList] addObject:b]; }
+  for (Boost* x in [self boostList])
+    if ([x.host isEqualToString:host]) b = x;
+  if (!b) {
+    b = [Boost new];
+    b.host = host;
+    [[self boostList] addObject:b];
+  }
   if (configure) configure(b);
   [self boostChanged];
   return b;
 }
 - (void)deleteBoostForHost:(NSString*)host {
   NSMutableArray* list = [self boostList];
-  for (Boost* b in [list copy]) if ([b.host isEqualToString:host]) [list removeObject:b];
+  for (Boost* b in [list copy])
+    if ([b.host isEqualToString:host]) [list removeObject:b];
   [self boostChanged];
 }
-- (NSUInteger)savedBoostCount { return BoostStoreLoad(BoostStorePath(self.selfTestProfiles)).count; }
+- (NSUInteger)savedBoostCount {
+  return BoostStoreLoad(BoostStorePath(self.selfTestProfiles)).count;
+}
 
 - (IBAction)zapElements:(id)sender {
   auto it = _browsers.find(_shown.browserId);
-  if (!_shown || it == _browsers.end() || !BoostHostForURL([self currentURL])) { NSBeep(); return; }
+  if (!_shown || it == _browsers.end() || !BoostHostForURL([self currentURL])) {
+    NSBeep();
+    return;
+  }
   _zapBrowser = _shown.browserId;
   CefRefPtr<CefFrame> f = it->second->GetMainFrame();
   f->ExecuteJavaScript(BoostZapModeScript().UTF8String, f->GetURL(), 0);
@@ -4615,8 +5186,13 @@ static ArcItem* NewSection(NSString* title) {
   NSString* host = BoostHostForURL(item.url);
   if (!host) return;
   Boost* b = nil;
-  for (Boost* x in [self boostList]) if ([x.host isEqualToString:host]) b = x;
-  if (!b) { b = [Boost new]; b.host = host; [[self boostList] addObject:b]; }
+  for (Boost* x in [self boostList])
+    if ([x.host isEqualToString:host]) b = x;
+  if (!b) {
+    b = [Boost new];
+    b.host = host;
+    [[self boostList] addObject:b];
+  }
   b.enabled = YES;
   if (![b.zaps containsObject:selector]) [b.zaps addObject:selector];
   [self boostChanged];
@@ -4624,7 +5200,10 @@ static ArcItem* NewSection(NSString* title) {
 }
 - (IBAction)toggleBoost:(id)sender {
   Boost* b = [self boostForCurrentSiteCreate:NO];
-  if (!b) { NSBeep(); return; }
+  if (!b) {
+    NSBeep();
+    return;
+  }
   b.enabled = !b.enabled;
   [self boostChanged];
   [self refreshBoostPanel];
@@ -4633,7 +5212,10 @@ static ArcItem* NewSection(NSString* title) {
 // Editor: a floating panel, live preview on every change, like Arc's Boost editor shelf.
 - (IBAction)editBoost:(id)sender {
   Boost* b = [self boostForCurrentSiteCreate:YES];
-  if (!b) { NSBeep(); return; }
+  if (!b) {
+    NSBeep();
+    return;
+  }
   _boostEditing = b;
   if (!_boostPanel) [self buildBoostPanel];
   [self refreshBoostPanel];
@@ -4646,7 +5228,8 @@ static ArcItem* NewSection(NSString* title) {
   _boostPanel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 300, 470)
                                            styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                                                      NSWindowStyleMaskUtilityWindow | NSWindowStyleMaskHUDWindow
-                                             backing:NSBackingStoreBuffered defer:YES];
+                                             backing:NSBackingStoreBuffered
+                                               defer:YES];
   _boostPanel.floatingPanel = YES;
   _boostPanel.releasedWhenClosed = NO;
   _boostPanel.hidesOnDeactivate = YES;
@@ -4670,13 +5253,21 @@ static ArcItem* NewSection(NSString* title) {
   useColor.frame = NSMakeRect(14, y, 22, 20);
   _boostControls[@"useColor"] = useColor;
   [v addSubview:useColor];
-  NSSlider* hue = [NSSlider sliderWithValue:220 minValue:0 maxValue:359 target:self action:@selector(boostControlChanged:)];
+  NSSlider* hue = [NSSlider sliderWithValue:220
+                                   minValue:0
+                                   maxValue:359
+                                     target:self
+                                     action:@selector(boostControlChanged:)];
   hue.frame = NSMakeRect(40, y, 246, 20);
   hue.continuous = YES;
   _boostControls[@"hue"] = hue;
   [v addSubview:hue];
   y -= 26;
-  NSSlider* strength = [NSSlider sliderWithValue:0.6 minValue:0.1 maxValue:1 target:self action:@selector(boostControlChanged:)];
+  NSSlider* strength = [NSSlider sliderWithValue:0.6
+                                        minValue:0.1
+                                        maxValue:1
+                                          target:self
+                                          action:@selector(boostControlChanged:)];
   strength.frame = NSMakeRect(40, y, 246, 20);
   strength.continuous = YES;
   _boostControls[@"strength"] = strength;
@@ -4684,23 +5275,28 @@ static ArcItem* NewSection(NSString* title) {
   y -= 34;
   label(@"FONT");
   NSPopUpButton* font = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(12, y, 276, 24) pullsDown:NO];
-  [font addItemsWithTitles:@[ @"Page Font", @"System", @"Georgia", @"Helvetica Neue", @"Avenir Next", @"Menlo",
-                              @"Times New Roman", @"Futura", @"Baskerville", @"Gill Sans" ]];
+  [font addItemsWithTitles:@[
+    @"Page Font", @"System", @"Georgia", @"Helvetica Neue", @"Avenir Next", @"Menlo", @"Times New Roman", @"Futura",
+    @"Baskerville", @"Gill Sans"
+  ]];
   font.target = self;
   font.action = @selector(boostControlChanged:);
   _boostControls[@"font"] = font;
   [v addSubview:font];
   y -= 34;
-  NSSegmentedControl* zoom = [NSSegmentedControl segmentedControlWithLabels:@[ @"90%", @"100%", @"110%", @"125%", @"150%" ]
-                                                               trackingMode:NSSegmentSwitchTrackingSelectOne
-                                                                     target:self action:@selector(boostControlChanged:)];
+  NSSegmentedControl* zoom =
+      [NSSegmentedControl segmentedControlWithLabels:@[ @"90%", @"100%", @"110%", @"125%", @"150%" ]
+                                        trackingMode:NSSegmentSwitchTrackingSelectOne
+                                              target:self
+                                              action:@selector(boostControlChanged:)];
   zoom.frame = NSMakeRect(12, y, 276, 24);
   _boostControls[@"zoom"] = zoom;
   [v addSubview:zoom];
   y -= 32;
   NSSegmentedControl* tcase = [NSSegmentedControl segmentedControlWithLabels:@[ @"Aa", @"AA", @"aa" ]
                                                                 trackingMode:NSSegmentSwitchTrackingSelectOne
-                                                                      target:self action:@selector(boostControlChanged:)];
+                                                                      target:self
+                                                                      action:@selector(boostControlChanged:)];
   tcase.frame = NSMakeRect(12, y, 140, 24);
   _boostControls[@"case"] = tcase;
   [v addSubview:tcase];
@@ -4739,14 +5335,20 @@ static ArcItem* NewSection(NSString* title) {
   if (b.hue >= 0) ((NSSlider*)_boostControls[@"hue"]).doubleValue = b.hue;
   ((NSSlider*)_boostControls[@"strength"]).doubleValue = b.colorStrength;
   NSPopUpButton* font = (NSPopUpButton*)_boostControls[@"font"];
-  if (b.font.length && [font itemWithTitle:b.font]) [font selectItemWithTitle:b.font]; else [font selectItemAtIndex:0];
+  if (b.font.length && [font itemWithTitle:b.font])
+    [font selectItemWithTitle:b.font];
+  else
+    [font selectItemAtIndex:0];
   NSArray* zooms = @[ @0.9, @1.0, @1.1, @1.25, @1.5 ];
   NSUInteger zi = 1;
-  for (NSUInteger i = 0; i < zooms.count; i++) if (fabs([zooms[i] doubleValue] - b.textZoom) < 0.01) zi = i;
+  for (NSUInteger i = 0; i < zooms.count; i++)
+    if (fabs([zooms[i] doubleValue] - b.textZoom) < 0.01) zi = i;
   ((NSSegmentedControl*)_boostControls[@"zoom"]).selectedSegment = (NSInteger)zi;
-  ((NSSegmentedControl*)_boostControls[@"case"]).selectedSegment =
-      [b.textTransform isEqualToString:@"uppercase"] ? 1 : [b.textTransform isEqualToString:@"lowercase"] ? 2 : 0;
-  ((NSButton*)_boostControls[@"clearZaps"]).title = [NSString stringWithFormat:@"Clear Zaps (%lu)", (unsigned long)b.zaps.count];
+  ((NSSegmentedControl*)_boostControls[@"case"]).selectedSegment = [b.textTransform isEqualToString:@"uppercase"]   ? 1
+                                                                   : [b.textTransform isEqualToString:@"lowercase"] ? 2
+                                                                                                                    : 0;
+  ((NSButton*)_boostControls[@"clearZaps"]).title =
+      [NSString stringWithFormat:@"Clear Zaps (%lu)", (unsigned long)b.zaps.count];
 }
 - (void)boostControlChanged:(id)sender {
   Boost* b = _boostEditing;
@@ -4757,7 +5359,9 @@ static ArcItem* NewSection(NSString* title) {
   b.hue = useColor ? ((NSSlider*)_boostControls[@"hue"]).doubleValue : -1;
   b.colorStrength = ((NSSlider*)_boostControls[@"strength"]).doubleValue;
   NSPopUpButton* font = (NSPopUpButton*)_boostControls[@"font"];
-  b.font = font.indexOfSelectedItem <= 0 ? nil : ([font.titleOfSelectedItem isEqualToString:@"System"] ? @"-apple-system" : font.titleOfSelectedItem);
+  b.font = font.indexOfSelectedItem <= 0
+               ? nil
+               : ([font.titleOfSelectedItem isEqualToString:@"System"] ? @"-apple-system" : font.titleOfSelectedItem);
   NSArray* zooms = @[ @0.9, @1.0, @1.1, @1.25, @1.5 ];
   NSInteger zi = ((NSSegmentedControl*)_boostControls[@"zoom"]).selectedSegment;
   b.textZoom = zi >= 0 ? [zooms[(NSUInteger)zi] doubleValue] : 1;
@@ -4774,7 +5378,8 @@ static ArcItem* NewSection(NSString* title) {
   Boost* b = _boostEditing ?: [self boostForCurrentSiteCreate:YES];
   if (!b) return;
   NSAlert* a = [NSAlert new];
-  a.messageText = js ? [NSString stringWithFormat:@"JavaScript for %@", b.host] : [NSString stringWithFormat:@"CSS for %@", b.host];
+  a.messageText =
+      js ? [NSString stringWithFormat:@"JavaScript for %@", b.host] : [NSString stringWithFormat:@"CSS for %@", b.host];
   a.informativeText = js ? @"Runs on every page of this site after it loads." : @"Added to every page of this site.";
   NSScrollView* sv = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 420, 220)];
   sv.hasVerticalScroller = YES;
@@ -4787,16 +5392,24 @@ static ArcItem* NewSection(NSString* title) {
   a.accessoryView = sv;
   [a addButtonWithTitle:@"Save"];
   [a addButtonWithTitle:@"Cancel"];
-  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
-    if (r != NSAlertFirstButtonReturn) return;
-    if (js) b.js = tv.string; else b.css = tv.string;
-    b.enabled = YES;
-    [self boostChanged];
-    [self refreshBoostPanel];
-  }];
+  [a beginSheetModalForWindow:self.window
+            completionHandler:^(NSModalResponse r) {
+              if (r != NSAlertFirstButtonReturn) return;
+              if (js)
+                b.js = tv.string;
+              else
+                b.css = tv.string;
+              b.enabled = YES;
+              [self boostChanged];
+              [self refreshBoostPanel];
+            }];
 }
-- (IBAction)editBoostCSS:(id)sender { [self editBoostCode:NO]; }
-- (IBAction)editBoostJS:(id)sender { [self editBoostCode:YES]; }
+- (IBAction)editBoostCSS:(id)sender {
+  [self editBoostCode:NO];
+}
+- (IBAction)editBoostJS:(id)sender {
+  [self editBoostCode:YES];
+}
 - (IBAction)deleteCurrentBoost:(id)sender {
   Boost* b = _boostEditing ?: [self boostForCurrentSiteCreate:NO];
   if (!b) return;
@@ -4815,8 +5428,7 @@ static ArcItem* NewSection(NSString* title) {
     @[ @"None", @[] ], @[ @"Lavender", @[ @"#B9A8FF", @"#8B7CF6" ] ], @[ @"Ocean", @[ @"#5EC8F2", @"#2F6FDE" ] ],
     @[ @"Mint", @[ @"#9BF0C9", @"#3BB58A" ] ], @[ @"Peach", @[ @"#FFC3A0", @"#FF7A7A" ] ],
     @[ @"Sunset", @[ @"#FFB347", @"#E84A7F" ] ], @[ @"Forest", @[ @"#7FB77E", @"#2E5E3E" ] ],
-    @[ @"Graphite", @[ @"#8E8E93", @"#3A3A3C" ] ], @[ @"Rose", @[ @"#FFB3C7", @"#D9468F" ] ],
-    @[ @"Custom", @[] ]
+    @[ @"Graphite", @[ @"#8E8E93", @"#3A3A3C" ] ], @[ @"Rose", @[ @"#FFB3C7", @"#D9468F" ] ], @[ @"Custom", @[] ]
   ];
   NSAlert* a = [NSAlert new];
   a.messageText = [NSString stringWithFormat:@"Edit Theme Color: %@", space.title ?: @"Space"];
@@ -4829,7 +5441,8 @@ static ArcItem* NewSection(NSString* title) {
   bottom.color = ColorFromHex(oldColors.lastObject) ?: top.color;
   NSTextField* label = [NSTextField labelWithString:@"Intensity"];
   label.frame = NSMakeRect(0, 36, 70, 20);
-  NSSlider* intensity = [NSSlider sliderWithValue:(oldColors.count ? oldIntensity : 0.5) minValue:0.1 maxValue:1 target:nil action:nil];
+  NSSlider* intensity =
+      [NSSlider sliderWithValue:(oldColors.count ? oldIntensity : 0.5) minValue:0.1 maxValue:1 target:nil action:nil];
   intensity.frame = NSMakeRect(74, 34, 212, 24);
   NSInteger sel = oldColors.count ? presets.count - 1 : 0;
   for (NSUInteger i = 1; i + 1 < presets.count; ++i)
@@ -4844,7 +5457,8 @@ static ArcItem* NewSection(NSString* title) {
   void (^preview)(void) = ^{
     NSInteger i = palette.indexOfSelectedItem;
     NSArray* colors = presets[i][1];
-    if (i == (NSInteger)presets.count - 1) colors = @[ HexFromColor(top.color) ?: @"#B9A8FF", HexFromColor(bottom.color) ?: @"#8B7CF6" ];
+    if (i == (NSInteger)presets.count - 1)
+      colors = @[ HexFromColor(top.color) ?: @"#B9A8FF", HexFromColor(bottom.color) ?: @"#8B7CF6" ];
     else if (colors.count && !fromPreset) {
       fromPreset = YES;
       top.color = ColorFromHex(colors[0]);
@@ -4870,7 +5484,9 @@ static ArcItem* NewSection(NSString* title) {
   [NSColorPanel.sharedColorPanel orderOut:nil];
 }
 
-- (void)themeControlChanged:(id)sender { if (_themePreview) _themePreview(); }
+- (void)themeControlChanged:(id)sender {
+  if (_themePreview) _themePreview();
+}
 - (void)themeWellChanged:(id)sender {
   [_themePalette selectItemAtIndex:_themePalette.numberOfItems - 1];  // touching a colour = Custom
   if (_themePreview) _themePreview();
@@ -4905,7 +5521,8 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   t.duration = 0.22;
   t.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
   [_sidebarScroll.layer addAnimation:t forKey:@"spaceSlide"];
-  [_spaceHeader.layer ?: (_spaceHeader.wantsLayer = YES, _spaceHeader.layer) addAnimation:[t copy] forKey:@"spaceSlide"];
+  [_spaceHeader.layer ?: (_spaceHeader.wantsLayer = YES, _spaceHeader.layer) addAnimation:[t copy]
+                                                                                   forKey:@"spaceSlide"];
 }
 - (void)popPageCard {
   if (ReduceMotion() || _sidebar.hidden) return;
@@ -4923,8 +5540,12 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   sc.duration = sc.settlingDuration;
   [_content.layer addAnimation:sc forKey:@"popScale"];
 }
-- (NSString*)lastSpaceSlide { return _lastSpaceSlide ?: @""; }
-- (NSUInteger)cardPopCount { return _cardPops; }
+- (NSString*)lastSpaceSlide {
+  return _lastSpaceSlide ?: @"";
+}
+- (NSUInteger)cardPopCount {
+  return _cardPops;
+}
 
 - (void)switchToSpace:(ArcSpace*)space {
   if (!space || space == _space) return;
@@ -4939,7 +5560,8 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   [self updateSpaceHeader];
   [self scheduleSave];
   ArcItem* first = [self lastShownInSpace:_space];
-  if (first) [self showItem:first];
+  if (first)
+    [self showItem:first];
   else {
     _shown = nil;
     [self layoutPanes];
@@ -4950,8 +5572,12 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   if (index < _spaces.count) [self switchToSpace:_spaces[index]];
 }
 
-- (NSArray<ArcSpace*>*)spaces { return _spaces; }
-- (ArcSpace*)currentSpace { return _space; }
+- (NSArray<ArcSpace*>*)spaces {
+  return _spaces;
+}
+- (ArcSpace*)currentSpace {
+  return _space;
+}
 
 // A new Space shares the current Space's profile, so it starts signed in to the same accounts
 // (and shows the same Favorites), like Arc's default.
@@ -5056,15 +5682,21 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   if ([alert runModal] == NSAlertFirstButtonReturn) [self deleteSpace:_space];
 }
 
-- (IBAction)moveSpaceUp:(id)sender { [self moveSpace:_space by:-1]; }
-- (IBAction)moveSpaceDown:(id)sender { [self moveSpace:_space by:1]; }
+- (IBAction)moveSpaceUp:(id)sender {
+  [self moveSpace:_space by:-1];
+}
+- (IBAction)moveSpaceDown:(id)sender {
+  [self moveSpace:_space by:1];
+}
 - (IBAction)nextSpace:(id)sender {
   if (_spaces.count) [self selectSpaceAtIndex:([_spaces indexOfObject:_space] + 1) % _spaces.count];
 }
 - (IBAction)previousSpace:(id)sender {
   if (_spaces.count) [self selectSpaceAtIndex:([_spaces indexOfObject:_space] + _spaces.count - 1) % _spaces.count];
 }
-- (IBAction)selectSpaceFromMenu:(NSMenuItem*)sender { [self selectSpaceAtIndex:sender.tag]; }
+- (IBAction)selectSpaceFromMenu:(NSMenuItem*)sender {
+  [self selectSpaceAtIndex:sender.tag];
+}
 
 #pragma mark Arc shortcuts
 
@@ -5098,7 +5730,8 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   CGFloat left = card ? 0 : 0, right = card ? kCardInsetSide : 0, bottom = card ? kCardInsetBottom : 0;
   CGFloat topInset = card && !bar ? kCardInsetTop : 0;
   _content.layer.cornerRadius = card ? kCardRadius : 0;
-  _content.frame = NSMakeRect(x + left, bottom, b.size.width - x - left - right, b.size.height - top - topInset - bottom);
+  _content.frame =
+      NSMakeRect(x + left, bottom, b.size.width - x - left - right, b.size.height - top - topInset - bottom);
   [self updateToolbarAddress];
   [self layoutPanes];
 }
@@ -5107,11 +5740,19 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   SettingSetBool(kSettingShowToolbar, !SettingBool(kSettingShowToolbar));
   [self layoutContentArea];
 }
-- (BOOL)toolbarShown { return !_toolbar.hidden; }
-- (NSString*)toolbarAddress { return _address.stringValue; }
+- (BOOL)toolbarShown {
+  return !_toolbar.hidden;
+}
+- (NSString*)toolbarAddress {
+  return _address.stringValue;
+}
 
-- (NSString*)sidebarAddressText { return _addressPillText.stringValue; }
-- (NSRect)sidebarAddressFrame { return [_addressPill convertRect:_addressPill.bounds toView:nil]; }
+- (NSString*)sidebarAddressText {
+  return _addressPillText.stringValue;
+}
+- (NSRect)sidebarAddressFrame {
+  return [_addressPill convertRect:_addressPill.bounds toView:nil];
+}
 
 // Arc shows just the site (host without "www.") in the sidebar pill; the full address is in the command bar.
 - (void)updateSidebarAddress {
@@ -5131,13 +5772,17 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   _address.stringValue = _shown ? ([self itemCurrentURL:_shown] ?: @"") : @"";
 }
 
-- (void)addressEntered:(NSTextField*)sender { [self submitToolbarAddress:sender.stringValue]; }
+- (void)addressEntered:(NSTextField*)sender {
+  [self submitToolbarAddress:sender.stringValue];
+}
 - (void)submitToolbarAddress:(NSString*)text {
   NSString* url = ResolveCommandBarInput(text);
   if (!url.length) return;
   [self.window makeFirstResponder:nil];
-  if (_shown) [self loadURL:url inItem:_shown];
-  else [self openInNewTab:url];
+  if (_shown)
+    [self loadURL:url inItem:_shown];
+  else
+    [self openInNewTab:url];
   _address.stringValue = url;
 }
 
@@ -5146,17 +5791,24 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   SettingSetBool(kSettingShowSpaceHeader, show);
   [self applySpaceHeader:show];
 }
-- (BOOL)spaceHeaderShown { return !_spaceHeader.hidden; }
+- (BOOL)spaceHeaderShown {
+  return !_spaceHeader.hidden;
+}
 - (void)applySpaceHeader:(BOOL)show {
   if (_spaceHeader.hidden == !show) return;
   _spaceHeader.hidden = !show;
   [self layoutSidebar];
 }
 
-
-- (BOOL)sidebarHidden { return _sidebar.hidden; }
-- (NSRect)pageCardFrame { return _content.frame; }
-- (CGFloat)pageCardRadius { return _content.layer.cornerRadius; }
+- (BOOL)sidebarHidden {
+  return _sidebar.hidden;
+}
+- (NSRect)pageCardFrame {
+  return _content.frame;
+}
+- (CGFloat)pageCardRadius {
+  return _content.layer.cornerRadius;
+}
 
 - (IBAction)toggleFocusMode:(id)sender {
   _focusMode = !_focusMode;
@@ -5170,7 +5822,9 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
     [self.window standardWindowButton:b].hidden = _focusMode;
   [self layoutContentArea];
 }
-- (ArcItem*)shownItem { return _shown; }
+- (ArcItem*)shownItem {
+  return _shown;
+}
 
 - (void)selectTabAtIndex:(NSUInteger)index {
   NSArray<ArcItem*>* tabs = _space.allTabs;
@@ -5196,7 +5850,9 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (IBAction)printPage:(id)sender {
   if (auto b = [self currentBrowser]) b->GetHost()->Print();
 }
-- (IBAction)selectTabFromMenu:(NSMenuItem*)sender { [self selectTabAtIndex:sender.tag]; }
+- (IBAction)selectTabFromMenu:(NSMenuItem*)sender {
+  [self selectTabAtIndex:sender.tag];
+}
 
 - (void)stepTab:(NSInteger)delta {
   NSArray<ArcItem*>* tabs = _space.allTabs;
@@ -5206,8 +5862,12 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   i = (i + delta + (NSInteger)tabs.count) % (NSInteger)tabs.count;
   [self showItem:tabs[i]];
 }
-- (IBAction)nextTab:(id)sender { [self stepTab:1]; }
-- (IBAction)previousTab:(id)sender { [self stepTab:-1]; }
+- (IBAction)nextTab:(id)sender {
+  [self stepTab:1];
+}
+- (IBAction)previousTab:(id)sender {
+  [self stepTab:-1];
+}
 
 // Archives every Today tab in the current Space (Arc: "Clear unpinned tabs").
 - (IBAction)clearToday:(id)sender {
@@ -5231,8 +5891,10 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   [self scheduleSave];
   if (!_shown) {
     ArcItem* first = _space.allTabs.firstObject;
-    if (first) [self showItem:first];
-    else [self layoutPanes];
+    if (first)
+      [self showItem:first];
+    else
+      [self layoutPanes];
   }
 }
 
@@ -5276,8 +5938,9 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   [menu removeAllItems];
   ArcItem* item = _outline.clickedRow >= 0 ? [_outline itemAtRow:_outline.clickedRow] : nil;
   NSArray<ArcItem*>* selected = [self selectedSidebarItems];
-  NSMenu* built = item && selected.count > 1 && [selected containsObject:item] ? [self sidebarMenuForItems:selected]
-                  : (item ? [self sidebarMenuForItem:item] : nil);
+  NSMenu* built = item && selected.count > 1 && [selected containsObject:item]
+                      ? [self sidebarMenuForItems:selected]
+                      : (item ? [self sidebarMenuForItem:item] : nil);
   for (NSMenuItem* mi in [built.itemArray copy]) {
     [built removeItem:mi];
     [menu addItem:mi];
@@ -5321,10 +5984,13 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   NSMutableArray* lines = [NSMutableArray array];
   for (ArcItem* t in [self tabsIn:items]) {
     NSString* url = [self itemCurrentURL:t];
-    if (!markdown) [lines addObject:url];
+    if (!markdown)
+      [lines addObject:url];
     else
       [lines addObject:[NSString stringWithFormat:@"- [%@](%@)",
-                        [t.displayTitle ?: url stringByReplacingOccurrencesOfString:@"]" withString:@"\\]"], url]];
+                                                  [t.displayTitle ?: url stringByReplacingOccurrencesOfString:@"]"
+                                                                                                   withString:@"\\]"],
+                                                  url]];
   }
   return [lines componentsJoinedByString:@"\n"];
 }
@@ -5350,8 +6016,10 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
     ArcItem* next = nil;
     for (ArcItem* t in _space.allTabs)
       if (!next && t.browserId) next = t;
-    if (next) [self showItem:next];
-    else [_outline deselectAll:nil];
+    if (next)
+      [self showItem:next];
+    else
+      [_outline deselectAll:nil];
   } else {
     [self selectSidebarRowFor:_shown];
   }
@@ -5426,8 +6094,10 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   add([NSString stringWithFormat:@"New Folder with %lu Items", (unsigned long)items.count], @selector(bulkNewFolder:));
   BOOL anyToday = NO, anyPinned = NO;
   for (ArcItem* it in items) {
-    if ([self sectionContaining:it] == _space.unpinned) anyToday = YES;
-    else anyPinned = YES;
+    if ([self sectionContaining:it] == _space.unpinned)
+      anyToday = YES;
+    else
+      anyPinned = YES;
   }
   if (anyToday) add(@"Pin Selected", @selector(bulkPin:));
   if (anyPinned) add(@"Unpin Selected", @selector(bulkUnpin:));
@@ -5486,7 +6156,9 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   NSArray* args = sender.representedObject;
   for (ArcItem* it in args[0]) [self moveItem:it toSpace:args[1] pinned:[args[2] boolValue]];
 }
-- (void)bulkArchive:(NSMenuItem*)sender { [self archiveItems:sender.representedObject]; }
+- (void)bulkArchive:(NSMenuItem*)sender {
+  [self archiveItems:sender.representedObject];
+}
 
 - (NSMenuItem*)menuItem:(NSString*)title action:(SEL)action item:(ArcItem*)item {
   NSMenuItem* mi = [[NSMenuItem alloc] initWithTitle:title action:action keyEquivalent:@""];
@@ -5517,9 +6189,13 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
     [m addItem:[self menuItem:@"Copy URL as Markdown" action:@selector(menuCopyMarkdown:) item:item]];
     [m addItem:[self menuItem:@"Copy Clean Link" action:@selector(menuCopyClean:) item:item]];
     if (item.browserId) {
-      [m addItem:[self menuItem:item.audioMuted ? @"Unmute Tab" : @"Mute Tab" action:@selector(menuToggleMute:) item:item]];
+      [m addItem:[self menuItem:item.audioMuted ? @"Unmute Tab" : @"Mute Tab"
+                         action:@selector(menuToggleMute:)
+                           item:item]];
       if (item.mediaPlaying || item.mediaPaused)
-        [m addItem:[self menuItem:item.mediaPlaying ? @"Pause Media" : @"Play Media" action:@selector(menuTogglePlay:) item:item]];
+        [m addItem:[self menuItem:item.mediaPlaying ? @"Pause Media" : @"Play Media"
+                           action:@selector(menuTogglePlay:)
+                             item:item]];
     }
   }
   [m addItem:[NSMenuItem separatorItem]];
@@ -5532,7 +6208,8 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   if (item.liveKind) [m addItem:[self menuItem:@"Refresh Live Folder" action:@selector(menuRefreshLive:) item:item]];
   if ([self parentOfItem:item].liveKind)  // Arc: liveFolderChildItemManuallyDeleted
     [m addItem:[self menuItem:@"Remove from Live Folder" action:@selector(menuDismissLive:) item:item]];
-  if (item.isFolder && !item.liveKind) [m addItem:[self menuItem:@"New Nested Folder" action:@selector(menuNewNestedFolder:) item:item]];
+  if (item.isFolder && !item.liveKind)
+    [m addItem:[self menuItem:@"New Nested Folder" action:@selector(menuNewNestedFolder:) item:item]];
   if (isTab || (!item.url.length && !item.isSection && !item.isSplit))
     [m addItem:[self menuItem:@"Duplicate" action:@selector(menuDuplicate:) item:item]];
   if (isToday) [m addItem:[self menuItem:@"Pin" action:@selector(menuTogglePin:) item:item]];
@@ -5549,7 +6226,8 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
       if (sp == _space) continue;
       for (int pinned = 0; pinned < 2; ++pinned) {
         NSMenuItem* mi = [self menuItem:[NSString stringWithFormat:@"%@ in %@", pinned ? @"Pinned" : @"Today", sp.title]
-                                 action:@selector(menuMoveToSpace:) item:item];
+                                 action:@selector(menuMoveToSpace:)
+                                   item:item];
         mi.representedObject = @[ item, sp, @(pinned) ];
         [sub addItem:mi];
       }
@@ -5570,7 +6248,9 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   }
   if (isTab) {
     [m addItem:[NSMenuItem separatorItem]];
-    [m addItem:[self menuItem:isToday ? @"Archive Tab" : @"Close and Keep Pinned" action:@selector(menuClose:) item:item]];
+    [m addItem:[self menuItem:isToday ? @"Archive Tab" : @"Close and Keep Pinned"
+                       action:@selector(menuClose:)
+                         item:item]];
   }
   return m;
 }
@@ -5584,7 +6264,9 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   if (!_shown || item == _shown) return;
   [self openInSplit:item.url horizontal:NO before:NO];
 }
-- (void)menuOpenLittle:(NSMenuItem*)sender { [self openLittleWindow:((ArcItem*)sender.representedObject).url]; }
+- (void)menuOpenLittle:(NSMenuItem*)sender {
+  [self openLittleWindow:((ArcItem*)sender.representedObject).url];
+}
 - (void)menuCopyURL:(NSMenuItem*)sender {
   [NSPasteboard.generalPasteboard clearContents];
   [NSPasteboard.generalPasteboard setString:((ArcItem*)sender.representedObject).url forType:NSPasteboardTypeString];
@@ -5611,7 +6293,9 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   NSString* name = [self askForSpaceName:@"Rename" initial:item.displayTitle];
   if (name.length) [self renameItem:item to:name];
 }
-- (void)menuDuplicate:(NSMenuItem*)sender { [self duplicateItem:sender.representedObject]; }
+- (void)menuDuplicate:(NSMenuItem*)sender {
+  [self duplicateItem:sender.representedObject];
+}
 - (void)menuTogglePin:(NSMenuItem*)sender {
   ArcItem* item = sender.representedObject;
   if ([self sectionContaining:item] == _space.unpinned) {
@@ -5626,11 +6310,21 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   NSArray* args = sender.representedObject;
   [self moveItem:args[0] toSpace:args[1] pinned:[args[2] boolValue]];
 }
-- (void)menuArchiveOthers:(NSMenuItem*)sender { [self archiveTodayTabsRelativeTo:sender.representedObject mode:0]; }
-- (void)menuArchiveAbove:(NSMenuItem*)sender { [self archiveTodayTabsRelativeTo:sender.representedObject mode:1]; }
-- (void)menuArchiveBelow:(NSMenuItem*)sender { [self archiveTodayTabsRelativeTo:sender.representedObject mode:2]; }
-- (void)menuResetPinned:(NSMenuItem*)sender { [self resetPinnedItem:sender.representedObject]; }
-- (void)menuReplacePinned:(NSMenuItem*)sender { [self replacePinnedURLWithCurrent:sender.representedObject]; }
+- (void)menuArchiveOthers:(NSMenuItem*)sender {
+  [self archiveTodayTabsRelativeTo:sender.representedObject mode:0];
+}
+- (void)menuArchiveAbove:(NSMenuItem*)sender {
+  [self archiveTodayTabsRelativeTo:sender.representedObject mode:1];
+}
+- (void)menuArchiveBelow:(NSMenuItem*)sender {
+  [self archiveTodayTabsRelativeTo:sender.representedObject mode:2];
+}
+- (void)menuResetPinned:(NSMenuItem*)sender {
+  [self resetPinnedItem:sender.representedObject];
+}
+- (void)menuReplacePinned:(NSMenuItem*)sender {
+  [self replacePinnedURLWithCurrent:sender.representedObject];
+}
 - (void)menuClose:(NSMenuItem*)sender {
   ArcItem* item = sender.representedObject;
   if (item != _shown) [self showItem:item];
@@ -5758,8 +6452,10 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   [self scheduleSave];
   if (!_shown) {
     ArcItem* first = _space.allTabs.firstObject;
-    if (first) [self showItem:first];
-    else [self layoutPanes];
+    if (first)
+      [self showItem:first];
+    else
+      [self layoutPanes];
   }
   return YES;
 }
@@ -5833,10 +6529,12 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (NSString*)commandBarStyle {  // tests
   NSColor* c = [CommandSelectedColor() colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
   NSTableRowView* rv = _suggestionTable.numberOfRows ? [_suggestionTable rowViewAtRow:0 makeIfNecessary:YES] : nil;
-  return [NSString stringWithFormat:@"sel=%02X%02X%02X rowClass=%@ divider=%d placeholder=%@ cell=%@", (int)lround(c.redComponent * 255),
-                                    (int)lround(c.greenComponent * 255), (int)lround(c.blueComponent * 255),
-                                    NSStringFromClass(rv.class), !_commandDivider.hidden, _commandField.placeholderString,
-                                    NSStringFromClass([[_suggestionTable viewAtColumn:0 row:0 makeIfNecessary:YES] class])];
+  return [NSString stringWithFormat:@"sel=%02X%02X%02X rowClass=%@ divider=%d placeholder=%@ cell=%@",
+                                    (int)lround(c.redComponent * 255), (int)lround(c.greenComponent * 255),
+                                    (int)lround(c.blueComponent * 255), NSStringFromClass(rv.class),
+                                    !_commandDivider.hidden, _commandField.placeholderString,
+                                    NSStringFromClass([[_suggestionTable viewAtColumn:0 row:0
+                                                                      makeIfNecessary:YES] class])];
 }
 // Search suggestions (#31): the engine's own suggestions for what is typed, fetched shortly after typing stops.
 // Not sent from Incognito, for URLs being typed, or when turned off in Settings.
@@ -5847,9 +6545,10 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   [_suggestTask cancel];
   _suggestTask = nil;
   NSUInteger token = ++_suggestToken;
-  BOOL urlish = [q containsString:@"://"] || ([q containsString:@"."] && ![q containsString:@" "] && q.length > 3 &&
-                                              [q rangeOfString:@"." options:NSBackwardsSearch].location < q.length - 1 &&
-                                              [q componentsSeparatedByString:@"."].lastObject.length <= 6);
+  BOOL urlish =
+      [q containsString:@"://"] || ([q containsString:@"."] && ![q containsString:@" "] && q.length > 3 &&
+                                    [q rangeOfString:@"." options:NSBackwardsSearch].location < q.length - 1 &&
+                                    [q componentsSeparatedByString:@"."].lastObject.length <= 6);
   if (!q.length || urlish || _commandOpensIncognito || !SettingBool(kSettingSearchSuggestions)) {
     _searchSuggestions = nil;
     _suggestQuery = nil;
@@ -5881,10 +6580,11 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
       c.timeoutIntervalForRequest = 4;
       session = [NSURLSession sessionWithConfiguration:c];
     }
-    me->_suggestTask = [session dataTaskWithURL:url completionHandler:^(NSData* d, NSURLResponse* r, NSError* e) {
-      NSArray* list = e ? @[] : ParseSearchSuggestions(d);
-      dispatch_async(dispatch_get_main_queue(), ^{ apply(list); });
-    }];
+    me->_suggestTask = [session dataTaskWithURL:url
+                              completionHandler:^(NSData* d, NSURLResponse* r, NSError* e) {
+                                NSArray* list = e ? @[] : ParseSearchSuggestions(d);
+                                dispatch_async(dispatch_get_main_queue(), ^{ apply(list); });
+                              }];
     [me->_suggestTask resume];
   });
 }
@@ -5893,16 +6593,16 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (void)commandSuggestionsAfterFetch:(NSString*)text done:(void (^)(NSArray<NSDictionary*>*))done {
   [self fetchSearchSuggestions:text];
   __weak MainWindowController* weakSelf = self;
-  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-    done([weakSelf commandSuggestionsFor:text] ?: @[]);
-  });
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(),
+                 ^{ done([weakSelf commandSuggestionsFor:text] ?: @[]); });
 }
 
 - (void)refreshSuggestions {
   [self fetchSearchSuggestions:_commandField.stringValue];
   _suggestionList.items = [self commandSuggestionsFor:_commandField.stringValue];
   [_suggestionTable reloadData];
-  if (_suggestionList.items.count) [_suggestionTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
+  if (_suggestionList.items.count)
+    [_suggestionTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
   CGFloat listH = _suggestionList.items.count * kSuggestionRow + (_suggestionList.items.count ? 8 : 0);
   CGFloat h = 52 + listH;
   NSRect f = self.window.frame;
@@ -5922,7 +6622,7 @@ static NSString* HostOf(NSString* url) {
 // Match score: 0 = no match. Title/host prefix beats a substring anywhere.
 static double MatchScore(NSString* q, NSString* title, NSString* url) {
   if (!q.length) return 1;
-  NSString* t = title.lowercaseString ?: @"", *u = url.lowercaseString ?: @"", *h = HostOf(url).lowercaseString;
+  NSString *t = title.lowercaseString ?: @"", *u = url.lowercaseString ?: @"", *h = HostOf(url).lowercaseString;
   if ([h hasPrefix:q]) return 6;
   if ([t hasPrefix:q]) return 5;
   if ([t rangeOfString:[@" " stringByAppendingString:q]].location != NSNotFound) return 4;
@@ -5941,9 +6641,14 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     if (mi.action == @selector(newTab:) || mi.action == @selector(openLocation:)) continue;  // we're already here
     double m = MatchScore(q, mi.title, nil);
     if (m <= 0) continue;
-    [out addObject:@{ @"kind" : @"action", @"title" : mi.title, @"subtitle" : menu.title ?: @"",
-                      @"key" : [@"action:" stringByAppendingString:NSStringFromSelector(mi.action)], @"item" : mi,
-                      @"score" : @(m + 0.5) }];
+    [out addObject:@{
+      @"kind" : @"action",
+      @"title" : mi.title,
+      @"subtitle" : menu.title ?: @"",
+      @"key" : [@"action:" stringByAppendingString:NSStringFromSelector(mi.action)],
+      @"item" : mi,
+      @"score" : @(m + 0.5)
+    }];
   }
 }
 
@@ -5971,8 +6676,13 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     }];
     for (NSString* h in top) {
       if (out.count >= 6) break;
-      [out addObject:@{ @"kind" : @"site", @"title" : h, @"subtitle" : @"", @"key" : [@"site:" stringByAppendingString:h],
-                        @"url" : lastURL[h] }];
+      [out addObject:@{
+        @"kind" : @"site",
+        @"title" : h,
+        @"subtitle" : @"",
+        @"key" : [@"site:" stringByAppendingString:h],
+        @"url" : lastURL[h]
+      }];
     }
     return out;
   }
@@ -5986,16 +6696,26 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
         if (m <= 0 || t == _shown) continue;
         [seenURLs addObject:url ?: @""];
         double bonus = (t.browserId ? 1.5 : 1.0) + (sp == _space ? 0.3 : 0);
-        [ranked addObject:@{ @"kind" : @"tab", @"title" : t.displayTitle ?: url, @"subtitle" :
-                               sp == _space ? HostOf(url) : [NSString stringWithFormat:@"%@ · %@", HostOf(url), sp.title],
-                             @"key" : [@"tab:" stringByAppendingString:t.itemID ?: url], @"item" : t, @"space" : sp,
-                             @"score" : @(m + bonus) }];
+        [ranked addObject:@{
+          @"kind" : @"tab",
+          @"title" : t.displayTitle ?: url,
+          @"subtitle" : sp == _space ? HostOf(url) : [NSString stringWithFormat:@"%@ · %@", HostOf(url), sp.title],
+          @"key" : [@"tab:" stringByAppendingString:t.itemID ?: url],
+          @"item" : t,
+          @"space" : sp,
+          @"score" : @(m + bonus)
+        }];
       }
       double m = MatchScore(q, sp.title, nil);
       if (m > 0 && sp != _space)
-        [ranked addObject:@{ @"kind" : @"space", @"title" : sp.iconEmoji.length ? [NSString stringWithFormat:@"%@ %@", sp.iconEmoji, sp.title] : sp.title,
-                             @"subtitle" : @"Switch Space", @"key" : [@"space:" stringByAppendingString:sp.spaceID ?: sp.title],
-                             @"space" : sp, @"score" : @(m + 1.2) }];
+        [ranked addObject:@{
+          @"kind" : @"space",
+          @"title" : sp.iconEmoji.length ? [NSString stringWithFormat:@"%@ %@", sp.iconEmoji, sp.title] : sp.title,
+          @"subtitle" : @"Switch Space",
+          @"key" : [@"space:" stringByAppendingString:sp.spaceID ?: sp.title],
+          @"space" : sp,
+          @"score" : @(m + 1.2)
+        }];
     }
     [self collectMenuActions:NSApp.mainMenu query:q into:ranked];
   }
@@ -6006,8 +6726,14 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     double m = MatchScore(q, v.title, v.url);
     if (m <= 0) continue;
     [seenURLs addObject:v.url];
-    [ranked addObject:@{ @"kind" : @"history", @"title" : v.title.length ? v.title : v.url, @"subtitle" : HostOf(v.url),
-                         @"key" : [@"url:" stringByAppendingString:v.url], @"url" : v.url, @"score" : @(m) }];
+    [ranked addObject:@{
+      @"kind" : @"history",
+      @"title" : v.title.length ? v.title : v.url,
+      @"subtitle" : HostOf(v.url),
+      @"key" : [@"url:" stringByAppendingString:v.url],
+      @"url" : v.url,
+      @"score" : @(m)
+    }];
   }
   // Learned ranking: every earlier pick of the same suggestion adds weight (capped).
   NSArray* sorted = [ranked sortedArrayUsingComparator:^NSComparisonResult(NSDictionary* a, NSDictionary* b) {
@@ -6017,14 +6743,20 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
   }];
   NSString* resolved = ResolveCommandBarInput(text) ?: text;
   BOOL looksURL = ![resolved containsString:@"?q="] && ![resolved containsString:@"search?"];
-  [out addObject:@{ @"kind" : @"go", @"title" : text, @"subtitle" : looksURL ? resolved : @"Search", @"key" : @"go", @"text" : text }];
+  [out addObject:@{
+    @"kind" : @"go",
+    @"title" : text,
+    @"subtitle" : looksURL ? resolved : @"Search",
+    @"key" : @"go",
+    @"text" : text
+  }];
   NSString* typed = [text stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
   if (_searchSuggestions.count && [_suggestQuery isEqualToString:typed]) {
     NSUInteger added = 0;
     for (NSString* s in _searchSuggestions) {
       if (added >= 3) break;
       if ([s.lowercaseString isEqualToString:q]) continue;
-      [out addObject:@{ @"kind" : @"search", @"title" : s, @"subtitle" : @"Search", @"key" : @"go", @"text" : s }];
+      [out addObject:@{@"kind" : @"search", @"title" : s, @"subtitle" : @"Search", @"key" : @"go", @"text" : s}];
       ++added;
     }
   }
@@ -6037,7 +6769,8 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
 
 - (void)suggestionClicked:(id)sender {
   NSInteger row = _suggestionTable.clickedRow;
-  if (row >= 0 && row < (NSInteger)_suggestionList.items.count) [self performCommandSuggestion:_suggestionList.items[row]];
+  if (row >= 0 && row < (NSInteger)_suggestionList.items.count)
+    [self performCommandSuggestion:_suggestionList.items[row]];
 }
 
 - (void)performCommandSuggestion:(NSDictionary*)s {
@@ -6065,11 +6798,16 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     [NSApp sendAction:mi.action to:mi.target from:mi];
   } else {
     NSString* target = s[@"url"] ?: s[@"text"];
-    if (incognito) [self openIncognitoWindow:target];
-    else if (little) [self openLittleWindow:target];
-    else if (split) [self openInSplit:target horizontal:_pendingSplitHorizontal before:_splitBefore];
-    else if (newTab) [self openInNewTab:target];
-    else [self navigateCurrentTab:target];
+    if (incognito)
+      [self openIncognitoWindow:target];
+    else if (little)
+      [self openLittleWindow:target];
+    else if (split)
+      [self openInSplit:target horizontal:_pendingSplitHorizontal before:_splitBefore];
+    else if (newTab)
+      [self openInNewTab:target];
+    else
+      [self navigateCurrentTab:target];
   }
 }
 
@@ -6110,15 +6848,21 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
   if (command == @selector(insertNewline:)) {
     NSString* text = _commandField.stringValue;
     [self hideCommandBar];
-    if (!_commandOpensIncognito && !_commandOpensLittle && [text containsString:@"\n"] && [self openSplitFromText:text]) {
+    if (!_commandOpensIncognito && !_commandOpensLittle && [text containsString:@"\n"] &&
+        [self openSplitFromText:text]) {
       _commandOpensSplit = NO;  // a pasted shared split: one split with all its pages
       return YES;
     }
-    if (_commandOpensIncognito) [self openIncognitoWindow:text];
-    else if (_commandOpensLittle) [self openLittleWindow:text];
-    else if (_commandOpensSplit) [self openInSplit:text horizontal:_pendingSplitHorizontal before:_splitBefore];
-    else if (_commandOpensNewTab) [self openInNewTab:text];
-    else [self navigateCurrentTab:text];
+    if (_commandOpensIncognito)
+      [self openIncognitoWindow:text];
+    else if (_commandOpensLittle)
+      [self openLittleWindow:text];
+    else if (_commandOpensSplit)
+      [self openInSplit:text horizontal:_pendingSplitHorizontal before:_splitBefore];
+    else if (_commandOpensNewTab)
+      [self openInNewTab:text];
+    else
+      [self navigateCurrentTab:text];
     _commandOpensSplit = NO;
     _commandOpensLittle = NO;
     _commandOpensIncognito = NO;
@@ -6140,8 +6884,12 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
   _commandOpensIncognito = NO;
   [self showCommandBarForNewTab:YES];
 }
-- (IBAction)openLocation:(id)sender { [self showCommandBarForNewTab:NO]; }
-- (IBAction)closeTab:(id)sender { [self closeCurrentTab]; }
+- (IBAction)openLocation:(id)sender {
+  [self showCommandBarForNewTab:NO];
+}
+- (IBAction)closeTab:(id)sender {
+  [self closeCurrentTab];
+}
 
 - (void)openInNewTab:(NSString*)input background:(BOOL)background {
   if (!background) {
@@ -6247,39 +6995,46 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target) {
   return _archive;
 }
 
-- (NSArray*)archivedTabs { return [self archive]; }
+- (NSArray*)archivedTabs {
+  return [self archive];
+}
 
 - (NSUndoManager*)sidebarUndoManager {
   if (!_undo) _undo = [NSUndoManager new];
   return _undo;
 }
-- (NSUndoManager*)windowWillReturnUndoManager:(NSWindow*)window { return [self sidebarUndoManager]; }
+- (NSUndoManager*)windowWillReturnUndoManager:(NSWindow*)window {
+  return [self sidebarUndoManager];
+}
 - (IBAction)undoCloseTab:(id)sender {
   if ([[self sidebarUndoManager].undoActionName isEqualToString:@"Close Tab"]) [[self sidebarUndoManager] undo];
 }
 
 // Undo of closing a Today tab: put it back where it was and take it out of the Archive.
-- (void)restoreClosedItem:(ArcItem*)item parent:(ArcItem*)parent index:(NSUInteger)index
-                    space:(ArcSpace*)space archived:(ArchivedTab*)archived {
+- (void)restoreClosedItem:(ArcItem*)item
+                   parent:(ArcItem*)parent
+                    index:(NSUInteger)index
+                    space:(ArcSpace*)space
+                 archived:(ArchivedTab*)archived {
   if (archived && [[self archive] containsObject:archived]) {
     [_archive removeObject:archived];
     if (self.archivePath) ArchiveStoreSave(_archive, self.archivePath);
   }
   if (space != _space && [_spaces containsObject:space]) [self switchToSpace:space];
   if (!Contains(space.unpinned, parent) && parent != space.unpinned) parent = space.unpinned;
-  if (!Contains(space.unpinned, item))
-    [parent.children insertObject:item atIndex:MIN(index, parent.children.count)];
+  if (!Contains(space.unpinned, item)) [parent.children insertObject:item atIndex:MIN(index, parent.children.count)];
   [_outline reloadData];
   for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
   [self scheduleSave];
   [self showItem:item];
   __weak MainWindowController* weakSelf = self;
-  [[self sidebarUndoManager] registerUndoWithTarget:self handler:^(id target) {
-    MainWindowController* me = weakSelf;
-    if (!me) return;
-    [me showItem:item];
-    [me closeCurrentTab];
-  }];
+  [[self sidebarUndoManager] registerUndoWithTarget:self
+                                            handler:^(id target) {
+                                              MainWindowController* me = weakSelf;
+                                              if (!me) return;
+                                              [me showItem:item];
+                                              [me closeCurrentTab];
+                                            }];
   [[self sidebarUndoManager] setActionName:@"Close Tab"];
 }
 
@@ -6304,9 +7059,14 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target) {
   if (undoParent) {
     ArcSpace* space = _space;
     __weak MainWindowController* weakSelf = self;
-    [[self sidebarUndoManager] registerUndoWithTarget:self handler:^(id target) {
-      [weakSelf restoreClosedItem:item parent:undoParent index:undoIndex space:space archived:archived];
-    }];
+    [[self sidebarUndoManager] registerUndoWithTarget:self
+                                              handler:^(id target) {
+                                                [weakSelf restoreClosedItem:item
+                                                                     parent:undoParent
+                                                                      index:undoIndex
+                                                                      space:space
+                                                                   archived:archived];
+                                              }];
     [[self sidebarUndoManager] setActionName:@"Close Tab"];
   }
   // Close and Keep Pinned: the tab stays and reopens at its saved URL.
@@ -6315,8 +7075,10 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target) {
     item.liveTitle = nil;
   }
   // Pinned tabs and Favorites stay in the sidebar (Arc just unloads them); Today tabs are removed.
-  if (RemoveItem(_space.unpinned, item)) [_outline reloadItem:_space.unpinned reloadChildren:YES];
-  else [_outline reloadItem:item];
+  if (RemoveItem(_space.unpinned, item))
+    [_outline reloadItem:_space.unpinned reloadChildren:YES];
+  else
+    [_outline reloadItem:item];
   [self scheduleSave];
   _shown = nil;
   NSArray<ArcItem*>* remaining = _space.allTabs;
@@ -6325,8 +7087,10 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target) {
     if (remaining[i].browserId) next = remaining[i];
   for (ArcItem* t in remaining)
     if (!next && t.browserId) next = t;
-  if (next) [self showItem:next];
-  else [_outline deselectAll:nil];
+  if (next)
+    [self showItem:next];
+  else
+    [_outline deselectAll:nil];
 }
 
 #pragma mark Sidebar organisation
@@ -6369,12 +7133,14 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
   return nil;
 }
 
-- (ArcItem*)currentPinnedSection { return _space.pinned; }
+- (ArcItem*)currentPinnedSection {
+  return _space.pinned;
+}
 
 - (BOOL)moveItem:(ArcItem*)item toParent:(ArcItem*)parent index:(NSInteger)index {
   if (!item || !parent || item.isSection) return NO;
   if (!(parent.isSection || parent.isFolder)) return NO;
-  if (parent.liveKind) return NO;  // a Live Folder's tabs come from its feed
+  if (parent.liveKind) return NO;         // a Live Folder's tabs come from its feed
   if (Contains(item, parent)) return NO;  // a folder can't go inside itself
   ArcItem* oldParent = [self parentOfItem:item];
   if (!oldParent || ![self sectionContaining:parent]) return NO;  // both must be in the current Space
@@ -6409,8 +7175,9 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 - (IBAction)newLiveFolder:(id)sender {
   NSAlert* alert = [NSAlert new];
   alert.messageText = @"New Live Folder";
-  alert.informativeText = @"Enter a feed address (RSS or Atom), or a GitHub repository like github.com/owner/repo for its open "
-                          "pull requests. Add /issues for its issues instead. The folder keeps itself up to date.";
+  alert.informativeText =
+      @"Enter a feed address (RSS or Atom), or a GitHub repository like github.com/owner/repo for its open "
+       "pull requests. Add /issues for its issues instead. The folder keeps itself up to date.";
   [alert addButtonWithTitle:@"Create"];
   [alert addButtonWithTitle:@"Cancel"];
   NSTextField* field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 24)];
@@ -6421,14 +7188,21 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   alert.window.initialFirstResponder = field;
   if ([alert runModal] != NSAlertFirstButtonReturn) return;
   NSDictionary* src = LiveFolderSourceFromInput(field.stringValue, NO);
-  if (!src) { NSBeep(); return; }
-  NSString* kind = src[@"kind"], *source = src[@"source"];
-  NSString* title = [kind isEqualToString:@"feed"] ? ([NSURL URLWithString:source].host ?: source)
-                    : [NSString stringWithFormat:@"%@ %@", source.lastPathComponent,
-                                                 [kind isEqualToString:@"github-prs"] ? @"Pull Requests" : @"Issues"];
+  if (!src) {
+    NSBeep();
+    return;
+  }
+  NSString *kind = src[@"kind"], *source = src[@"source"];
+  NSString* title =
+      [kind isEqualToString:@"feed"]
+          ? ([NSURL URLWithString:source].host ?: source)
+          : [NSString stringWithFormat:@"%@ %@", source.lastPathComponent,
+                                       [kind isEqualToString:@"github-prs"] ? @"Pull Requests" : @"Issues"];
   [self createLiveFolderKind:kind source:source title:title];
 }
-- (void)menuRefreshLive:(NSMenuItem*)mi { [self refreshLiveFolder:mi.representedObject done:nil]; }
+- (void)menuRefreshLive:(NSMenuItem*)mi {
+  [self refreshLiveFolder:mi.representedObject done:nil];
+}
 - (void)menuDismissLive:(NSMenuItem*)mi {
   BOOL wasShown = mi.representedObject == _shown;
   [self dismissLiveFolderTab:mi.representedObject];
@@ -6445,7 +7219,8 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
     [self collectLiveFolders:sp.unpinned into:all];
   }
   for (ArcItem* f in all)
-    if (!f.liveRefreshedAt || -f.liveRefreshedAt.timeIntervalSinceNow > kLiveFolderRefreshInterval) [self refreshLiveFolder:f done:nil];
+    if (!f.liveRefreshedAt || -f.liveRefreshedAt.timeIntervalSinceNow > kLiveFolderRefreshInterval)
+      [self refreshLiveFolder:f done:nil];
 }
 // Merge fetched entries into the folder: keep tabs still in the feed (and their pages), add new ones in feed
 // order, drop ones that left the feed. Entries the user closed are remembered and not added back.
@@ -6481,31 +7256,44 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   // Dismissed entries that left the feed don't need remembering.
   NSMutableSet* inFeed = [NSMutableSet set];
   for (LiveFolderEntry* e in entries) [inFeed addObject:e.url];
-  [f.liveDismissed filterUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString* u, NSDictionary*) { return [inFeed containsObject:u]; }]];
+  [f.liveDismissed filterUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(NSString* u, NSDictionary*) {
+                     return [inFeed containsObject:u];
+                   }]];
   f.children = next;
 }
 - (void)refreshLiveFolder:(ArcItem*)f done:(void (^)(BOOL ok))done {
-  if (!f.liveKind) { if (done) done(NO); return; }
+  if (!f.liveKind) {
+    if (done) done(NO);
+    return;
+  }
   __weak MainWindowController* weakSelf = self;
   f.liveRefreshedAt = [NSDate date];  // also throttles retries after an error
-  LiveFolderFetch(f.liveKind, f.liveSource, kLiveFolderMaxItems, ^(NSArray<LiveFolderEntry*>* entries, NSString* error) {
-    MainWindowController* me = weakSelf;
-    if (!me) return;
-    f.liveError = error;
-    if (entries) [me applyLiveEntries:entries toFolder:f];
-    if ([me spaceOwningItem:f] == me->_space) {
-      [me->_outline reloadItem:f reloadChildren:YES];
-      if (me->_shown) [me selectSidebarRowFor:me->_shown];
-    }
-    [me scheduleSave];
-    if (done) done(entries != nil);
-  });
+  LiveFolderFetch(f.liveKind, f.liveSource, kLiveFolderMaxItems,
+                  ^(NSArray<LiveFolderEntry*>* entries, NSString* error) {
+                    MainWindowController* me = weakSelf;
+                    if (!me) return;
+                    f.liveError = error;
+                    if (entries) [me applyLiveEntries:entries toFolder:f];
+                    if ([me spaceOwningItem:f] == me->_space) {
+                      [me->_outline reloadItem:f reloadChildren:YES];
+                      if (me->_shown) [me selectSidebarRowFor:me->_shown];
+                    }
+                    [me scheduleSave];
+                    if (done) done(entries != nil);
+                  });
 }
 // Tests: write a cookie into the current Space's profile and flush it to disk; read cookie names for a URL.
-- (void)setTestCookie:(NSString*)name value:(NSString*)value url:(NSString*)url session:(BOOL)session done:(void (^)(BOOL))done {
+- (void)setTestCookie:(NSString*)name
+                value:(NSString*)value
+                  url:(NSString*)url
+              session:(BOOL)session
+                 done:(void (^)(BOOL))done {
   CefRefPtr<CefRequestContext> ctx = [self contextForSpace:_space];
   auto mgr = ctx ? ctx->GetCookieManager(nullptr) : nullptr;
-  if (!mgr) { if (done) done(NO); return; }
+  if (!mgr) {
+    if (done) done(NO);
+    return;
+  }
   CefCookie c;
   CefString(&c.name) = name.UTF8String;
   CefString(&c.value) = value.UTF8String;
@@ -6524,8 +7312,11 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
     void OnComplete(bool ok) override {
       m_->FlushStore(nullptr);
       void (^b)(BOOL) = b_;
-      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{ if (b) b(ok); });
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        if (b) b(ok);
+      });
     }
+
    private:
     CefRefPtr<CefCookieManager> m_;
     void (^b_)(BOOL);
@@ -6536,7 +7327,10 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 - (void)testCookieNamesForURL:(NSString*)url done:(void (^)(NSArray<NSString*>*))done {
   CefRefPtr<CefRequestContext> ctx = [self contextForSpace:_space];
   auto mgr = ctx ? ctx->GetCookieManager(nullptr) : nullptr;
-  if (!mgr) { done(@[]); return; }
+  if (!mgr) {
+    done(@[]);
+    return;
+  }
   class NameVisitor : public CefCookieVisitor {
    public:
     explicit NameVisitor(void (^b)(NSArray*)) : b_(b), names_([NSMutableArray array]) {}
@@ -6549,6 +7343,7 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
       [names_ addObject:[NSString stringWithUTF8String:CefString(&c.name).ToString().c_str()]];
       return true;
     }
+
    private:
     void (^b_)(NSArray*);
     NSMutableArray* names_;
@@ -6679,9 +7474,15 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   return n;
 }
 
-- (IBAction)resetPinnedTab:(id)sender { if (_shown) [self resetPinnedItem:_shown]; }
-- (IBAction)replacePinnedURL:(id)sender { if (_shown) [self replacePinnedURLWithCurrent:_shown]; }
-- (IBAction)resetAllPinnedTabs:(id)sender { [self resetPinnedTabsInSpace]; }
+- (IBAction)resetPinnedTab:(id)sender {
+  if (_shown) [self resetPinnedItem:_shown];
+}
+- (IBAction)replacePinnedURL:(id)sender {
+  if (_shown) [self replacePinnedURLWithCurrent:_shown];
+}
+- (IBAction)resetAllPinnedTabs:(id)sender {
+  [self resetPinnedTabsInSpace];
+}
 
 - (BOOL)validateMenuItem:(NSMenuItem*)mi {
   if (mi.action == @selector(translatePage:)) {
@@ -6690,7 +7491,8 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
     mi.title = translated ? @"Show Original" : @"Translate Page";
     return translated || (url && TranslateURLFor(url, @"en"));
   }
-  if (mi.action == @selector(toggleToolbar:)) mi.title = SettingBool(kSettingShowToolbar) ? @"Hide Toolbar" : @"Show Toolbar";
+  if (mi.action == @selector(toggleToolbar:))
+    mi.title = SettingBool(kSettingShowToolbar) ? @"Hide Toolbar" : @"Show Toolbar";
   if (mi.action == @selector(toggleSpaceHeader:))
     mi.title = SettingBool(kSettingShowSpaceHeader) ? @"Hide Space Header" : @"Show Space Header";
   if (mi.action == @selector(resetPinnedTab:) || mi.action == @selector(replacePinnedURL:))
@@ -6806,11 +7608,14 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 
 - (void)startAutoArchiveTimer {
   __weak MainWindowController* weakSelf = self;
-  _archiveTimer = [NSTimer scheduledTimerWithTimeInterval:60 repeats:YES block:^(NSTimer* t) {
-    [weakSelf runAutoArchiveWithThreshold:AutoArchiveThreshold() now:[NSDate date]];
-    [weakSelf archiveIdleLittleWindowsAt:[NSDate date]];
-    [weakSelf refreshStaleLiveFolders];
-  }];
+  _archiveTimer = [NSTimer scheduledTimerWithTimeInterval:60
+                                                  repeats:YES
+                                                    block:^(NSTimer* t) {
+                                                      [weakSelf runAutoArchiveWithThreshold:AutoArchiveThreshold()
+                                                                                        now:[NSDate date]];
+                                                      [weakSelf archiveIdleLittleWindowsAt:[NSDate date]];
+                                                      [weakSelf refreshStaleLiveFolders];
+                                                    }];
 }
 
 - (IBAction)reopenLastArchived:(id)sender {
@@ -6840,7 +7645,7 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
     __weak MainWindowController* weakSelf = self;
     _archiveWindow = [[ArchiveWindowController alloc]
         initWithProvider:^NSArray<ArchivedTab*>* { return [weakSelf archivedTabs]; }
-                  reopen:^(ArchivedTab* tab) { [weakSelf reopenArchivedTab:tab]; }];
+        reopen:^(ArchivedTab* tab) { [weakSelf reopenArchivedTab:tab]; }];
   }
   [_archiveWindow reload];
   [_archiveWindow showWindow:nil];
@@ -6851,14 +7656,16 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   return _history;
 }
 
-- (NSArray<ArchivedTab*>*)historyVisits { return [self historyStore].visits ?: @[]; }
+- (NSArray<ArchivedTab*>*)historyVisits {
+  return [self historyStore].visits ?: @[];
+}
 
 - (IBAction)showHistory:(id)sender {
   if (!_historyWindow) {
     __weak MainWindowController* weakSelf = self;
     _historyWindow = [[ArchiveWindowController alloc]
         initWithProvider:^NSArray<ArchivedTab*>* { return [weakSelf historyVisits]; }
-                  reopen:^(ArchivedTab* visit) { [weakSelf openInNewTab:visit.url]; }];
+        reopen:^(ArchivedTab* visit) { [weakSelf openInNewTab:visit.url]; }];
     _historyWindow.baseTitle = @"History";
     [_historyWindow setPlaceholder:@"Search history" dateHeader:@"Visited" reasonHeader:@"Space"];
   }
@@ -6874,7 +7681,10 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   return out;
 }
 
-- (void)clearBrowsingDataSince:(NSDate*)since history:(BOOL)history cookies:(BOOL)cookies cache:(BOOL)cache
+- (void)clearBrowsingDataSince:(NSDate*)since
+                       history:(BOOL)history
+                       cookies:(BOOL)cookies
+                         cache:(BOOL)cache
                           done:(void (^)(NSUInteger, NSUInteger))done {
   NSUInteger historyRemoved = 0;
   if (history) {
@@ -6890,8 +7700,9 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
     if (cookies) {
       if (auto mgr = ctx->GetCookieManager(nullptr)) {
         dispatch_group_enter(group);
-        BOOL started = mgr->VisitAllCookies(new MatchCookieVisitor(mgr,
-            [sinceUnix](const CefCookie& c) { return sinceUnix == 0 || CookieCreatedUnix(c) >= sinceUnix - 1; }, true,
+        BOOL started = mgr->VisitAllCookies(new MatchCookieVisitor(
+            mgr, [sinceUnix](const CefCookie& c) { return sinceUnix == 0 || CookieCreatedUnix(c) >= sinceUnix - 1; },
+            true,
             ^(NSUInteger n) {
               cookiesRemoved += n;
               dispatch_group_leave(group);
@@ -6958,21 +7769,25 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   }
   // Site storage (localStorage, IndexedDB, service workers, cache storage) for this origin.
   CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
-  NSString* origin = [NSString stringWithFormat:@"%@://%@%@", u.scheme, u.host, u.port ? [NSString stringWithFormat:@":%@", u.port] : @""];
+  NSString* origin = [NSString
+      stringWithFormat:@"%@://%@%@", u.scheme, u.host, u.port ? [NSString stringWithFormat:@":%@", u.port] : @""];
   params->SetString("origin", origin.UTF8String);
-  params->SetString("storageTypes", "local_storage,indexeddb,websql,cache_storage,service_workers,file_systems,shader_cache");
+  params->SetString("storageTypes",
+                    "local_storage,indexeddb,websql,cache_storage,service_workers,file_systems,shader_cache");
   b->GetHost()->ExecuteDevToolsMethod(0, "Storage.clearDataForOrigin", params);
   auto mgr = b->GetHost()->GetRequestContext()->GetCookieManager(nullptr);
   void (^finish)(NSUInteger) = ^(NSUInteger n) {
     b->Reload();
     if (done) done(n);
   };
-  if (!mgr || !mgr->VisitAllCookies(new MatchCookieVisitor(mgr,
-                  [host](const CefCookie& c) { return CookieBelongsToHost(c, host); }, true, finish)))
+  if (!mgr || !mgr->VisitAllCookies(new MatchCookieVisitor(
+                  mgr, [host](const CefCookie& c) { return CookieBelongsToHost(c, host); }, true, finish)))
     finish(0);
 }
 
-- (IBAction)clearCookiesAndRefresh:(id)sender { [self clearCookiesAndRefreshWithDone:nil]; }
+- (IBAction)clearCookiesAndRefresh:(id)sender {
+  [self clearCookiesAndRefreshWithDone:nil];
+}
 
 - (void)selfTestSetCookie:(NSString*)url name:(NSString*)name done:(void (^)(void))done {
   CefRefPtr<CefBrowser> b = [self currentBrowser];
@@ -6992,8 +7807,8 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   CefRefPtr<CefBrowser> b = [self currentBrowser];
   auto mgr = b ? b->GetHost()->GetRequestContext()->GetCookieManager(nullptr) : nullptr;
   std::string n = name.UTF8String;
-  if (!mgr || !mgr->VisitAllCookies(new MatchCookieVisitor(mgr,
-                  [n](const CefCookie& c) { return CefString(&c.name).ToString() == n; }, false, done)))
+  if (!mgr || !mgr->VisitAllCookies(new MatchCookieVisitor(
+                  mgr, [n](const CefCookie& c) { return CefString(&c.name).ToString() == n; }, false, done)))
     done(0);
 }
 
@@ -7024,8 +7839,12 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 
 #pragma mark Windows (#39)
 
-+ (NSUInteger)openWindowCount { return MAX(gWindows.count, (NSUInteger)1); }
-- (BOOL)isMainWindowController { return !gMainWindow || gMainWindow == self; }
++ (NSUInteger)openWindowCount {
+  return MAX(gWindows.count, (NSUInteger)1);
+}
+- (BOOL)isMainWindowController {
+  return !gMainWindow || gMainWindow == self;
+}
 
 - (instancetype)initSecondaryFrom:(MainWindowController*)main space:(ArcSpace*)space {
   if ((self = [self initWithSpaces:main->_spaces focusedSpaceID:space.spaceID])) {
@@ -7083,7 +7902,9 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   if (!self.selfTestProfiles) [main.window makeKeyAndOrderFront:nil];
 }
 
-- (IBAction)moveShownToMainWindow:(id)sender { [self moveItemToMainWindow:_shown]; }
+- (IBAction)moveShownToMainWindow:(id)sender {
+  [self moveItemToMainWindow:_shown];
+}
 
 - (BOOL)moveToMainButtonShown {  // tests
   NSInteger row = [_outline rowForItem:_space.unpinned];
@@ -7092,7 +7913,9 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   return b && !b.hidden;
 }
 
-- (void)menuMoveToMainWindow:(NSMenuItem*)sender { [self moveItemToMainWindow:sender.representedObject]; }
+- (void)menuMoveToMainWindow:(NSMenuItem*)sender {
+  [self moveItemToMainWindow:sender.representedObject];
+}
 
 // The page itself moves (Arc: reassignWebContent): same browser, nothing reloads.
 - (void)claimBrowserOfItem:(ArcItem*)item {
@@ -7216,7 +8039,8 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   NSString* path = [self windowStatePath];
   if (!path) return;
   NSData* data = [NSJSONSerialization dataWithJSONObject:@{@"version" : @1, @"windows" : [self windowStateList]}
-                                                 options:NSJSONWritingPrettyPrinted error:nil];
+                                                 options:NSJSONWritingPrettyPrinted
+                                                   error:nil];
   [data writeToFile:path atomically:YES];
 }
 
@@ -7229,7 +8053,9 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 + (NSUInteger)savedWindowCount {  // tests
   NSString* path = [self windowStatePath];
   NSDictionary* d = path ? [NSJSONSerialization JSONObjectWithData:[NSData dataWithContentsOfFile:path] ?: [NSData data]
-                                                           options:0 error:nil] : nil;
+                                                           options:0
+                                                             error:nil]
+                         : nil;
   return [d isKindOfClass:NSDictionary.class] ? [d[@"windows"] count] : 0;
 }
 

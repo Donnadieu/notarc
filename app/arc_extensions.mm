@@ -4,8 +4,9 @@
 @end
 
 NSString* NotArcExtensionsDirectory(BOOL selfTest) {
-  NSString* support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
-      stringByAppendingPathComponent:@"NotArc"];
+  NSString* support =
+      [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
+          stringByAppendingPathComponent:@"NotArc"];
   return [support stringByAppendingPathComponent:selfTest ? @"SelfTestExtensions" : @"Extensions From Arc"];
 }
 
@@ -18,23 +19,26 @@ static NSString* ResolveName(NSDictionary* manifest, NSString* dir) {
   NSData* d = [NSData dataWithContentsOfFile:[dir stringByAppendingFormat:@"/_locales/%@/messages.json", locale]];
   NSDictionary* msgs = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
   for (NSString* k in msgs)
-    if ([k caseInsensitiveCompare:key] == NSOrderedSame && [msgs[k] isKindOfClass:NSDictionary.class]) return msgs[k][@"message"] ?: name;
+    if ([k caseInsensitiveCompare:key] == NSOrderedSame && [msgs[k] isKindOfClass:NSDictionary.class])
+      return msgs[k][@"message"] ?: name;
   return name;
 }
 
-NSArray<ArcExtensionCopy*>* ArcCopyExtensions(NSString* arcUserData, NSArray<NSString*>* profiles, NSString* destination) {
+NSArray<ArcExtensionCopy*>* ArcCopyExtensions(NSString* arcUserData,
+                                              NSArray<NSString*>* profiles,
+                                              NSString* destination) {
   NSFileManager* fm = NSFileManager.defaultManager;
   [fm createDirectoryAtPath:destination withIntermediateDirectories:YES attributes:nil error:nil];
   NSMutableArray* out = [NSMutableArray array];
   NSMutableSet* seen = [NSMutableSet set];
   for (NSString* profile in profiles) {
-    NSString* root = [[arcUserData stringByAppendingPathComponent:profile] stringByAppendingPathComponent:@"Extensions"];
+    NSString* root =
+        [[arcUserData stringByAppendingPathComponent:profile] stringByAppendingPathComponent:@"Extensions"];
     for (NSString* extID in [fm contentsOfDirectoryAtPath:root error:nil]) {
       if (extID.length != 32 || [seen containsObject:extID]) continue;
       NSString* extDir = [root stringByAppendingPathComponent:extID];
-      NSArray* versions = [[fm contentsOfDirectoryAtPath:extDir error:nil] sortedArrayUsingComparator:^(NSString* a, NSString* b) {
-        return [a compare:b options:NSNumericSearch];
-      }];
+      NSArray* versions = [[fm contentsOfDirectoryAtPath:extDir error:nil]
+          sortedArrayUsingComparator:^(NSString* a, NSString* b) { return [a compare:b options:NSNumericSearch]; }];
       NSString* src = versions.count ? [extDir stringByAppendingPathComponent:versions.lastObject] : nil;
       NSData* m = src ? [NSData dataWithContentsOfFile:[src stringByAppendingPathComponent:@"manifest.json"]] : nil;
       NSDictionary* manifest = m ? [NSJSONSerialization JSONObjectWithData:m options:0 error:nil] : nil;
@@ -64,7 +68,8 @@ NSArray<NSString*>* ArcCopiedExtensionPaths(NSString* destination) {
   NSMutableArray* out = [NSMutableArray array];
   for (NSString* e in [NSFileManager.defaultManager contentsOfDirectoryAtPath:destination error:nil]) {
     NSString* p = [destination stringByAppendingPathComponent:e];
-    if ([NSFileManager.defaultManager fileExistsAtPath:[p stringByAppendingPathComponent:@"manifest.json"]]) [out addObject:p];
+    if ([NSFileManager.defaultManager fileExistsAtPath:[p stringByAppendingPathComponent:@"manifest.json"]])
+      [out addObject:p];
   }
   return [out sortedArrayUsingSelector:@selector(compare:)];
 }

@@ -35,16 +35,20 @@ void SettingsRegisterDefaults(void) {
 static NSMutableDictionary* g_memorySettings;
 void SettingsUseMemoryOnly(void) { g_memorySettings = [NSMutableDictionary dictionary]; }
 void SettingSetBool(NSString* key, BOOL value) {
-  if (g_memorySettings) g_memorySettings[key] = @(value);
-  else [NSUserDefaults.standardUserDefaults setBool:value forKey:key];
+  if (g_memorySettings)
+    g_memorySettings[key] = @(value);
+  else
+    [NSUserDefaults.standardUserDefaults setBool:value forKey:key];
 }
 id SettingObject(NSString* key) {
   if (g_memorySettings) return g_memorySettings[key];
   return [NSUserDefaults.standardUserDefaults objectForKey:key];
 }
 void SettingSetObject(NSString* key, id value) {
-  if (g_memorySettings) g_memorySettings[key] = value;
-  else [NSUserDefaults.standardUserDefaults setObject:value forKey:key];
+  if (g_memorySettings)
+    g_memorySettings[key] = value;
+  else
+    [NSUserDefaults.standardUserDefaults setObject:value forKey:key];
 }
 BOOL SettingBool(NSString* key) {
   if (NSNumber* v = g_memorySettings[key]) return v.boolValue;
@@ -78,7 +82,8 @@ BOOL PlaySoundEffect(NotArcSound sound) {
   static NSSound* capture;
   if (!capture) {
     NSString* sys = @"/System/Library/Components/CoreAudio.component/Contents/SharedSupport/SystemSounds/system/";
-    capture = [[NSSound alloc] initWithContentsOfFile:[sys stringByAppendingString:@"Screen Capture.aif"] byReference:YES]
+    capture = [[NSSound alloc] initWithContentsOfFile:[sys stringByAppendingString:@"Screen Capture.aif"]
+                                          byReference:YES]
                   ?: [NSSound soundNamed:@"Tink"];
   }
   NSSound* s = sound == NotArcSoundCapture ? capture : nil;
@@ -121,11 +126,17 @@ void MakeNotArcDefaultBrowser(void (^done)(BOOL ok)) {
   NSURL* me = NSBundle.mainBundle.bundleURL;
   NSWorkspace* ws = NSWorkspace.sharedWorkspace;
   // http first; macOS asks once and applies the choice to https too.
-  [ws setDefaultApplicationAtURL:me toOpenURLsWithScheme:@"http" completionHandler:^(NSError* e1) {
-    [NSWorkspace.sharedWorkspace setDefaultApplicationAtURL:me toOpenURLsWithScheme:@"https" completionHandler:^(NSError* e2) {
-      dispatch_async(dispatch_get_main_queue(), ^{ if (done) done(!e1 && !e2 && NotArcIsDefaultBrowser()); });
-    }];
-  }];
+  [ws setDefaultApplicationAtURL:me
+            toOpenURLsWithScheme:@"http"
+               completionHandler:^(NSError* e1) {
+                 [NSWorkspace.sharedWorkspace setDefaultApplicationAtURL:me
+                                                    toOpenURLsWithScheme:@"https"
+                                                       completionHandler:^(NSError* e2) {
+                                                         dispatch_async(dispatch_get_main_queue(), ^{
+                                                           if (done) done(!e1 && !e2 && NotArcIsDefaultBrowser());
+                                                         });
+                                                       }];
+               }];
 }
 
 // Translate page (#52): Arc used Chromium's translate bubble, which isn't in CEF. NotArc opens the page through
@@ -136,8 +147,10 @@ NSString* TranslateURLFor(NSString* url, NSString* lang) {
   if (OriginalURLForTranslated(url)) return nil;  // already translated
   NSString* tl = lang.length ? lang : @"en";
   NSURLComponents* c = [NSURLComponents componentsWithString:@"https://translate.google.com/translate"];
-  c.queryItems = @[ [NSURLQueryItem queryItemWithName:@"sl" value:@"auto"], [NSURLQueryItem queryItemWithName:@"tl" value:tl],
-                    [NSURLQueryItem queryItemWithName:@"u" value:url] ];
+  c.queryItems = @[
+    [NSURLQueryItem queryItemWithName:@"sl" value:@"auto"], [NSURLQueryItem queryItemWithName:@"tl" value:tl],
+    [NSURLQueryItem queryItemWithName:@"u" value:url]
+  ];
   return c.URL.absoluteString;
 }
 
@@ -152,7 +165,8 @@ NSString* OriginalURLForTranslated(NSString* url) {
   // The translator serves pages from <host with dots as dashes>.translate.goog; map back to the real host.
   if ([c.host hasSuffix:@".translate.goog"]) {
     NSString* h = [c.host substringToIndex:c.host.length - @".translate.goog".length];
-    h = [[h stringByReplacingOccurrencesOfString:@"--" withString:@"\x01"] stringByReplacingOccurrencesOfString:@"-" withString:@"."];
+    h = [[h stringByReplacingOccurrencesOfString:@"--" withString:@"\x01"] stringByReplacingOccurrencesOfString:@"-"
+                                                                                                     withString:@"."];
     h = [h stringByReplacingOccurrencesOfString:@"\x01" withString:@"-"];
     NSMutableArray* keep = [NSMutableArray array];
     for (NSURLQueryItem* q in c.queryItems)
@@ -190,12 +204,17 @@ NSArray<NSString*>* ParseSearchSuggestions(NSData* json) {
   NSArray* list = nil;
   if ([o isKindOfClass:NSArray.class]) {
     NSArray* a = o;
-    if (a.count >= 2 && [a[1] isKindOfClass:NSArray.class]) list = a[1];
-    else list = a;
+    if (a.count >= 2 && [a[1] isKindOfClass:NSArray.class])
+      list = a[1];
+    else
+      list = a;
   }
   for (id x in list) {
-    NSString* s = [x isKindOfClass:NSString.class] ? x
-                : ([x isKindOfClass:NSDictionary.class] && [x[@"phrase"] isKindOfClass:NSString.class] ? x[@"phrase"] : nil);
+    NSString* s =
+        [x isKindOfClass:NSString.class]
+            ? x
+            : ([x isKindOfClass:NSDictionary.class] && [x[@"phrase"] isKindOfClass:NSString.class] ? x[@"phrase"]
+                                                                                                   : nil);
     if (s.length && ![out containsObject:s]) [out addObject:s];
     if (out.count >= 5) break;
   }
@@ -211,12 +230,16 @@ NSString* SearchURLForQuery(NSString* q) {
 
 // Archive intervals offered in Arc: 12 hours, 24 hours, 7 days, 30 days, never.
 static NSArray* ArchiveChoices() {
-  return @[ @[ @"After 6 hours", @6 ], @[ @"After 12 hours", @12 ], @[ @"After 24 hours", @24 ], @[ @"After 7 days", @(24 * 7) ],
-            @[ @"After 30 days", @(24 * 30) ], @[ @"Never", @0 ] ];
+  return @[
+    @[ @"After 6 hours", @6 ], @[ @"After 12 hours", @12 ], @[ @"After 24 hours", @24 ],
+    @[ @"After 7 days", @(24 * 7) ], @[ @"After 30 days", @(24 * 30) ], @[ @"Never", @0 ]
+  ];
 }
 static NSArray* LittleArchiveChoices() {
-  return @[ @[ @"After 1 hour", @1 ], @[ @"After 6 hours", @6 ], @[ @"After 12 hours", @12 ],
-            @[ @"After 24 hours", @24 ], @[ @"Never", @0 ] ];
+  return @[
+    @[ @"After 1 hour", @1 ], @[ @"After 6 hours", @6 ], @[ @"After 12 hours", @12 ], @[ @"After 24 hours", @24 ],
+    @[ @"Never", @0 ]
+  ];
 }
 
 @implementation SettingsWindowController {
@@ -274,8 +297,10 @@ static NSArray* LittleArchiveChoices() {
 - (void)refreshDefaultBrowser {
   BOOL mine = NotArcIsDefaultBrowser();
   NSURL* app = DefaultBrowserAppURL();
-  NSString* name = app ? [NSFileManager.defaultManager displayNameAtPath:app.path].stringByDeletingPathExtension : @"another app";
-  _defaultLabel.stringValue = mine ? @"NotArc is your default browser." : [NSString stringWithFormat:@"Links open in %@.", name];
+  NSString* name =
+      app ? [NSFileManager.defaultManager displayNameAtPath:app.path].stringByDeletingPathExtension : @"another app";
+  _defaultLabel.stringValue =
+      mine ? @"NotArc is your default browser." : [NSString stringWithFormat:@"Links open in %@.", name];
   _defaultButton.hidden = mine;
 }
 
@@ -289,7 +314,9 @@ static NSArray* LittleArchiveChoices() {
   return _defaultButton.hidden == NotArcIsDefaultBrowser() && _defaultLabel.stringValue.length > 0;
 }
 
-- (void)windowDidBecomeKey:(NSNotification*)n { [self refreshDefaultBrowser]; }
+- (void)windowDidBecomeKey:(NSNotification*)n {
+  [self refreshDefaultBrowser];
+}
 
 - (NSTextField*)heading:(NSString*)text {
   NSTextField* f = [NSTextField labelWithString:text];
@@ -318,12 +345,16 @@ static NSArray* LittleArchiveChoices() {
   _engine.target = self;
   _engine.action = @selector(engineChanged:);
   _archive = [self popup:ArchiveChoices() key:kSettingAutoArchiveHours action:@selector(archiveChanged:)];
-  _littleArchive = [self popup:LittleArchiveChoices() key:kSettingLittleArchiveHours
+  _littleArchive = [self popup:LittleArchiveChoices()
+                           key:kSettingLittleArchiveHours
                         action:@selector(littleArchiveChanged:)];
 
   NSGridView* general = [NSGridView gridViewWithViews:@[
     @[ [NSTextField labelWithString:@"Search engine:"], _engine ],
-    @[ NSGridCell.emptyContentView, [self check:@"Show search suggestions in the command bar" key:kSettingSearchSuggestions] ],
+    @[
+      NSGridCell.emptyContentView, [self check:@"Show search suggestions in the command bar"
+                                           key:kSettingSearchSuggestions]
+    ],
     @[ NSGridCell.emptyContentView, [self check:@"Block ads & trackers" key:kSettingBlockAds] ],
     @[ [NSTextField labelWithString:@"Archive Today tabs:"], _archive ],
   ]];
@@ -335,11 +366,13 @@ static NSArray* LittleArchiveChoices() {
 
   [DownloadManager shared];  // registers the folder default
   _folderLabel = [NSTextField labelWithString:[NSUserDefaults.standardUserDefaults stringForKey:kSettingDownloadFolder]
-                                                  .stringByAbbreviatingWithTildeInPath ?: @""];
+                                                      .stringByAbbreviatingWithTildeInPath
+                                                  ?: @""];
   _folderLabel.lineBreakMode = NSLineBreakByTruncatingMiddle;
   [_folderLabel.widthAnchor constraintLessThanOrEqualToConstant:260].active = YES;
   NSButton* choose = [NSButton buttonWithTitle:@"Change..." target:self action:@selector(chooseFolder:)];
-  NSGridView* downloads = [NSGridView gridViewWithViews:@[ @[ [NSTextField labelWithString:@"Download location:"], _folderLabel, choose ] ]];
+  NSGridView* downloads = [NSGridView
+      gridViewWithViews:@[ @[ [NSTextField labelWithString:@"Download location:"], _folderLabel, choose ] ]];
 
   NSStackView* stack = [NSStackView stackViewWithViews:@[
     [self heading:@"General"],
@@ -355,7 +388,8 @@ static NSArray* LittleArchiveChoices() {
     [self check:@"Play sound effects" key:kSettingSoundEffects],
     [self check:@"Haptic feedback when reordering tabs" key:kSettingReorderHaptics],
     [NSButton buttonWithTitle:@"Air Traffic Control..." target:nil action:@selector(showAirTrafficControl:)],
-    [self note:@"Rules that send links from other apps to a Space or a Little Window. Your Arc rules come over on first launch."],
+    [self note:@"Rules that send links from other apps to a Space or a Little Window. Your Arc rules come over on "
+               @"first launch."],
     little,
     [self heading:@"Downloads"],
     downloads,

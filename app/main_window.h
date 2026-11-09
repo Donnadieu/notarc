@@ -13,7 +13,10 @@ NSString* CleanLinkURL(NSString* url);
 @class Boost;
 @class EaselView;
 NSInteger UnreadCountFromTitle(NSString* title);
-NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL began);  // -1 back, 1 forward, 0 none  // "Inbox (12)" -> 12
+NSInteger SwipeDirectionForScroll(CGFloat dx,
+                                  CGFloat dy,
+                                  BOOL precise,
+                                  BOOL began);  // -1 back, 1 forward, 0 none  // "Inbox (12)" -> 12
 
 @interface MainWindowController : NSWindowController <NSWindowDelegate>
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID;
@@ -56,16 +59,16 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (IBAction)findNext:(id)sender;
 - (IBAction)findPrevious:(id)sender;
 - (IBAction)toggleDevTools:(id)sender;
-- (IBAction)copyCurrentURL:(id)sender;          // Cmd+Shift+C in Arc
+- (IBAction)copyCurrentURL:(id)sender;            // Cmd+Shift+C in Arc
 - (IBAction)copyCurrentURLAsMarkdown:(id)sender;  // Cmd+Shift+Opt+C in Arc
 - (void)findText:(NSString*)text forward:(BOOL)forward;
 @property(nonatomic, readonly) int lastFindCount;  // tests
-- (double)currentZoomLevel;                       // tests
-- (BOOL)canGoBack;                                // tests
-- (NSString*)currentURL;                          // tests
-- (BOOL)hasLiveBrowser;                           // tests: the shown tab has a web view
-- (void)startDownload:(NSString*)url;  // downloads url from the shown tab
-- (BOOL)isLoading;                                // tests: the shown tab is still loading
+- (double)currentZoomLevel;                        // tests
+- (BOOL)canGoBack;                                 // tests
+- (NSString*)currentURL;                           // tests
+- (BOOL)hasLiveBrowser;                            // tests: the shown tab has a web view
+- (void)startDownload:(NSString*)url;              // downloads url from the shown tab
+- (BOOL)isLoading;                                 // tests: the shown tab is still loading
 
 // Split view: up to 4 tabs side by side (vertical) or stacked (horizontal) in one window.
 - (IBAction)addVerticalSplit:(id)sender;    // Ctrl+Shift+=
@@ -75,9 +78,11 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (IBAction)focusPreviousPane:(id)sender;   // Ctrl+Shift+[
 - (IBAction)shareSplitView:(id)sender;
 - (IBAction)translatePage:(id)sender;
-- (BOOL)adBlockingOnForHost:(NSString*)host;          // #53
-- (void)setAdBlocking:(BOOL)on forHost:(NSString*)host;       // View > Translate Page / Show Original (#52)      // copies every pane's address
-- (NSString*)splitViewShareText;            // tests
+- (BOOL)adBlockingOnForHost:(NSString*)host;  // #53
+- (void)setAdBlocking:(BOOL)on
+              forHost:
+                  (NSString*)host;  // View > Translate Page / Show Original (#52)      // copies every pane's address
+- (NSString*)splitViewShareText;    // tests
 - (NSArray<ArcItem*>*)visiblePanesForTest;  // tests
 - (BOOL)openSplitFromText:(NSString*)text;  // 2-4 addresses, one per line -> one split
 - (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal;
@@ -86,10 +91,12 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Little Window (Arc: Little Arc): quick-look window for links from other apps (Cmd+Opt+Shift+N for a blank one).
 - (void)openLittleWindow:(NSString*)input;
 - (IBAction)newLittleWindow:(id)sender;
-- (NSUInteger)littleWindowCount;                 // tests
+- (NSUInteger)littleWindowCount;  // tests
 - (void)moveLittleWindowToMain:(NSUInteger)index;
-- (void)moveLittleWindow:(NSUInteger)index toSpaceAtIndex:(NSUInteger)spaceIndex;  // tests: its Move to Space menu  // tests: same as its "Open in NotArc" button
-- (void)closeLittleWindow:(NSUInteger)index;       // tests
+- (void)moveLittleWindow:(NSUInteger)index
+          toSpaceAtIndex:
+              (NSUInteger)spaceIndex;  // tests: its Move to Space menu  // tests: same as its "Open in NotArc" button
+- (void)closeLittleWindow:(NSUInteger)index;  // tests
 
 // Links asking for a new tab/window: Shift-click (disposition NEW_WINDOW) opens Peek from any tab, like
 // Arc's "Open a Peek window when clicking on links with Shift held"; Cmd-click and target=_blank open a
@@ -103,17 +110,17 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal before:(BOOL)before;
 - (NSUInteger)indexOfShownInSplit;  // tests
 // A split is one sidebar item (Arc does the same). Dragging a divider resizes the panes on either side.
-- (ArcItem*)splitGroupOfShown;                                   // nil when the shown tab isn't split
+- (ArcItem*)splitGroupOfShown;                                       // nil when the shown tab isn't split
 - (void)moveDivider:(NSUInteger)index toPosition:(CGFloat)position;  // position: 0-1 along the split
-- (NSUInteger)dividerCount;                                      // tests
+- (NSUInteger)dividerCount;                                          // tests
 
 // Peek: links clicked on a Pinned tab or Favorite that leave its site open in an overlay instead
 // of navigating the tab away, so the pinned page stays put.
 - (BOOL)shouldPeekFromItem:(ArcItem*)item toURL:(NSString*)url;
 - (void)openPeek:(NSString*)url;
-- (BOOL)isPeeking;              // tests
-- (void)promotePeekToTab;       // tests: same as "Open as Tab"
-- (void)closePeek;              // tests
+- (BOOL)isPeeking;         // tests
+- (void)promotePeekToTab;  // tests: same as "Open as Tab"
+- (void)closePeek;         // tests
 
 // Spaces: create, rename, delete (tabs go to the Archive), reorder, switch (Ctrl+1-9).
 - (IBAction)newSpace:(id)sender;
@@ -132,13 +139,16 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (NSUInteger)importArcHistory;
 // One button for everything that can come over from Arc today: history and extensions (logins come over on
 // each Space's first page load). Returns counts: @"history", @"extensions", @"skipped".
-- (NSDictionary<NSString*, NSNumber*>*)importEverythingFromArcInto:(NSString*)extensionsDir userData:(NSString*)userData;
+- (NSDictionary<NSString*, NSNumber*>*)importEverythingFromArcInto:(NSString*)extensionsDir
+                                                          userData:(NSString*)userData;
 - (void)offerArcImportIfFirstLaunch;  // first real launch only: "Bring everything over from Arc?"
 // File > Import Extensions from Arc: copies the Spaces' Arc extensions; they load with Chrome-style pages.
-- (NSArray*)importArcExtensionsInto:(NSString*)destination fromArcUserData:(NSString*)userData;  // File > Import History from Arc: each Space's Arc profile history; returns visits added
-- (NSArray<NSString*>*)profileDirectories;            // in display order
+- (NSArray*)importArcExtensionsInto:(NSString*)destination
+                    fromArcUserData:(NSString*)userData;  // File > Import History from Arc: each Space's Arc profile
+                                                          // history; returns visits added
+- (NSArray<NSString*>*)profileDirectories;                // in display order
 - (NSString*)nameOfProfile:(NSString*)profileDirectory;
-- (NSString*)createProfileNamed:(NSString*)name;      // returns the new profile folder
+- (NSString*)createProfileNamed:(NSString*)name;  // returns the new profile folder
 - (void)renameProfile:(NSString*)profileDirectory to:(NSString*)name;
 - (void)assignSpace:(ArcSpace*)space toProfile:(NSString*)profileDirectory;
 - (void)moveSpace:(ArcSpace*)space by:(NSInteger)delta;
@@ -152,7 +162,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (IBAction)selectTabFromMenu:(NSMenuItem*)sender;  // tag = index
 - (IBAction)nextTab:(id)sender;
 - (IBAction)switchToRecentTab:(id)sender;  // Ctrl+Tab: the most recently used other tab in this Space
-- (IBAction)pasteAndGo:(id)sender;          // clipboard URL or search text -> new Today tab
+- (IBAction)pasteAndGo:(id)sender;         // clipboard URL or search text -> new Today tab
 - (IBAction)printPage:(id)sender;
 // Focus mode: hides the sidebar and the window's title-bar buttons so only the page shows. The
 // same command (Cmd+Opt+Shift+F) leaves it; full screen is the standard macOS one (Ctrl+Cmd+F).
@@ -174,17 +184,17 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (MainWindowController*)openNewWindowShowing:(ArcItem*)item;  // nil = the current Space's last tab
 - (void)moveItemToMainWindow:(ArcItem*)item;
 + (NSUInteger)openWindowCount;
-+ (NSArray<NSDictionary*>*)windowStateList;   // other windows: Space, tab, frame
++ (NSArray<NSDictionary*>*)windowStateList;  // other windows: Space, tab, frame
 + (void)saveWindowState;
-+ (void)prepareForQuit;                        // keep the other windows for next launch
-+ (NSUInteger)savedWindowCount;                // tests
++ (void)prepareForQuit;          // keep the other windows for next launch
++ (NSUInteger)savedWindowCount;  // tests
 - (NSArray<MainWindowController*>*)restoreWindowsFromList:(NSArray<NSDictionary*>*)list;
-- (void)restoreSavedWindows;                   // after createBrowsers
+- (void)restoreSavedWindows;  // after createBrowsers
 - (BOOL)isMainWindowController;
-- (BOOL)hostsBrowserOfItem:(ArcItem*)item;  // tests
-- (BOOL)sidebarShowsItem:(ArcItem*)item;    // tests
-- (IBAction)moveShownToMainWindow:(id)sender;  // Today header button in other windows
-- (BOOL)moveToMainButtonShown;              // tests
+- (BOOL)hostsBrowserOfItem:(ArcItem*)item;                          // tests
+- (BOOL)sidebarShowsItem:(ArcItem*)item;                            // tests
+- (IBAction)moveShownToMainWindow:(id)sender;                       // Today header button in other windows
+- (BOOL)moveToMainButtonShown;                                      // tests
 - (BOOL)chromePageOfItem:(ArcItem*)item isInWindow:(NSWindow*)win;  // tests
 // AppleScript (#76): "select", "back", "forward", "reload", "stop", "close", or "loading" (returns it) for a tab.
 - (BOOL)scriptItem:(ArcItem*)item command:(NSString*)command;
@@ -194,7 +204,8 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (void)toggleCallCamera:(ArcItem*)item;
 - (BOOL)callControlsShown;  // tests
 @property(nonatomic, copy) NSDictionary<NSString*, NSArray<NSString*>*>* searchSuggestionStub;
-- (void)commandSuggestionsAfterFetch:(NSString*)text done:(void (^)(NSArray<NSDictionary*>* items))done;  // tests: query -> suggestions
+- (void)commandSuggestionsAfterFetch:(NSString*)text
+                                done:(void (^)(NSArray<NSDictionary*>* items))done;  // tests: query -> suggestions
 - (void)pictureInPicture:(BOOL)enter item:(ArcItem*)item done:(void (^)(NSString* result))done;  // #46
 - (NSView*)webViewForItem:(ArcItem*)item;
 // Import bookmarks (#80): adds the folder to the current Space's Pinned section, like Arc. Returns NO if nil.
@@ -207,7 +218,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (void)openIncognitoWindow:(NSString*)url;
 - (NSUInteger)incognitoWindowCount;  // tests
 - (BOOL)incognitoContextIsOnDisk;    // tests: NO = in-memory  // the rule editor (Settings > Links, command bar)
-- (NSWindowController*)airTrafficControlEditor;  // tests
+- (NSWindowController*)airTrafficControlEditor;        // tests
 @property(nonatomic, copy) NSString* linkRoutingPath;  // set before the first link arrives
 - (IBAction)editThemeColor:(id)sender;
 // Hover cards: resting the pointer on a sidebar tab for a moment shows a card with its title, site,
@@ -216,8 +227,8 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Media in the sidebar: tabs playing sound show a speaker; a bar at the bottom of the sidebar controls the
 // tab that is playing (or was last playing) while you look at another tab.
 - (void)toggleMuteItem:(ArcItem*)item;
-- (void)togglePlayItem:(ArcItem*)item;   // pauses playing media, or resumes media this tab paused
-- (void)pollMediaNow;                    // asks every open tab for its media state
+- (void)togglePlayItem:(ArcItem*)item;                 // pauses playing media, or resumes media this tab paused
+- (void)pollMediaNow;                                  // asks every open tab for its media state
 @property(nonatomic, readonly) ArcItem* mediaBarItem;  // tab shown in the media bar, nil when hidden
 - (IBAction)toggleMuteCurrentTab:(id)sender;
 - (void)runJS:(NSString*)js inItem:(ArcItem*)item;
@@ -227,7 +238,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Multi-select: Cmd/Shift-click selects several sidebar rows; the sidebar menu then acts on all of them.
 - (NSArray<ArcItem*>*)selectedSidebarItems;
 - (void)selectSidebarItems:(NSArray<ArcItem*>*)items;
-- (void)archiveItems:(NSArray<ArcItem*>*)items;          // Today tabs archived, pinned tabs closed (kept)
+- (void)archiveItems:(NSArray<ArcItem*>*)items;  // Today tabs archived, pinned tabs closed (kept)
 - (NSString*)linksForItems:(NSArray<ArcItem*>*)items markdown:(BOOL)markdown;
 - (ArcItem*)newFolderWithItems:(NSArray<ArcItem*>*)items;
 - (ArcItem*)newNestedFolderIn:(ArcItem*)folder;
@@ -239,7 +250,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Site prompts. Permission requests (camera, microphone, location, notifications, ...) and links that open
 // another app show a sheet; "Remember for this site" stores the answer in the sitePermissions setting.
 // Tab > Reset Site Permissions forgets them for the current site.
-@property(nonatomic, readonly) NSString* pendingSitePrompt;  // tests: kind:origin of the sheet showing, or nil
+@property(nonatomic, readonly) NSString* pendingSitePrompt;    // tests: kind:origin of the sheet showing, or nil
 - (void)answerSitePrompt:(BOOL)allow remember:(BOOL)remember;  // tests: same as clicking the sheet
 - (IBAction)resetSitePermissions:(id)sender;
 // View > Site Settings (Cmd+Shift+I): popover for the current site with its connection security, a row per
@@ -258,14 +269,15 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 @property(nonatomic, readonly) BOOL toolbarShown;
 @property(nonatomic, readonly) BOOL spaceHeaderShown;
 @property(nonatomic, readonly) NSString* toolbarAddress;  // what the address field shows
-- (void)submitToolbarAddress:(NSString*)text;            // tests: same as typing it and pressing Enter
+- (void)submitToolbarAddress:(NSString*)text;             // tests: same as typing it and pressing Enter
 @property(nonatomic, readonly) NSString* lastClosedPeekURL;
 @property(nonatomic, readonly) BOOL peekToastShown;
 // Session restore: each Space reopens on the tab it last showed. After a crash (restoreOpenTabs set
 // before createBrowsers) the tabs that had pages open are loaded again too.
 @property(nonatomic) BOOL restoreOpenTabs;
 @property(nonatomic, readonly) NSUInteger restoredTabCount;
-- (NSUInteger)liveTabCount;  // Arc: "New Nested Folder"; added at the top of the folder  // in Pinned, where the first pinned item was
+- (NSUInteger)liveTabCount;  // Arc: "New Nested Folder"; added at the top of the folder  // in Pinned, where the first
+                             // pinned item was
 - (void)loadURL:(NSString*)url inItem:(ArcItem*)item;
 - (void)sendKeyToItem:(ArcItem*)item;  // used by the self-test to trigger the hang monitor
 @property(nonatomic, readonly) ArcItem* hungItem;
@@ -276,7 +288,10 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 @property(nonatomic, readonly) NSView* themeView;  // the tint layer over the sidebar (for tests)
 // Clear Browsing Data: history and cookies from `since` on (nil = all time) in every Space's profile;
 // the HTTP cache is always cleared in full (Chromium has no time range for it).
-- (void)clearBrowsingDataSince:(NSDate*)since history:(BOOL)history cookies:(BOOL)cookies cache:(BOOL)cache
+- (void)clearBrowsingDataSince:(NSDate*)since
+                       history:(BOOL)history
+                       cookies:(BOOL)cookies
+                         cache:(BOOL)cache
                           done:(void (^)(NSUInteger historyRemoved, NSUInteger cookiesRemoved))done;
 - (IBAction)clearBrowsingData:(id)sender;
 // Arc's "Clear Cookies and Refresh": the current site's cookies and storage, then reload.
@@ -288,9 +303,9 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Pinned tabs (Arc): closing keeps the tab and returns it to its saved URL next time.
 - (void)showItem:(ArcItem*)item;
 - (BOOL)isPinnedItem:(ArcItem*)item;
-- (void)resetPinnedItem:(ArcItem*)item;            // back to the saved URL
+- (void)resetPinnedItem:(ArcItem*)item;  // back to the saved URL
 - (void)replacePinnedURLWithCurrent:(ArcItem*)item;
-- (NSUInteger)resetPinnedTabsInSpace;               // unloads and resets every changed pinned tab
+- (NSUInteger)resetPinnedTabsInSpace;  // unloads and resets every changed pinned tab
 - (IBAction)resetPinnedTab:(id)sender;
 - (IBAction)replacePinnedURL:(id)sender;
 - (IBAction)resetAllPinnedTabs:(id)sender;
@@ -298,20 +313,20 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (IBAction)clearToday:(id)sender;
 - (IBAction)focusPaneFromMenu:(NSMenuItem*)sender;  // tag = index
 - (void)selectTabAtIndex:(NSUInteger)index;
-- (BOOL)sidebarHidden;   // tests
-- (NSRect)pageCardFrame;   // tests: the rounded page card, in window content coordinates
+- (BOOL)sidebarHidden;    // tests
+- (NSRect)pageCardFrame;  // tests: the rounded page card, in window content coordinates
 - (CGFloat)pageCardRadius;
-- (NSString*)sidebarAddressText;   // tests: the site shown in the sidebar address pill
+- (NSString*)sidebarAddressText;  // tests: the site shown in the sidebar address pill
 - (NSRect)sidebarAddressFrame;
 - (NSString*)sidebarRowStyleForItem:(ArcItem*)item;  // tests: "h=36 r=8 sel=1 hover=0 alpha=0.20"
 - (void)hoverSidebarItem:(ArcItem*)item;
-- (NSArray<NSString*>*)spaceBarIcons;   // tests: one per Space, "*" marks the current one
+- (NSArray<NSString*>*)spaceBarIcons;  // tests: one per Space, "*" marks the current one
 - (void)clickSpaceBarIcon:(NSUInteger)index;
 - (void)pressSidebarItem:(ArcItem*)item down:(BOOL)down;  // tests
 - (void)toggleFolder:(ArcItem*)folder;
 - (BOOL)folderExpanded:(ArcItem*)folder;
-- (NSString*)folderChevronForItem:(ArcItem*)folder;       // tests
-- (BOOL)stockDisclosureShown;                             // tests
+- (NSString*)folderChevronForItem:(ArcItem*)folder;  // tests
+- (BOOL)stockDisclosureShown;                        // tests
 - (NSString*)commandBarStyle;
 // Boosts
 - (IBAction)editBoost:(id)sender;
@@ -319,7 +334,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (IBAction)toggleBoost:(id)sender;
 - (Boost*)boostForURL:(NSString*)url;
 - (Boost*)setBoostForHost:(NSString*)host configure:(void (^)(Boost* b))configure;  // tests
-- (void)deleteBoostForHost:(NSString*)host;                                        // tests
+- (void)deleteBoostForHost:(NSString*)host;                                         // tests
 - (void)handleZapSelector:(NSString*)selector browser:(int)browserId;               // tests
 - (NSUInteger)savedBoostCount;                                                      // tests
 - (IBAction)shuffleBoost:(id)sender;
@@ -328,9 +343,13 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (ArcItem*)createLiveFolderKind:(NSString*)kind source:(NSString*)source title:(NSString*)title;
 - (void)refreshLiveFolder:(ArcItem*)folder done:(void (^)(BOOL ok))done;
 - (BOOL)dismissLiveFolderTab:(ArcItem*)item;
-- (void)deleteSidebarItem:(ArcItem*)item;  // tests
+- (void)deleteSidebarItem:(ArcItem*)item;      // tests
 - (BOOL)writeSidebarSnapshot:(NSString*)path;  // design checks
-- (void)setTestCookie:(NSString*)name value:(NSString*)value url:(NSString*)url session:(BOOL)session done:(void (^)(BOOL ok))done;  // tests
+- (void)setTestCookie:(NSString*)name
+                value:(NSString*)value
+                  url:(NSString*)url
+              session:(BOOL)session
+                 done:(void (^)(BOOL ok))done;                                                // tests
 - (void)testCookieNamesForURL:(NSString*)url done:(void (^)(NSArray<NSString*>* names))done;  // tests
 // Easels
 - (IBAction)newEasel:(id)sender;
@@ -341,9 +360,12 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 - (IBAction)captureFullPage:(id)sender;
 - (IBAction)capturePortrait:(id)sender;
 - (IBAction)addLastCaptureToEasel:(id)sender;
-- (void)capture:(NSString*)mode rect:(NSRect)rect done:(void (^)(NSData* png))done;  // "visible", "full", "portrait", "area"
-- (NSString*)deliverCapture:(NSData*)png;  // returns the saved path
-@property(nonatomic, copy) NSString* captureDirectory;  // tests: a scratch folder (also switches to a private pasteboard)
+- (void)capture:(NSString*)mode
+           rect:(NSRect)rect
+           done:(void (^)(NSData* png))done;  // "visible", "full", "portrait", "area"
+- (NSString*)deliverCapture:(NSData*)png;     // returns the saved path
+@property(nonatomic, copy)
+    NSString* captureDirectory;  // tests: a scratch folder (also switches to a private pasteboard)
 - (IBAction)addEaselText:(id)sender;
 - (void)easelDidChange:(EaselView*)easel;
 - (ArcItem*)createEaselWithID:(NSString*)easelID;
@@ -352,27 +374,28 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Notes
 - (IBAction)newNote:(id)sender;
 - (ArcItem*)createNoteWithID:(NSString*)noteID;
-- (void)typeInNote:(NSString*)text;                   // tests
-- (NSString*)noteEditorText;                          // tests: nil when the editor is hidden
-- (NSString*)savedNoteText:(ArcItem*)note;            // tests
-- (void)makeNoteRangeBold:(NSRange)r;                 // tests
-- (BOOL)noteRangeIsBold:(ArcItem*)note range:(NSRange)r;  // tests
-- (NSString*)boostIndicatorState;                                                   // tests: on/off/none
+- (void)typeInNote:(NSString*)text;                                  // tests
+- (NSString*)noteEditorText;                                         // tests: nil when the editor is hidden
+- (NSString*)savedNoteText:(ArcItem*)note;                           // tests
+- (void)makeNoteRangeBold:(NSRange)r;                                // tests
+- (BOOL)noteRangeIsBold:(ArcItem*)note range:(NSRange)r;             // tests
+- (NSString*)boostIndicatorState;                                    // tests: on/off/none
 - (void)setColorScheme:(NSString*)scheme forSpace:(ArcSpace*)space;  // nil/"auto", "light", "dark"
-- (BOOL)sidebarIsDark;                       // tests
-- (BOOL)defaultThemeShown;                   // tests: Arc's default indigo is behind an unthemed Space
-- (NSArray<NSString*>*)favoriteTileTitles;   // tests
+- (BOOL)sidebarIsDark;                                               // tests
+- (BOOL)defaultThemeShown;                     // tests: Arc's default indigo is behind an unthemed Space
+- (NSArray<NSString*>*)favoriteTileTitles;     // tests
 - (NSMenu*)sidebarMenuForItem:(ArcItem*)item;  // tests
-- (BOOL)swipeNavigationInstalled;  // tests
-- (NSRect)favoritesGridFrame;                // tests
-- (NSRect)spaceHeaderFrame;                  // tests
-- (NSString*)lastSpaceSlide;   // tests
-- (NSUInteger)cardPopCount;    // tests
+- (BOOL)swipeNavigationInstalled;              // tests
+- (NSRect)favoritesGridFrame;                  // tests
+- (NSRect)spaceHeaderFrame;                    // tests
+- (NSString*)lastSpaceSlide;                   // tests
+- (NSUInteger)cardPopCount;                    // tests
 - (void)showCommandBarForNewTab:(BOOL)newTab;
-- (void)hideCommandBar;               // tests
-- (NSString*)spaceHeaderText;               // tests: Space title row text
-- (NSArray<NSString*>*)spaceMenuTitles;     // tests: the Space "..." menu              // tests: show the hover state on a row (nil clears)    // tests: pill frame in window coordinates
-- (ArcItem*)shownItem;   // tests
+- (void)hideCommandBar;                  // tests
+- (NSString*)spaceHeaderText;            // tests: Space title row text
+- (NSArray<NSString*>*)spaceMenuTitles;  // tests: the Space "..." menu              // tests: show the hover state on a
+                                         // row (nil clears)    // tests: pill frame in window coordinates
+- (ArcItem*)shownItem;                   // tests
 
 // Little Windows not focused for the "Archive Little Windows" setting are closed (and archived).
 - (NSUInteger)archiveIdleLittleWindowsAt:(NSDate*)now;
@@ -392,7 +415,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Archive (Arc: auto-archive of Today tabs + Cmd+Shift+T style reopen).
 @property(nonatomic, copy) NSString* archivePath;
 @property(nonatomic, copy) NSDictionary<NSString*, NSString*>* arcHistoryOverride;  // tests: profile -> fake History DB
-@property(nonatomic, copy) NSString* historyPath;  // set before the first page loads
+@property(nonatomic, copy) NSString* historyPath;                                   // set before the first page loads
 - (IBAction)showHistory:(id)sender;
 - (IBAction)clearHistory:(id)sender;
 - (NSArray<ArchivedTab*>*)historyVisits;

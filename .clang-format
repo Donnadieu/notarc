@@ -1,0 +1,13 @@
+---
+# NotArc is Objective-C++ on top of CEF/Chromium; base the style on Chromium's
+# own .clang-format (2-space indent, pointer-left alignment) but raise the
+# column limit to match code already written at ~100-130 columns, so this
+# first pass doesn't rewrap most of the existing tree.
+BasedOnStyle: Chromium
+ColumnLimit: 120
+SortIncludes: false
+AllowShortIfStatementsOnASingleLine: WithoutElse
+AllowShortBlocksOnASingleLine: Always
+AllowShortLoopsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: All
+AllowShortCaseLabelsOnASingleLine: true

@@ -1,0 +1,95 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  lint:
+    name: Format, ratchet, Keychain scope
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install clang-format
+        run: sudo apt-get update && sudo apt-get install -y clang-format
+
+      - name: clang-format check
+        run: scripts/lint/check-format.sh $(git ls-files 'app/*.mm' 'app/*.h' 'app/*.cc')
+
+      - name: File-length ratchet
+        run: scripts/lint/file-length-ratchet.sh
+
+      - name: File-length ratchet did not regress vs origin/main
+        if: github.event_name == 'pull_request'
+        run: scripts/lint/file-length-ratchet.sh --verify-base origin/main
+
+      - name: File-length ratchet canary (proves the check blocks)
+        run: scripts/lint/file-length-ratchet.sh --prove
+
+      - name: Keychain-scope check
+        run: python3 scripts/lint/check-keychain-scope.py
+
+      - name: Keychain-scope canary (proves the check blocks)
+        run: python3 scripts/lint/check-keychain-scope.py --prove
+
+  build-and-selftest:
+    name: Build + --selftest (macOS arm64)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Cache CEF distribution
+        uses: actions/cache@v4
+        with:
+          path: third_party/std
+          # The cache key is the CEF pin baked into scripts/fetch-cef.sh; bump
+          # that script's CEF_VERSION/CEF_SHA1 to invalidate this cache.
+          key: cef-macosarm64-${{ hashFiles('scripts/fetch-cef.sh') }}
+
+      - name: Fetch CEF
+        run: scripts/fetch-cef.sh
+
+      - name: Install ninja
+        run: brew install ninja
+
+      - name: Configure
+        run: cmake -G Ninja -DCMAKE_BUILD_TYPE=Release -S . -B build
+
+      - name: Build
+        run: ninja -C build
+
+      - name: Run --selftest
+        run: scripts/run-selftest.sh build/Release/NotArc.app 600
+
+      # WHY one job instead of a second macOS workflow: a separate
+      # updater-canary workflow needs its own macOS runner and its own
+      # CEF-fetch-and-build, and this account's macOS runner concurrency is
+      # low enough that two macOS jobs from the same PR can starve each
+      # other (observed: a separate updater-canary job sat queued for its
+      # full run and was cancelled with zero billable minutes while this job
+      # ran). Reusing this job's already-built app avoids both problems.
+      - name: Check if updater/session-restore inputs changed
+        id: updater-changed
+        if: github.event_name == 'pull_request'
+        run: |
+          base="${{ github.event.pull_request.base.sha }}"
+          paths='app/updater.mm app/updater.h app/sidebar_store.mm app/sidebar_store.h app/archive_store.mm app/archive_store.h scripts/test-update.sh scripts/test-session-restore.sh scripts/make-test-home.py scripts/fetch-cef.sh CMakeLists.txt'
+          if git diff --name-only "$base" HEAD -- $paths | grep -q .; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: scripts/test-update.sh
+        if: steps.updater-changed.outputs.changed == 'true'
+        run: scripts/test-update.sh build/Release/NotArc.app
+
+      - name: scripts/test-session-restore.sh
+        if: steps.updater-changed.outputs.changed == 'true'
+        run: scripts/test-session-restore.sh build/Release/NotArc.app

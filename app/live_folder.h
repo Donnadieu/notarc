@@ -13,7 +13,9 @@ NSString* LiveFolderFetchURL(NSString* kind, NSString* source);
 // Parses a fetched response; nil if it can't be read. At most `limit` entries, newest first as served.
 NSArray<LiveFolderEntry*>* LiveFolderParse(NSString* kind, NSData* data, NSUInteger limit);
 // Fetches and parses; calls back on the main queue with entries or an error message.
-void LiveFolderFetch(NSString* kind, NSString* source, NSUInteger limit,
+void LiveFolderFetch(NSString* kind,
+                     NSString* source,
+                     NSUInteger limit,
                      void (^done)(NSArray<LiveFolderEntry*>* entries, NSString* error));
 // Turns user input ("github.com/owner/repo", "owner/repo", a feed URL) into kind + source; nil if unusable.
 NSDictionary* LiveFolderSourceFromInput(NSString* input, BOOL issues);
