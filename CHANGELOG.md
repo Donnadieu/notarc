@@ -3,6 +3,10 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- The parity checklist is up to date with 0.23.0, with an Out of scope section and docs/decisions.md for every
+  scope call.
+
 ## 0.23.0
 - File > Import History...: brings your browsing history from Chrome, Brave, Edge, Vivaldi, Chromium, Firefox or Safari
   (Safari needs Full Disk Access for NotArc) into History
