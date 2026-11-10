@@ -12,6 +12,7 @@
 #import "app/global_hotkey.h"
 #import "app/email_peek.h"
 #import "app/visual_shots.h"
+#import "app/library_panel.h"
 #import "app/web_notifications.h"
 #import "app/calendar_preview.h"
 #import "app/main_window_max.h"
@@ -2872,6 +2873,17 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                       [style containsString:@"divider=1"] && [style containsString:@"placeholder=Search or Enter URL..."] &&
                       [style containsString:@"cell=NSTableCellView"];
         if (!styled) std::printf("SELFTEST-CMDSTYLE-DEBUG %s\n", style.UTF8String);
+        {  // Visual parity V5: Arc's big centred bar: opaque card, 20 pt input, 40 pt rows, Return's action on the pill.
+          BOOL card = [style containsString:@"card=CommandCardView"] && [style containsString:@"font=20"] &&
+                      [style containsString:@"row=40"];
+          BOOL centred = [style hasSuffix:@"centred=1"];
+          BOOL hint = ![style containsString:@"hint=-"];
+          NSRange wr = [style rangeOfString:@"width="];
+          double width = wr.location == NSNotFound ? 0 : [[style substringFromIndex:wr.location + 6] doubleValue];
+          BOOL wide = width >= 420 && width <= 680;
+          std::printf("SELFTEST-CMDBARLOOK card=%d centred=%d hint=%d wide=%d\n", card, centred, hint, wide);
+          if (!card || !centred || !hint || !wide) std::printf("SELFTEST-CMDBARLOOK-DEBUG %s\n", style.UTF8String);
+        }
         std::printf("SELFTEST-SUGGEST goFirst=%d tab=%d space=%d action=%d history=%d topSites=%d switched=%d learned=%d "
                     "styled=%d\n", first, tab, space, action, history, top, switched, learned, styled);
       });
@@ -4534,6 +4546,32 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                   (unsigned long)[w archiveWindowCountForQuery:@""],
                   (unsigned long)[w archiveWindowCountForQuery:@"github"],
                   (unsigned long)[w archiveWindowCountForQuery:@"zzqqxx-no-such-tab"]);
+      {  // Visual parity V4: Archive opens inside the sidebar (no window), grouped by day, with search; Back closes it.
+        NSUInteger windowsBefore = NSApp.windows.count;
+        ArcItem* shownBefore = w.shownItem;
+        [w showArchive:nil];
+        BOOL inSidebar = w.libraryShown && NSApp.windows.count == windowsBefore;
+        NSString* style = w.libraryStyle;
+        BOOL look = [style containsString:@"search=32 radius=8 row=41"] && [style hasSuffix:@"placeholder=Search Archive"];
+        NSArray* groups = w.libraryGroupTitles;
+        NSCalendar* cal = NSCalendar.currentCalendar;
+        NSDate* now = [NSDate date];
+        BOOL grouping = [ArchiveGroupTitle(now, now, cal) isEqualToString:@"Today"] &&
+                        [ArchiveGroupTitle([now dateByAddingTimeInterval:-86400 * 1.0], now, cal) isEqualToString:@"Yesterday"] &&
+                        [ArchiveGroupTitle([now dateByAddingTimeInterval:-86400 * 10.0], now, cal) isEqualToString:@"Last Week"] &&
+                        ArchiveGroupTitle([now dateByAddingTimeInterval:-86400 * 400.0], now, cal).length > 5 &&
+                        (groups.count == 0 || [groups.firstObject length] > 0);
+        [w hideLibrary];
+        BOOL closed = !w.libraryShown && w.shownItem == shownBefore;
+        [w showArchive:nil];
+        ArcSpace* home = w.currentSpace;
+        [w switchToSpace:w.spaces.lastObject == home ? w.spaces.firstObject : w.spaces.lastObject];
+        BOOL closedBySpace = !w.libraryShown;
+        [w switchToSpace:home];
+        std::printf("SELFTEST-ARCHIVEPANEL inSidebar=%d look=%d grouping=%d closed=%d closedBySpace=%d\n", inSidebar, look, grouping,
+                    closed, closedBySpace);
+        if (!look) std::printf("SELFTEST-ARCHIVEPANEL-DEBUG %s\n", style.UTF8String);
+      }
       [w saveSidebarNow];
     });
   }

@@ -12,6 +12,12 @@ or later. From 0.5.0 on, NotArc updates itself.
 - The mini player is now Arc's card: the artwork (or the site's icon), what's playing and the artist or site on two
   lines, and back, play/pause and forward when the site supports them; mute shows while the pointer is over it.
   Running clocks in page titles, like "brain.fm (2:52)", are left out.
+- Archive opens inside the sidebar, as in Arc, instead of a separate table window: a search field and your
+  archived tabs grouped by day (Today, Yesterday, weekdays, Last Week, then months), each a normal tab row with the
+  time it was archived. Click one to bring it back; Back, Esc or picking a Space closes it.
+- The command bar is Arc's big centred bar: an opaque card about a fifth of the way down the window, a 20 pt input
+  with a search icon, 40 pt rows with each site's own icon, and what Return will do ("Switch to Tab", "Open",
+  "Search") on the selected row.
 
 ## 0.26.1
 - The Dock shows NotArc's own icon (the gold "¬" on indigo, the same one Finder shows) instead of a colourway from

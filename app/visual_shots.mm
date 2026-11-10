@@ -4,6 +4,7 @@
 #include <dlfcn.h>
 #include <objc/runtime.h>
 #include <cstdio>
+#include <initializer_list>
 #include <string>
 
 #import "app/arc_import.h"
@@ -26,8 +27,10 @@ BOOL VisualShotsRequested(int argc, char* argv[], NSString** planPath) {
 static NSRect PassThroughConstrain(id, SEL, NSRect r, NSScreen*) { return r; }
 
 void VisualShotsPrepareWindow(NSWindow* window) {
-  class_replaceMethod(window.class, @selector(constrainFrameRect:toScreen:), (IMP)PassThroughConstrain,
-                      "{CGRect={CGPoint=dd}{CGSize=dd}}@:{CGRect={CGPoint=dd}{CGSize=dd}}@");
+  // Every window class, before any panel is first placed (a panel's first frame would otherwise land on a screen).
+  for (Class k : {NSWindow.class, NSPanel.class, window.class})
+    class_replaceMethod(k, @selector(constrainFrameRect:toScreen:), (IMP)PassThroughConstrain,
+                        "{CGRect={CGPoint=dd}{CGSize=dd}}@:{CGRect={CGPoint=dd}{CGSize=dd}}@");
   [window setFrame:NSMakeRect(kOffscreen, kOffscreen, gSize.width, gSize.height) display:NO];
 }
 
@@ -174,6 +177,9 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
       SettingSetBool(args[0], args[1].boolValue);
     } else if ([cmd isEqual:@"cmdbar"] || [cmd isEqual:@"cmdbar-current"]) {
       [c showCommandBarForNewTab:[cmd isEqual:@"cmdbar"]];
+      // The first time a panel is ordered in, macOS moves it onto a screen; lay it out again, now that it's up.
+      SEL relayout = NSSelectorFromString(@"refreshSuggestions");
+      if ([c respondsToSelector:relayout]) ((void (*)(id, SEL))[c methodForSelector:relayout])(c, relayout);
       if ([cmd isEqual:@"cmdbar"] && arg.length) {
         NSTextField* f = [c valueForKey:@"_commandField"];
         f.stringValue = arg;
@@ -188,6 +194,10 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
         val = e.reason;
       }
       std::printf("VISUAL kv %s = %s\n", arg.UTF8String, [val description].UTF8String ?: "nil");
+    } else if ([cmd isEqual:@"windows"]) {  // list every window (debugging renders)
+      for (NSWindow* w in NSApp.windows)
+        std::printf("VISUAL window %s visible=%d alpha=%.2f frame=%s child=%d\n", NSStringFromClass(w.class).UTF8String, w.isVisible,
+                    w.alphaValue, NSStringFromRect(w.frame).UTF8String, w.parentWindow != nil);
     } else if ([cmd isEqual:@"close-cmdbar"]) {
       [c hideCommandBar];
     } else if ([cmd isEqual:@"shot"]) {

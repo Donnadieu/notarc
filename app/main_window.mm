@@ -5,6 +5,7 @@
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
 #import "app/archive_window.h"
+#import "app/library_panel.h"
 #import "app/arc_history.h"
 #import "app/chrome_page.h"
 #import "app/arc_extensions.h"
@@ -151,7 +152,7 @@ static NSString* HexFromColor(NSColor* c) {
 }
 
 static const CGFloat kToolbarHeight = 38;
-static const CGFloat kSuggestionRow = 34;
+static const CGFloat kSuggestionRow = 40;  // Arc: 40 pt rows under a 60 pt input row
 static const NSUInteger kMaxSuggestions = 8;
 
 // Data source for the command bar's suggestion list (kept separate from the sidebar's outline delegate).
@@ -167,8 +168,26 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
 - (BOOL)isEmphasized { return YES; }
 @end
 
+// Arc's command bar card: an opaque rounded panel (not see-through glass), hairline edge, deep shadow from the window.
+@interface CommandCardView : NSView
+@end
+@implementation CommandCardView
+- (BOOL)wantsUpdateLayer { return YES; }
+- (void)updateLayer {
+  BOOL dark = [self.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
+              NSAppearanceNameDarkAqua;
+  self.layer.cornerRadius = 14;
+  self.layer.masksToBounds = YES;
+  self.layer.backgroundColor = (dark ? [NSColor colorWithSRGBRed:0.137 green:0.137 blue:0.149 alpha:1]
+                                     : [NSColor colorWithSRGBRed:0.988 green:0.988 blue:0.992 alpha:1]).CGColor;
+  self.layer.borderWidth = 1;
+  self.layer.borderColor = (dark ? [NSColor colorWithWhite:1 alpha:0.10] : [NSColor colorWithWhite:0 alpha:0.08]).CGColor;
+}
+@end
+
 @interface CommandSuggestionList : NSObject <NSTableViewDataSource, NSTableViewDelegate>
 @property(nonatomic, copy) NSArray<NSDictionary*>* items;
+@property(nonatomic, copy) NSImage* (^iconForSuggestion)(NSDictionary* s);  // site icon for tabs, history, top sites
 @end
 @implementation CommandSuggestionList
 - (NSInteger)numberOfRowsInTableView:(NSTableView*)t { return (NSInteger)self.items.count; }
@@ -180,20 +199,27 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
   if (!cell) {
     cell = [[NSTableCellView alloc] initWithFrame:NSMakeRect(0, 0, c.width, kSuggestionRow - 2)];
     cell.identifier = @"cmd";
-    NSImageView* icon = [[NSImageView alloc] initWithFrame:NSMakeRect(12, 8, 16, 16)];
+    NSImageView* icon = [[NSImageView alloc] initWithFrame:NSMakeRect(12, 11, 16, 16)];
+    icon.imageScaling = NSImageScaleProportionallyUpOrDown;
     icon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:13 weight:NSFontWeightRegular];
     [cell addSubview:icon];
     cell.imageView = icon;
     NSTextField* title = [NSTextField labelWithString:@""];
     title.lineBreakMode = NSLineBreakByTruncatingTail;
-    title.frame = NSMakeRect(38, 7, c.width - 50, 18);
+    title.frame = NSMakeRect(40, 10, c.width - 52, 18);
     title.autoresizingMask = NSViewWidthSizable;
     [cell addSubview:title];
     cell.textField = title;
+    NSTextField* hint = [NSTextField labelWithString:@""];  // Arc: what Return does, on the selected row
+    hint.tag = 3;
+    hint.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+    hint.alignment = NSTextAlignmentRight;
+    hint.autoresizingMask = NSViewMinXMargin;
+    [cell addSubview:hint];
   }
-  static NSDictionary* kinds = @{ @"go" : @"Go", @"tab" : @"Switch to Tab", @"space" : @"Space", @"history" : @"History",
-                                  @"action" : @"Action", @"site" : @"Top Site", @"search" : @"Search",
-                                  @"chatgpt" : @"chatgpt.com" };
+  static NSDictionary* kinds = @{ @"go" : @"Open", @"tab" : @"Switch to Tab", @"space" : @"Switch Space", @"history" : @"Open",
+                                  @"action" : @"Run", @"site" : @"Open", @"search" : @"Search",
+                                  @"chatgpt" : @"Ask ChatGPT" };
   static NSDictionary* icons = @{ @"go" : @"magnifyingglass", @"tab" : @"square.on.square", @"space" : @"square.stack",
                                   @"history" : @"clock", @"action" : @"command", @"site" : @"globe",
                                   @"search" : @"magnifyingglass", @"chatgpt" : @"bubble.left.and.text.bubble.right" };
@@ -204,14 +230,21 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
       initWithString:s[@"title"] ?: @""
           attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:14 weight:NSFontWeightMedium], NSForegroundColorAttributeName : primary}];
   NSString* sub = [s[@"subtitle"] length] ? [@"  —  " stringByAppendingString:s[@"subtitle"]] : @"";
-  NSString* kind = kinds[s[@"kind"]];
-  if (kind.length) sub = [sub stringByAppendingFormat:@"  ·  %@", kind];
   [a appendAttributedString:[[NSAttributedString alloc] initWithString:sub
-                                                            attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:12],
+                                                            attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:13],
                                                                          NSForegroundColorAttributeName : secondary}]];
   cell.textField.attributedStringValue = a;
-  cell.imageView.image = [NSImage imageWithSystemSymbolName:icons[s[@"kind"]] ?: @"globe" accessibilityDescription:nil];
-  cell.imageView.contentTintColor = sel ? NSColor.whiteColor : secondary;
+  NSTextField* hint = [cell viewWithTag:3];
+  NSString* kind = s[@"kind"];
+  if ([kind isEqual:@"go"] && [s[@"subtitle"] isEqual:@"Search"]) kind = @"search";
+  hint.stringValue = sel ? (kinds[kind] ?: @"") : @"";
+  hint.textColor = [NSColor colorWithWhite:1 alpha:0.75];
+  CGFloat hw = hint.stringValue.length ? ceil(hint.attributedStringValue.size.width) + 4 : 0;
+  hint.frame = NSMakeRect(cell.bounds.size.width - 14 - hw, 11, hw, 16);
+  cell.textField.frame = NSMakeRect(40, 10, cell.bounds.size.width - 52 - (hw ? hw + 12 : 0), 18);
+  NSImage* site = self.iconForSuggestion ? self.iconForSuggestion(s) : nil;
+  cell.imageView.image = site ?: [NSImage imageWithSystemSymbolName:icons[s[@"kind"]] ?: @"globe" accessibilityDescription:nil];
+  cell.imageView.contentTintColor = sel ? NSColor.whiteColor : [NSColor.labelColor colorWithAlphaComponent:0.55];
   return cell;
 }
 - (NSTableRowView*)tableView:(NSTableView*)t rowViewForRow:(NSInteger)row { return [CommandRowView new]; }
@@ -976,11 +1009,16 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   CommandSuggestionList* _suggestionList;
   NSBox* _commandDivider;
   NSTextField* _commandField;
+  NSImageView* _commandIcon;
   BOOL _commandOpensNewTab;
   BOOL _saveScheduled;
   NSMutableArray<ArchivedTab*>* _archive;
   NSTimer* _archiveTimer;
   ArchiveWindowController* _archiveWindow;
+  LibraryPanelView* _library;  // the sidebar's Library panel (Archive), nil until first opened
+  BOOL _libraryShown;
+  NSButton* _libraryButton;
+  __weak NSResponder* _responderBeforeLibrary;
   ArchiveWindowController* _historyWindow;
   HistoryStore* _history;
   BOOL _focusMode;
@@ -1395,6 +1433,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   lib.toolTip = @"Archive";
   lib.contentTintColor = NSColor.secondaryLabelColor;
   lib.frame = NSMakeRect(2, 2, 26, 26);
+  _libraryButton = lib;
   [_spaceBar addSubview:lib];
   NSButton* plus = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"plus" accessibilityDescription:@"New"]
                                       target:self action:@selector(showNewMenu:)];
@@ -1474,6 +1513,14 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _meetingBar.frame = mf;
   if (!_meetingBar.hidden) bottom += 40;
   _sidebarScroll.frame = NSMakeRect(8, bottom, w, MAX(0, H - top - bottom));
+  // The Library takes the place of Favorites, the Space title and the tabs, between the address pill and the bars.
+  _library.hidden = !_libraryShown;
+  if (_libraryShown) {
+    _library.frame = NSMakeRect(8, bottom, w, MAX(0, H - 90 - bottom));
+    _favGrid.hidden = YES;
+  }
+  _sidebarScroll.hidden = _libraryShown;
+  _spaceHeader.alphaValue = _libraryShown ? 0 : 1;
 }
 
 - (void)updateFavoritesGrid {
@@ -7026,6 +7073,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (NSUInteger)cardPopCount { return _cardPops; }
 
 - (void)switchToSpace:(ArcSpace*)space {
+  [self hideLibrary];  // the Library closes when you pick a Space, as with Back
   if (!space || space == _space) return;
   [_extensionPopup closeBecause:@"space"];  // the popup runs in the old Space's profile
   NSUInteger from = _space ? [_spaces indexOfObject:_space] : 0, to = [_spaces indexOfObject:space];
@@ -8269,13 +8317,9 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
     _commandBar.backgroundColor = NSColor.clearColor;
     _commandBar.opaque = NO;
     _commandBar.hasShadow = YES;
-    // Rounded translucent card, as in Arc, with a hairline (CommandBarHairlineDividerColor) under the field.
-    NSVisualEffectView* card = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0, 0, 640, 52)];
-    card.material = NSVisualEffectMaterialPopover;
-    card.state = NSVisualEffectStateActive;
+    // Arc's command bar: a large opaque card floating over the page, with a hairline under the input row.
+    CommandCardView* card = [[CommandCardView alloc] initWithFrame:NSMakeRect(0, 0, 640, 60)];
     card.wantsLayer = YES;
-    card.layer.cornerRadius = 12;
-    card.layer.masksToBounds = YES;
     card.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [_commandBar.contentView addSubview:card];
     _commandDivider = [[NSBox alloc] initWithFrame:NSMakeRect(0, 0, 640, 1)];
@@ -8283,14 +8327,31 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
     _commandDivider.borderWidth = 0;
     _commandDivider.fillColor = [NSColor.labelColor colorWithAlphaComponent:0.10];
     [_commandBar.contentView addSubview:_commandDivider];
-    _commandField = [[NSTextField alloc] initWithFrame:NSMakeRect(12, 10, 616, 32)];
-    _commandField.font = [NSFont systemFontOfSize:18];
+    _commandIcon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"magnifyingglass" accessibilityDescription:nil]];
+    _commandIcon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:16 weight:NSFontWeightMedium];
+    _commandIcon.contentTintColor = [NSColor.labelColor colorWithAlphaComponent:0.33];
+    [_commandBar.contentView addSubview:_commandIcon];
+    _commandField = [[NSTextField alloc] initWithFrame:NSMakeRect(48, 17, 576, 26)];
+    _commandField.font = [NSFont systemFontOfSize:20];
     _commandField.bezeled = NO;
     _commandField.focusRingType = NSFocusRingTypeNone;
     _commandField.drawsBackground = NO;
     _commandField.delegate = self;
     [_commandBar.contentView addSubview:_commandField];
     _suggestionList = [CommandSuggestionList new];
+    __weak MainWindowController* weakCmd = self;
+    _suggestionList.iconForSuggestion = ^NSImage*(NSDictionary* s) {
+      MainWindowController* me = weakCmd;
+      ArcItem* item = [s[@"item"] isKindOfClass:ArcItem.class] ? s[@"item"] : nil;
+      NSString* url = [s[@"url"] isKindOfClass:NSString.class] ? s[@"url"] : nil;
+      if (!me || (!item && !url.length)) return nil;
+      if (!item) {
+        item = [ArcItem new];
+        item.url = url;
+      }
+      NSImage* img = [me iconImageForItem:item];
+      return img.isTemplate ? nil : img;  // no saved icon: the row keeps its kind symbol
+    };
     _suggestionTable = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 640, 0)];
     NSTableColumn* col = [[NSTableColumn alloc] initWithIdentifier:@"s"];
     col.width = 620;
@@ -8323,10 +8384,18 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
 - (NSString*)commandBarStyle {  // tests
   NSColor* c = [CommandSelectedColor() colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
   NSTableRowView* rv = _suggestionTable.numberOfRows ? [_suggestionTable rowViewAtRow:0 makeIfNecessary:YES] : nil;
-  return [NSString stringWithFormat:@"sel=%02X%02X%02X rowClass=%@ divider=%d placeholder=%@ cell=%@", (int)lround(c.redComponent * 255),
-                                    (int)lround(c.greenComponent * 255), (int)lround(c.blueComponent * 255),
-                                    NSStringFromClass(rv.class), !_commandDivider.hidden, _commandField.placeholderString,
-                                    NSStringFromClass([[_suggestionTable viewAtColumn:0 row:0 makeIfNecessary:YES] class])];
+  NSTableCellView* first = _suggestionTable.numberOfRows ? [_suggestionTable viewAtColumn:0 row:0 makeIfNecessary:YES] : nil;
+  NSTextField* hint = [first viewWithTag:3];
+  NSRect bf = _commandBar.frame, wf = self.window.frame;
+  BOOL centred = fabs(NSMidX(bf) - NSMidX(wf)) <= 1 && NSMaxY(wf) - NSMaxY(bf) >= 80;
+  NSView* card = _commandBar.contentView.subviews.firstObject;
+  return [NSString stringWithFormat:@"sel=%02X%02X%02X rowClass=%@ divider=%d placeholder=%@ cell=%@ width=%.0f font=%.0f card=%@ "
+                                    @"row=%.0f hint=%@ centred=%d",
+                                    (int)lround(c.redComponent * 255), (int)lround(c.greenComponent * 255),
+                                    (int)lround(c.blueComponent * 255), NSStringFromClass(rv.class), !_commandDivider.hidden,
+                                    _commandField.placeholderString, NSStringFromClass(first.class), NSWidth(bf),
+                                    _commandField.font.pointSize, NSStringFromClass(card.class), kSuggestionRow,
+                                    hint.stringValue.length ? hint.stringValue : @"-", centred];
 }
 // Search suggestions (#31): the engine's own suggestions for what is typed, fetched shortly after typing stops.
 // Not sent from Incognito, for URLs being typed, or when turned off in Settings.
@@ -8393,14 +8462,21 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
   _suggestionList.items = [self commandSuggestionsFor:_commandField.stringValue];
   [_suggestionTable reloadData];
   if (_suggestionList.items.count) [_suggestionTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
-  CGFloat listH = _suggestionList.items.count * kSuggestionRow + (_suggestionList.items.count ? 8 : 0);
-  CGFloat h = 52 + listH;
+  // Arc: centred over the window, about a fifth of the way down; up to 680 pt wide; 60 pt input row with a 20 pt
+  // font, then 40 pt rows with 8 pt of padding.
+  CGFloat listH = _suggestionList.items.count * kSuggestionRow + (_suggestionList.items.count ? 16 : 0);
+  CGFloat h = 60 + listH;
   NSRect f = self.window.frame;
-  [_commandBar setFrame:NSMakeRect(NSMidX(f) - 320, NSMaxY(f) - 168 - h, 640, h) display:YES];
-  _commandField.frame = NSMakeRect(12, h - 42, 616, 32);
-  _suggestionScroll.frame = NSMakeRect(6, 4, 628, listH);
+  CGFloat W = MIN(680, MAX(420, f.size.width - 80));
+  CGFloat top = NSMaxY(f) - MAX(80, round(f.size.height * 0.18));
+  [_commandBar setFrame:NSMakeRect(round(NSMidX(f) - W / 2), top - h, W, h) display:YES];
+  _commandIcon.frame = NSMakeRect(18, h - 40, 20, 20);
+  _commandIcon.contentTintColor = [NSColor colorWithWhite:IsDark(_commandBar.contentView) ? 1 : 0 alpha:0.33];
+  _commandField.frame = NSMakeRect(48, h - 43, W - 48 - 16, 26);
+  _suggestionScroll.frame = NSMakeRect(8, 8, W - 16, MAX(0, listH - 16));
+  _suggestionTable.tableColumns.firstObject.width = W - 16;
   _suggestionScroll.hidden = listH == 0;
-  _commandDivider.frame = NSMakeRect(0, h - 52, 640, 1);
+  _commandDivider.frame = NSMakeRect(0, h - 60, W, 1);
   _commandDivider.hidden = listH == 0;
 }
 
@@ -9686,19 +9762,66 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
       [self applyTheme];
     }
   [self openInNewTab:tab.url];
-  [_archiveWindow reload];
+  [_library reload];
 }
 
+// Arc: the Library button opens Archive inside the sidebar, in place of the Space's tabs; again closes it.
 - (IBAction)showArchive:(id)sender {
-  if (!_archiveWindow) {
-    __weak MainWindowController* weakSelf = self;
-    _archiveWindow = [[ArchiveWindowController alloc]
-        initWithProvider:^NSArray<ArchivedTab*>* { return [weakSelf archivedTabs]; }
-                  reopen:^(ArchivedTab* tab) { [weakSelf reopenArchivedTab:tab]; }];
+  if (_libraryShown && sender == _libraryButton) {
+    [self hideLibrary];
+    return;
   }
-  [_archiveWindow reload];
-  [_archiveWindow showWindow:nil];
+  [self libraryPanel];
+  [_library setQuery:@""];
+  _libraryShown = YES;
+  [self layoutSidebar];
+  [self applyLibraryColors];
+  _responderBeforeLibrary = self.window.firstResponder;
+  [_library focusSearch];
 }
+- (LibraryPanelView*)libraryPanel {
+  if (_library) return _library;
+  __weak MainWindowController* weakSelf = self;
+  _library = [[LibraryPanelView alloc] initWithFrame:NSMakeRect(8, 42, kSidebarWidth - 17, 300)];
+  _library.archiveProvider = ^NSArray<ArchivedTab*>* { return [weakSelf archivedTabs]; };
+  _library.reopen = ^(ArchivedTab* tab) {
+    [weakSelf reopenArchivedTab:tab];
+    [weakSelf hideLibrary];
+  };
+  _library.back = ^{ [weakSelf hideLibrary]; };
+  _library.iconForURL = ^NSImage*(NSString* url) {
+    MainWindowController* s = weakSelf;
+    if (!s) return nil;
+    ArcItem* probe = [ArcItem new];
+    probe.url = url;
+    return [s iconImageForItem:probe];
+  };
+  _library.hidden = YES;
+  [_sidebar addSubview:_library];
+  return _library;
+}
+- (void)applyLibraryColors {
+  BOOL dark = IsDark(_sidebar);
+  _library.textColor = [self usingDefaultTheme] && dark ? ArcDefaultTabText() : NSColor.labelColor;
+  _libraryButton.contentTintColor = _libraryShown ? (_library.textColor ?: NSColor.labelColor) : NSColor.secondaryLabelColor;
+}
+- (void)hideLibrary {
+  if (!_libraryShown) return;
+  _libraryShown = NO;
+  NSResponder* r = self.window.firstResponder;
+  if ([r isKindOfClass:NSView.class] && [(NSView*)r isDescendantOf:_library])
+    [self.window makeFirstResponder:_responderBeforeLibrary];
+  else if ([r isKindOfClass:NSTextView.class] && [(NSTextView*)r delegate] && [[(NSTextView*)r delegate] isKindOfClass:NSView.class] &&
+           [(NSView*)[(NSTextView*)r delegate] isDescendantOf:_library])
+    [self.window makeFirstResponder:_responderBeforeLibrary];
+  _responderBeforeLibrary = nil;
+  [self layoutSidebar];
+  [self updateFavoritesGrid];
+  [self applyLibraryColors];
+}
+- (BOOL)libraryShown { return _libraryShown; }  // tests
+- (NSString*)libraryStyle { return [[self libraryPanel] styleDescription]; }  // tests
+- (NSArray<NSString*>*)libraryGroupTitles { return [[self libraryPanel] groupTitles]; }  // tests
 
 - (HistoryStore*)historyStore {
   if (!_history && self.historyPath) _history = [[HistoryStore alloc] initWithPath:self.historyPath];
@@ -9870,10 +9993,9 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
   return _historyWindow.visibleCount;
 }
 
-- (NSUInteger)archiveWindowCountForQuery:(NSString*)query {
-  [self showArchive:nil];
-  [_archiveWindow setQuery:query];
-  return _archiveWindow.visibleCount;
+- (NSUInteger)archiveWindowCountForQuery:(NSString*)query {  // tests: the Library's Archive list, without showing it
+  [[self libraryPanel] setQuery:query];
+  return _library.visibleCount;
 }
 
 #pragma mark Windows (#39)

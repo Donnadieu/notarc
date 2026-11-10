@@ -444,3 +444,10 @@ trackpad; everything else is checked by the hidden self-test.
     when the page handles previous / next track, because a button that does nothing is worse than none. Mute shows
     only while the pointer is over the card (or while muted), to leave room for the title. Artwork is fetched once
     per address and never in test runs.
+106. **Archive is a sidebar panel (V4).** It replaces Favorites, the Space title and the tabs, under the address
+    pill. All archived tabs are listed (6,586 imported from Arc is fine: the list only draws the rows on screen),
+    newest first, under day headings. One click reopens a tab, like a tab row. The old table window is gone; History
+    keeps its own window for now (Arc had no history panel).
+107. **The command bar card is opaque (V5).** Arc's bar reads as a solid dark (or white) card, not frosted glass, so
+    the page never shows through the suggestions. It's centred on the window, up to 680 pt wide, with its top about
+    18% down. Return's action shows only on the selected row, which keeps the other rows quiet.

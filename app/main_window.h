@@ -558,6 +558,10 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (NSUInteger)runAutoArchiveWithThreshold:(NSTimeInterval)threshold now:(NSDate*)now;  // returns # archived
 - (IBAction)reopenLastArchived:(id)sender;
 - (IBAction)showArchive:(id)sender;
+- (void)hideLibrary;
+- (BOOL)libraryShown;                       // tests (V4)
+- (NSString*)libraryStyle;                  // tests (V4)
+- (NSArray<NSString*>*)libraryGroupTitles;  // tests (V4)
 - (void)reopenArchivedTab:(ArchivedTab*)tab;
 - (NSUInteger)archiveWindowCountForQuery:(NSString*)query;  // tests: opens the window, filters
 - (NSArray*)archivedTabs;
