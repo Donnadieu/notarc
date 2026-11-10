@@ -14,3 +14,5 @@ ArcItem* BookmarksFromHTMLFile(NSString* path, NSString* folderTitle, NSUInteger
 NSArray<NSArray<NSString*>*>* DetectedBookmarkSources(void);
 // Same browsers, profiles with a "History" database (#63): @[ @[displayName, path], ... ].
 NSArray<NSArray<NSString*>*>* DetectedHistorySources(void);
+// Same browsers, profiles with saved passwords (#63): @[ @[displayName, profileFolder, safeStorageService], ... ].
+NSArray<NSArray<NSString*>*>* DetectedPasswordSources(void);

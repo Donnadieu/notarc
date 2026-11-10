@@ -9,6 +9,12 @@
 // Shows a macOS Keychain prompt the first time (the item belongs to Arc).
 NSString* ArcSafeStoragePassword(NSError** error);
 NSData* ArcCookieKey(NSString* password);
+// Any Chromium-family browser's "<Name> Safe Storage" Keychain password (account optional). Items that belong to
+// another app make macOS ask once.
+NSString* SafeStoragePassword(NSString* service, NSString* account, NSError** error);
+// Chromium's macOS value encryption ("v10" + AES-128-CBC, IV = 16 spaces, PKCS7) with a key from ArcCookieKey.
+NSData* ChromiumDecryptValue(NSData* blob, NSData* key);  // nil if not v10 or the key is wrong
+NSData* ChromiumEncryptValue(NSData* plain, NSData* key);
 
 @interface ArcCookie : NSObject
 @property(nonatomic, copy) NSString* host;  // host_key: ".example.com" = domain cookie

@@ -39,6 +39,8 @@
 #import "app/archive_store.h"
 #import "app/arc_cookies.h"
 #import "app/tab_thumbnails.h"
+#import "app/autofill.h"
+#import "app/password_store.h"
 #include "include/cef_app.h"
 #include "include/cef_application_mac.h"
 #include "include/wrapper/cef_library_loader.h"
@@ -92,6 +94,67 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   });
 }
 
+
+// Self-test fixtures for password import (#67): Chromium-format "Login Data" and "Web Data" files encrypted with a
+// throwaway key, never a real browser's.
+static void SelfTestExec(sqlite3* db, NSString* sql, NSArray* binds) {
+  sqlite3_stmt* st = NULL;
+  if (sqlite3_prepare_v2(db, sql.UTF8String, -1, &st, NULL) != SQLITE_OK) return;
+  int i = 1;
+  for (id b in binds) {
+    if ([b isKindOfClass:NSData.class]) sqlite3_bind_blob(st, i, [b bytes], (int)[b length], SQLITE_TRANSIENT);
+    else if ([b isKindOfClass:NSNumber.class]) sqlite3_bind_int64(st, i, [b longLongValue]);
+    else sqlite3_bind_text(st, i, [b UTF8String], -1, SQLITE_TRANSIENT);
+    ++i;
+  }
+  sqlite3_step(st);
+  sqlite3_finalize(st);
+}
+
+static void SelfTestMakeLoginData(NSString* path, NSData* key, NSArray<NSArray*>* rows) {  // [realm, user, pw|nil=never]
+  [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+  sqlite3* db = NULL;
+  sqlite3_open(path.UTF8String, &db);
+  sqlite3_exec(db, "CREATE TABLE logins(origin_url TEXT, action_url TEXT, username_element TEXT, username_value TEXT,"
+                   " password_element TEXT, password_value BLOB, signon_realm TEXT, date_created INTEGER,"
+                   " blacklisted_by_user INTEGER)", NULL, NULL, NULL);
+  for (NSArray* r in rows) {
+    BOOL never = [r[2] isKindOfClass:NSNull.class];
+    NSData* pw = never ? [NSData data] : [r[2] isKindOfClass:NSData.class] ? r[2]
+                                                                          : ChromiumEncryptValue([r[2] dataUsingEncoding:NSUTF8StringEncoding], key);
+    SelfTestExec(db, @"INSERT INTO logins VALUES(?,?,?,?,?,?,?,?,?)",
+                 @[ [r[0] stringByAppendingString:@"login"], r[0], @"u", r[1], @"p", pw, r[0], @13300000000000000, @(never) ]);
+  }
+  sqlite3_close(db);
+}
+
+static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NSDictionary* a, NSArray* card) {
+  [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+  sqlite3* db = NULL;
+  sqlite3_open(path.UTF8String, &db);
+  if (typeTokens) {  // Chrome 113+
+    sqlite3_exec(db, "CREATE TABLE local_addresses(guid TEXT); CREATE TABLE local_addresses_type_tokens(guid TEXT, type INTEGER,"
+                     " value TEXT)", NULL, NULL, NULL);
+    SelfTestExec(db, @"INSERT INTO local_addresses VALUES('g1')", @[]);
+    NSDictionary* types = @{@"name" : @7, @"line1" : @30, @"city" : @33, @"state" : @34, @"zip" : @35, @"email" : @9};
+    for (NSString* k in a) SelfTestExec(db, @"INSERT INTO local_addresses_type_tokens VALUES('g1',?,?)", @[ types[k], a[k] ]);
+  } else {  // older Chrome and Arc
+    sqlite3_exec(db, "CREATE TABLE autofill_profiles(guid TEXT, company_name TEXT, street_address TEXT, city TEXT, state TEXT,"
+                     " zipcode TEXT, country_code TEXT); CREATE TABLE autofill_profile_names(guid TEXT, first_name TEXT,"
+                     " middle_name TEXT, last_name TEXT, full_name TEXT); CREATE TABLE autofill_profile_emails(guid TEXT,"
+                     " email TEXT); CREATE TABLE autofill_profile_phones(guid TEXT, number TEXT)", NULL, NULL, NULL);
+    SelfTestExec(db, @"INSERT INTO autofill_profiles VALUES('g1','',?,?,?,?,'US')", @[ a[@"line1"], a[@"city"], a[@"state"], a[@"zip"] ]);
+    NSArray* name = [a[@"name"] componentsSeparatedByString:@" "];
+    SelfTestExec(db, @"INSERT INTO autofill_profile_names VALUES('g1',?,'',?,?)", @[ name[0], name[1], a[@"name"] ]);
+    SelfTestExec(db, @"INSERT INTO autofill_profile_emails VALUES('g1',?)", @[ a[@"email"] ]);
+  }
+  sqlite3_exec(db, "CREATE TABLE credit_cards(guid TEXT, name_on_card TEXT, expiration_month INTEGER, expiration_year INTEGER,"
+                   " card_number_encrypted BLOB, nickname TEXT)", NULL, NULL, NULL);
+  SelfTestExec(db, @"INSERT INTO credit_cards VALUES('c1',?,?,?,?,'')",
+               @[ card[0], card[1], card[2], ChromiumEncryptValue([card[3] dataUsingEncoding:NSUTF8StringEncoding], key) ]);
+  sqlite3_close(db);
+}
+
 @implementation AppDelegate
 
 - (void)buildMenu {
@@ -101,6 +164,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   NSMenu* appMenu = [NSMenu new];
   [appMenu addItemWithTitle:@"Check for Updates..." action:@selector(checkForUpdates:) keyEquivalent:@""];
   [appMenu addItemWithTitle:@"Settings..." action:@selector(showSettings:) keyEquivalent:@","];
+  [appMenu addItemWithTitle:@"Passwords..." action:@selector(showPasswords:) keyEquivalent:@""];
   [appMenu addItemWithTitle:@"Keyboard Shortcuts..." action:@selector(showKeyboardShortcuts:) keyEquivalent:@""];
   [appMenu addItem:[NSMenuItem separatorItem]];
   [appMenu addItemWithTitle:@"Quit NotArc" action:@selector(terminate:) keyEquivalent:@"q"];
@@ -117,6 +181,12 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [edit addItemWithTitle:@"Paste" action:@selector(paste:) keyEquivalent:@"v"];
   [edit addItemWithTitle:@"Paste and Go" action:@selector(pasteAndGo:) keyEquivalent:@""];
   [edit addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
+  [edit addItem:[NSMenuItem separatorItem]];
+  NSMenuItem* autoFillItem = [edit addItemWithTitle:@"AutoFill" action:nil keyEquivalent:@""];
+  NSMenu* autoFill = [[NSMenu alloc] initWithTitle:@"AutoFill"];
+  [autoFill addItemWithTitle:@"Fill Password" action:@selector(fillPassword:) keyEquivalent:@"\\"];
+  [autoFill addItemWithTitle:@"Passwords..." action:@selector(showPasswords:) keyEquivalent:@""];
+  autoFillItem.submenu = autoFill;
   [edit addItem:[NSMenuItem separatorItem]];
   [edit addItemWithTitle:@"Find..." action:@selector(findInPage:) keyEquivalent:@"f"];
   [edit addItemWithTitle:@"Find Next" action:@selector(findNext:) keyEquivalent:@"g"];
@@ -160,6 +230,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"Import Everything from Arc..." action:@selector(importEverythingFromArcMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import Bookmarks..." action:@selector(importBookmarksFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import History..." action:@selector(importHistoryFromMenu:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Import Passwords..." action:@selector(importPasswordsFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import History from Arc" action:@selector(importArcHistoryFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import Extensions from Arc" action:@selector(importArcExtensionsFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Capture to Easel" action:@selector(captureToEasel:) keyEquivalent:@"2"].keyEquivalentModifierMask =
@@ -2467,6 +2538,236 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         });
       });
     });
+    // Passwords and autofill (#67): encryption round trip against a Chromium vector, import from fake Arc and Chrome
+    // profiles and a CSV, then on a local login page: save prompt, update, Never, the fill menu (only after a click),
+    // filling login / address / card fields, Fill Password, and the Passwords window. Throwaway key, no Keychain.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 95 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSFileManager* fm = NSFileManager.defaultManager;
+      PasswordStore* store = [PasswordStore shared];
+      // Tests use their own file and an in-memory key, never the Keychain or Passwords.dat.
+      BOOL testStore = PasswordStoreIsSelfTest() && [store.path.lastPathComponent isEqualToString:@"SelfTestPasswords.dat"] &&
+                       store.usable;
+      [fm removeItemAtPath:store.path error:nil];
+      [store reload];
+      // Chromium's scheme: a blob made outside NotArc (python PBKDF2 + openssl) decrypts, and we produce the same bytes.
+      NSData* tk = ArcCookieKey(@"selftest-safe-storage");
+      const unsigned char vec[] = {0x76, 0x31, 0x30, 0x83, 0xe1, 0x9b, 0x0a, 0x8b, 0x48, 0x95,
+                                   0x5e, 0xc8, 0xe0, 0x75, 0x47, 0x7f, 0x38, 0xed, 0x65};
+      NSData* vector = [NSData dataWithBytes:vec length:sizeof(vec)];
+      NSData* plain = ChromiumDecryptValue(vector, tk);
+      BOOL roundTrip = [[[NSString alloc] initWithData:plain encoding:NSUTF8StringEncoding] isEqualToString:@"chromium-vector"] &&
+                       [ChromiumEncryptValue([@"chromium-vector" dataUsingEncoding:NSUTF8StringEncoding], tk) isEqualToData:vector] &&
+                       ![ChromiumDecryptValue(vector, ArcCookieKey(@"wrong")) isEqualToData:plain] &&
+                       [[store unseal:[store seal:@"pässwörd ✓"]] isEqualToString:@"pässwörd ✓"];
+      // Arc: one Space profile with Login Data (one login, one "Never" site, one android row, one wrong-key row) + Web Data.
+      NSString* fake = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-arc-passwords"];
+      NSString* prof = w.currentSpace.profileDirectory.length ? w.currentSpace.profileDirectory : @"Default";
+      NSString* arcProfile = [fake stringByAppendingPathComponent:prof];
+      [fm removeItemAtPath:fake error:nil];
+      [fm createDirectoryAtPath:arcProfile withIntermediateDirectories:YES attributes:nil error:nil];
+      SelfTestMakeLoginData([arcProfile stringByAppendingPathComponent:@"Login Data"], tk, @[
+        @[ @"https://accounts.example.com/", @"arc-user", @"arc-pass-1" ], @[ @"https://never.example/", @"", [NSNull null] ],
+        @[ @"android://hash@com.example/", @"x", @"y" ],
+        @[ @"https://bad.example/", @"b", ChromiumEncryptValue([@"zzz" dataUsingEncoding:NSUTF8StringEncoding], ArcCookieKey(@"other")) ]
+      ]);
+      SelfTestMakeWebData([arcProfile stringByAppendingPathComponent:@"Web Data"], tk, NO,
+                          @{@"name" : @"Jane Doe", @"line1" : @"1 Main St", @"city" : @"San Francisco", @"state" : @"CA",
+                            @"zip" : @"94110", @"email" : @"jane@example.com"},
+                          @[ @"Jane Doe", @4, @2031, @"4111 1111 1111 1111" ]);
+      w.arcSafeStorageKeyOverride = tk;
+      NSDictionary* arc = [w importArcPasswordsFromUserData:fake];
+      NSDictionary* arcAgain = [w importArcPasswordsFromUserData:fake];
+      w.arcSafeStorageKeyOverride = nil;
+      SavedLogin* arcLogin = [store loginForOrigin:@"https://accounts.example.com" username:@"arc-user"];
+      BOOL arcOK = [arc[@"passwords"] intValue] == 1 && [arc[@"addresses"] intValue] == 1 && [arc[@"cards"] intValue] == 1 &&
+                   [[store passwordFor:arcLogin] isEqualToString:@"arc-pass-1"] && [store isNeverOrigin:@"https://never.example"] &&
+                   [arcAgain[@"passwords"] intValue] + [arcAgain[@"addresses"] intValue] + [arcAgain[@"cards"] intValue] == 0;
+      // Chrome (newer address format) and a CSV export (Apple Passwords columns, quoted comma).
+      NSString* chrome = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-chrome-profile"];
+      [fm removeItemAtPath:chrome error:nil];
+      [fm createDirectoryAtPath:chrome withIntermediateDirectories:YES attributes:nil error:nil];
+      SelfTestMakeLoginData([chrome stringByAppendingPathComponent:@"Login Data"], tk,
+                            @[ @[ @"https://chrome.example/", @"c1", @"cp1" ], @[ @"https://chrome.example/", @"c2", @"cp2" ] ]);
+      SelfTestMakeWebData([chrome stringByAppendingPathComponent:@"Web Data"], tk, YES,
+                          @{@"name" : @"John Roe", @"line1" : @"5 Side Ave", @"city" : @"Austin", @"state" : @"TX",
+                            @"zip" : @"73301", @"email" : @"john@example.com"},
+                          @[ @"John Roe", @12, @2030, @"5555555555554444" ]);
+      NSDictionary* cr = [store importChromiumProfile:chrome key:tk source:@"Google Chrome (Test)"];
+      NSDictionary* crAgain = [store importChromiumProfile:chrome key:tk source:@"Google Chrome (Test)"];
+      BOOL chromeOK = [cr[@"passwords"] intValue] == 2 && [cr[@"addresses"] intValue] == 1 && [cr[@"cards"] intValue] == 1 &&
+                      [crAgain[@"passwords"] intValue] + [crAgain[@"addresses"] intValue] + [crAgain[@"cards"] intValue] == 0 &&
+                      [store importChromiumProfile:@"/nonexistent/profile" key:tk source:@"x"] == nil;
+      NSString* csv = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-passwords.csv"];
+      [@"Title,URL,Username,Password,Notes,OTPAuth\ncsv,https://csv.example/login,\"csv,user\",\"p\"\"w\",,\n"
+          writeToFile:csv atomically:YES encoding:NSUTF8StringEncoding error:nil];
+      BOOL csvOK = [store importCSVFile:csv source:@"CSV"] == 1 &&
+                   [[store passwordFor:[store loginForOrigin:@"https://csv.example" username:@"csv,user"]] isEqualToString:@"p\"w"];
+      [fm removeItemAtPath:csv error:nil];
+      [fm removeItemAtPath:fake error:nil];
+      [fm removeItemAtPath:chrome error:nil];
+
+      // The login page (a local file; the page script normally runs only on http(s) pages).
+      BrowserClient::SetAutofillAllowFileURLs(true);
+      NSString* page = [NSTemporaryDirectory() stringByAppendingPathComponent:@"notarc-selftest-login.html"];
+      NSMutableString* months = [NSMutableString string];
+      for (int m = 1; m <= 12; ++m) [months appendFormat:@"<option>%02d</option>", m];
+      [[NSString stringWithFormat:
+          @"<!doctype html><title>login</title><form id=f onsubmit='event.preventDefault()'><input id=u name=username "
+          @"autocomplete=username><input id=p type=password name=password><button type=submit>Sign in</button></form>"
+          @"<form id=a onsubmit='event.preventDefault()'><input id=an autocomplete=name><input id=ae type=email name=email>"
+          @"<input id=as name=address1><input id=ac name=city><select id=ast name=state><option value=''>-</option>"
+          @"<option value=CA>California</option><option value=NY>New York</option></select><input id=az name=zip></form>"
+          @"<form id=c><input id=cn autocomplete=cc-number><input id=cc name=cardholder><select id=cm "
+          @"autocomplete=cc-exp-month>%@</select><input id=cy autocomplete=cc-exp-year maxlength=2></form>", months]
+          writeToFile:page atomically:YES encoding:NSUTF8StringEncoding error:nil];
+      [w openInNewTab:[NSURL fileURLWithPath:page].absoluteString];
+      ArcItem* t = w.shownItem;
+      AutofillController* af = w.autofill;
+      NSString* (^byId)(NSString*) = ^(NSString* js) { return [@"var $=function(i){return document.getElementById(i)};" stringByAppendingString:js]; };
+      WaitUntil(^{ return (BOOL)([t.liveTitle isEqualToString:@"login"] && t.browserId); }, 10, ^{
+        [w runJS:byId(@"setTimeout(function(){document.title='onload:'+(!$('u').value&&!$('p').value)+':'+!!window.__notarcAF},300)") inItem:t];
+        WaitUntil(^{ return [t.liveTitle hasPrefix:@"onload:"]; }, 5, ^{
+          BOOL noFillOnLoad = [t.liveTitle isEqualToString:@"onload:true:true"] && af.menusOffered == 0;
+          [w runJS:byId(@"$('u').value='selftest-user';$('p').value='hunter2-selftest';$('f').requestSubmit()") inItem:t];
+          WaitUntil(^{ return [af.pendingSavePrompt hasPrefix:@"Save password"]; }, 5, ^{
+            BOOL saveOffered = [af.pendingSavePrompt isEqualToString:@"Save password for this file?"] &&
+                               [w.toastText isEqualToString:af.pendingSavePrompt];
+            [af savePending:nil];
+            BOOL saved = [[store passwordFor:[store loginForOrigin:@"file://" username:@"selftest-user"]] isEqualToString:@"hunter2-selftest"] &&
+                         !w.toastText;
+            [w runJS:byId(@"$('p').value='hunter3-selftest';$('f').requestSubmit()") inItem:t];
+            WaitUntil(^{ return [af.pendingSavePrompt hasPrefix:@"Update"]; }, 5, ^{
+              BOOL updatePrompt = [af.pendingSavePrompt hasPrefix:@"Update the saved password for selftest-user"];
+              [af savePending:nil];
+              BOOL updated = [[store passwordFor:[store loginForOrigin:@"file://" username:@"selftest-user"]] isEqualToString:@"hunter3-selftest"] &&
+                             [store checkOrigin:@"file://" username:@"selftest-user" password:@"hunter3-selftest"] == PasswordUnchanged;
+              [w runJS:byId(@"$('u').value='other-user';$('p').value='x-pass';$('f').requestSubmit()") inItem:t];
+              WaitUntil(^{ return [af.pendingSavePrompt hasPrefix:@"Save password"]; }, 5, ^{
+                [af neverPending:nil];
+                [w runJS:byId(@"$('u').value='third-user';$('p').value='y-pass';$('f').requestSubmit()") inItem:t];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+                  BOOL never = [store isNeverOrigin:@"file://"] && !af.pendingSavePrompt && ![store loginForOrigin:@"file://" username:@"other-user"];
+                  [store setNever:NO forOrigin:@"file://"];
+                  // Fill: a click into the empty username field offers the saved login; choosing it fills both fields.
+                  [w runJS:byId(@"window.__ev=0;['u','p'].forEach(function(i){$(i).value='';$(i).addEventListener('input',function(){window.__ev++})});"
+                                @"$('u').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))") inItem:t];
+                  WaitUntil(^{ return (BOOL)(af.menusOffered >= 1); }, 5, ^{
+                    BOOL menu = [af.lastMenuGroup isEqualToString:@"login"] && [af.lastMenuTitles isEqualToArray:@[ @"selftest-user" ]];
+                    [af chooseMenuItemAtIndex:0];
+                    WaitUntil(^{ return (BOOL)(af.lastFilledCount >= 2); }, 5, ^{
+                      [w runJS:byId(@"document.title='filled:'+$('u').value+'|'+$('p').value+'|'+window.__ev") inItem:t];
+                      WaitUntil(^{ return [t.liveTitle hasPrefix:@"filled:"]; }, 5, ^{
+                        BOOL filled = [t.liveTitle isEqualToString:@"filled:selftest-user|hunter3-selftest|2"];
+                        // Edit > AutoFill > Fill Password finds the login field without a click.
+                        NSInteger menusBefore = af.menusOffered;
+                        [w runJS:byId(@"$('u').value='';$('p').value=''") inItem:t];
+                        [w showItem:t];
+                        [w fillPassword:nil];
+                        WaitUntil(^{ return (BOOL)(af.menusOffered > menusBefore); }, 5, ^{
+                          BOOL fillMenu = af.menusOffered > menusBefore && [af.lastMenuGroup isEqualToString:@"login"];
+                          // Address and card fields offer the imported Arc / Chrome entries; a card asks for device auth.
+                          NSInteger m0 = af.menusOffered;
+                          [w runJS:byId(@"$('an').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))") inItem:t];
+                          WaitUntil(^{ return (BOOL)(af.menusOffered > m0); }, 5, ^{
+                            NSUInteger jane = [af.lastMenuTitles indexOfObjectPassingTest:^BOOL(NSString* s, NSUInteger, BOOL*) {
+                              return [s hasPrefix:@"Jane Doe, 1 Main St"];
+                            }];
+                            BOOL addrMenu = [af.lastMenuGroup isEqualToString:@"address"] && af.lastMenuTitles.count == 2 && jane != NSNotFound;
+                            [af chooseMenuItemAtIndex:(NSInteger)jane];
+                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                              NSInteger m1 = af.menusOffered, auth0 = AutofillAuthRequestsForTest();
+                              [w runJS:byId(@"$('cn').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))") inItem:t];
+                              WaitUntil(^{ return (BOOL)(af.menusOffered > m1); }, 5, ^{
+                                NSUInteger visa = [af.lastMenuTitles indexOfObjectPassingTest:^BOOL(NSString* s, NSUInteger, BOOL*) {
+                                  return [s hasPrefix:@"•••• 1111"];
+                                }];
+                                BOOL cardMenu = [af.lastMenuGroup isEqualToString:@"card"] && af.lastMenuTitles.count == 2 && visa != NSNotFound;
+                                [af chooseMenuItemAtIndex:(NSInteger)visa];
+                                BOOL cardAuth = AutofillAuthRequestsForTest() == auth0 + 1;
+                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                                  [w runJS:byId(@"document.title='af:'+[$('an').value,$('ae').value,$('as').value,$('ac').value,$('ast').value,"
+                                                @"$('az').value,$('cn').value,$('cc').value,$('cm').value,$('cy').value].join('|')") inItem:t];
+                                  WaitUntil(^{ return [t.liveTitle hasPrefix:@"af:"]; }, 5, ^{
+                                    BOOL address = [t.liveTitle hasPrefix:@"af:Jane Doe|jane@example.com|1 Main St|San Francisco|CA|94110|"];
+                                    BOOL card = [t.liveTitle hasSuffix:@"|4111111111111111|Jane Doe|04|31"];
+                                    if (!address || !card) std::printf("SELFTEST-AUTOFILL-DEBUG %s\n", t.liveTitle.UTF8String);
+                                    // Passwords window: search, Show / Copy behind device auth (private pasteboard), Delete.
+                                    [w showPasswords:nil];
+                                    PasswordsWindowController* pwc = [PasswordsWindowController shared];
+                                    pwc.section = 0;
+                                    NSUInteger all = (NSUInteger)pwc.rowCount;
+                                    [pwc setSearchText:@"selftest-user"];
+                                    BOOL search = all == store.logins.count && all == 5 && pwc.rowCount == 1;
+                                    NSInteger generalBefore = NSPasteboard.generalPasteboard.changeCount, auth1 = AutofillAuthRequestsForTest();
+                                    BOOL hidden = [pwc shownSecretAtRow:0] == nil && [[pwc titleAtRow:0] containsString:@"••••"];
+                                    [pwc showSecretAtRow:0];
+                                    BOOL shown = hidden && [[pwc shownSecretAtRow:0] isEqualToString:@"hunter3-selftest"] &&
+                                                 AutofillAuthRequestsForTest() == auth1 + 1;
+                                    [pwc copySecretAtRow:0];
+                                    BOOL copied = [[[w copyPasteboard] stringForType:NSPasteboardTypeString] isEqualToString:@"hunter3-selftest"] &&
+                                                  NSPasteboard.generalPasteboard.changeCount == generalBefore;
+                                    // On disk: encrypted (no plaintext), readable again, unreadable with another key.
+                                    NSData* disk = [NSData dataWithContentsOfFile:store.path];
+                                    NSData* needle1 = [@"hunter3-selftest" dataUsingEncoding:NSUTF8StringEncoding];
+                                    NSData* needle2 = [@"selftest-user" dataUsingEncoding:NSUTF8StringEncoding];
+                                    BOOL encrypted = disk.length > 3 && [[disk subdataWithRange:NSMakeRange(0, 3)] isEqualToData:[@"v10" dataUsingEncoding:NSUTF8StringEncoding]] &&
+                                                     [disk rangeOfData:needle1 options:0 range:NSMakeRange(0, disk.length)].location == NSNotFound &&
+                                                     [disk rangeOfData:needle2 options:0 range:NSMakeRange(0, disk.length)].location == NSNotFound &&
+                                                     ![[PasswordStore alloc] initWithPath:store.path key:ArcCookieKey(@"wrong")].usable;
+                                    [store reload];
+                                    BOOL reloaded = store.logins.count == 5 && store.addresses.count == 2 && store.cards.count == 2 &&
+                                                    [[store passwordFor:[store loginForOrigin:@"file://" username:@"selftest-user"]] isEqualToString:@"hunter3-selftest"];
+                                    [pwc reload];
+                                    [pwc setSearchText:@"selftest-user"];
+                                    [pwc deleteRow:0];
+                                    BOOL deleted = pwc.rowCount == 0 && ![store loginForOrigin:@"file://" username:@"selftest-user"];
+                                    [pwc setSearchText:@""];
+                                    // Add... in each section (addresses and cards by hand; a card must pass the Luhn check).
+                                    NSDictionary* ann = @{@"name" : @"Ann Lee", @"line1" : @"9 Elm St", @"city" : @"Boston", @"zip" : @"02110"};
+                                    pwc.section = 1;
+                                    BOOL addAddr = [pwc addEntry:ann] && ![pwc addEntry:ann] && store.addresses.count == 3 && pwc.rowCount == 3;
+                                    pwc.section = 2;
+                                    BOOL addCard = ![pwc addEntry:@{@"number" : @"4111 1111 1111 1112", @"month" : @"1", @"year" : @"30"}] &&
+                                                   [pwc addEntry:@{@"number" : @"3782 822463 10005", @"name" : @"Ann Lee", @"month" : @"7", @"year" : @"29"}] &&
+                                                   store.cards.count == 3 && [store.cards.lastObject.summary hasPrefix:@"•••• 0005"] &&
+                                                   store.cards.lastObject.expYear == 2029;
+                                    pwc.section = 0;
+                                    NSDictionary* manual = @{@"website" : @"manual.example", @"username" : @"m", @"password" : @"mp"};
+                                    BOOL addLogin = [pwc addEntry:manual] && ![pwc addEntry:manual] &&
+                                                    [[store passwordFor:[store loginForOrigin:@"https://manual.example" username:@"m"]] isEqualToString:@"mp"];
+                                    BOOL manualAdd = addAddr && addCard && addLogin;
+                                    if (!manualAdd) std::printf("SELFTEST-PASSWORDS-DEBUG addAddr=%d addCard=%d addLogin=%d\n", addAddr, addCard, addLogin);
+                                    std::printf("SELFTEST-PASSWORDS roundTrip=%d saveOffered=%d saved=%d updatePrompt=%d updated=%d never=%d "
+                                                "encrypted=%d reloaded=%d window=%d shown=%d copied=%d deleted=%d testStore=%d manualAdd=%d\n",
+                                                roundTrip, saveOffered, saved, updatePrompt, updated, never, encrypted, reloaded,
+                                                search, shown, copied, deleted, testStore, manualAdd);
+                                    std::printf("SELFTEST-AUTOFILL noFillOnLoad=%d menu=%d filled=%d fillPassword=%d addressMenu=%d address=%d "
+                                                "cardMenu=%d cardAuth=%d card=%d arcImport=%d chromeImport=%d csv=%d\n",
+                                                noFillOnLoad, menu, filled, fillMenu, addrMenu, address, cardMenu, cardAuth, card, arcOK,
+                                                chromeOK, csvOK);
+                                    [fm removeItemAtPath:store.path error:nil];
+                                    [store reload];
+                                    [fm removeItemAtPath:page error:nil];
+                                    [w showItem:t];
+                                    [w closeTab:nil];
+                                    BrowserClient::SetAutofillAllowFileURLs(false);
+                                  });
+                                });
+                              });
+                            });
+                          });
+                        });
+                      });
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
     // Boosts: a Boost for example.org applies on page load (colour overlay, zap, case, custom CSS and JS), a zap
     // picked in the page is added, turning it off removes it from the page, and it's saved.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -3616,6 +3917,7 @@ int main(int argc, char* argv[]) {
     if (!CefInitialize(main_args, settings, nullptr, nullptr)) return CefGetExitCode();
     SettingsRegisterDefaults();
     if (selfTest) SettingsUseMemoryOnly();
+    PasswordStoreConfigure(selfTest);  // tests: throwaway in-memory key, never the Keychain
     ApplyContentBlockerSettings();
 
     AppDelegate* delegate = [AppDelegate new];

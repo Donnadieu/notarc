@@ -107,6 +107,12 @@ ArcItem* BookmarksFromHTMLFile(NSString* path, NSString* folderTitle, NSUInteger
 static NSArray<NSArray<NSString*>*>* DetectedProfileFiles(NSString* file);
 
 NSArray<NSArray<NSString*>*>* DetectedBookmarkSources(void) { return DetectedProfileFiles(@"Bookmarks"); }
+NSArray<NSArray<NSString*>*>* DetectedPasswordSources(void) {
+  NSMutableArray* out = [NSMutableArray array];
+  for (NSArray* s in DetectedProfileFiles(@"Login Data"))
+    [out addObject:@[ s[0], [s[1] stringByDeletingLastPathComponent], s[2] ]];
+  return out;
+}
 NSArray<NSArray<NSString*>*>* DetectedHistorySources(void) {
   NSMutableArray* out = [NSMutableArray array];
   for (NSArray* s in DetectedProfileFiles(@"History")) [out addObject:@[ s[0], s[1], @"chromium" ]];
@@ -128,8 +134,12 @@ NSArray<NSArray<NSString*>*>* DetectedHistorySources(void) {
 
 static NSArray<NSArray<NSString*>*>* DetectedProfileFiles(NSString* file) {
   NSString* support = NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject;
-  NSArray* browsers = @[ @[ @"Google Chrome", @"Google/Chrome" ], @[ @"Brave", @"BraveSoftware/Brave-Browser" ],
-                         @[ @"Microsoft Edge", @"Microsoft Edge" ], @[ @"Vivaldi", @"Vivaldi" ], @[ @"Chromium", @"Chromium" ] ];
+  // [display name, support folder, Keychain item holding the browser's encryption password (#63 passwords)]
+  NSArray* browsers = @[ @[ @"Google Chrome", @"Google/Chrome", @"Chrome Safe Storage" ],
+                         @[ @"Brave", @"BraveSoftware/Brave-Browser", @"Brave Safe Storage" ],
+                         @[ @"Microsoft Edge", @"Microsoft Edge", @"Microsoft Edge Safe Storage" ],
+                         @[ @"Vivaldi", @"Vivaldi", @"Vivaldi Safe Storage" ],
+                         @[ @"Chromium", @"Chromium", @"Chromium Safe Storage" ] ];
   NSFileManager* fm = NSFileManager.defaultManager;
   NSMutableArray* out = [NSMutableArray array];
   for (NSArray* b in browsers) {
@@ -141,7 +151,7 @@ static NSArray<NSArray<NSString*>*>* DetectedProfileFiles(NSString* file) {
       NSString* f = [[dir stringByAppendingPathComponent:p] stringByAppendingPathComponent:file];
       if (![fm fileExistsAtPath:f]) continue;
       NSString* pname = [names isKindOfClass:NSDictionary.class] ? names[p][@"name"] : nil;
-      [out addObject:@[ [NSString stringWithFormat:@"%@ (%@)", b[0], pname ?: p], f ]];
+      [out addObject:@[ [NSString stringWithFormat:@"%@ (%@)", b[0], pname ?: p], f, b[2] ]];
     }
   }
   return out;

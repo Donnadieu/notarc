@@ -104,15 +104,15 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 - [x] Downloads list (Cmd+Shift+J: progress, filter, Open, Show in Finder, Copy, Cancel; download folder setting; quit warning) (#61)
 - [x] History view (Cmd+Y, searchable, per-Space column, Clear History) (#62)
 - [x] Import from Arc (Spaces, tabs, archive, logins)
-- [ ] Import everything from Arc with one button: Spaces, tabs, Favorites, logins, history, extensions, saved passwords, autofill (partial: first-launch offer and File > Import Everything from Arc bring all but saved passwords and autofill, which wait on #67) (#150)
-- [ ] Import from Chrome/Safari/other browsers, password import (partial: File > Import Bookmarks (#80) and File > Import History from Chrome, Brave, Edge, Vivaldi, Chromium, Firefox and Safari (Safari needs Full Disk Access); no password import yet) (#63)
+- [x] Import everything from Arc with one button: Spaces, tabs, Favorites, logins, history, extensions, saved passwords, autofill (#150)
+- [x] Import from Chrome/Safari/other browsers, password import (File > Import Bookmarks (#80), Import History and Import Passwords; Safari passwords come in as a CSV export from Apple Passwords, which other apps can't read) (#63)
 - [x] Clear browsing data (time range; history, cookies, cache across all Spaces; Clear Cookies and Refresh for the current site) (#64)
 - [x] Tab thumbnails for switchers and previews (sidebar hover cards, Ctrl+Tab switcher; in memory only) (#65)
 
 ## Browser basics
 
 - [ ] Chrome extensions (Web Store), extension picker (partial: Chrome-style pages behind a setting (off by default) load extensions; File > Import Extensions from Arc; Web Store installs and the extension picker to do) (#66)
-- [ ] Password saving/autofill, address/card autofill (missing) (#67)
+- [x] Password saving/autofill, address/card autofill (#67)
 - [x] DevTools (show/hide), developer mode (per-site Developer Mode: on by itself for localhost, 127.0.0.1 and .local; full address with port in the sidebar pill, never auto-archived, Developer Tools in the pill; View menu, Site Settings and Settings > Advanced, with a reset) (#68)
 - [x] Set as default browser, open links from other apps (#69)
 - [x] Context menus (page, link, image, sidebar): sidebar menu; links (new tab, background, split, Peek, Little Window, Markdown); images (open, save to Downloads, copy image, copy address); selected text (search); page (copy URL, Markdown, Capture, Translate, Boost) (#70)

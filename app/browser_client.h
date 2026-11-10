@@ -178,6 +178,20 @@ class BrowserClient : public CefClient,
   using LoadEndCallback = std::function<void(int browser_id, const std::string& url)>;
   void set_load_end_callback(LoadEndCallback cb) { on_load_end_ = std::move(cb); }
   void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override;
+
+  // Passwords and autofill (#67). Every http(s) document gets a small script (see autofill.mm) that reports login
+  // submissions and clicks into login / address / card fields as "__notarc_af__:<nonce>:<json>" console lines.
+  // The nonce is made here per frame, so a message is only trusted for the frame (and origin) it was given to;
+  // unknown nonces are dropped. Fills go back to that same frame with AutofillRun, only if it still shows that origin.
+  using AutofillCallback = std::function<void(int browser_id, const std::string& nonce, const std::string& origin,
+                                              bool main_frame, const std::string& json)>;
+  void set_autofill_callback(AutofillCallback cb) { on_autofill_ = std::move(cb); }
+  bool AutofillRun(const std::string& nonce, const std::string& js);
+  // Runs js in every frame of a tab that has the autofill script (Fill Password from the menu).
+  void AutofillRunAllFrames(int browser_id, const std::string& js);
+  CefRefPtr<CefBrowser> BrowserById(int browser_id);
+  // Self-test only: also give file:// pages the script (the login fixture is a local file).
+  static void SetAutofillAllowFileURLs(bool allow);
   bool OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t level, const CefString& message,
                         const CefString& source, int line) override;
 
@@ -216,6 +230,17 @@ class BrowserClient : public CefClient,
   PermissionCallback on_permission_;
   ExternalCallback on_external_;
   CaptureCallback on_capture_;
+  AutofillCallback on_autofill_;
+  struct AutofillFrame {
+    int browser_id = 0;
+    std::string frame_id;
+    std::string origin;
+    bool main_frame = false;
+  };
+  std::map<std::string, AutofillFrame> autofill_frames_;   // nonce -> frame
+  std::map<std::string, std::string> autofill_nonces_;     // "<browser>/<frame>/<origin>" -> nonce
+  std::map<int, CefRefPtr<CefBrowser>> browsers_;
+  void InjectAutofillShim(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame);
   struct PendingPermission {
     CefRefPtr<CefMediaAccessCallback> media;
     uint32_t media_bits = 0;

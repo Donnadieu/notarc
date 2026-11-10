@@ -237,3 +237,48 @@ trackpad; everything else is checked by the hidden self-test.
     check (including #18's synchronous SELFTEST-TIDY) sees the same state on any Mac; the Max checks swap in an
     "available" stub with canned replies. The real model's state is only reported (`model=` in SELFTEST-MAX), so the
     live FoundationModels path is untested by the self-test.
+
+## 2026-11-09: passwords and autofill (#67, #63, #150)
+
+31. **NotArc has its own password manager and autofill.** NotArc pages run in CEF's Alloy style by default, which has
+    no Chromium password manager or autofill (Chrome-style pages, #66, stay off by default). So NotArc keeps its own
+    store and works in the default pages instead of waiting for Chrome-style pages.
+32. **Store: one encrypted file, Chromium's scheme, NotArc's own Keychain item.** Logins, addresses and cards live in
+    `Application Support/NotArc/Passwords.dat`. The whole file, and inside it each password and card number again, is
+    encrypted the way Chromium does it ("v10", AES-128-CBC, key from PBKDF2 over a Keychain password), generalising
+    the Arc cookie reader. The password is a random one in a "NotArc Safe Storage" Keychain item that NotArc makes on
+    first use (so macOS doesn't ask). NotArc doesn't reuse CEF's "Chromium Safe Storage" item: the Chromium browser
+    uses that same name, so the two would share a key and importing from Chromium would mix them up. Self-tests use a
+    throwaway in-memory key and `SelfTestPasswords.dat`, and never touch the Keychain. If the file can't be decrypted
+    it is never overwritten.
+33. **Saving: a small page script reports login submissions; NotArc asks in a toast.** "Save password for <site>?"
+    (Save, Never for This Site) or "Update the saved password for <user> on <site>?" (Update). Nothing is saved without
+    a click. The script reports through a console line tagged with a per-frame secret made by NotArc, so a message
+    only counts for the frame and site it was given to; fills go back only to that frame, and only while it still
+    shows that site. "Offer to save passwords" can be turned off in the Passwords window.
+34. **Filling only on a user action, never on page load.** A click (or Tab) into an empty login, address or card field
+    opens a native menu of the saved entries at the field; Edit > AutoFill > Fill Password (Cmd+\\, chosen by us; Arc
+    had no own shortcut) does the same for the page's login field. Logins saved for a site are offered on its other
+    subdomains too (shown with the site name); an https login is never offered on an http page. Values are set the
+    way typing would (input and change events), so sign-in pages built with React or Vue see them.
+35. **Device authentication** (Touch ID or the Mac's password) before Show Password, Copy Password and filling a card;
+    the Passwords window then trusts itself for 5 minutes. Copied passwords are marked concealed for clipboard
+    managers. Self-tests skip the prompt and count it. Export from the Passwords window is out of scope.
+36. **Import from Arc** is part of File > Import Everything from Arc and the first-launch offer: each Space's Chromium
+    profile `Login Data` (and `Login Data For Account`) and `Web Data` (addresses and cards), read from a private copy
+    with the "Arc Safe Storage" key cookie import already uses. Sites the person told Arc to never save come over as
+    "Never" sites. NotArc's own copy of a login wins over an imported one; importing twice adds nothing twice.
+37. **Import from Chrome, Brave, Edge, Vivaldi and Chromium** with File > Import Passwords..., same reader, each
+    browser's own "<Name> Safe Storage" Keychain item. macOS asks once per browser; that is expected and can't be
+    avoided because the item belongs to the other browser.
+38. **Safari's passwords can't be read**: they live in Apple's Passwords app, which other apps can't read. The import
+    sheet says so and points to Passwords > File > Export All Passwords, and NotArc imports that CSV file (Chrome,
+    Firefox and Apple Passwords CSV formats), with a reminder to delete it. This also covers Firefox passwords.
+39. **Address and card fields are matched** by their autocomplete attribute first, then by common field names
+    (name, email, street, city, state, zip, country, phone, card number, name on card, expiry). The security code is
+    never filled or stored. Addresses, cards and passwords come from imports or Add... in the Passwords window (a card
+    number must pass the Luhn check). NotArc doesn't offer to save an address or card when a form is submitted, as
+    Chromium does; to change one, delete it and add it again.
+40. **Needs Omar's eyes:** the fill menu's position next to the field (it opens at the pointer inside cross-site
+    frames), the save toast, the Add... form, Touch ID before Show/Copy, and an import from a real Chrome profile (macOS's "allow
+    access" prompt). The self-test covers the rest with fixture databases and a local login page.

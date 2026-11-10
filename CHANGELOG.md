@@ -54,6 +54,13 @@ or later. From 0.5.0 on, NotArc updates itself.
   sentences, key sentences, folders by site, the built-in title rules). The command bar offers "Ask ChatGPT" for questions (opens chatgpt.com
   with your own sign-in), and Edit > Copy Page as Markdown copies any page as Markdown. Settings > Max has the
   switches. Nothing goes to a NotArc server.
+- Passwords and autofill: NotArc offers to save a password when you sign in (Save, Never for This Site, or Update
+  when it changed), and clicking into a login, address or card field shows your saved entries to fill in. Edit >
+  AutoFill > Fill Password (Cmd+\\) fills the page's login. NotArc > Passwords... lists them, with Add, and Show and
+  Copy behind Touch ID or your Mac's password. Everything is stored encrypted on your Mac.
+- File > Import Everything from Arc now brings your saved passwords, addresses and cards too, and File > Import
+  Passwords... brings them from Chrome, Brave, Edge, Vivaldi, Chromium or a passwords CSV file (Safari: export from
+  Apple's Passwords app first).
 - The parity checklist is up to date with 0.23.0, with an Out of scope section and docs/decisions.md for every
   scope call.
 

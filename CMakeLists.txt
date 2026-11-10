@@ -47,6 +47,10 @@ set(APP_SRCS
   app/downloads.mm
   app/arc_cookies.h
   app/arc_cookies.mm
+  app/password_store.h
+  app/password_store.mm
+  app/autofill.h
+  app/autofill.mm
   app/little_window.h
   app/little_window.mm
   app/settings.h
@@ -130,7 +134,7 @@ target_compile_options(${APP_NAME} PRIVATE
   $<$<COMPILE_LANGUAGE:OBJCXX>:${CEF_COMPILER_FLAGS} ${CEF_CXX_COMPILER_FLAGS}>
   $<$<AND:$<COMPILE_LANGUAGE:OBJCXX>,$<CONFIG:Release>>:${CEF_COMPILER_FLAGS_RELEASE} ${CEF_CXX_COMPILER_FLAGS_RELEASE}>)
 add_dependencies(${APP_NAME} libcef_dll_wrapper)
-target_link_libraries(${APP_NAME} libcef_dll_wrapper ${CEF_STANDARD_LIBS} sqlite3 "-framework Security" "-framework QuartzCore" "-framework UniformTypeIdentifiers" "-framework Carbon" "-framework UserNotifications" "-framework EventKit" "-weak_framework ScreenCaptureKit")  # updater uses Foundation + CommonCrypto (libSystem); Space themes use CAGradientLayer; tab thumbnails use ScreenCaptureKit (macOS 14.4+)
+target_link_libraries(${APP_NAME} libcef_dll_wrapper ${CEF_STANDARD_LIBS} sqlite3 "-framework Security" "-framework QuartzCore" "-framework UniformTypeIdentifiers" "-framework Carbon" "-framework UserNotifications" "-framework EventKit" "-weak_framework ScreenCaptureKit" "-framework LocalAuthentication")  # updater uses Foundation + CommonCrypto (libSystem); Space themes use CAGradientLayer; tab thumbnails use ScreenCaptureKit (macOS 14.4+); passwords use LocalAuthentication
 set_target_properties(${APP_NAME} PROPERTIES
   MACOSX_BUNDLE_INFO_PLIST ${CMAKE_CURRENT_SOURCE_DIR}/app/Info.plist.in)
 COPY_MAC_FRAMEWORK("${APP_NAME}" "${CEF_BINARY_DIR}" "${APP_BUNDLE}")
