@@ -4239,7 +4239,14 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       [w openLittleWindow:@"https://example.org/idle-little"];
       NSUInteger before = [w littleWindowCount];
       [w setLittleWindowLastUsed:[NSDate dateWithTimeIntervalSinceNow:-7 * 3600] index:before - 1];
+      // Idle archiving skips the window in use. If NotArc happens to be the active app, the Little Window just
+      // opened is key, so hand focus back to the main window first (as when the user goes back to it).
+      NSWindow* keyBefore = NSApp.keyWindow;
+      if (keyBefore && keyBefore != w.window) [w.window makeKeyWindow];
       NSUInteger idleClosed = [w archiveIdleLittleWindowsAt:[NSDate date]];
+      if (!idleClosed)
+        std::printf("SELFTEST-SETTINGS-DEBUG little=%lu keyWasOther=%d keyNow=%s\n", (unsigned long)before,
+                    keyBefore && keyBefore != w.window, NSApp.keyWindow == w.window ? "main" : NSApp.keyWindow ? "other" : "none");
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
         std::printf("SELFTEST-SETTINGS defaults=%d searchEngine=%d restored=%d shiftPeekOffOpensTab=%d todayDelta=%ld "
                     "idleLittleClosed=%lu lastReason=%s\n", defaultsOK, ddg, restored, shiftWentToTab,
