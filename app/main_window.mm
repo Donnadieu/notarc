@@ -5,6 +5,7 @@
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
 #import "app/archive_window.h"
+#import "app/library_panel.h"
 #import "app/arc_history.h"
 #import "app/chrome_page.h"
 #import "app/arc_extensions.h"
@@ -151,24 +152,44 @@ static NSString* HexFromColor(NSColor* c) {
 }
 
 static const CGFloat kToolbarHeight = 38;
-static const CGFloat kSuggestionRow = 34;
+static const CGFloat kSuggestionRow = 50;  // Arc: 50 pt rows (46 pt pill) under a 64 pt input row
 static const NSUInteger kMaxSuggestions = 8;
 
 // Data source for the command bar's suggestion list (kept separate from the sidebar's outline delegate).
 // Arc: HoveredAndKeyboardSelectedBackground (0.161, 0.18, 0.757), a rounded pill.
 static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 green:0.18 blue:0.757 alpha:1]; }
+// Arc fills the selected row with the Space's own colour, a shade deeper; the default theme uses Arc blue.
+static NSColor* gCommandPillColor;
 @interface CommandRowView : NSTableRowView
 @end
 @implementation CommandRowView
 - (void)drawSelectionInRect:(NSRect)r {
-  [CommandSelectedColor() setFill];
-  [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 0, 1) xRadius:8 yRadius:8] fill];
+  [(gCommandPillColor ?: CommandSelectedColor()) setFill];
+  [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 0, 2) xRadius:8 yRadius:8] fill];
 }
 - (BOOL)isEmphasized { return YES; }
 @end
 
+// Arc's command bar card: an opaque rounded panel (not see-through glass), hairline edge, deep shadow from the window.
+@interface CommandCardView : NSView
+@end
+@implementation CommandCardView
+- (BOOL)wantsUpdateLayer { return YES; }
+- (void)updateLayer {
+  BOOL dark = [self.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
+              NSAppearanceNameDarkAqua;
+  self.layer.cornerRadius = 14;
+  self.layer.masksToBounds = YES;
+  self.layer.backgroundColor = (dark ? [NSColor colorWithSRGBRed:0.137 green:0.137 blue:0.149 alpha:1]
+                                     : [NSColor colorWithSRGBRed:0.988 green:0.988 blue:0.992 alpha:1]).CGColor;
+  self.layer.borderWidth = 1;
+  self.layer.borderColor = (dark ? [NSColor colorWithWhite:1 alpha:0.10] : [NSColor colorWithWhite:0 alpha:0.08]).CGColor;
+}
+@end
+
 @interface CommandSuggestionList : NSObject <NSTableViewDataSource, NSTableViewDelegate>
 @property(nonatomic, copy) NSArray<NSDictionary*>* items;
+@property(nonatomic, copy) NSImage* (^iconForSuggestion)(NSDictionary* s);  // site icon for tabs, history, top sites
 @end
 @implementation CommandSuggestionList
 - (NSInteger)numberOfRowsInTableView:(NSTableView*)t { return (NSInteger)self.items.count; }
@@ -178,22 +199,37 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
   NSDictionary* s = self.items[row];
   NSTableCellView* cell = [t makeViewWithIdentifier:@"cmd" owner:nil];
   if (!cell) {
-    cell = [[NSTableCellView alloc] initWithFrame:NSMakeRect(0, 0, c.width, kSuggestionRow - 2)];
+    cell = [[NSTableCellView alloc] initWithFrame:NSMakeRect(0, 0, c.width, kSuggestionRow)];
     cell.identifier = @"cmd";
-    NSImageView* icon = [[NSImageView alloc] initWithFrame:NSMakeRect(12, 8, 16, 16)];
+    NSImageView* icon = [[NSImageView alloc] initWithFrame:NSMakeRect(14, 17, 16, 16)];
+    icon.imageScaling = NSImageScaleProportionallyUpOrDown;
     icon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:13 weight:NSFontWeightRegular];
     [cell addSubview:icon];
     cell.imageView = icon;
     NSTextField* title = [NSTextField labelWithString:@""];
     title.lineBreakMode = NSLineBreakByTruncatingTail;
-    title.frame = NSMakeRect(38, 7, c.width - 50, 18);
+    title.frame = NSMakeRect(42, 16, c.width - 54, 18);
     title.autoresizingMask = NSViewWidthSizable;
     [cell addSubview:title];
     cell.textField = title;
+    NSTextField* hint = [NSTextField labelWithString:@""];  // Arc: what Return does, on the selected row
+    hint.tag = 3;
+    hint.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+    hint.alignment = NSTextAlignmentRight;
+    hint.autoresizingMask = NSViewMinXMargin;
+    [cell addSubview:hint];
+    // Arc: a small rounded square with an arrow after "Switch to Tab".
+    NSImageView* arrow = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"arrow.right" accessibilityDescription:nil]];
+    arrow.tag = 4;
+    arrow.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:10 weight:NSFontWeightBold];
+    arrow.wantsLayer = YES;
+    arrow.layer.cornerRadius = 5;
+    arrow.autoresizingMask = NSViewMinXMargin;
+    [cell addSubview:arrow];
   }
-  static NSDictionary* kinds = @{ @"go" : @"Go", @"tab" : @"Switch to Tab", @"space" : @"Space", @"history" : @"History",
-                                  @"action" : @"Action", @"site" : @"Top Site", @"search" : @"Search",
-                                  @"chatgpt" : @"chatgpt.com" };
+  static NSDictionary* kinds = @{ @"go" : @"Open", @"tab" : @"Switch to Tab", @"space" : @"Switch Space", @"history" : @"Open",
+                                  @"action" : @"Run", @"site" : @"Open", @"search" : @"Search",
+                                  @"chatgpt" : @"Ask ChatGPT" };
   static NSDictionary* icons = @{ @"go" : @"magnifyingglass", @"tab" : @"square.on.square", @"space" : @"square.stack",
                                   @"history" : @"clock", @"action" : @"command", @"site" : @"globe",
                                   @"search" : @"magnifyingglass", @"chatgpt" : @"bubble.left.and.text.bubble.right" };
@@ -204,14 +240,29 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
       initWithString:s[@"title"] ?: @""
           attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:14 weight:NSFontWeightMedium], NSForegroundColorAttributeName : primary}];
   NSString* sub = [s[@"subtitle"] length] ? [@"  —  " stringByAppendingString:s[@"subtitle"]] : @"";
-  NSString* kind = kinds[s[@"kind"]];
-  if (kind.length) sub = [sub stringByAppendingFormat:@"  ·  %@", kind];
   [a appendAttributedString:[[NSAttributedString alloc] initWithString:sub
-                                                            attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:12],
+                                                            attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:13],
                                                                          NSForegroundColorAttributeName : secondary}]];
   cell.textField.attributedStringValue = a;
-  cell.imageView.image = [NSImage imageWithSystemSymbolName:icons[s[@"kind"]] ?: @"globe" accessibilityDescription:nil];
-  cell.imageView.contentTintColor = sel ? NSColor.whiteColor : secondary;
+  NSTextField* hint = [cell viewWithTag:3];
+  NSImageView* arrow = [cell viewWithTag:4];
+  NSString* kind = s[@"kind"];
+  if ([kind isEqual:@"go"] && [s[@"subtitle"] isEqual:@"Search"]) kind = @"search";
+  BOOL tabRow = [kind isEqual:@"tab"];
+  hint.stringValue = sel || tabRow ? (kinds[kind] ?: @"") : @"";  // Arc keeps "Switch to Tab" on every open-tab row
+  hint.textColor = sel ? [NSColor colorWithWhite:1 alpha:0.85] : secondary;
+  arrow.hidden = !tabRow;
+  arrow.contentTintColor = sel ? NSColor.whiteColor : [NSColor.labelColor colorWithAlphaComponent:0.55];
+  arrow.layer.backgroundColor = (sel ? [NSColor colorWithWhite:1 alpha:0.22] : [NSColor.labelColor colorWithAlphaComponent:0.08]).CGColor;
+  CGFloat W = cell.bounds.size.width, aw = arrow.hidden ? 0 : 24;
+  arrow.frame = NSMakeRect(W - 10 - 24, 13, 24, 24);
+  CGFloat hw = hint.stringValue.length ? ceil(hint.attributedStringValue.size.width) + 4 : 0;
+  hint.frame = NSMakeRect(W - 14 - aw - (aw ? 4 : 0) - hw, 17, hw, 16);
+  CGFloat right = hw ? NSMinX(hint.frame) - 12 : W - 12;
+  cell.textField.frame = NSMakeRect(42, 16, MAX(40, right - 42), 18);
+  NSImage* site = self.iconForSuggestion ? self.iconForSuggestion(s) : nil;
+  cell.imageView.image = site ?: [NSImage imageWithSystemSymbolName:icons[s[@"kind"]] ?: @"globe" accessibilityDescription:nil];
+  cell.imageView.contentTintColor = sel ? NSColor.whiteColor : [NSColor.labelColor colorWithAlphaComponent:0.55];
   return cell;
 }
 - (NSTableRowView*)tableView:(NSTableView*)t rowViewForRow:(NSInteger)row { return [CommandRowView new]; }
@@ -337,6 +388,106 @@ static BOOL IsDark(NSView* v) {
   return [v.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
          NSAppearanceNameDarkAqua;
 }
+// Arc's tab titles never end in "...": a long title fades out toward the row's right edge.
+@interface FadingLabel : NSTextField
+- (void)updateFade;
+@end
+@implementation FadingLabel
+- (void)setFrameSize:(NSSize)size {
+  [super setFrameSize:size];
+  [self updateFade];
+}
+- (void)updateFade {
+  self.wantsLayer = YES;
+  CGFloat w = self.bounds.size.width;
+  if (w <= 0 || self.attributedStringValue.size.width <= w) {
+    self.layer.mask = nil;
+    return;
+  }
+  CAGradientLayer* g = [self.layer.mask isKindOfClass:CAGradientLayer.class] ? (CAGradientLayer*)self.layer.mask : [CAGradientLayer layer];
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  g.frame = self.bounds;
+  g.startPoint = CGPointMake(0, 0.5);
+  g.endPoint = CGPointMake(1, 0.5);
+  g.colors = @[ (id)NSColor.blackColor.CGColor, (id)NSColor.blackColor.CGColor, (id)NSColor.clearColor.CGColor ];
+  g.locations = @[ @0, @(MAX(0.0, 1 - 24 / w)), @1 ];
+  self.layer.mask = g;
+  [CATransaction commit];
+}
+- (BOOL)fadesForTest { return self.layer.mask != nil; }
+@end
+
+// The close button Arc shows at the right of a tab row while it's hovered.
+@interface RowCloseButton : NSButton
+@property(nonatomic) BOOL applies;  // the row is a tab (folders, sections and "+ New Tab" have none)
+@property(nonatomic) BOOL mouseInside;
+@end
+@implementation RowCloseButton
+- (void)updateTrackingAreas {
+  [super updateTrackingAreas];
+  for (NSTrackingArea* t in self.trackingAreas) [self removeTrackingArea:t];
+  [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                     options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow |
+                                                             NSTrackingInVisibleRect
+                                                       owner:self
+                                                    userInfo:nil]];
+}
+- (void)mouseEntered:(NSEvent*)e { self.mouseInside = YES; self.needsDisplay = YES; }
+- (void)mouseExited:(NSEvent*)e { self.mouseInside = NO; self.needsDisplay = YES; }
+- (void)drawRect:(NSRect)r {
+  if (self.mouseInside) {  // Arc: SidebarItemHoveredBackground behind the cross
+    BOOL dark = [self.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
+                NSAppearanceNameDarkAqua;
+    [(dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.15] : [NSColor colorWithSRGBRed:0.055 green:0.059 blue:0.063 alpha:0.10]) setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 2, 2) xRadius:5 yRadius:5] fill];
+  }
+  [super drawRect:r];
+}
+@end
+
+// The mini player card: tells its owner when the pointer enters or leaves (mute shows only while it's inside).
+static const CGFloat kMediaCardHeight = 48;
+@interface MediaCardView : NSView
+@property(nonatomic, copy) void (^hoverChanged)(BOOL inside);
+@property(nonatomic) BOOL inside;
+@end
+@implementation MediaCardView
+- (void)updateTrackingAreas {
+  [super updateTrackingAreas];
+  for (NSTrackingArea* t in self.trackingAreas) [self removeTrackingArea:t];
+  [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                     options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways |
+                                                             NSTrackingInVisibleRect
+                                                       owner:self
+                                                    userInfo:nil]];
+}
+- (void)mouseEntered:(NSEvent*)e {
+  self.inside = YES;
+  if (self.hoverChanged) self.hoverChanged(YES);
+}
+- (void)mouseExited:(NSEvent*)e {
+  self.inside = NO;
+  if (self.hoverChanged) self.hoverChanged(NO);
+}
+@end
+
+// A page title as the mini player shows it when the page doesn't say what's playing: no running clock such as
+// "brain.fm (2:52)" or "1:02 / 3:40", and no leading play triangle.
+NSString* MediaBarTitle(NSString* pageTitle) {
+  NSString* t = pageTitle ?: @"";
+  static NSRegularExpression* clock, *lead;
+  if (!clock) {
+    clock = [NSRegularExpression regularExpressionWithPattern:@"\\s*[(\\[]?\\d{1,2}(:\\d{2}){1,2}(\\s*/\\s*\\d{1,2}(:\\d{2}){1,2})?[)\\]]?\\s*"
+                                                      options:0 error:nil];
+    lead = [NSRegularExpression regularExpressionWithPattern:@"^[\\s\\x{25B6}\\x{25BA}\\x{23F8}|\\-:]+" options:0 error:nil];
+  }
+  t = [clock stringByReplacingMatchesInString:t options:0 range:NSMakeRange(0, t.length) withTemplate:@" "];
+  t = [lead stringByReplacingMatchesInString:t options:0 range:NSMakeRange(0, t.length) withTemplate:@""];
+  t = [t stringByTrimmingCharactersInSet:[NSCharacterSet characterSetWithCharactersInString:@" \t-|:"]];
+  return t.length ? t : (pageTitle ?: @"");
+}
+
 @interface SidebarRowView : NSTableRowView
 @property(nonatomic) BOOL hovered;
 @property(nonatomic) BOOL multi;
@@ -345,6 +496,33 @@ static BOOL IsDark(NSView* v) {
 @property(nonatomic) BOOL newTabRow;       // Today header: hairline, then a "+ New Tab" pill at the bottom
 @end
 @implementation SidebarRowView
+- (void)setHovered:(BOOL)hovered {
+  _hovered = hovered;
+  [self syncCloseButton];
+}
+- (void)setSelected:(BOOL)selected {
+  [super setSelected:selected];
+  [self syncCloseButton];
+}
+- (void)didAddSubview:(NSView*)v {
+  [super didAddSubview:v];
+  [self syncCloseButton];
+}
+// Arc: the close button shows on the hovered row; the title's fade moves in to make room.
+- (void)syncCloseButton {
+  for (NSView* cell in self.subviews) {
+    RowCloseButton* b = [cell viewWithTag:81];
+    if (![b isKindOfClass:RowCloseButton.class]) continue;
+    BOOL show = b.applies && self.hovered;  // Arc's own videos: the selected row shows no cross until hovered
+    b.hidden = !show;
+    if (!b.applies) continue;
+    NSTextField* label = ((NSTableCellView*)cell).textField;
+    NSRect lf = label.frame;
+    CGFloat right = show ? NSMinX(b.frame) - 2 : cell.bounds.size.width - 8;
+    lf.size.width = MAX(0, right - lf.origin.x);
+    if (lf.size.width != label.frame.size.width) label.frame = lf;
+  }
+}
 - (NSColor*)fill {
   BOOL dark = IsDark(self);
   if (self.pressed)  // Arc: TabCellBackgroundPressed
@@ -381,7 +559,9 @@ static BOOL IsDark(NSView* v) {
     CGFloat inset = (kRowPitch - kRowHeight) / 2;
     return NSMakeRect(0, self.flipped ? self.bounds.size.height - kRowPitch + inset : inset, self.bounds.size.width, kRowHeight);
   }
-  return NSInsetRect(self.bounds, 0, (self.bounds.size.height - kRowHeight) / 2);
+  NSRect r = NSInsetRect(self.bounds, 0, (self.bounds.size.height - kRowHeight) / 2);
+  r.size.width -= 2;  // Arc: the row pill ends 2 pt short of the address pill (x 8-262 vs 8-264)
+  return r;
 }
 - (void)drawBackgroundInRect:(NSRect)r {
   if (self.separatorAbove) {  // Arc: SidebarSeparator, 15% white (dark) / black (light)
@@ -401,10 +581,29 @@ static BOOL IsDark(NSView* v) {
 }
 @end
 
+// Arc's sidebar never shows a scrollbar track, even with a mouse attached or "Show scroll bars: Always": the
+// scroller is always the thin overlay kind and only appears while you scroll a list that doesn't fit.
+@interface SidebarScroller : NSScroller
+@end
+@implementation SidebarScroller
++ (BOOL)isCompatibleWithOverlayScrollers { return YES; }
+@end
+@interface SidebarScrollView : NSScrollView
+@end
+@implementation SidebarScrollView
+- (void)setScrollerStyle:(NSScrollerStyle)style { [super setScrollerStyle:NSScrollerStyleOverlay]; }
+@end
+
 // Arc doesn't indent top-level tabs under the Pinned/Today headers; only folder contents are indented.
 @interface SidebarOutlineView : NSOutlineView
 @end
 @implementation SidebarOutlineView
+// Rows are exactly as wide as the visible sidebar (no hidden scroller gutter), so the pill's right corners show.
+- (void)setFrameSize:(NSSize)size {
+  NSClipView* clip = (NSClipView*)self.superview;
+  if ([clip isKindOfClass:NSClipView.class] && clip.bounds.size.width > 0) size.width = clip.bounds.size.width;
+  [super setFrameSize:size];
+}
 // Arc has no disclosure triangles: folders show their own chevron and toggle on click.
 - (NSRect)frameOfOutlineCellAtRow:(NSInteger)row { return NSZeroRect; }
 - (void)mouseDown:(NSEvent*)e {
@@ -828,11 +1027,17 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   CommandSuggestionList* _suggestionList;
   NSBox* _commandDivider;
   NSTextField* _commandField;
+  NSImageView* _commandIcon;
+  NSView* _commandScrim;
   BOOL _commandOpensNewTab;
   BOOL _saveScheduled;
   NSMutableArray<ArchivedTab*>* _archive;
   NSTimer* _archiveTimer;
   ArchiveWindowController* _archiveWindow;
+  LibraryPanelView* _library;  // the sidebar's Library panel (Archive), nil until first opened
+  BOOL _libraryShown;
+  NSButton* _libraryButton;
+  __weak NSResponder* _responderBeforeLibrary;
   ArchiveWindowController* _historyWindow;
   HistoryStore* _history;
   BOOL _focusMode;
@@ -873,6 +1078,11 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSTextField* _mediaTitle;
   NSButton* _mediaPlay;
   NSButton* _mediaMute;
+  NSButton* _mediaPrev;
+  NSButton* _mediaNext;
+  NSImageView* _mediaArt;
+  NSTextField* _mediaSubtitle;
+  NSString* _mediaArtLoading;
   ArcItem* _mediaItem;
   NSScrollView* _sidebarScroll;
   NSTimer* _mediaTimer;
@@ -1016,24 +1226,43 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   [root addSubview:_themeView];
   [root addSubview:sidebar];
 
-  _mediaBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 44, kSidebarWidth - 16, 34)];
+  // Arc's mini player: a dark card above the bottom bar with the artwork (or the site's icon), what's playing and
+  // the site on two lines, and back / play-pause / forward; mute shows while the pointer is over the card.
+  MediaCardView* card = [[MediaCardView alloc] initWithFrame:NSMakeRect(8, 44, kSidebarWidth - 17, kMediaCardHeight)];
+  card.hoverChanged = ^(BOOL inside) { [weakOwner updateMediaBar]; };
+  _mediaBar = card;
   _mediaBar.wantsLayer = YES;
   _mediaBar.layer.cornerRadius = 8;
-  _mediaBar.layer.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.08].CGColor;
-  _mediaPlay = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"pause.fill" accessibilityDescription:@"Pause"]
-                                  target:self action:@selector(mediaBarPlay:)];
-  _mediaPlay.bordered = NO;
-  _mediaPlay.frame = NSMakeRect(4, 5, 24, 24);
-  _mediaMute = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"speaker.wave.2.fill" accessibilityDescription:@"Mute"]
-                                  target:self action:@selector(mediaBarMute:)];
-  _mediaMute.bordered = NO;
-  _mediaMute.frame = NSMakeRect(kSidebarWidth - 16 - 28, 5, 24, 24);
-  _mediaTitle = [NSTextField labelWithString:@""];
-  _mediaTitle.lineBreakMode = NSLineBreakByTruncatingTail;
-  _mediaTitle.font = [NSFont systemFontOfSize:12];
-  _mediaTitle.frame = NSMakeRect(32, 8, kSidebarWidth - 16 - 64, 18);
+  auto mediaButton = ^NSButton*(NSString* symbol, NSString* label, SEL action, CGFloat size) {
+    NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:label]
+                                     target:self action:action];
+    b.bordered = NO;
+    b.imagePosition = NSImageOnly;
+    b.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:size weight:NSFontWeightMedium];
+    b.toolTip = label;
+    return b;
+  };
+  _mediaArt = [[NSImageView alloc] initWithFrame:NSMakeRect(8, 8, 32, 32)];
+  _mediaArt.imageScaling = NSImageScaleProportionallyUpOrDown;
+  _mediaArt.wantsLayer = YES;
+  _mediaArt.layer.cornerRadius = 6;
+  _mediaArt.layer.masksToBounds = YES;
+  NSClickGestureRecognizer* goArt = [[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(mediaBarShowTab:)];
+  [_mediaArt addGestureRecognizer:goArt];
+  _mediaTitle = [FadingLabel labelWithString:@""];
+  _mediaTitle.lineBreakMode = NSLineBreakByClipping;
+  _mediaTitle.font = [NSFont systemFontOfSize:12 weight:NSFontWeightSemibold];
+  _mediaTitle.frame = NSMakeRect(48, 24, 120, 16);
   NSClickGestureRecognizer* go = [[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(mediaBarShowTab:)];
   [_mediaTitle addGestureRecognizer:go];
+  _mediaSubtitle = [FadingLabel labelWithString:@""];
+  _mediaSubtitle.lineBreakMode = NSLineBreakByClipping;
+  _mediaSubtitle.font = [NSFont systemFontOfSize:11];
+  _mediaSubtitle.frame = NSMakeRect(48, 9, 120, 14);
+  _mediaPrev = mediaButton(@"backward.fill", @"Previous", @selector(mediaBarPrevious:), 11);
+  _mediaPlay = mediaButton(@"pause.fill", @"Pause", @selector(mediaBarPlay:), 14);
+  _mediaNext = mediaButton(@"forward.fill", @"Next", @selector(mediaBarNext:), 11);
+  _mediaMute = mediaButton(@"speaker.wave.2.fill", @"Mute", @selector(mediaBarMute:), 11);
   // Arc's call controls: in a call, the bar shows microphone and camera toggles instead of play / mute.
   _callCam = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"video.fill" accessibilityDescription:@"Camera"]
                                 target:self action:@selector(callBarCamera:)];
@@ -1044,7 +1273,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _callMic.bordered = NO;
   _callMic.frame = NSMakeRect(kSidebarWidth - 16 - 28, 5, 24, 24);
   _callCam.hidden = _callMic.hidden = YES;
-  for (NSView* v in @[ _mediaPlay, _mediaTitle, _mediaMute, _callCam, _callMic ]) [_mediaBar addSubview:v];
+  for (NSView* v in @[ _mediaArt, _mediaTitle, _mediaSubtitle, _mediaPrev, _mediaPlay, _mediaNext, _mediaMute, _callCam, _callMic ])
+    [_mediaBar addSubview:v];
   _mediaBar.hidden = YES;
   [sidebar addSubview:_mediaBar];
   // Arc's next-meeting bar (#56): title, when, and Join for a video-call link; from the Mac's Calendar.
@@ -1108,11 +1338,14 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   [sidebar addSubview:_favGrid];
   [self updateSpaceHeader];
 
-  NSScrollView* scroll = [[NSScrollView alloc]
+  NSScrollView* scroll = [[SidebarScrollView alloc]
       initWithFrame:NSMakeRect(8, 42, kSidebarWidth - 17, bounds.size.height - 166)];
   scroll.autoresizingMask = NSViewHeightSizable;
   scroll.drawsBackground = NO;
+  scroll.verticalScroller = [SidebarScroller new];
   scroll.hasVerticalScroller = YES;
+  scroll.hasHorizontalScroller = NO;
+  scroll.autohidesScrollers = YES;
   scroll.scrollerStyle = NSScrollerStyleOverlay;
   scroll.automaticallyAdjustsContentInsets = NO;
   _sidebarScroll = scroll;
@@ -1219,6 +1452,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   lib.toolTip = @"Archive";
   lib.contentTintColor = NSColor.secondaryLabelColor;
   lib.frame = NSMakeRect(2, 2, 26, 26);
+  _libraryButton = lib;
   [_spaceBar addSubview:lib];
   NSButton* plus = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"plus" accessibilityDescription:@"New"]
                                       target:self action:@selector(showNewMenu:)];
@@ -1292,12 +1526,20 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   CGFloat below = gridH ? 90 + gridH : 82;
   _spaceHeader.frame = NSMakeRect(8, H - below - 42, w, 34);
   CGFloat top = _spaceHeader.hidden ? below + 8 : below + 42;
-  CGFloat bottom = _mediaBar.hidden ? 42 : 82;
+  CGFloat bottom = _mediaBar.hidden ? 42 : 44 + kMediaCardHeight + 4;
   NSRect mf = _meetingBar.frame;
   mf.origin.y = bottom + 2;
   _meetingBar.frame = mf;
   if (!_meetingBar.hidden) bottom += 40;
   _sidebarScroll.frame = NSMakeRect(8, bottom, w, MAX(0, H - top - bottom));
+  // The Library takes the place of Favorites, the Space title and the tabs, between the address pill and the bars.
+  _library.hidden = !_libraryShown;
+  if (_libraryShown) {
+    _library.frame = NSMakeRect(8, bottom, w, MAX(0, H - 90 - bottom));
+    _favGrid.hidden = YES;
+  }
+  _sidebarScroll.hidden = _libraryShown;
+  _spaceHeader.alphaValue = _libraryShown ? 0 : 1;
 }
 
 - (void)updateFavoritesGrid {
@@ -1885,7 +2127,8 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   });
   _client->set_media_callback([weakSelf](int browserId, const std::string& state, const std::string& title) {
     if (getenv("NOTARC_MEDIA_DEBUG") && !title.empty()) std::fprintf(stderr, "MEDIA-DEBUG %d %s %s\n", browserId, state.c_str(), title.c_str());
-    [OwnerOf(browserId, weakSelf) browser:browserId mediaState:[NSString stringWithUTF8String:state.c_str()]];
+    [OwnerOf(browserId, weakSelf) browser:browserId mediaState:[NSString stringWithUTF8String:state.c_str()]
+                                      info:[NSString stringWithUTF8String:title.c_str()]];
   });
   _mediaTimer = [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer*) { [weakSelf pollMediaNow]; }];
   _client->set_renderer_callback([weakSelf](int browserId, int kind, int status) {
@@ -2263,8 +2506,8 @@ static NSString* const kPiPExitJS =
     icon.autoresizingMask = NSViewMaxYMargin;  // pinned to the bottom 41 pt (the "+ New Tab" header is taller)
     [cell addSubview:icon];
     cell.imageView = icon;
-    NSTextField* label = [NSTextField labelWithString:@""];
-    label.lineBreakMode = NSLineBreakByTruncatingTail;
+    NSTextField* label = [FadingLabel labelWithString:@""];
+    label.lineBreakMode = NSLineBreakByClipping;
     label.frame = NSMakeRect(37, 11.5, col.width - 45, 18);
     label.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin;
     [cell addSubview:label];
@@ -2343,6 +2586,24 @@ static NSString* const kPiPExitJS =
   icf.origin.y = 12.5;
   cell.imageView.frame = icf;
   cell.textField.hidden = a.isSection && !newTab;
+  RowCloseButton* close = [cell viewWithTag:81];
+  if (!close) {
+    close = [RowCloseButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"xmark" accessibilityDescription:@"Close Tab"]
+                                     target:self action:@selector(rowCloseClicked:)];
+    close.tag = 81;
+    close.bordered = NO;
+    close.imagePosition = NSImageOnly;
+    close.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:10 weight:NSFontWeightSemibold];
+    close.frame = NSMakeRect(cell.bounds.size.width - 34, 8.5, 24, 24);
+    close.autoresizingMask = NSViewMinXMargin | NSViewMaxYMargin;
+    close.toolTip = @"Close Tab";
+    [cell addSubview:close];
+  }
+  close.applies = !a.isSection && !a.isFolder && !newTab && (a.url.length || a.isSplit || a.noteID || a.easelID);
+  close.contentTintColor = indigo ? [ArcDefaultTabText() colorWithAlphaComponent:0.7] : NSColor.secondaryLabelColor;
+  close.hidden = YES;
+  if ([cell.superview isKindOfClass:SidebarRowView.class]) [(SidebarRowView*)cell.superview syncCloseButton];
+  if ([cell.textField isKindOfClass:FadingLabel.class]) [(FadingLabel*)cell.textField updateFade];
   // Other windows: "Move to main window" sits at the right of the Today header (Arc: moveToMainWindow).
   NSButton* toMain = [cell viewWithTag:78];
   if (newTab && !toMain) {
@@ -2484,8 +2745,20 @@ static NSString* const kMediaProbeJS =
     @"(function(){var m=[].slice.call(document.querySelectorAll('video,audio'));"
      "var on=m.some(function(e){return !e.paused&&!e.ended&&e.readyState>2&&!e.muted&&e.volume>0;});"
      "var held=m.some(function(e){return e.__notarcPaused;});"
+     "var s=navigator.mediaSession,md=s&&s.metadata,h=window.__notarcMSActions||{},art='';"
+     "if(md&&md.artwork&&md.artwork.length)art=md.artwork[md.artwork.length-1].src||'';"
+     "var meta=JSON.stringify({t:md?md.title:'',a:md?(md.artist||md.album||''):'',art:art,"
+     "prev:!!h.previoustrack,next:!!h.nexttrack});"
      "console.log('__notarc_media__:'+(on?'playing':(held?'paused':'none'))+'|'+m.map(function(e){"
-     "return [e.paused,e.ended,e.readyState,e.muted,e.volume,e.error&&e.error.code].join(',');}).join(';'));})()";
+     "return [e.paused,e.ended,e.readyState,e.muted,e.volume,e.error&&e.error.code].join(',');}).join(';')+'|'+meta);})()";
+// Remembers which media actions the page handles (previous / next track), so the mini player can offer them.
+static NSString* const kMediaSessionHookJS =
+    @"(()=>{const s=navigator.mediaSession;if(!s||window.__notarcMSHook)return;window.__notarcMSHook=1;"
+    @"window.__notarcMSActions={};const o=s.setActionHandler.bind(s);"
+    @"s.setActionHandler=(n,f)=>{window.__notarcMSActions[n]=f;return o(n,f);};})()";
+static NSString* MediaActionJS(NSString* action) {
+  return [NSString stringWithFormat:@"(()=>{const f=(window.__notarcMSActions||{})['%@'];if(f)f({action:'%@'});})()", action, action];
+}
 static NSString* const kMediaPauseJS =
     @"(function(){[].slice.call(document.querySelectorAll('video,audio')).forEach(function(e){"
      "if(!e.paused){e.__notarcPaused=true;e.pause();}});})()";
@@ -2511,6 +2784,7 @@ static NSString* const kCallHookJS =
   if (it == _browsers.end()) return;
   CefRefPtr<CefFrame> f = it->second->GetMainFrame();
   f->ExecuteJavaScript(kCallHookJS.UTF8String, f->GetURL(), 0);
+  f->ExecuteJavaScript(kMediaSessionHookJS.UTF8String, f->GetURL(), 0);
 }
 
 - (void)runJS:(NSString*)js inItem:(ArcItem*)item {  // also used by the self-test
@@ -2527,10 +2801,29 @@ static NSString* const kCallHookJS =
   }
 }
 
-- (void)browser:(int)browserId mediaState:(NSString*)state {
+- (void)browser:(int)browserId mediaState:(NSString*)state info:(NSString*)info {
   ArcItem* item = [self itemForBrowserId:browserId];
   if (!item) return;
   BOOL playing = [state isEqualToString:@"playing"], paused = [state isEqualToString:@"paused"];
+  NSRange j = [info rangeOfString:@"|{"];
+  NSDictionary* meta = j.location == NSNotFound ? nil
+      : [NSJSONSerialization JSONObjectWithData:[[info substringFromIndex:j.location + 1] dataUsingEncoding:NSUTF8StringEncoding]
+                                        options:0 error:nil];
+  if ([meta isKindOfClass:NSDictionary.class]) {
+    NSString* (^str)(NSString*) = ^NSString*(NSString* k) {
+      id v = meta[k];
+      return [v isKindOfClass:NSString.class] && [v length] ? v : nil;
+    };
+    BOOL changed = ![str(@"t") ?: @"" isEqual:item.mediaTitle ?: @""] || ![str(@"a") ?: @"" isEqual:item.mediaArtist ?: @""] ||
+                   ![str(@"art") ?: @"" isEqual:item.mediaArtworkURL ?: @""] || [meta[@"prev"] boolValue] != item.mediaCanPrevious ||
+                   [meta[@"next"] boolValue] != item.mediaCanNext;
+    item.mediaTitle = str(@"t");
+    item.mediaArtist = str(@"a");
+    item.mediaArtworkURL = str(@"art");
+    item.mediaCanPrevious = [meta[@"prev"] boolValue];
+    item.mediaCanNext = [meta[@"next"] boolValue];
+    if (changed && item == _mediaItem) [self updateMediaBar];
+  }
   if (playing == item.mediaPlaying && paused == item.mediaPaused) return;
   item.mediaPlaying = playing;
   item.mediaPaused = paused;
@@ -2748,37 +3041,100 @@ NSString* FavoritePreviewKind(NSString* url) {
   ArcItem* call = [self callItem];
   _callMic.hidden = !call || !call.usingMic;
   _callCam.hidden = !call || !call.usingCamera;
-  _mediaPlay.hidden = _mediaMute.hidden = call != nil;
-  if (call) {
-    _callMic.image = [NSImage imageWithSystemSymbolName:call.micMuted ? @"mic.slash.fill" : @"mic.fill" accessibilityDescription:nil];
-    _callMic.contentTintColor = call.micMuted ? NSColor.systemRedColor : nil;
-    _callCam.image = [NSImage imageWithSystemSymbolName:call.cameraOff ? @"video.slash.fill" : @"video.fill" accessibilityDescription:nil];
-    _callCam.contentTintColor = call.cameraOff ? NSColor.systemRedColor : nil;
-    _callMic.toolTip = call.micMuted ? @"Unmute microphone" : @"Mute microphone";
-    _callCam.toolTip = call.cameraOff ? @"Turn camera on" : @"Turn camera off";
-    _mediaItem = call;
-    _mediaTitle.stringValue = call.displayTitle ?: @"";
-    if (_mediaBar.hidden) {
-      _mediaBar.hidden = NO;
-      [self layoutSidebar];
-    }
-    return;
-  }
   ArcItem* pick = nil;
-  for (ArcItem* t in _space.allTabs)
-    if (t != _shown && t.browserId && (t.mediaPlaying || t.mediaPaused) && (!pick || (t.mediaPlaying && !pick.mediaPlaying)))
-      pick = t;
-  _mediaItem = pick;
-  BOOL show = pick != nil;
+  if (!call)
+    for (ArcItem* t in _space.allTabs)
+      if (t != _shown && t.browserId && (t.mediaPlaying || t.mediaPaused) && (!pick || (t.mediaPlaying && !pick.mediaPlaying)))
+        pick = t;
+  ArcItem* item = call ?: pick;
+  _mediaItem = item;
+  BOOL show = item != nil;
   if (show) {
-    _mediaTitle.stringValue = pick.displayTitle ?: @"";
-    _mediaPlay.image = [NSImage imageWithSystemSymbolName:pick.mediaPlaying ? @"pause.fill" : @"play.fill" accessibilityDescription:nil];
-    _mediaMute.image = [NSImage imageWithSystemSymbolName:pick.audioMuted ? @"speaker.slash.fill" : @"speaker.wave.2.fill"
-                                 accessibilityDescription:nil];
+    BOOL hover = ((MediaCardView*)_mediaBar).inside;
+    _mediaPlay.hidden = call != nil;
+    _mediaPrev.hidden = call || !item.mediaCanPrevious;
+    _mediaNext.hidden = call || !item.mediaCanNext;
+    _mediaMute.hidden = call || !(hover || item.audioMuted);
+    if (call) {
+      _callMic.image = [NSImage imageWithSystemSymbolName:call.micMuted ? @"mic.slash.fill" : @"mic.fill" accessibilityDescription:nil];
+      _callMic.contentTintColor = call.micMuted ? NSColor.systemRedColor : nil;
+      _callCam.image = [NSImage imageWithSystemSymbolName:call.cameraOff ? @"video.slash.fill" : @"video.fill" accessibilityDescription:nil];
+      _callCam.contentTintColor = call.cameraOff ? NSColor.systemRedColor : nil;
+      _callMic.toolTip = call.micMuted ? @"Unmute microphone" : @"Mute microphone";
+      _callCam.toolTip = call.cameraOff ? @"Turn camera on" : @"Turn camera off";
+    } else {
+      _mediaPlay.image = [NSImage imageWithSystemSymbolName:item.mediaPlaying ? @"pause.fill" : @"play.fill"
+                                   accessibilityDescription:item.mediaPlaying ? @"Pause" : @"Play"];
+      _mediaPlay.toolTip = item.mediaPlaying ? @"Pause" : @"Play";
+      _mediaMute.image = [NSImage imageWithSystemSymbolName:item.audioMuted ? @"speaker.slash.fill" : @"speaker.wave.2.fill"
+                                   accessibilityDescription:nil];
+    }
+    NSString* host = [NSURL URLWithString:item.url ?: @""].host ?: @"";
+    if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
+    _mediaTitle.stringValue = (!call && item.mediaTitle.length) ? item.mediaTitle : MediaBarTitle(item.displayTitle);
+    _mediaSubtitle.stringValue = (!call && item.mediaArtist.length) ? item.mediaArtist : host;
+    [self updateMediaArtworkFor:item];
+    [self layoutMediaCard];
   }
   if (_mediaBar.hidden == !show) return;
   _mediaBar.hidden = !show;
   [self layoutSidebar];
+}
+
+// Right to left: mute (while hovered), next, play, previous; or the call's camera and microphone. The two text
+// lines take the rest of the card.
+- (void)layoutMediaCard {
+  BOOL dark = IsDark(_sidebar);
+  _mediaBar.layer.backgroundColor = (dark ? [NSColor colorWithWhite:0 alpha:0.40] : [NSColor colorWithWhite:1 alpha:0.60]).CGColor;
+  BOOL indigo = [self usingDefaultTheme];
+  NSColor* text = indigo && dark ? ArcDefaultTabText() : NSColor.labelColor;
+  _mediaTitle.textColor = text;
+  _mediaSubtitle.textColor = [text colorWithAlphaComponent:0.55];
+  CGFloat x = NSWidth(_mediaBar.bounds) - 6, y = (kMediaCardHeight - 24) / 2;
+  for (NSButton* b in @[ _mediaMute, _callMic, _callCam, _mediaNext, _mediaPlay, _mediaPrev ]) {
+    if (b.hidden) continue;
+    x -= 24;
+    b.frame = NSMakeRect(x, y, 24, 24);
+    b.contentTintColor = b == _callMic || b == _callCam ? b.contentTintColor : [text colorWithAlphaComponent:b == _mediaMute ? 0.6 : 0.85];
+  }
+  CGFloat w = MAX(40, x - 4 - 48);
+  _mediaTitle.frame = NSMakeRect(48, 24, w, 16);
+  _mediaSubtitle.frame = NSMakeRect(48, 9, w, 14);
+  [(FadingLabel*)_mediaTitle updateFade];
+  [(FadingLabel*)_mediaSubtitle updateFade];
+}
+
+// The page's artwork when it gives one (loaded once, never in hidden test runs), else the site's icon.
+- (void)updateMediaArtworkFor:(ArcItem*)item {
+  static NSCache<NSString*, NSImage*>* cache = [NSCache new];
+  NSString* art = item.mediaArtworkURL;
+  NSImage* img = art.length ? [cache objectForKey:art] : nil;
+  if (!img && art.length && !self.selfTestProfiles && ![_mediaArtLoading isEqual:art] &&
+      ([art hasPrefix:@"https://"] || [art hasPrefix:@"http://"])) {
+    _mediaArtLoading = art;
+    __weak MainWindowController* weakSelf = self;
+    [[NSURLSession.sharedSession dataTaskWithURL:[NSURL URLWithString:art]
+                               completionHandler:^(NSData* data, NSURLResponse*, NSError*) {
+                                 NSImage* got = data.length ? [[NSImage alloc] initWithData:data] : nil;
+                                 dispatch_async(dispatch_get_main_queue(), ^{
+                                   if (got) [cache setObject:got forKey:art];
+                                   [weakSelf updateMediaBar];
+                                 });
+                               }] resume];
+  }
+  _mediaArt.image = img ?: [self iconImageForItem:item];
+  _mediaArt.imageScaling = img ? NSImageScaleProportionallyUpOrDown : NSImageScaleNone;
+  _mediaArt.layer.backgroundColor = img ? nil : [NSColor colorWithWhite:IsDark(_sidebar) ? 1 : 0 alpha:0.08].CGColor;
+}
+
+- (NSString*)mediaCardDescription {  // tests (visual parity V3)
+  return [NSString stringWithFormat:@"h=%.0f title=%@ subtitle=%@ prev=%d play=%d next=%d mute=%d art=%d", NSHeight(_mediaBar.frame),
+                                    _mediaTitle.stringValue, _mediaSubtitle.stringValue, !_mediaPrev.hidden, !_mediaPlay.hidden,
+                                    !_mediaNext.hidden, !_mediaMute.hidden, _mediaArt.image != nil];
+}
+- (void)setMediaCardHoveredForTest:(BOOL)hovered {
+  ((MediaCardView*)_mediaBar).inside = hovered;
+  [self updateMediaBar];
 }
 
 - (ArcItem*)mediaBarItem { return _mediaBar.hidden ? nil : _mediaItem; }
@@ -2800,6 +3156,8 @@ NSString* FavoritePreviewKind(NSString* url) {
 - (IBAction)toggleMuteCurrentTab:(id)sender { if (_shown) [self toggleMuteItem:_shown]; }
 - (void)mediaBarPlay:(id)sender { if (_mediaItem) [self togglePlayItem:_mediaItem]; }
 - (void)mediaBarMute:(id)sender { if (_mediaItem) [self toggleMuteItem:_mediaItem]; }
+- (void)mediaBarPrevious:(id)sender { if (_mediaItem) [self runJS:MediaActionJS(@"previoustrack") inItem:_mediaItem]; }
+- (void)mediaBarNext:(id)sender { if (_mediaItem) [self runJS:MediaActionJS(@"nexttrack") inItem:_mediaItem]; }
 - (void)mediaBarShowTab:(id)sender { if (_mediaItem) [self showItem:_mediaItem]; }
 - (void)menuToggleMute:(NSMenuItem*)sender { [self toggleMuteItem:sender.representedObject]; }
 - (void)menuTogglePlay:(NSMenuItem*)sender { [self togglePlayItem:sender.representedObject]; }
@@ -6066,6 +6424,11 @@ static ArcItem* NewSection(NSString* title) {
 }
 - (IBAction)setSpaceAppearance:(NSMenuItem*)sender { [self setColorScheme:sender.representedObject forSpace:_space]; }
 - (BOOL)sidebarIsDark { return IsDark(_sidebarScroll); }  // tests
+- (BOOL)sidebarScrollerIsOverlay {  // tests: no track, even after the system asks for the legacy (always shown) style
+  _sidebarScroll.scrollerStyle = NSScrollerStyleLegacy;
+  return _sidebarScroll.scrollerStyle == NSScrollerStyleOverlay && _sidebarScroll.autohidesScrollers &&
+         !_sidebarScroll.hasHorizontalScroller && NSWidth(_outline.frame) <= NSWidth(_sidebarScroll.contentView.bounds);
+}
 
 - (void)applyTheme {
   [self applyColorScheme];
@@ -6729,6 +7092,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (NSUInteger)cardPopCount { return _cardPops; }
 
 - (void)switchToSpace:(ArcSpace*)space {
+  [self hideLibrary];  // the Library closes when you pick a Space, as with Back
   if (!space || space == _space) return;
   [_extensionPopup closeBecause:@"space"];  // the popup runs in the old Space's profile
   NSUInteger from = _space ? [_spaces indexOfObject:_space] : 0, to = [_spaces indexOfObject:space];
@@ -7972,13 +8336,9 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
     _commandBar.backgroundColor = NSColor.clearColor;
     _commandBar.opaque = NO;
     _commandBar.hasShadow = YES;
-    // Rounded translucent card, as in Arc, with a hairline (CommandBarHairlineDividerColor) under the field.
-    NSVisualEffectView* card = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0, 0, 640, 52)];
-    card.material = NSVisualEffectMaterialPopover;
-    card.state = NSVisualEffectStateActive;
+    // Arc's command bar: a large opaque card floating over the page, with a hairline under the input row.
+    CommandCardView* card = [[CommandCardView alloc] initWithFrame:NSMakeRect(0, 0, 640, 60)];
     card.wantsLayer = YES;
-    card.layer.cornerRadius = 12;
-    card.layer.masksToBounds = YES;
     card.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [_commandBar.contentView addSubview:card];
     _commandDivider = [[NSBox alloc] initWithFrame:NSMakeRect(0, 0, 640, 1)];
@@ -7986,14 +8346,31 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
     _commandDivider.borderWidth = 0;
     _commandDivider.fillColor = [NSColor.labelColor colorWithAlphaComponent:0.10];
     [_commandBar.contentView addSubview:_commandDivider];
-    _commandField = [[NSTextField alloc] initWithFrame:NSMakeRect(12, 10, 616, 32)];
-    _commandField.font = [NSFont systemFontOfSize:18];
+    _commandIcon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"magnifyingglass" accessibilityDescription:nil]];
+    _commandIcon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:16 weight:NSFontWeightMedium];
+    _commandIcon.contentTintColor = [NSColor.labelColor colorWithAlphaComponent:0.33];
+    [_commandBar.contentView addSubview:_commandIcon];
+    _commandField = [[NSTextField alloc] initWithFrame:NSMakeRect(48, 17, 576, 26)];
+    _commandField.font = [NSFont systemFontOfSize:20];
     _commandField.bezeled = NO;
     _commandField.focusRingType = NSFocusRingTypeNone;
     _commandField.drawsBackground = NO;
     _commandField.delegate = self;
     [_commandBar.contentView addSubview:_commandField];
     _suggestionList = [CommandSuggestionList new];
+    __weak MainWindowController* weakCmd = self;
+    _suggestionList.iconForSuggestion = ^NSImage*(NSDictionary* s) {
+      MainWindowController* me = weakCmd;
+      ArcItem* item = [s[@"item"] isKindOfClass:ArcItem.class] ? s[@"item"] : nil;
+      NSString* url = [s[@"url"] isKindOfClass:NSString.class] ? s[@"url"] : nil;
+      if (!me || (!item && !url.length)) return nil;
+      if (!item) {
+        item = [ArcItem new];
+        item.url = url;
+      }
+      NSImage* img = [me iconImageForItem:item];
+      return img.isTemplate ? nil : img;  // no saved icon: the row keeps its kind symbol
+    };
     _suggestionTable = [[NSTableView alloc] initWithFrame:NSMakeRect(0, 0, 640, 0)];
     NSTableColumn* col = [[NSTableColumn alloc] initWithIdentifier:@"s"];
     col.width = 620;
@@ -8026,10 +8403,18 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
 - (NSString*)commandBarStyle {  // tests
   NSColor* c = [CommandSelectedColor() colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
   NSTableRowView* rv = _suggestionTable.numberOfRows ? [_suggestionTable rowViewAtRow:0 makeIfNecessary:YES] : nil;
-  return [NSString stringWithFormat:@"sel=%02X%02X%02X rowClass=%@ divider=%d placeholder=%@ cell=%@", (int)lround(c.redComponent * 255),
-                                    (int)lround(c.greenComponent * 255), (int)lround(c.blueComponent * 255),
-                                    NSStringFromClass(rv.class), !_commandDivider.hidden, _commandField.placeholderString,
-                                    NSStringFromClass([[_suggestionTable viewAtColumn:0 row:0 makeIfNecessary:YES] class])];
+  NSTableCellView* first = _suggestionTable.numberOfRows ? [_suggestionTable viewAtColumn:0 row:0 makeIfNecessary:YES] : nil;
+  NSTextField* hint = [first viewWithTag:3];
+  NSRect bf = _commandBar.frame, wf = self.window.frame;
+  BOOL centred = fabs(NSMidX(bf) - NSMidX(wf)) <= 1 && NSMaxY(wf) - NSMaxY(bf) >= 80;
+  NSView* card = _commandBar.contentView.subviews.firstObject;
+  return [NSString stringWithFormat:@"sel=%02X%02X%02X rowClass=%@ divider=%d placeholder=%@ cell=%@ width=%.0f font=%.0f card=%@ "
+                                    @"row=%.0f hint=%@ scrim=%d centred=%d",
+                                    (int)lround(c.redComponent * 255), (int)lround(c.greenComponent * 255),
+                                    (int)lround(c.blueComponent * 255), NSStringFromClass(rv.class), !_commandDivider.hidden,
+                                    _commandField.placeholderString, NSStringFromClass(first.class), NSWidth(bf),
+                                    _commandField.font.pointSize, NSStringFromClass(card.class), kSuggestionRow,
+                                    hint.stringValue.length ? hint.stringValue : @"-", _commandScrim && !_commandScrim.hidden, centred];
 }
 // Search suggestions (#31): the engine's own suggestions for what is typed, fetched shortly after typing stops.
 // Not sent from Incognito, for URLs being typed, or when turned off in Settings.
@@ -8096,14 +8481,24 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
   _suggestionList.items = [self commandSuggestionsFor:_commandField.stringValue];
   [_suggestionTable reloadData];
   if (_suggestionList.items.count) [_suggestionTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
-  CGFloat listH = _suggestionList.items.count * kSuggestionRow + (_suggestionList.items.count ? 8 : 0);
-  CGFloat h = 52 + listH;
+  // Arc: centred over the window, about a fifth of the way down; up to 680 pt wide; 60 pt input row with a 20 pt
+  // font, then 40 pt rows with 8 pt of padding.
+  CGFloat listH = _suggestionList.items.count * kSuggestionRow + (_suggestionList.items.count ? 16 : 0);
+  CGFloat h = 64 + listH;
   NSRect f = self.window.frame;
-  [_commandBar setFrame:NSMakeRect(NSMidX(f) - 320, NSMaxY(f) - 168 - h, 640, h) display:YES];
-  _commandField.frame = NSMakeRect(12, h - 42, 616, 32);
-  _suggestionScroll.frame = NSMakeRect(6, 4, 628, listH);
+  // Arc (measured from its own videos): about two thirds of the window wide, top a quarter of the way down.
+  CGFloat W = round(MIN(780, MAX(480, f.size.width * 0.65)));
+  CGFloat top = NSMaxY(f) - MAX(80, round(f.size.height * 0.26));
+  if (top - h < NSMinY(f) + 20) top = MIN(NSMaxY(f) - 60, NSMinY(f) + 20 + h);
+  [_commandBar setFrame:NSMakeRect(round(NSMidX(f) - W / 2), top - h, W, h) display:YES];
+  _commandIcon.frame = NSMakeRect(18, h - 42, 20, 20);
+  _commandIcon.contentTintColor = [NSColor colorWithWhite:IsDark(_commandBar.contentView) ? 1 : 0 alpha:0.33];
+  _commandField.frame = NSMakeRect(48, h - 45, W - 48 - 16, 26);
+  _suggestionScroll.frame = NSMakeRect(8, 8, W - 16, MAX(0, listH - 16));
+  _suggestionTable.tableColumns.firstObject.width = W - 16;
   _suggestionScroll.hidden = listH == 0;
-  _commandDivider.frame = NSMakeRect(0, h - 52, 640, 1);
+  _commandDivider.frame = NSMakeRect(0, h - 64, W, 1);
+  [self updateCommandScrim];
   _commandDivider.hidden = listH == 0;
 }
 
@@ -8271,7 +8666,38 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
   }
 }
 
+// Arc dims the whole window in the Space's colour while the command bar is open, and fills the selected row with
+// that colour, a shade deeper (Arc blue on the default theme).
+- (NSColor*)commandSpaceColor {
+  NSColor* c = _space.themeColors.count ? ColorFromHex(_space.themeColors.firstObject) : nil;
+  return [c colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+}
+- (void)updateCommandScrim {
+  NSView* root = self.window.contentView;
+  if (!_commandScrim) {
+    _commandScrim = [[NSView alloc] initWithFrame:root.bounds];
+    _commandScrim.wantsLayer = YES;
+    _commandScrim.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    // A click anywhere outside the bar closes it, as in Arc.
+    [_commandScrim addGestureRecognizer:[[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(hideCommandBar)]];
+  }
+  NSColor* sc = [self commandSpaceColor];
+  BOOL dark = IsDark(root);
+  NSColor* tint = sc ?: (dark ? ColorFromHex(@"#120C39") : [NSColor colorWithWhite:0.9 alpha:1]);
+  _commandScrim.layer.backgroundColor = [tint colorWithAlphaComponent:dark ? 0.55 : 0.5].CGColor;
+  _commandScrim.frame = root.bounds;
+  if (_commandScrim.superview != root) [root addSubview:_commandScrim positioned:NSWindowAbove relativeTo:nil];
+  _commandScrim.hidden = NO;
+  if (sc) {
+    CGFloat hh, ss, bb, aa;
+    [sc getHue:&hh saturation:&ss brightness:&bb alpha:&aa];
+    gCommandPillColor = [NSColor colorWithHue:hh saturation:MIN(1, ss * 1.15 + 0.1) brightness:MAX(0.25, bb * 0.72) alpha:1];
+  } else {
+    gCommandPillColor = nil;
+  }
+}
 - (void)hideCommandBar {
+  _commandScrim.hidden = YES;
   [self.window removeChildWindow:_commandBar];
   [_commandBar orderOut:nil];
   [self.window makeKeyWindow];
@@ -8481,9 +8907,39 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target) {
   [[self sidebarUndoManager] setActionName:@"Close Tab"];
 }
 
-- (void)closeCurrentTab {
-  ArcItem* item = _shown;
+- (void)closeCurrentTab { [self closeSidebarTab:_shown]; }
+- (void)rowCloseClicked:(NSButton*)sender {
+  NSInteger row = [_outline rowForView:sender];
+  ArcItem* item = row >= 0 ? [_outline itemAtRow:row] : nil;
+  if (item.isSplit && item == [self splitGroupOfShown]) item = _shown;  // the split row closes its shown pane
+  else if (item.isSplit) item = item.children.firstObject;
+  if (item) [self closeSidebarTab:item];
+}
+- (NSString*)tabRowAccessoriesForItem:(ArcItem*)item {  // tests (visual parity V2)
+  NSInteger row = [_outline rowForItem:item];
+  NSTableCellView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
+  RowCloseButton* b = [cell viewWithTag:81];
+  FadingLabel* l = (FadingLabel*)cell.textField;
+  BOOL fade = [l isKindOfClass:FadingLabel.class] && [(id)l fadesForTest];
+  BOOL clip = l.lineBreakMode == NSLineBreakByClipping;
+  BOOL roomForClose = b && (b.hidden || NSMaxX(l.frame) <= NSMinX(b.frame));
+  return [NSString stringWithFormat:@"close=%d fade=%d clip=%d room=%d", b && !b.hidden, fade, clip, roomForClose];
+}
+- (void)reloadSidebarItemForTest:(ArcItem*)item { [_outline reloadItem:item]; }
+- (BOOL)pressCloseButtonOfItem:(ArcItem*)item {  // tests
+  NSInteger row = [_outline rowForItem:item];
+  NSTableCellView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
+  RowCloseButton* b = [cell viewWithTag:81];
+  if (!b.applies) return NO;
+  [self rowCloseClicked:b];
+  return YES;
+}
+
+// Closes one tab: the shown one (then the next open tab is shown) or any other row's close button (the shown tab
+// stays). Today tabs are archived and removed; pinned tabs and Favorites are unloaded and keep their place.
+- (void)closeSidebarTab:(ArcItem*)item {
   if (!item) return;
+  BOOL wasShown = item == _shown;
   NSArray<ArcItem*>* tabs = _space.allTabs;
   NSUInteger index = [tabs indexOfObject:item];
   BOOL isToday = Contains(_space.unpinned, item);
@@ -8516,6 +8972,15 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target) {
   if (RemoveItem(_space.unpinned, item)) [_outline reloadItem:_space.unpinned reloadChildren:YES];
   else [_outline reloadItem:item];
   [self scheduleSave];
+  if (!wasShown) {
+    NSInteger row = _shown ? [_outline rowForItem:_shown] : -1;
+    BOOL syncing = _syncingSidebar;
+    _syncingSidebar = YES;  // only the highlight moves back; the shown tab doesn't change
+    if (row >= 0) [_outline selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)row] byExtendingSelection:NO];
+    else [_outline deselectAll:nil];
+    _syncingSidebar = syncing;
+    return;
+  }
   _shown = nil;
   NSArray<ArcItem*>* remaining = _space.allTabs;
   ArcItem* next = nil;
@@ -9350,19 +9815,70 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
       [self applyTheme];
     }
   [self openInNewTab:tab.url];
-  [_archiveWindow reload];
+  [_library reload];
 }
 
+// Arc: the Library button opens Archive inside the sidebar, in place of the Space's tabs; again closes it.
 - (IBAction)showArchive:(id)sender {
-  if (!_archiveWindow) {
-    __weak MainWindowController* weakSelf = self;
-    _archiveWindow = [[ArchiveWindowController alloc]
-        initWithProvider:^NSArray<ArchivedTab*>* { return [weakSelf archivedTabs]; }
-                  reopen:^(ArchivedTab* tab) { [weakSelf reopenArchivedTab:tab]; }];
+  if (_libraryShown && sender == _libraryButton) {
+    [self hideLibrary];
+    return;
   }
-  [_archiveWindow reload];
-  [_archiveWindow showWindow:nil];
+  [self libraryPanel];
+  [_library setQuery:@""];
+  _libraryShown = YES;
+  [self layoutSidebar];
+  [self applyLibraryColors];
+  _responderBeforeLibrary = self.window.firstResponder;
+  [_library focusSearch];
 }
+- (LibraryPanelView*)libraryPanel {
+  if (_library) return _library;
+  __weak MainWindowController* weakSelf = self;
+  _library = [[LibraryPanelView alloc] initWithFrame:NSMakeRect(8, 42, kSidebarWidth - 17, 300)];
+  _library.archiveProvider = ^NSArray<ArchivedTab*>* { return [weakSelf archivedTabs]; };
+  _library.reopen = ^(ArchivedTab* tab) {
+    [weakSelf reopenArchivedTab:tab];
+    [weakSelf hideLibrary];
+  };
+  _library.back = ^{ [weakSelf hideLibrary]; };
+  _library.iconForURL = ^NSImage*(NSString* url) {
+    MainWindowController* s = weakSelf;
+    if (!s) return nil;
+    ArcItem* probe = [ArcItem new];
+    probe.url = url;
+    return [s iconImageForItem:probe];
+  };
+  _library.hidden = YES;
+  [_sidebar addSubview:_library];
+  return _library;
+}
+- (void)applyLibraryColors {
+  BOOL dark = IsDark(_sidebar);
+  _library.textColor = [self usingDefaultTheme] && dark ? ArcDefaultTabText() : NSColor.labelColor;
+  _libraryButton.contentTintColor = _libraryShown ? (_library.textColor ?: NSColor.labelColor) : NSColor.secondaryLabelColor;
+}
+- (void)hideLibrary {
+  if (!_libraryShown) return;
+  _libraryShown = NO;
+  NSResponder* r = self.window.firstResponder;
+  if ([r isKindOfClass:NSView.class] && [(NSView*)r isDescendantOf:_library])
+    [self.window makeFirstResponder:_responderBeforeLibrary];
+  else if ([r isKindOfClass:NSTextView.class] && [(NSTextView*)r delegate] && [[(NSTextView*)r delegate] isKindOfClass:NSView.class] &&
+           [(NSView*)[(NSTextView*)r delegate] isDescendantOf:_library])
+    [self.window makeFirstResponder:_responderBeforeLibrary];
+  _responderBeforeLibrary = nil;
+  [self layoutSidebar];
+  [self updateFavoritesGrid];
+  [self applyLibraryColors];
+}
+- (BOOL)libraryShown { return _libraryShown; }  // tests
+- (BOOL)libraryInSidebar {  // tests: shown inside the sidebar, and no Archive window was made
+  return _libraryShown && [_library isDescendantOf:_sidebar] && !_library.hidden && NSHeight(_library.frame) > 100 &&
+         _sidebarScroll.hidden && _archiveWindow == nil;
+}
+- (NSString*)libraryStyle { return [[self libraryPanel] styleDescription]; }  // tests
+- (NSArray<NSString*>*)libraryGroupTitles { return [[self libraryPanel] groupTitles]; }  // tests
 
 - (HistoryStore*)historyStore {
   if (!_history && self.historyPath) _history = [[HistoryStore alloc] initWithPath:self.historyPath];
@@ -9534,10 +10050,9 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
   return _historyWindow.visibleCount;
 }
 
-- (NSUInteger)archiveWindowCountForQuery:(NSString*)query {
-  [self showArchive:nil];
-  [_archiveWindow setQuery:query];
-  return _archiveWindow.visibleCount;
+- (NSUInteger)archiveWindowCountForQuery:(NSString*)query {  // tests: the Library's Archive list, without showing it
+  [[self libraryPanel] setQuery:query];
+  return _library.visibleCount;
 }
 
 #pragma mark Windows (#39)

@@ -66,6 +66,11 @@ camera and microphone. Keep it that way when you add checks.
 Add a check for the feature you build. Timed checks run side by side, so show your own tab with `showItem:` before
 asserting. Paste the relevant lines into your pull request, and try the feature by hand too.
 
+Changing how something looks? Render it without showing a window: `--visual-shots=<plan.txt>` follows a small plan
+(open tabs, switch Spaces, open the command bar, then `shot <name>`) and writes PNGs of the window kept far off
+screen. The commands are listed at the top of `app/visual_shots.h`. Use the same throwaway home as the self-test.
+Compare the result with the Arc reference named on the item's line in `docs/visual-parity.md`.
+
 Changing the updater? Also run `scripts/test-update.sh`: it updates a throwaway copy of the app from the latest
 GitHub release and checks the copy was replaced. It never touches /Applications.
 

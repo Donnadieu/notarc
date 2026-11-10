@@ -3,6 +3,23 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- The sidebar never shows a scrollbar track, even with a mouse plugged in or "Show scroll bars: Always" set in macOS;
+  a thin scroller appears only while you scroll a long list, as in Arc. Tab rows now reach their full width, so the
+  selected row's right corners are rounded.
+- Tab rows look like Arc's: a long title fades out at the right edge instead of ending in "...", and a close button
+  shows on the row under the pointer. Closing a row that isn't shown leaves the shown tab alone.
+- The mini player is now Arc's card: the artwork (or the site's icon), what's playing and the artist or site on two
+  lines, and back, play/pause and forward when the site supports them; mute shows while the pointer is over it.
+  Running clocks in page titles, like "brain.fm (2:52)", are left out.
+- Archive opens inside the sidebar, as in Arc, instead of a separate table window: a search field and your
+  archived tabs grouped by day (Today, Yesterday, weekdays, Last Week, then months), each a normal tab row with the
+  time it was archived. Click one to bring it back; Back, Esc or picking a Space closes it.
+- The command bar is Arc's big centred bar: an opaque card about two thirds of the window wide, a quarter of the way
+  down, over the whole window dimmed in the Space's colour. A 20 pt input with a search icon, 50 pt rows with each
+  site's own icon, the selected row filled with the Space's colour (Arc blue on the default theme), "Switch to Tab"
+  with an arrow on open tabs, and what Return will do on the selected row. Clicking outside closes it.
+
 ## 0.26.1
 - The Dock shows NotArc's own icon (the gold "¬" on indigo, the same one Finder shows) instead of a colourway from
   the icon picker. It's now the first choice in Settings > Appearance and the default; a colourway saved by an older

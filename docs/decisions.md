@@ -425,3 +425,32 @@ trackpad; everything else is checked by the hidden self-test.
     sites may still ask to sign in again (sessions tied to a device or an IP address). Saved passwords NotArc already
     has are counted as "already here" rather than shown as 0 added.
 
+## 2026-11-10: visual parity with Arc
+
+101. **"Done" now means it looks like Arc, not only that it works.** `docs/visual-parity.md` lists every screen and
+    state (66 items) with what Arc does and the reference used. A box is ticked only after a hidden render of NotArc
+    matches the reference. Arc is never launched for this: the references are Omar's own Arc screenshots, Arc's
+    colours and labels, Arc's help pages and public screenshots and videos.
+102. **Hidden renders are a built-in switch, `--visual-shots=<plan>`.** It runs with the self-test's isolation and
+    keeps the window 30,000 pt off screen at full opacity, so each check is a PNG and no window ever shows. It's kept
+    in the app (not a local patch) because every visual item needs it, before and after.
+103. **The sidebar scroller is always the overlay kind (V1).** macOS switches scroll views to the always-visible style
+    when a mouse is attached; Arc's sidebar never shows a track, so the sidebar's scroll view refuses that switch.
+104. **Tab rows fade long titles and show a close button on hover (V2).** Arc 1.169 fades titles (Arc's 2022 videos
+    still show "..."); its videos show no cross on the selected row until the pointer is over it. The cross is a
+    plain "x" with Arc's hover fill. On a Today tab it archives the tab (like Cmd+W); on a pinned tab or Favorite it unloads
+    it and keeps the row. Closing a row that isn't shown keeps the shown tab.
+105. **The mini player reads what's playing from the page (V3).** Title, artist and artwork come from the page's
+    media session; without one, the page title is used with running clocks taken out. Back and forward show only
+    when the page handles previous / next track, because a button that does nothing is worse than none. Mute shows
+    only while the pointer is over the card (or while muted), to leave room for the title. Artwork is fetched once
+    per address and never in test runs.
+106. **Archive is a sidebar panel (V4).** It replaces Favorites, the Space title and the tabs, under the address
+    pill. All archived tabs are listed (6,586 imported from Arc is fine: the list only draws the rows on screen),
+    newest first, under day headings. One click reopens a tab, like a tab row. The old table window is gone; History
+    keeps its own window for now (Arc had no history panel).
+107. **The command bar follows Arc's own videos (V5).** Measured from Arc's multitasking video: the card is about 65%
+    of the window wide (here 480-780 pt), its top 26% down, 64 pt input row and 50 pt rows; the window behind is
+    dimmed in the Space's colour and the selected row is the Space's colour, a shade deeper (Arc blue on the default
+    theme). The card is opaque, so the page never shows through. "Switch to Tab" and its arrow show on every open-tab
+    row; other rows show Return's action only when selected.

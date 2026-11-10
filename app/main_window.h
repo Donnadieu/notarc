@@ -10,6 +10,7 @@
 // URL with tracking parameters (utm_*, fbclid, gclid, ...) removed; other parameters keep their order.
 NSString* CleanLinkURL(NSString* url);
 
+NSString* MediaBarTitle(NSString* pageTitle);  // the mini player's title for a page title (V3)
 @class Boost;
 @class BoostColorWheel;
 @class AutofillController;
@@ -271,6 +272,9 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (void)toggleCallMic:(ArcItem*)item;
 - (void)toggleCallCamera:(ArcItem*)item;
 - (BOOL)callControlsShown;  // tests
+- (NSString*)mediaCardDescription;  // tests (V3)
+- (void)setMediaCardHoveredForTest:(BOOL)hovered;
+- (IBAction)mediaBarNext:(id)sender;
 @property(nonatomic, copy) NSDictionary<NSString*, NSArray<NSString*>*>* searchSuggestionStub;
 - (void)commandSuggestionsAfterFetch:(NSString*)text done:(void (^)(NSArray<NSDictionary*>* items))done;  // tests: query -> suggestions
 - (void)pictureInPicture:(BOOL)enter item:(ArcItem*)item done:(void (^)(NSString* result))done;  // #46
@@ -459,6 +463,11 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (NSUInteger)liveUnreadCountOf:(ArcItem*)folder;
 - (void)deleteSidebarItem:(ArcItem*)item;  // tests
 - (BOOL)writeSidebarSnapshot:(NSString*)path;  // design checks
+- (BOOL)sidebarScrollerIsOverlay;               // tests (visual parity V1)
+- (NSString*)tabRowAccessoriesForItem:(ArcItem*)item;  // tests (V2): "close=1 fade=1 clip=1 room=1"
+- (BOOL)pressCloseButtonOfItem:(ArcItem*)item;        // tests (V2)
+- (void)reloadSidebarItemForTest:(ArcItem*)item;
+- (void)closeSidebarTab:(ArcItem*)item;
 - (void)setTestCookie:(NSString*)name value:(NSString*)value url:(NSString*)url session:(BOOL)session done:(void (^)(BOOL ok))done;  // tests
 - (void)testCookieDetailsForURL:(NSString*)url done:(void (^)(NSArray<NSDictionary*>*))done;  // tests
 - (void)testDeleteCookiesForURL:(NSString*)url done:(void (^)(void))done;                      // tests
@@ -549,6 +558,11 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (NSUInteger)runAutoArchiveWithThreshold:(NSTimeInterval)threshold now:(NSDate*)now;  // returns # archived
 - (IBAction)reopenLastArchived:(id)sender;
 - (IBAction)showArchive:(id)sender;
+- (void)hideLibrary;
+- (BOOL)libraryShown;                       // tests (V4)
+- (BOOL)libraryInSidebar;                   // tests (V4)
+- (NSString*)libraryStyle;                  // tests (V4)
+- (NSArray<NSString*>*)libraryGroupTitles;  // tests (V4)
 - (void)reopenArchivedTab:(ArchivedTab*)tab;
 - (NSUInteger)archiveWindowCountForQuery:(NSString*)query;  // tests: opens the window, filters
 - (NSArray*)archivedTabs;

@@ -11,6 +11,8 @@
 #import "app/tidy_title.h"
 #import "app/global_hotkey.h"
 #import "app/email_peek.h"
+#import "app/visual_shots.h"
+#import "app/library_panel.h"
 #import "app/web_notifications.h"
 #import "app/calendar_preview.h"
 #import "app/main_window_max.h"
@@ -84,6 +86,7 @@
 @property(nonatomic) BOOL selfTest;
 @property(nonatomic) BOOL selfTestReload;  // phase 2: reopen the saved store, no actions
 @property(nonatomic, copy) NSString* snapshotPath;  // --sidebar-snapshot=<png>: hidden run that renders the sidebar and quits
+@property(nonatomic, copy) NSString* visualPlan;  // --visual-shots=<plan>: hidden design renders (app/visual_shots.h)
 @property(nonatomic, copy) NSString* pendingSource;
 @property(nonatomic, strong) NSMutableArray<NSString*>* pendingURLs;  // links that arrived before the window
 @end
@@ -594,6 +597,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     self.window.window.alphaValue = 0.01;
     self.window.window.ignoresMouseEvents = YES;
+    if (self.visualPlan) VisualShotsPrepareWindow(self.window.window);
   }
   [self.window showWindow:nil];
   [self.window createBrowsers];
@@ -608,12 +612,20 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
     // so a test never shows up on screen or takes focus. Chromium is told not to throttle hidden windows.
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer*) {
+      if (self.visualPlan) {
+        VisualShotsKeepOffscreen(self.window);
+        return;
+      }
       for (NSWindow* win in NSApp.windows) {
         if (win.alphaValue > 0.011) win.alphaValue = 0.01;
         win.ignoresMouseEvents = YES;
       }
     }];
     [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
+    if (self.visualPlan) {
+      VisualShotsRun(self.window, self.visualPlan);
+      return;
+    }
     if (self.snapshotPath) {
       ArcSpace* busiest = self.window.currentSpace;
       for (ArcSpace* s in self.window.spaces)
@@ -1665,6 +1677,43 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       NSString* offStyle = otherTab ? [w sidebarRowStyleForItem:otherTab] : @"";
       BOOL rowsOK = [selStyle hasPrefix:@"h=36 r=8 sel=1"] && [hovStyle containsString:@"hover=1"] &&
                     [offStyle hasSuffix:@"alpha=0.00"];
+      {  // Visual parity V2: close button on the hovered row only, long titles fade (no "...").
+        NSString* selAcc = shownTab ? [w tabRowAccessoriesForItem:shownTab] : @"";
+        [w hoverSidebarItem:otherTab];
+        NSString* hovAcc = otherTab ? [w tabRowAccessoriesForItem:otherTab] : @"";
+        [w hoverSidebarItem:nil];
+        NSString* offAcc = otherTab ? [w tabRowAccessoriesForItem:otherTab] : @"";
+        BOOL closeShown = [selAcc hasPrefix:@"close=0"] && [hovAcc hasPrefix:@"close=1"] && [offAcc hasPrefix:@"close=0"];
+        BOOL room = [selAcc hasSuffix:@"room=1"] && [hovAcc hasSuffix:@"room=1"];
+        ArcItem* longTab = nil;
+        for (ArcItem* t in w.currentSpace.unpinned.children)
+          if (t != shownTab && t.url.length && !t.isSplit) { longTab = t; break; }
+        NSString* savedTitle = longTab.title;
+        BOOL savedRenamed = longTab.renamed;
+        longTab.title = @"A very long tab title that keeps going well past the right edge of the sidebar row";
+        longTab.renamed = YES;
+        [w reloadSidebarItemForTest:longTab];
+        NSString* longAcc = longTab ? [w tabRowAccessoriesForItem:longTab] : @"";
+        BOOL fade = [longAcc containsString:@"fade=1 clip=1"];
+        longTab.title = savedTitle;
+        longTab.renamed = savedRenamed;
+        [w reloadSidebarItemForTest:longTab];
+        BOOL shortNoFade = [[w tabRowAccessoriesForItem:longTab] containsString:@"fade=0"] || longTab.displayTitle.length > 30;
+        // The close button on a row that isn't shown closes that tab (archived) and leaves the shown tab alone.
+        NSUInteger todayBefore = w.currentSpace.unpinned.children.count;
+        [w openInNewTab:@"https://closebutton.example/" background:YES];
+        ArcItem* extra = nil;
+        for (ArcItem* t in w.currentSpace.unpinned.children)
+          if ([t.url hasPrefix:@"https://closebutton.example/"]) extra = t;
+        BOOL pressed = extra && [w pressCloseButtonOfItem:extra];
+        BOOL closeOther = pressed && w.shownItem == shownTab && w.currentSpace.unpinned.children.count == todayBefore &&
+                          ![w.currentSpace.unpinned.children containsObject:extra];
+        std::printf("SELFTEST-TABROWS closeShown=%d room=%d fade=%d shortNoFade=%d closeOther=%d\n", closeShown, room, fade,
+                    shortNoFade, closeOther);
+        if (!closeShown || !room || !fade)
+          std::printf("SELFTEST-TABROWS-DEBUG sel=[%s] hov=[%s] off=[%s] long=[%s]\n", selAcc.UTF8String, hovAcc.UTF8String,
+                      offAcc.UTF8String, longAcc.UTF8String);
+      }
       // Arc sidebar: Favorites as tiles 90 pt below the top (8 pt in); Space title right under them.
       NSRect gf = w.favoritesGridFrame, hf = w.spaceHeaderFrame;
       BOOL gridOK = w.currentSpace.favorites.children.count == 0 ||
@@ -1933,8 +1982,8 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           [[NSFileManager defaultManager] removeItemAtPath:saved error:nil];
         }
       }
-      std::printf("SELFTEST-SIDEBARLOOK grid=%d defaultTheme=%d\n", gridOK,
-                  w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown);
+      std::printf("SELFTEST-SIDEBARLOOK grid=%d defaultTheme=%d noScrollTrack=%d\n", gridOK,
+                  w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown, w.sidebarScrollerIsOverlay);
       if (!rowsOK) std::printf("SELFTEST-ROWS-DEBUG sel=[%s] hov=[%s] off=[%s]\n", selStyle.UTF8String, hovStyle.UTF8String, offStyle.UTF8String);
       [w toggleFocusMode:nil];
       NSRect ff = w.pageCardFrame;
@@ -2098,7 +2147,10 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                   "v.setUint16(34,16,true);s(36,'data');v.setUint32(40,n*2,true);"
                   "for(var i=0;i<n;i++)v.setInt16(44+i*2,Math.sin(i*2*Math.PI*440/r)*200,true);"
                   "var a=document.createElement('audio');a.src=URL.createObjectURL(new Blob([b],{type:'audio/wav'}));"
-                  "document.body.appendChild(a);a.play();})()" inItem:m];
+                  "document.body.appendChild(a);"
+                  "if(navigator.mediaSession){navigator.mediaSession.metadata=new MediaMetadata({title:'Test Track',artist:'Test Artist'});"
+                  "navigator.mediaSession.setActionHandler('nexttrack',function(){document.title='next:on';});}"
+                  "a.play();})()" inItem:m];
         __block int waits = 0;
         __block void (^check)(void);
 #pragma clang diagnostic push
@@ -2117,6 +2169,24 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
             BOOL barHiddenWhileShown = w.mediaBarItem == nil;
             [w openInNewTab:@"https://example.com/media-other"];
             BOOL bar = w.mediaBarItem == m;
+            {  // Visual parity V3: Arc's mini player card (what's playing, the site, back/play/forward, mute on hover).
+              [w pollMediaNow];
+              NSString* card = w.mediaCardDescription;
+              BOOL meta = [card containsString:@"title=Test Track subtitle=Test Artist"];
+              BOOL buttons = [card containsString:@"prev=0 play=1 next=1"];
+              BOOL muteHidden = [card containsString:@"mute=0"];
+              [w setMediaCardHoveredForTest:YES];
+              BOOL muteOnHover = [w.mediaCardDescription containsString:@"mute=1"];
+              [w setMediaCardHoveredForTest:NO];
+              BOOL size = [card hasPrefix:@"h=48"] && [card hasSuffix:@"art=1"];
+              BOOL clock = [MediaBarTitle(@"brain.fm (2:52)") isEqualToString:@"brain.fm"] &&
+                           [MediaBarTitle(@"\u25B6 Song - Artist 1:02 / 3:40") isEqualToString:@"Song - Artist"] &&
+                           [MediaBarTitle(@"Lisbon - Wikipedia") isEqualToString:@"Lisbon - Wikipedia"];
+              [w mediaBarNext:nil];
+              std::printf("SELFTEST-MINIPLAYER meta=%d buttons=%d muteHidden=%d muteOnHover=%d size=%d clock=%d\n", meta, buttons,
+                          muteHidden, muteOnHover, size, clock);
+              if (!meta || !buttons || !size) std::printf("SELFTEST-MINIPLAYER-DEBUG %s\n", card.UTF8String);
+            }
             [w toggleMuteItem:m];
             BOOL muted = m.audioMuted;
             [w toggleMuteItem:m];
@@ -2803,6 +2873,17 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                       [style containsString:@"divider=1"] && [style containsString:@"placeholder=Search or Enter URL..."] &&
                       [style containsString:@"cell=NSTableCellView"];
         if (!styled) std::printf("SELFTEST-CMDSTYLE-DEBUG %s\n", style.UTF8String);
+        {  // Visual parity V5: Arc's big centred bar: opaque card, 20 pt input, 40 pt rows, Return's action on the pill.
+          BOOL card = [style containsString:@"card=CommandCardView"] && [style containsString:@"font=20"] &&
+                      [style containsString:@"row=50"] && [style containsString:@"scrim=1"];
+          BOOL centred = [style hasSuffix:@"centred=1"];
+          BOOL hint = ![style containsString:@"hint=-"];
+          NSRange wr = [style rangeOfString:@"width="];
+          double width = wr.location == NSNotFound ? 0 : [[style substringFromIndex:wr.location + 6] doubleValue];
+          BOOL wide = width >= 480 && width <= 780;
+          std::printf("SELFTEST-CMDBARLOOK card=%d centred=%d hint=%d wide=%d\n", card, centred, hint, wide);
+          if (!card || !centred || !hint || !wide) std::printf("SELFTEST-CMDBARLOOK-DEBUG %s\n", style.UTF8String);
+        }
         std::printf("SELFTEST-SUGGEST goFirst=%d tab=%d space=%d action=%d history=%d topSites=%d switched=%d learned=%d "
                     "styled=%d\n", first, tab, space, action, history, top, switched, learned, styled);
       });
@@ -4465,6 +4546,31 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                   (unsigned long)[w archiveWindowCountForQuery:@""],
                   (unsigned long)[w archiveWindowCountForQuery:@"github"],
                   (unsigned long)[w archiveWindowCountForQuery:@"zzqqxx-no-such-tab"]);
+      {  // Visual parity V4: Archive opens inside the sidebar (no window), grouped by day, with search; Back closes it.
+        ArcItem* shownBefore = w.shownItem;
+        [w showArchive:nil];
+        BOOL inSidebar = w.libraryInSidebar;
+        NSString* style = w.libraryStyle;
+        BOOL look = [style containsString:@"search=32 radius=8 row=41"] && [style hasSuffix:@"placeholder=Search Archive"];
+        NSArray* groups = w.libraryGroupTitles;
+        NSCalendar* cal = NSCalendar.currentCalendar;
+        NSDate* now = [NSDate date];
+        BOOL grouping = [ArchiveGroupTitle(now, now, cal) isEqualToString:@"Today"] &&
+                        [ArchiveGroupTitle([now dateByAddingTimeInterval:-86400 * 1.0], now, cal) isEqualToString:@"Yesterday"] &&
+                        [ArchiveGroupTitle([now dateByAddingTimeInterval:-86400 * 10.0], now, cal) isEqualToString:@"Last Week"] &&
+                        ArchiveGroupTitle([now dateByAddingTimeInterval:-86400 * 400.0], now, cal).length > 5 &&
+                        (groups.count == 0 || [groups.firstObject length] > 0);
+        [w hideLibrary];
+        BOOL closed = !w.libraryShown && w.shownItem == shownBefore;
+        [w showArchive:nil];
+        ArcSpace* home = w.currentSpace;
+        [w switchToSpace:w.spaces.lastObject == home ? w.spaces.firstObject : w.spaces.lastObject];
+        BOOL closedBySpace = !w.libraryShown;
+        [w switchToSpace:home];
+        std::printf("SELFTEST-ARCHIVEPANEL inSidebar=%d look=%d grouping=%d closed=%d closedBySpace=%d\n", inSidebar, look, grouping,
+                    closed, closedBySpace);
+        if (!look) std::printf("SELFTEST-ARCHIVEPANEL-DEBUG %s\n", style.UTF8String);
+      }
       [w saveSidebarNow];
     });
   }
@@ -4605,7 +4711,7 @@ int main(int argc, char* argv[]) {
   static char noMacOcclusion[] = "--disable-features=MacWebContentsOcclusion";  // pages in hidden test windows stay "visible"
   for (int i = 1; i < argc; ++i)
     if (std::string(argv[i]) == "--selftest" || std::string(argv[i]) == "--selftest-reload" ||
-        std::string(argv[i]).rfind("--sidebar-snapshot=", 0) == 0) {
+        std::string(argv[i]).rfind("--sidebar-snapshot=", 0) == 0 || std::string(argv[i]).rfind("--visual-shots=", 0) == 0) {
       args.push_back(mockKeychain);
       args.push_back(autoplay);
       args.push_back(fakeDevices);
@@ -4654,6 +4760,8 @@ int main(int argc, char* argv[]) {
     BOOL selfTestReload = NO;
     for (int i = 1; i < argc; ++i)
       if (std::string(argv[i]) == "--selftest-reload") selfTest = selfTestReload = YES;
+    NSString* visualPlan = nil;
+    if (VisualShotsRequested(argc, argv, &visualPlan)) selfTest = YES;  // same isolation as the self-test
     NSString* snapshotPath = nil;
     for (int i = 1; i < argc; ++i)
       if (std::string(argv[i]).rfind("--sidebar-snapshot=", 0) == 0) {
@@ -4684,6 +4792,7 @@ int main(int argc, char* argv[]) {
     delegate.selfTest = selfTest;
     delegate.selfTestReload = selfTestReload;
     delegate.snapshotPath = snapshotPath;
+    delegate.visualPlan = visualPlan;
     NSApp.delegate = delegate;
     [delegate performSelectorOnMainThread:@selector(start) withObject:nil waitUntilDone:NO];
 

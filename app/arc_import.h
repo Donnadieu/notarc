@@ -42,6 +42,12 @@
 @property(nonatomic) BOOL mediaPlaying;  // audio or video playing (not saved)
 @property(nonatomic) BOOL mediaPaused;   // has media that was playing and is now paused (not saved)
 @property(nonatomic) BOOL audioMuted;
+// What the page says is playing (navigator.mediaSession, not saved): shown in the sidebar's mini player.
+@property(nonatomic, copy) NSString* mediaTitle;
+@property(nonatomic, copy) NSString* mediaArtist;
+@property(nonatomic, copy) NSString* mediaArtworkURL;
+@property(nonatomic) BOOL mediaCanPrevious;  // the page handles previous / next track
+@property(nonatomic) BOOL mediaCanNext;
 // Calls (#47, not saved): the page has the camera / microphone, and whether the user turned them off.
 // Tab thumbnails (#65, not saved): a small picture of the page from when it was last on screen.
 @property(nonatomic, strong) NSImage* thumbnail;
