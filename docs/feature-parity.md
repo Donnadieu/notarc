@@ -1,6 +1,6 @@
 # Feature parity with Arc 1.169
 
-70 done, 12 partial, 4 not started, of 86 items.
+85 done, 1 partial, 0 not started, of 86 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a
 checked line's issue is closed. Lines without a number were done before issues were opened. Status as of NotArc 0.23.0;
