@@ -7844,7 +7844,8 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   NSInteger row = [_outline rowForItem:folder];
   NSTableCellView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
   BOOL open = [_outline isItemExpanded:folder];
-  BOOL bold = [cell.textField.font.fontDescriptor.fontAttributes[NSFontTraitsAttribute][NSFontWeightTrait] doubleValue] >= 0.3;
+  NSFont* f = cell.textField.font;
+  BOOL bold = f && [f isEqual:[NSFont systemFontOfSize:f.pointSize weight:NSFontWeightSemibold]];
   NSInteger childRow = open && folder.children.count ? [_outline rowForItem:folder.children.firstObject] : -1;
   CGFloat indent = childRow >= 0 ? NSMinX([_outline frameOfCellAtColumn:0 row:childRow]) - NSMinX([_outline frameOfCellAtColumn:0 row:row]) : -1;
   return [NSString stringWithFormat:@"glyph=%d chevron=%d bold=%d indent=%.0f", cell.imageView.image == FolderGlyph(open),
