@@ -108,4 +108,5 @@ void SettingsDidChange(void);
 - (NSNumber*)checkboxForSetting:(NSString*)settingKey;  // @YES/@NO as shown, nil if no pane has one
 - (NSString*)developerModeSitesText;
 - (IBAction)resetDeveloperModeSites:(id)sender;
+- (BOOL)hasCheckboxForKey:(NSString*)key;  // tests
 @end

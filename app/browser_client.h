@@ -73,6 +73,11 @@ class BrowserClient : public CefClient,
                                                                  bool&) override {
     return this;
   }
+  // Self-tests only: pages whose URL starts with `url_prefix` get `html` instead of going to the network
+  // (empty html removes the stub). Never set outside tests.
+  static void SetTestResponse(const std::string& url_prefix, const std::string& html);
+  CefRefPtr<CefResourceHandler> GetResourceHandler(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                                   CefRefPtr<CefRequest> request) override;
   void OnProtocolExecution(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, CefRefPtr<CefRequest> request,
                            bool& allow_os_execution) override;
   // Built-in ad & tracker blocking (#53): cancels third-party requests to listed hosts.

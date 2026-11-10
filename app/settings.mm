@@ -564,6 +564,8 @@ static MainWindowController* Browser() { return [MainWindowController mainContro
   return _defaultButton.hidden == NotArcIsDefaultBrowser() && _defaultLabel.stringValue.length > 0;
 }
 
+- (BOOL)hasCheckboxForKey:(NSString*)key { return [self checkboxForSetting:key] != nil; }  // tests
+
 - (NSView*)generalPane {
   _engine = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
   NSString* chosen = [NSUserDefaults.standardUserDefaults stringForKey:kSettingSearchEngine];

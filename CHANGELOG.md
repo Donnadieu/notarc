@@ -61,6 +61,12 @@ or later. From 0.5.0 on, NotArc updates itself.
 - File > Import Everything from Arc now brings your saved passwords, addresses and cards too, and File > Import
   Passwords... brings them from Chrome, Brave, Edge, Vivaldi, Chromium or a passwords CSV file (Safari: export from
   Apple's Passwords app first).
+- Chrome extensions (with Chrome-style pages on): a puzzle-piece button in the sidebar's address pill lists your
+  extensions, with Open (its popup page, in a tab), Options, Turn Off/On, Update and Remove, plus Install
+  Extension..., Chrome Web Store and Manage Extensions (chrome://extensions). File > Install Extension... takes a
+  Chrome Web Store link or extension ID, downloads it from the Web Store and checks its signature before installing.
+  Changes take effect when NotArc relaunches (one click; your tabs come back). Settings has a new "Use Chrome-style
+  pages" switch, still off by default. Installing asks the Chrome Web Store (Google) for the extension's package.
 - The parity checklist is up to date with 0.23.0, with an Out of scope section and docs/decisions.md for every
   scope call.
 
