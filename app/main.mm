@@ -751,6 +751,14 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       if (self.selfTestReload) { finish(); return; }
       // Multiple windows (#39): runs last so no other check shares the screen with a second window.
       MainWindowController* w = self.window;
+      // The crash-restore test expects the marker tab on screen when the run saves. Checks that end after it opened
+      // (Max, Easel clips) show their own tab for a moment, so put the marker back first.
+      for (ArcSpace* space in w.spaces)
+        for (ArcItem* it in space.allTabs)
+          if ([it.url hasPrefix:@"https://example.org/session-restore-marker"] && w.shownItem != it) {
+            if (space != w.currentSpace) [w switchToSpace:space];
+            [w showItem:it];
+          }
       ArcItem* t = w.shownItem;
       int bid = t.browserId;
       MainWindowController* w2 = [w openNewWindowShowing:t];
