@@ -1295,10 +1295,11 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _mediaSubtitle.lineBreakMode = NSLineBreakByClipping;
   _mediaSubtitle.font = [NSFont systemFontOfSize:11];
   _mediaSubtitle.frame = NSMakeRect(48, 9, 120, 14);
-  _mediaPrev = mediaButton(@"backward.end.fill", @"Previous", @selector(mediaBarPrevious:), 11);
-  _mediaPlay = mediaButton(@"pause.fill", @"Pause", @selector(mediaBarPlay:), 12);
-  _mediaNext = mediaButton(@"forward.end.fill", @"Next", @selector(mediaBarNext:), 11);
-  _mediaMute = mediaButton(@"speaker.wave.2.fill", @"Mute", @selector(mediaBarMute:), 12);
+  // Sizes measured from Arc: back / forward 13 pt wide, play 10, speaker 19 with its waves.
+  _mediaPrev = mediaButton(@"backward.end.fill", @"Previous", @selector(mediaBarPrevious:), 13);
+  _mediaPlay = mediaButton(@"pause.fill", @"Pause", @selector(mediaBarPlay:), 13);
+  _mediaNext = mediaButton(@"forward.end.fill", @"Next", @selector(mediaBarNext:), 13);
+  _mediaMute = mediaButton(@"speaker.wave.3.fill", @"Mute", @selector(mediaBarMute:), 13);
   // Arc's call controls: in a call, the bar shows microphone and camera toggles instead of play / mute.
   _callCam = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"video.fill" accessibilityDescription:@"Camera"]
                                 target:self action:@selector(callBarCamera:)];
@@ -3110,7 +3111,7 @@ NSString* FavoritePreviewKind(NSString* url) {
       _mediaPlay.image = [NSImage imageWithSystemSymbolName:item.mediaPlaying ? @"pause.fill" : @"play.fill"
                                    accessibilityDescription:item.mediaPlaying ? @"Pause" : @"Play"];
       _mediaPlay.toolTip = item.mediaPlaying ? @"Pause" : @"Play";
-      _mediaMute.image = [NSImage imageWithSystemSymbolName:item.audioMuted ? @"speaker.slash.fill" : @"speaker.wave.2.fill"
+      _mediaMute.image = [NSImage imageWithSystemSymbolName:item.audioMuted ? @"speaker.slash.fill" : @"speaker.wave.3.fill"
                                    accessibilityDescription:nil];
     }
     NSString* host = [NSURL URLWithString:item.url ?: @""].host ?: @"";
