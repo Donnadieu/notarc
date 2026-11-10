@@ -152,18 +152,20 @@ static NSString* HexFromColor(NSColor* c) {
 }
 
 static const CGFloat kToolbarHeight = 38;
-static const CGFloat kSuggestionRow = 40;  // Arc: 40 pt rows under a 60 pt input row
+static const CGFloat kSuggestionRow = 50;  // Arc: 50 pt rows (46 pt pill) under a 64 pt input row
 static const NSUInteger kMaxSuggestions = 8;
 
 // Data source for the command bar's suggestion list (kept separate from the sidebar's outline delegate).
 // Arc: HoveredAndKeyboardSelectedBackground (0.161, 0.18, 0.757), a rounded pill.
 static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 green:0.18 blue:0.757 alpha:1]; }
+// Arc fills the selected row with the Space's own colour, a shade deeper; the default theme uses Arc blue.
+static NSColor* gCommandPillColor;
 @interface CommandRowView : NSTableRowView
 @end
 @implementation CommandRowView
 - (void)drawSelectionInRect:(NSRect)r {
-  [CommandSelectedColor() setFill];
-  [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 0, 1) xRadius:8 yRadius:8] fill];
+  [(gCommandPillColor ?: CommandSelectedColor()) setFill];
+  [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 0, 2) xRadius:8 yRadius:8] fill];
 }
 - (BOOL)isEmphasized { return YES; }
 @end
@@ -197,16 +199,16 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
   NSDictionary* s = self.items[row];
   NSTableCellView* cell = [t makeViewWithIdentifier:@"cmd" owner:nil];
   if (!cell) {
-    cell = [[NSTableCellView alloc] initWithFrame:NSMakeRect(0, 0, c.width, kSuggestionRow - 2)];
+    cell = [[NSTableCellView alloc] initWithFrame:NSMakeRect(0, 0, c.width, kSuggestionRow)];
     cell.identifier = @"cmd";
-    NSImageView* icon = [[NSImageView alloc] initWithFrame:NSMakeRect(12, 11, 16, 16)];
+    NSImageView* icon = [[NSImageView alloc] initWithFrame:NSMakeRect(14, 17, 16, 16)];
     icon.imageScaling = NSImageScaleProportionallyUpOrDown;
     icon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:13 weight:NSFontWeightRegular];
     [cell addSubview:icon];
     cell.imageView = icon;
     NSTextField* title = [NSTextField labelWithString:@""];
     title.lineBreakMode = NSLineBreakByTruncatingTail;
-    title.frame = NSMakeRect(40, 10, c.width - 52, 18);
+    title.frame = NSMakeRect(42, 16, c.width - 54, 18);
     title.autoresizingMask = NSViewWidthSizable;
     [cell addSubview:title];
     cell.textField = title;
@@ -216,6 +218,14 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
     hint.alignment = NSTextAlignmentRight;
     hint.autoresizingMask = NSViewMinXMargin;
     [cell addSubview:hint];
+    // Arc: a small rounded square with an arrow after "Switch to Tab".
+    NSImageView* arrow = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"arrow.right" accessibilityDescription:nil]];
+    arrow.tag = 4;
+    arrow.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:10 weight:NSFontWeightBold];
+    arrow.wantsLayer = YES;
+    arrow.layer.cornerRadius = 5;
+    arrow.autoresizingMask = NSViewMinXMargin;
+    [cell addSubview:arrow];
   }
   static NSDictionary* kinds = @{ @"go" : @"Open", @"tab" : @"Switch to Tab", @"space" : @"Switch Space", @"history" : @"Open",
                                   @"action" : @"Run", @"site" : @"Open", @"search" : @"Search",
@@ -235,13 +245,21 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
                                                                          NSForegroundColorAttributeName : secondary}]];
   cell.textField.attributedStringValue = a;
   NSTextField* hint = [cell viewWithTag:3];
+  NSImageView* arrow = [cell viewWithTag:4];
   NSString* kind = s[@"kind"];
   if ([kind isEqual:@"go"] && [s[@"subtitle"] isEqual:@"Search"]) kind = @"search";
-  hint.stringValue = sel ? (kinds[kind] ?: @"") : @"";
-  hint.textColor = [NSColor colorWithWhite:1 alpha:0.75];
+  BOOL tabRow = [kind isEqual:@"tab"];
+  hint.stringValue = sel || tabRow ? (kinds[kind] ?: @"") : @"";  // Arc keeps "Switch to Tab" on every open-tab row
+  hint.textColor = sel ? [NSColor colorWithWhite:1 alpha:0.85] : secondary;
+  arrow.hidden = !tabRow;
+  arrow.contentTintColor = sel ? NSColor.whiteColor : [NSColor.labelColor colorWithAlphaComponent:0.55];
+  arrow.layer.backgroundColor = (sel ? [NSColor colorWithWhite:1 alpha:0.22] : [NSColor.labelColor colorWithAlphaComponent:0.08]).CGColor;
+  CGFloat W = cell.bounds.size.width, aw = arrow.hidden ? 0 : 24;
+  arrow.frame = NSMakeRect(W - 10 - 24, 13, 24, 24);
   CGFloat hw = hint.stringValue.length ? ceil(hint.attributedStringValue.size.width) + 4 : 0;
-  hint.frame = NSMakeRect(cell.bounds.size.width - 14 - hw, 11, hw, 16);
-  cell.textField.frame = NSMakeRect(40, 10, cell.bounds.size.width - 52 - (hw ? hw + 12 : 0), 18);
+  hint.frame = NSMakeRect(W - 14 - aw - (aw ? 4 : 0) - hw, 17, hw, 16);
+  CGFloat right = hw ? NSMinX(hint.frame) - 12 : W - 12;
+  cell.textField.frame = NSMakeRect(42, 16, MAX(40, right - 42), 18);
   NSImage* site = self.iconForSuggestion ? self.iconForSuggestion(s) : nil;
   cell.imageView.image = site ?: [NSImage imageWithSystemSymbolName:icons[s[@"kind"]] ?: @"globe" accessibilityDescription:nil];
   cell.imageView.contentTintColor = sel ? NSColor.whiteColor : [NSColor.labelColor colorWithAlphaComponent:0.55];
@@ -400,7 +418,7 @@ static BOOL IsDark(NSView* v) {
 - (BOOL)fadesForTest { return self.layer.mask != nil; }
 @end
 
-// The round close button Arc shows at the right of a tab row while it's hovered or selected.
+// The close button Arc shows at the right of a tab row while it's hovered.
 @interface RowCloseButton : NSButton
 @property(nonatomic) BOOL applies;  // the row is a tab (folders, sections and "+ New Tab" have none)
 @property(nonatomic) BOOL mouseInside;
@@ -490,12 +508,12 @@ NSString* MediaBarTitle(NSString* pageTitle) {
   [super didAddSubview:v];
   [self syncCloseButton];
 }
-// Arc: the close button shows on the hovered row and on the selected one; the title's fade moves in to make room.
+// Arc: the close button shows on the hovered row; the title's fade moves in to make room.
 - (void)syncCloseButton {
   for (NSView* cell in self.subviews) {
     RowCloseButton* b = [cell viewWithTag:81];
     if (![b isKindOfClass:RowCloseButton.class]) continue;
-    BOOL show = b.applies && (self.hovered || (self.selected && !self.multi));
+    BOOL show = b.applies && self.hovered;  // Arc's own videos: the selected row shows no cross until hovered
     b.hidden = !show;
     if (!b.applies) continue;
     NSTextField* label = ((NSTableCellView*)cell).textField;
@@ -1010,6 +1028,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSBox* _commandDivider;
   NSTextField* _commandField;
   NSImageView* _commandIcon;
+  NSView* _commandScrim;
   BOOL _commandOpensNewTab;
   BOOL _saveScheduled;
   NSMutableArray<ArchivedTab*>* _archive;
@@ -8390,12 +8409,12 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
   BOOL centred = fabs(NSMidX(bf) - NSMidX(wf)) <= 1 && NSMaxY(wf) - NSMaxY(bf) >= 80;
   NSView* card = _commandBar.contentView.subviews.firstObject;
   return [NSString stringWithFormat:@"sel=%02X%02X%02X rowClass=%@ divider=%d placeholder=%@ cell=%@ width=%.0f font=%.0f card=%@ "
-                                    @"row=%.0f hint=%@ centred=%d",
+                                    @"row=%.0f hint=%@ scrim=%d centred=%d",
                                     (int)lround(c.redComponent * 255), (int)lround(c.greenComponent * 255),
                                     (int)lround(c.blueComponent * 255), NSStringFromClass(rv.class), !_commandDivider.hidden,
                                     _commandField.placeholderString, NSStringFromClass(first.class), NSWidth(bf),
                                     _commandField.font.pointSize, NSStringFromClass(card.class), kSuggestionRow,
-                                    hint.stringValue.length ? hint.stringValue : @"-", centred];
+                                    hint.stringValue.length ? hint.stringValue : @"-", _commandScrim && !_commandScrim.hidden, centred];
 }
 // Search suggestions (#31): the engine's own suggestions for what is typed, fetched shortly after typing stops.
 // Not sent from Incognito, for URLs being typed, or when turned off in Settings.
@@ -8465,18 +8484,21 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
   // Arc: centred over the window, about a fifth of the way down; up to 680 pt wide; 60 pt input row with a 20 pt
   // font, then 40 pt rows with 8 pt of padding.
   CGFloat listH = _suggestionList.items.count * kSuggestionRow + (_suggestionList.items.count ? 16 : 0);
-  CGFloat h = 60 + listH;
+  CGFloat h = 64 + listH;
   NSRect f = self.window.frame;
-  CGFloat W = MIN(680, MAX(420, f.size.width - 80));
-  CGFloat top = NSMaxY(f) - MAX(80, round(f.size.height * 0.18));
+  // Arc (measured from its own videos): about two thirds of the window wide, top a quarter of the way down.
+  CGFloat W = round(MIN(780, MAX(480, f.size.width * 0.65)));
+  CGFloat top = NSMaxY(f) - MAX(80, round(f.size.height * 0.26));
+  if (top - h < NSMinY(f) + 20) top = MIN(NSMaxY(f) - 60, NSMinY(f) + 20 + h);
   [_commandBar setFrame:NSMakeRect(round(NSMidX(f) - W / 2), top - h, W, h) display:YES];
-  _commandIcon.frame = NSMakeRect(18, h - 40, 20, 20);
+  _commandIcon.frame = NSMakeRect(18, h - 42, 20, 20);
   _commandIcon.contentTintColor = [NSColor colorWithWhite:IsDark(_commandBar.contentView) ? 1 : 0 alpha:0.33];
-  _commandField.frame = NSMakeRect(48, h - 43, W - 48 - 16, 26);
+  _commandField.frame = NSMakeRect(48, h - 45, W - 48 - 16, 26);
   _suggestionScroll.frame = NSMakeRect(8, 8, W - 16, MAX(0, listH - 16));
   _suggestionTable.tableColumns.firstObject.width = W - 16;
   _suggestionScroll.hidden = listH == 0;
-  _commandDivider.frame = NSMakeRect(0, h - 60, W, 1);
+  _commandDivider.frame = NSMakeRect(0, h - 64, W, 1);
+  [self updateCommandScrim];
   _commandDivider.hidden = listH == 0;
 }
 
@@ -8644,7 +8666,38 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
   }
 }
 
+// Arc dims the whole window in the Space's colour while the command bar is open, and fills the selected row with
+// that colour, a shade deeper (Arc blue on the default theme).
+- (NSColor*)commandSpaceColor {
+  NSColor* c = _space.themeColors.count ? ColorFromHex(_space.themeColors.firstObject) : nil;
+  return [c colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+}
+- (void)updateCommandScrim {
+  NSView* root = self.window.contentView;
+  if (!_commandScrim) {
+    _commandScrim = [[NSView alloc] initWithFrame:root.bounds];
+    _commandScrim.wantsLayer = YES;
+    _commandScrim.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    // A click anywhere outside the bar closes it, as in Arc.
+    [_commandScrim addGestureRecognizer:[[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(hideCommandBar)]];
+  }
+  NSColor* sc = [self commandSpaceColor];
+  BOOL dark = IsDark(root);
+  NSColor* tint = sc ?: (dark ? ColorFromHex(@"#120C39") : [NSColor colorWithWhite:0.9 alpha:1]);
+  _commandScrim.layer.backgroundColor = [tint colorWithAlphaComponent:dark ? 0.55 : 0.5].CGColor;
+  _commandScrim.frame = root.bounds;
+  if (_commandScrim.superview != root) [root addSubview:_commandScrim positioned:NSWindowAbove relativeTo:nil];
+  _commandScrim.hidden = NO;
+  if (sc) {
+    CGFloat hh, ss, bb, aa;
+    [sc getHue:&hh saturation:&ss brightness:&bb alpha:&aa];
+    gCommandPillColor = [NSColor colorWithHue:hh saturation:MIN(1, ss * 1.15 + 0.1) brightness:MAX(0.25, bb * 0.72) alpha:1];
+  } else {
+    gCommandPillColor = nil;
+  }
+}
 - (void)hideCommandBar {
+  _commandScrim.hidden = YES;
   [self.window removeChildWindow:_commandBar];
   [_commandBar orderOut:nil];
   [self.window makeKeyWindow];

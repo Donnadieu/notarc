@@ -436,8 +436,9 @@ trackpad; everything else is checked by the hidden self-test.
     in the app (not a local patch) because every visual item needs it, before and after.
 103. **The sidebar scroller is always the overlay kind (V1).** macOS switches scroll views to the always-visible style
     when a mouse is attached; Arc's sidebar never shows a track, so the sidebar's scroll view refuses that switch.
-104. **Tab rows fade long titles and show a close button on hover and selection (V2).** The cross is a plain "x"
-    with Arc's hover fill. On a Today tab it archives the tab (like Cmd+W); on a pinned tab or Favorite it unloads
+104. **Tab rows fade long titles and show a close button on hover (V2).** Arc 1.169 fades titles (Arc's 2022 videos
+    still show "..."); its videos show no cross on the selected row until the pointer is over it. The cross is a
+    plain "x" with Arc's hover fill. On a Today tab it archives the tab (like Cmd+W); on a pinned tab or Favorite it unloads
     it and keeps the row. Closing a row that isn't shown keeps the shown tab.
 105. **The mini player reads what's playing from the page (V3).** Title, artist and artwork come from the page's
     media session; without one, the page title is used with running clocks taken out. Back and forward show only
@@ -448,6 +449,8 @@ trackpad; everything else is checked by the hidden self-test.
     pill. All archived tabs are listed (6,586 imported from Arc is fine: the list only draws the rows on screen),
     newest first, under day headings. One click reopens a tab, like a tab row. The old table window is gone; History
     keeps its own window for now (Arc had no history panel).
-107. **The command bar card is opaque (V5).** Arc's bar reads as a solid dark (or white) card, not frosted glass, so
-    the page never shows through the suggestions. It's centred on the window, up to 680 pt wide, with its top about
-    18% down. Return's action shows only on the selected row, which keeps the other rows quiet.
+107. **The command bar follows Arc's own videos (V5).** Measured from Arc's multitasking video: the card is about 65%
+    of the window wide (here 480-780 pt), its top 26% down, 64 pt input row and 50 pt rows; the window behind is
+    dimmed in the Space's colour and the selected row is the Space's colour, a shade deeper (Arc blue on the default
+    theme). The card is opaque, so the page never shows through. "Switch to Tab" and its arrow show on every open-tab
+    row; other rows show Return's action only when selected.

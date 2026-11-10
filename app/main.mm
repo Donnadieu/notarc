@@ -1677,13 +1677,13 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       NSString* offStyle = otherTab ? [w sidebarRowStyleForItem:otherTab] : @"";
       BOOL rowsOK = [selStyle hasPrefix:@"h=36 r=8 sel=1"] && [hovStyle containsString:@"hover=1"] &&
                     [offStyle hasSuffix:@"alpha=0.00"];
-      {  // Visual parity V2: close button on the selected and hovered rows only, long titles fade (no "...").
+      {  // Visual parity V2: close button on the hovered row only, long titles fade (no "...").
         NSString* selAcc = shownTab ? [w tabRowAccessoriesForItem:shownTab] : @"";
         [w hoverSidebarItem:otherTab];
         NSString* hovAcc = otherTab ? [w tabRowAccessoriesForItem:otherTab] : @"";
         [w hoverSidebarItem:nil];
         NSString* offAcc = otherTab ? [w tabRowAccessoriesForItem:otherTab] : @"";
-        BOOL closeShown = [selAcc hasPrefix:@"close=1"] && [hovAcc hasPrefix:@"close=1"] && [offAcc hasPrefix:@"close=0"];
+        BOOL closeShown = [selAcc hasPrefix:@"close=0"] && [hovAcc hasPrefix:@"close=1"] && [offAcc hasPrefix:@"close=0"];
         BOOL room = [selAcc hasSuffix:@"room=1"] && [hovAcc hasSuffix:@"room=1"];
         ArcItem* longTab = nil;
         for (ArcItem* t in w.currentSpace.unpinned.children)
@@ -2875,12 +2875,12 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         if (!styled) std::printf("SELFTEST-CMDSTYLE-DEBUG %s\n", style.UTF8String);
         {  // Visual parity V5: Arc's big centred bar: opaque card, 20 pt input, 40 pt rows, Return's action on the pill.
           BOOL card = [style containsString:@"card=CommandCardView"] && [style containsString:@"font=20"] &&
-                      [style containsString:@"row=40"];
+                      [style containsString:@"row=50"] && [style containsString:@"scrim=1"];
           BOOL centred = [style hasSuffix:@"centred=1"];
           BOOL hint = ![style containsString:@"hint=-"];
           NSRange wr = [style rangeOfString:@"width="];
           double width = wr.location == NSNotFound ? 0 : [[style substringFromIndex:wr.location + 6] doubleValue];
-          BOOL wide = width >= 420 && width <= 680;
+          BOOL wide = width >= 480 && width <= 780;
           std::printf("SELFTEST-CMDBARLOOK card=%d centred=%d hint=%d wide=%d\n", card, centred, hint, wide);
           if (!card || !centred || !hint || !wide) std::printf("SELFTEST-CMDBARLOOK-DEBUG %s\n", style.UTF8String);
         }
