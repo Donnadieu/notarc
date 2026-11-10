@@ -560,6 +560,7 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (IBAction)showArchive:(id)sender;
 - (void)hideLibrary;
 - (BOOL)libraryShown;                       // tests (V4)
+- (BOOL)libraryInSidebar;                   // tests (V4)
 - (NSString*)libraryStyle;                  // tests (V4)
 - (NSArray<NSString*>*)libraryGroupTitles;  // tests (V4)
 - (void)reopenArchivedTab:(ArchivedTab*)tab;

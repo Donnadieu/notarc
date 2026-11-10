@@ -260,9 +260,11 @@ static const CGFloat kHeaderH = 34, kSearchH = 32, kRowH = 41, kHeadingH = 30;
   return out;
 }
 - (NSString*)styleDescription {
+  [self layoutSubtreeIfNeeded];
+  if (NSHeight(_searchBox.frame) == 0) [self layout];
   return [NSString stringWithFormat:@"header=%.0f search=%.0f radius=%.0f row=%.0f heading=%.0f placeholder=%@",
                                     NSHeight(_title.frame) ? kHeaderH : 0, NSHeight(_searchBox.frame), _searchBox.layer.cornerRadius,
-                                    kRowH, kHeadingH, _search.placeholderString];
+                                    kRowH, kHeadingH, _search.placeholderAttributedString.string ?: _search.placeholderString];
 }
 
 - (void)controlTextDidChange:(NSNotification*)n { [self reload]; }

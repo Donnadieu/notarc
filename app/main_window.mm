@@ -9820,6 +9820,10 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
   [self applyLibraryColors];
 }
 - (BOOL)libraryShown { return _libraryShown; }  // tests
+- (BOOL)libraryInSidebar {  // tests: shown inside the sidebar, and no Archive window was made
+  return _libraryShown && [_library isDescendantOf:_sidebar] && !_library.hidden && NSHeight(_library.frame) > 100 &&
+         _sidebarScroll.hidden && _archiveWindow == nil;
+}
 - (NSString*)libraryStyle { return [[self libraryPanel] styleDescription]; }  // tests
 - (NSArray<NSString*>*)libraryGroupTitles { return [[self libraryPanel] groupTitles]; }  // tests
 

@@ -4547,10 +4547,9 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                   (unsigned long)[w archiveWindowCountForQuery:@"github"],
                   (unsigned long)[w archiveWindowCountForQuery:@"zzqqxx-no-such-tab"]);
       {  // Visual parity V4: Archive opens inside the sidebar (no window), grouped by day, with search; Back closes it.
-        NSUInteger windowsBefore = NSApp.windows.count;
         ArcItem* shownBefore = w.shownItem;
         [w showArchive:nil];
-        BOOL inSidebar = w.libraryShown && NSApp.windows.count == windowsBefore;
+        BOOL inSidebar = w.libraryInSidebar;
         NSString* style = w.libraryStyle;
         BOOL look = [style containsString:@"search=32 radius=8 row=41"] && [style hasSuffix:@"placeholder=Search Archive"];
         NSArray* groups = w.libraryGroupTitles;
