@@ -89,11 +89,42 @@ set(APP_SRCS
   app/app_icons.mm
   app/main_window.h
   app/main_window.mm
+  app/arc_max.h
+  app/arc_max.mm
+  app/main_window_max.h
+  app/main_window_max.mm
 )
+
+# Arc Max (#58, #59): Apple's on-device model is a Swift-only API (FoundationModels, macOS 26). A small Swift file
+# exposes it to Objective-C; swiftc builds it into an object file plus a generated header (NotArcAI-Swift.h). The
+# framework is weak-linked and every use is behind an availability check, so NotArc still runs on macOS 13.
+find_program(SWIFTC swiftc REQUIRED)
+execute_process(COMMAND xcrun --show-sdk-path OUTPUT_VARIABLE NOTARC_SDK OUTPUT_STRIP_TRAILING_WHITESPACE)
+execute_process(COMMAND xcrun -f swiftc OUTPUT_VARIABLE _swiftc_real OUTPUT_STRIP_TRAILING_WHITESPACE)
+get_filename_component(_swift_toolchain "${_swiftc_real}" DIRECTORY)
+get_filename_component(_swift_toolchain "${_swift_toolchain}" DIRECTORY)
+set(NOTARC_AI_OBJ "${CMAKE_CURRENT_BINARY_DIR}/on_device_ai.o")
+set(NOTARC_AI_HEADER "${CMAKE_CURRENT_BINARY_DIR}/swift/NotArcAI-Swift.h")
+add_custom_command(
+  OUTPUT ${NOTARC_AI_OBJ} ${NOTARC_AI_HEADER}
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/swift"
+  COMMAND ${SWIFTC} -parse-as-library -swift-version 5 -module-name NotArcAI -target arm64-apple-macos13.0
+          -sdk "${NOTARC_SDK}" -O -c "${CMAKE_CURRENT_SOURCE_DIR}/app/on_device_ai.swift" -o ${NOTARC_AI_OBJ}
+          -emit-objc-header-path ${NOTARC_AI_HEADER}
+          -Xfrontend -disable-autolink-framework -Xfrontend FoundationModels
+  DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/app/on_device_ai.swift"
+  COMMENT "Compiling app/on_device_ai.swift"
+  VERBATIM)
+set_source_files_properties(${NOTARC_AI_OBJ} PROPERTIES EXTERNAL_OBJECT TRUE GENERATED TRUE)
+set_source_files_properties(${NOTARC_AI_HEADER} PROPERTIES GENERATED TRUE HEADER_FILE_ONLY TRUE)
+list(APPEND APP_SRCS ${NOTARC_AI_OBJ} ${NOTARC_AI_HEADER})
 
 add_executable(${APP_NAME} MACOSX_BUNDLE ${APP_SRCS})
 SET_EXECUTABLE_TARGET_PROPERTIES(${APP_NAME})
-target_include_directories(${APP_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_include_directories(${APP_NAME} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} "${CMAKE_CURRENT_BINARY_DIR}/swift")
+# Swift runtime (in macOS since 10.14.4) and its back-deployment shims; FoundationModels only exists on macOS 26+.
+target_link_options(${APP_NAME} PRIVATE "-L${NOTARC_SDK}/usr/lib/swift" "-L${_swift_toolchain}/lib/swift/macosx"
+                    "-Wl,-rpath,/usr/lib/swift" "-Wl,-weak_framework,FoundationModels")
 # CEF's macros only apply its C++ flags (C++20 etc.) to CXX sources; .mm files are OBJCXX.
 target_compile_options(${APP_NAME} PRIVATE
   $<$<COMPILE_LANGUAGE:OBJCXX>:${CEF_COMPILER_FLAGS} ${CEF_CXX_COMPILER_FLAGS}>

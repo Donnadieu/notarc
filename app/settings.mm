@@ -2,6 +2,7 @@
 #import "app/app_icons.h"
 #import "app/downloads.h"
 #import "app/main_window.h"
+#import "app/arc_max.h"
 #include "app/content_blocker.h"
 
 NSString* const kSettingAutoArchiveHours = @"autoArchiveThresholdHours";
@@ -40,6 +41,7 @@ void SettingsRegisterDefaults(void) {
     kSettingDeveloperModeLocal : @YES,
     kSettingAppIcon : @"classic",
   }];
+  [NSUserDefaults.standardUserDefaults registerDefaults:MaxDefaultSettings()];  // Settings > Max (#58, #59)
 }
 
 static NSMutableDictionary* g_memorySettings;
@@ -463,7 +465,7 @@ static MainWindowController* Browser() { return [MainWindowController mainContro
   [self addPane:@"profiles" title:@"Profiles" symbol:@"person.2" view:[self profilesPane]];
   [self addPane:@"appearance" title:@"Appearance" symbol:@"paintpalette" view:[self appearancePane]];
   [self addPane:@"links" title:@"Links" symbol:@"link" view:[self linksPane]];
-  // Max (AI) pane: [self addPane:@"max" title:@"Max" symbol:@"sparkles" view:[self maxPane]];
+  [self addPane:@"max" title:@"Max" symbol:@"sparkles" view:[self pane:@[ MaxSettingsSection() ]]];  // #58, #59
   [self addPane:@"advanced" title:@"Advanced" symbol:@"gearshape.2" view:[self advancedPane]];
 }
 

@@ -199,3 +199,41 @@ trackpad; everything else is checked by the hidden self-test.
 6. **Reset All Settings** resets every preference shown in Settings (including the app icon, Space appearance and
    Developer Mode sites). Spaces, tabs, profiles, history, site permissions, ad-blocking exceptions and keyboard
    shortcuts are kept: those are data or have their own reset.
+
+## 2026-11-09: Arc Max on the Mac (#58, #59)
+
+31. **Swift in the build.** Apple's on-device model (FoundationModels) is Swift-only. `app/on_device_ai.swift` is one
+    `@objc` class compiled by a custom `swiftc` step in CMake into an object file and a generated header
+    (`NotArcAI-Swift.h`); FoundationModels is weak-linked and checked with `#available(macOS 26, *)` and
+    `SystemLanguageModel.default.availability`, so NotArc still runs on macOS 13. Command Line Tools have no macro
+    plugins, so `@Generable` is out; replies are plain text, parsed in Objective-C++ with greedy sampling.
+32. **Fallbacks keep every command visible.** Without the model: Ask on Page shows the page's sentences that best match
+    the question (plus "Ask ChatGPT"), summaries pick the page's key sentences, link previews show the page's own
+    description and Tidy Tabs groups by site. Settings > Max turns each feature, or all of Max, off.
+33. **Tidy Tabs asks for one topic per tab, not for folders.** The small on-device model gave muddled folders when asked
+    for "Folder: 1, 4" groups, but clean ones when it labels each tab ("3: Cooking") and NotArc groups equal labels.
+    Only top-level Today tabs are tidied (folders, splits, notes and easels stay put); topics with 2+ tabs become
+    folders at the top of Today; Undo (Edit menu and the toast) dissolves them back into the original order.
+34. **Ask on Page is Cmd+Shift+A** (Arc folded it into Cmd+F; NotArc keeps Find as Find) and answers in a small panel
+    over the page. "Ask ChatGPT" opens `https://chatgpt.com/?q=<question>` (with the page address for page questions)
+    in a new tab of the current Space, so it uses that Space's own ChatGPT sign-in.
+35. **5-second previews:** hold Shift while pointing at a link (or press Shift while on it); Chromium's link-target
+    message tells NotArc which link. The page is fetched with an ephemeral, cookie-less `NSURLSession` (no sign-in,
+    nothing stored), only http(s), and summarised on the Mac; results are cached per window for 50 links.
+36. **Copy Page as Markdown is NotArc's own DOM walker** (no library): headings, paragraphs, emphasis, inline and block
+    code, links and images made absolute, nested lists, quotes and tables; scripts, forms, navigation and hidden
+    elements are skipped. It starts from the page's `<article>`/`<main>` when there is one, and adds the title and a
+    Source line. Page scripts send results back through tagged console lines with a random nonce, in chunks.
+37. **Settings > Max is a section of the current Settings window** because the tabbed Settings (branch settings-panes)
+    wasn't merged yet; it's one self-contained view (`MaxSettingsSection()`), ready to become a tab.
+38. **One tidy-title path, model first (#18 + #58).** #18 (merged first) tidies titles with rules on pin and from the
+    tab menu. Max doesn't add a second tidy: when Max and its "Tidy tab titles with Apple's model" switch are on and
+    the model is available, the same entry points (pin, tab menu's Tidy Title, View > Tidy Tab Title) ask the model,
+    and use `TidyTabTitle` when it's off, unavailable or its reply is unusable. Whether pinning tidies at all stays
+    #18's "Tidy tab titles when pinning" setting. A model reply that arrives after the tab was renamed is dropped.
+    Every tidy (rules or model) is undoable from Edit > Undo as "Tidy Tab Title", besides #18's toast and "Use Page
+    Title".
+39. **Self-tests never call the real model.** A self-test run installs an "unavailable" model stub at launch, so every
+    check (including #18's synchronous SELFTEST-TIDY) sees the same state on any Mac; the Max checks swap in an
+    "available" stub with canned replies. The real model's state is only reported (`model=` in SELFTEST-MAX), so the
+    live FoundationModels path is untested by the self-test.

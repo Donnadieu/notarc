@@ -47,6 +47,13 @@ or later. From 0.5.0 on, NotArc updates itself.
   View > Turn On Developer Mode for This Site or Site Settings. The sidebar shows the full address with its port, the
   tab is never auto-archived, and Developer Tools is one click away in the address pill. View > Reset Developer Mode
   Sites forgets the sites you turned on.
+- Max, NotArc's take on Arc Max, runs on your Mac with Apple's built-in model (macOS 26 with Apple Intelligence on):
+  View > Ask on Page... (Cmd+Shift+A) answers questions from the page, View > Summarize Page, Shift + point at a link
+  for a short preview of it, Tabs > Tidy Today Tabs sorts Today's tabs into topic folders (Undo puts them back), and
+  tidy tab titles come from the model. Without Apple Intelligence each falls back to a non-AI version (best-matching
+  sentences, key sentences, folders by site, the built-in title rules). The command bar offers "Ask ChatGPT" for questions (opens chatgpt.com
+  with your own sign-in), and Edit > Copy Page as Markdown copies any page as Markdown. Settings > Max has the
+  switches. Nothing goes to a NotArc server.
 - The parity checklist is up to date with 0.23.0, with an Out of scope section and docs/decisions.md for every
   scope call.
 

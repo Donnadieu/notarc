@@ -1,5 +1,6 @@
 #include "app/browser_client.h"
 #import "app/downloads.h"
+#import "app/arc_max.h"
 #include "app/content_blocker.h"
 
 #include <cstdio>
@@ -226,6 +227,11 @@ bool BrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
   }
   if (m.compare(0, kLang.size(), kLang) == 0) {
     if (on_lang_) on_lang_(browser->GetIdentifier(), m.substr(kLang.size()));
+    return true;
+  }
+  // Max page scripts (#58, #59) reply as "__notarc_max__:<nonce>:..." lines.
+  if (m.compare(0, 15, "__notarc_max__:") == 0) {
+    if (NSString* line = [NSString stringWithUTF8String:m.c_str()]) MaxHandleConsoleMessage(line);
     return true;
   }
   if (m.compare(0, kZap.size(), kZap) == 0) {
