@@ -37,6 +37,8 @@ typedef struct {
   NSUInteger undecryptable;
 } ArcCookieStats;
 
-// Copies the DB first (Arc keeps it open). Expired cookies are skipped.
+// Copies the DB first (Arc keeps it open). Expired cookies are skipped. Errors are plain words for the person.
 NSArray<ArcCookie*>* ArcReadCookies(NSString* dbPath, NSData* key, ArcCookieStats* stats, NSError** error);
 NSString* ArcCookieDBPath(NSString* profileDirectory);  // .../Arc/User Data/<profile>/Cookies
+// <userData>/<profile>/Cookies (or <profile>/Network/Cookies when only that exists).
+NSString* ArcCookieDBPathIn(NSString* userData, NSString* profileDirectory);

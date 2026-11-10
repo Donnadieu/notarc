@@ -313,6 +313,12 @@ static NSDate* ChromeTime(id v) {  // microseconds since 1601
 - (NSString*)passwordFor:(SavedLogin*)login { return [self unseal:login.sealedPassword]; }
 - (NSString*)cardNumberFor:(AutofillCard*)card { return [self unseal:card.sealedNumber]; }
 
+- (BOOL)unlockIfNeeded {
+  if (_usable) return YES;
+  if (!_key) _key = StoreKey();  // the Keychain may have said no earlier this launch
+  return [self reload] && _usable;
+}
+
 - (BOOL)reload {
   _logins = [NSMutableArray array];
   _addresses = [NSMutableArray array];
@@ -675,7 +681,7 @@ static NSDictionary* CompleteAddress(NSMutableDictionary* f) {
 
 - (NSDictionary<NSString*, NSNumber*>*)importChromiumProfile:(NSString*)profileDir key:(NSData*)key source:(NSString*)source {
   if (!_usable || key.length != 16) return nil;
-  NSUInteger passwords = 0, addresses = 0, cards = 0, never = 0, bad = 0;
+  NSUInteger passwords = 0, addresses = 0, cards = 0, never = 0, bad = 0, existing = 0;
   BOOL readAny = NO;
   for (NSString* file in @[ @"Login Data", @"Login Data For Account" ]) {
     NSString* tmp = nil;
@@ -701,8 +707,11 @@ static NSDictionary* CompleteAddress(NSMutableDictionary* f) {
         ++bad;
         continue;
       }
-      passwords += [self importLogin:origin username:Text(r[@"username_value"]) password:pw
-                             created:ChromeTime(r[@"date_created"]) source:source];
+      if ([self importLogin:origin username:Text(r[@"username_value"]) password:pw created:ChromeTime(r[@"date_created"])
+                     source:source])
+        ++passwords;
+      else
+        ++existing;  // NotArc already has this site + user; its copy wins
     }
     sqlite3_close(db);
     [NSFileManager.defaultManager removeItemAtPath:tmp error:nil];
@@ -719,7 +728,7 @@ static NSDictionary* CompleteAddress(NSMutableDictionary* f) {
   if (!readAny) return nil;
   if (passwords || addresses || cards || never) [self save];
   return @{@"passwords" : @(passwords), @"addresses" : @(addresses), @"cards" : @(cards), @"never" : @(never),
-           @"undecryptable" : @(bad)};
+           @"undecryptable" : @(bad), @"existing" : @(existing)};
 }
 
 - (NSUInteger)importCSVFile:(NSString*)path source:(NSString*)source {

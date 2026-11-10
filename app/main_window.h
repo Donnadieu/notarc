@@ -177,10 +177,17 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 // Profiles (Arc: each Space belongs to a browser profile with its own logins, history and Favorites).
 // Keyed by profile folder ("Profile 4"); names come from Arc on first launch and are saved in Profiles.json.
 - (NSUInteger)importArcHistory;
-// One button for everything that can come over from Arc today: history and extensions (logins come over on
-// each Space's first page load). Returns counts: @"history", @"extensions", @"skipped".
-- (NSDictionary<NSString*, NSNumber*>*)importEverythingFromArcInto:(NSString*)extensionsDir userData:(NSString*)userData;
-- (void)offerArcImportIfFirstLaunch;  // first real launch only: "Bring everything over from Arc?"
+// One button for everything that can come over from Arc: the synchronous part (history, extensions, passwords,
+// addresses, cards). Returns counts: @"history", @"extensions", @"skipped", @"passwords" (-1 = no key),
+// @"existing", @"addresses", @"cards", @"locked", and @"passwordError" (plain words) when passwords couldn't come.
+// File > Import Everything from Arc runs it and then -importArcCookiesFromUserData:key:done: (the logins).
+- (NSDictionary*)importEverythingFromArcInto:(NSString*)extensionsDir userData:(NSString*)userData;
+// Every Space profile's Arc cookies, copied again through CEF's cookie manager (stored with NotArc's own key).
+// Report: @"read", @"set", @"profiles", @"expired", @"locked", @"errors" (plain-word lines). Tests pass a key.
+- (void)importArcCookiesFromUserData:(NSString*)userData key:(NSData*)key done:(void (^)(NSDictionary* report))done;
+// At launch while Arc data exists and the import hasn't been run (arcImportCompleted) or turned down (arcImportNotNow).
+- (void)offerArcImportIfFirstLaunch;
+- (IBAction)importEverythingFromArcMenu:(id)sender;  // File menu and Settings > Profiles
 // File > Import Extensions from Arc: copies the Spaces' Arc extensions; they load with Chrome-style pages.
 - (NSArray*)importArcExtensionsInto:(NSString*)destination fromArcUserData:(NSString*)userData;  // File > Import History from Arc: each Space's Arc profile history; returns visits added
 - (NSArray<NSString*>*)profileDirectories;            // in display order
@@ -321,7 +328,8 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (NSPasteboard*)copyPasteboard;  // private pasteboard in self-tests
 // Arc's saved passwords, addresses and cards (part of Import Everything from Arc, #150). Tests set the key.
 @property(nonatomic, copy) NSData* arcSafeStorageKeyOverride;
-- (NSDictionary<NSString*, NSNumber*>*)importArcPasswordsFromUserData:(NSString*)userData;
+// @"error" (plain words) when Arc's key or NotArc's own vault isn't available.
+- (NSDictionary*)importArcPasswordsFromUserData:(NSString*)userData;
 // View > Show Toolbar: back/forward/reload and the full address above the page (Enter goes to what you type).
 // View > Hide Space Header: hides the Space picker at the top of the sidebar. Both are remembered.
 - (IBAction)toggleToolbar:(id)sender;
@@ -452,6 +460,8 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (void)deleteSidebarItem:(ArcItem*)item;  // tests
 - (BOOL)writeSidebarSnapshot:(NSString*)path;  // design checks
 - (void)setTestCookie:(NSString*)name value:(NSString*)value url:(NSString*)url session:(BOOL)session done:(void (^)(BOOL ok))done;  // tests
+- (void)testCookieDetailsForURL:(NSString*)url done:(void (^)(NSArray<NSDictionary*>*))done;  // tests
+- (void)testDeleteCookiesForURL:(NSString*)url done:(void (^)(void))done;                      // tests
 - (void)testCookieNamesForURL:(NSString*)url done:(void (^)(NSArray<NSString*>* names))done;  // tests
 // Easels
 - (IBAction)newEasel:(id)sender;
@@ -549,3 +559,9 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 @end
 
 NSString* ResolveCommandBarInput(NSString* input);  // URL as-is (https added) or a search URL
+
+// Import Everything from Arc (#150): the pure parts, for tests.
+extern NSString* const kArcImportCompletedKey;  // NSDate: the import ran
+extern NSString* const kArcImportDeclinedKey;   // BOOL: "Not Now" on the launch offer
+BOOL ArcImportOfferDue(NSDictionary* prefs, BOOL arcDataExists);
+NSString* ArcImportSummary(NSDictionary* counts, NSDictionary* cookieReport);

@@ -401,3 +401,27 @@ trackpad; everything else is checked by the hidden self-test.
 96. **The updater still checks only the SHA-256**, not the signing identity, so ad-hoc copies (0.25.0 and earlier)
     update to signed ones. Because the signature changes, macOS treats the first signed launch as a new app for
     Keychain items and privacy permissions, and may ask once more.
+
+## 2026-11-10: Dock icon, Arc import offer, logins on re-import
+
+97. **The bundle icon (Icon A, "¬" on indigo) is the default app icon and the first tile in Settings > Appearance.**
+    Choosing it sets `NSApp.applicationIconImage` to nil, so the Dock, Finder and Launchpad show the same signed
+    `NotArc.icns`. The six drawn colourways stay as options. Builds before 0.26.1 had no bundle tile and older self-test
+    runs could save a colourway into the real preferences, so the saved `appIcon` is cleared once at launch
+    (`appIconBundleDefault` marks it done; never in self-tests).
+98. **The Arc import offer is keyed on what happened, not on having been offered.** It shows at launch while
+    `~/Library/Application Support/Arc/User Data` exists and neither `arcImportCompleted` (set when Import Everything
+    finishes) nor `arcImportNotNow` (Not Now) is set. The old `arcImportOffered` key is ignored: test and dev launches
+    set it without the person ever seeing the sheet. It waits for any other sheet and for the window to be on screen.
+    Settings > Profiles has an Import Everything from Arc button too.
+99. **Import Everything copies Arc's cookies again, for every Space profile, each time it runs.** They go through each
+    Space's CEF cookie manager (`SetCookie`), so Chromium stores them encrypted with NotArc's own Safe Storage key; an
+    existing cookie with the same name, domain and path is replaced by Arc's copy. Writing NotArc's Cookies SQLite
+    directly was ruled out: CEF holds it open and re-encrypting by hand would duplicate Chromium's code. The one-time
+    automatic copy on a Space's first start stays. Arc's key is read once per import (one Keychain prompt at most), on
+    a background queue. Unencrypted legacy rows are copied as they are; expired rows are skipped and counted.
+100. **Import errors are shown in plain words** in the summary sheet (no key from macOS, NotArc's vault locked, no Arc
+    files in a profile, Arc's key didn't unlock its cookies, cookies the store refused), and the sheet warns that a few
+    sites may still ask to sign in again (sessions tied to a device or an IP address). Saved passwords NotArc already
+    has are counted as "already here" rather than shown as 0 added.
+

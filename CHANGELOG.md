@@ -3,6 +3,20 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## 0.26.1
+- The Dock shows NotArc's own icon (the gold "¬" on indigo, the same one Finder shows) instead of a colourway from
+  the icon picker. It's now the first choice in Settings > Appearance and the default; a colourway saved by an older
+  version is cleared once, and anything you pick after that is kept.
+- Import Everything from Arc now brings your logins over every time you run it: it copies each Space profile's Arc
+  cookies again (Arc's newest sessions win), with their expiry, domain, path, Secure, HttpOnly and SameSite kept,
+  and tells you how many came over. Before, logins were copied only once, the first time each Space opened, so
+  sessions Arc renewed later never reached NotArc. It also reads Arc's key once for passwords and cookies, and when
+  something can't come over (macOS said no to Arc's key, NotArc's own vault is locked, a profile has no Arc files)
+  it says so in plain words instead of showing 0.
+- The "Bring everything over from Arc?" offer shows at launch whenever Arc's data is there and you haven't imported
+  or chosen Not Now yet. Older test and development launches could mark it as offered without it ever showing.
+  The button is also in Settings > Profiles.
+
 ## 0.26.0
 - NotArc is now signed with an Apple Developer ID and notarized by Apple, so macOS opens the download without asking
   you to allow it in System Settings. The first launch after updating, macOS may ask once more for the Keychain item
