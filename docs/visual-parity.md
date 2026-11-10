@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-0 done of 66 items.
+5 done of 66 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -19,25 +19,25 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
 
 ## Reported by Omar (Nov 10)
 
-- [ ] **V1 Sidebar scrollbar.** Arc shows no scrollbar track in the sidebar, ever; an overlay scroller appears only
+- [x] **V1 Sidebar scrollbar.** Arc shows no scrollbar track in the sidebar, ever; an overlay scroller appears only
   while scrolling a long list, and the empty area below the tabs is just the Space colour. Ref: shot (no track),
   Omar's NotArc screenshot (track visible).
-- [ ] **V2 Tab rows.** 36 pt rows on a 41 pt pitch, 16 pt favicon at x 18, title at x 45 in 13-14 pt medium
-  lavender-white; a long title fades out at the right edge (no "..."), and the fade makes room for a round close
-  button that shows on hover and on the selected row. Ref: shot, colours.
-- [ ] **V3 Mini player and media controls.** A card above the bottom bar for the tab playing sound: artwork or favicon,
+- [x] **V2 Tab rows.** 36 pt rows on a 41 pt pitch, 16 pt favicon at x 18, title at x 45 in 13-14 pt medium
+  lavender-white; a long title fades out at the right edge (no "..."), and the fade makes room for a close button
+  that shows on the row under the pointer (not on the selected row by itself). Ref: shot, colours, app, video.
+- [x] **V3 Mini player and media controls.** A card above the bottom bar for the tab playing sound: artwork or favicon,
   the track title and the site on two lines (no "(2:52)" in the title), and back, play/pause and forward buttons;
   mute on hover. A playing video you leave keeps playing in a small player there. Ref: help (Mini Player), shot
   (media bar black ~45%, radius 8), colours (playback control colour).
-- [ ] **V4 Archive in the sidebar.** The archive button opens Archive inside the sidebar (Library), not a window: a
+- [x] **V4 Archive in the sidebar.** The archive button opens Archive inside the sidebar (Library), not a window: a
   search field, archived tabs grouped by when they were archived (Today, Yesterday, earlier days and months), each a
   normal favicon + title row; clicking one brings it back as a tab. Long archives load as you scroll. Ref: app
   (Archive page, search, empty state, auto-archive vs manual), help (Auto Archive).
-- [ ] **V5 Command bar (new tab).** Cmd+T opens a large floating bar centred over the page, about a fifth of the way
-  down: big 20 pt input, a solid material card with a deep soft shadow and ~12 pt corners, then rows with an icon,
-  title and a dim second part (address, "Switch to Tab", action name); the selected row is a filled Arc-blue pill with a
-  key hint on the right. Ref: app (centred, top-left, floating and full-window placements), colours, help (Command Bar
-  Actions), video.
+- [x] **V5 Command bar (new tab).** Cmd+T opens a large card centred on the window, about two thirds of its width and
+  a quarter of the way down, while the whole window dims in the Space's colour: 20 pt input, opaque card with a deep
+  shadow, 50 pt rows with the site's icon, title and a dim second part; "Switch to Tab" with a small arrow box on open
+  tabs; the selected row is filled with the Space's colour, a shade deeper (Arc blue on the default theme). Ref: app
+  (centred, top-left, floating and full-window placements), colours, help (Command Bar Actions), video.
 
 ## Window
 
