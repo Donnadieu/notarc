@@ -67,6 +67,10 @@ or later. From 0.5.0 on, NotArc updates itself.
   Chrome Web Store link or extension ID, downloads it from the Web Store and checks its signature before installing.
   Changes take effect when NotArc relaunches (one click; your tabs come back). Settings has a new "Use Chrome-style
   pages" switch, still off by default. Installing asks the Chrome Web Store (Google) for the extension's package.
+- Ad blocking: Manage Ad Blockers... (Settings and Site Settings) lets you subscribe to filter lists such as
+  EasyList and EasyPrivacy (downloaded only when you turn them on, refreshed daily or with Update Now) or any list by
+  address. Lists block ad and tracker requests and hide ad elements on pages. The built-in list can be turned off, and
+  the sites where blocking is off are listed with a Remove button.
 - The parity checklist is up to date with 0.23.0, with an Out of scope section and docs/decisions.md for every
   scope call.
 

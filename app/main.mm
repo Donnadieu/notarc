@@ -32,6 +32,8 @@
 #import "app/settings.h"
 #import "app/app_icons.h"
 #include "app/content_blocker.h"
+#import "app/filter_lists.h"
+#import "app/ad_blockers_window.h"
 #include "app/browser_client.h"
 #import "app/history_store.h"
 #import "app/updater.h"
@@ -103,6 +105,7 @@ static void InstallSelfTestExtension(NSString* dir) {
   NSData* crx = BuildTestCRX(TestExtensionFiles(@"NotArc Test Extension", 3), &extID);
   if (crx && InstallExtensionCRX(crx, extID, dir, nil)) gTestExtensionID = extID;
 }
+static BOOL gAdBlockTestDone = NO;  // self-test: the filter-list page check (#53) printed
 static BOOL gLateTestsDone = NO;  // self-test: the last chained page checks (call, capture, PiP) printed  // self-test: the hang check finished (later page tests wait for it)
 
 // Self-test: poll a condition every 0.25 s instead of a fixed wait, then continue (also on timeout).
@@ -729,7 +732,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         [self.window setTestCookie:@"notarc_saved_login" value:@"1" url:@"https://example.org/" session:NO done:nil];
       });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 170 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-     WaitUntil(^{ return (BOOL)((gLateTestsDone && gMaxTestDone) || self.selfTestReload); }, 40, ^{
+     WaitUntil(^{ return (BOOL)((gLateTestsDone && gMaxTestDone && gAdBlockTestDone) || self.selfTestReload); }, 40, ^{
       void (^finish)(void) = ^{
         for (NSDictionary* tab in [self.window tabSnapshot])
           std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
@@ -2939,6 +2942,153 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           });
         });
       });
+    });
+    // Filter lists (#53): a list subscribed from a local file (never the network) is parsed (network, exception and
+    // cosmetic rules), the Manage Ad Blockers dialog shows it with the suggestions and site exceptions, Update Now
+    // re-reads it, and on a page its cosmetic rules hide matching elements. Settings are memory-only.
+    // Runs after the call/capture/PiP chain so its tab never takes the screen from the hang or call checks, and while
+    // it runs blocking is on for every page; the multi-window check at the end waits for it.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 140 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+     WaitUntil(^{ return gLateTestsDone; }, 50, ^{
+      MainWindowController* w = self.window;
+      namespace cb = content_blocker;
+      FilterListManager* mgr = FilterListManager.shared;
+      ManageAdBlockersWindowController* dlg = ManageAdBlockersWindowController.shared;  // built, never shown
+      NSString* path = [NSTemporaryDirectory() stringByAppendingPathComponent:@"notarc-selftest-filters.txt"];
+      NSString* fixture = @"[Adblock Plus 2.0]\n! Title: NotArc Test List\n! a comment\n"
+                           "||ads.fixture.example^\n"
+                           "||track.fixture.example^$third-party\n"
+                           "||cdn.fixture.example^$script,domain=news.example|~sports.news.example\n"
+                           "@@||ok.ads.fixture.example^\n"
+                           "@@||allowed-page.example^$document\n"
+                           "##.notarc-generic-ad\n"
+                           "example.org##.notarc-site-ad\n"
+                           "example.org#@#.notarc-generic-unhidden\n"
+                           "##.notarc-generic-unhidden\n"
+                           "~example.org##.notarc-not-on-example\n"
+                           "||popup.fixture.example^$popup\n/banner/*\nexample.com#?#div:has-text(Ad)\n##+js(noop)\n";
+      [fixture writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+      NSString* url = [NSURL fileURLWithPath:path].absoluteString;
+      BOOL suggestedOff = NO;
+      int suggestions = 0;
+      for (FilterList* l in mgr.lists)
+        if (l.suggested && !l.enabled && !l.updated && ([l.title isEqualToString:@"EasyList"] || [l.title isEqualToString:@"EasyPrivacy"]))
+          ++suggestions;
+      suggestedOff = suggestions == 2;
+      BOOL parsed = cb::CountSupportedRules(fixture.UTF8String) == 10 && cb::ListTitle(fixture.UTF8String) == "NotArc Test List";
+      SettingSetBool(kSettingBlockAds, YES);
+      SettingSetBool(kSettingAdBlockBuiltIn, NO);  // only the fixture's made-up hosts while the page check runs
+      ApplyContentBlockerSettings();
+      BOOL rejects = ![dlg addListFromField:@"javascript:alert(1)"] && ![dlg addListFromField:@"ftp://lists.example/x.txt"];
+      BOOL added = [dlg addListFromField:url];
+      WaitUntil(^{ return (BOOL)(!mgr.busy && cb::FilterRuleCount() > 0); }, 10, ^{
+        FilterList* mine = nil;
+        for (FilterList* l in mgr.lists) if ([l.url isEqualToString:url]) mine = l;
+        BOOL subscribed = added && mine.enabled && mine.rules == 10 && mine.updated && [mine.title isEqualToString:@"NotArc Test List"] &&
+                          cb::FilterRuleCount() == 10;
+        BOOL network = cb::ShouldBlock("https://ads.fixture.example/a.js", "https://news.example/", false, "script") &&
+                       cb::ShouldBlock("https://x.ads.fixture.example/i.png", "https://news.example/", false, "image") &&
+                       !cb::ShouldBlock("https://ads.fixture.example/", "https://ads.fixture.example/", true) &&
+                       !cb::ShouldBlock("https://popup.fixture.example/", "https://news.example/", false);
+        BOOL thirdParty = cb::ShouldBlock("https://track.fixture.example/p", "https://news.example/", false) &&
+                          !cb::ShouldBlock("https://track.fixture.example/p", "https://www.fixture.example/", false);
+        BOOL domainOpt = cb::ShouldBlock("https://cdn.fixture.example/ad.js", "https://www.news.example/", false, "script") &&
+                         !cb::ShouldBlock("https://cdn.fixture.example/logo.png", "https://news.example/", false, "image") &&
+                         !cb::ShouldBlock("https://cdn.fixture.example/ad.js", "https://other.example/", false, "script") &&
+                         !cb::ShouldBlock("https://cdn.fixture.example/ad.js", "https://sports.news.example/", false, "script");
+        BOOL exception = !cb::ShouldBlock("https://ok.ads.fixture.example/x", "https://news.example/", false) &&
+                         !cb::ShouldBlock("https://ads.fixture.example/x", "https://allowed-page.example/", false) &&
+                         cb::CosmeticCSS("https://allowed-page.example/").empty();
+        std::string onSite = cb::CosmeticCSS("https://www.example.org/a"), elsewhere = cb::CosmeticCSS("https://other.example/");
+        auto has = [](const std::string& css, const char* cls) { return css.find(std::string(cls) + "{display:none") != std::string::npos; };
+        BOOL cosmetic = has(onSite, ".notarc-generic-ad") && has(onSite, ".notarc-site-ad") &&
+                        !has(onSite, ".notarc-generic-unhidden") && !has(onSite, ".notarc-not-on-example") &&
+                        has(elsewhere, ".notarc-generic-ad") && !has(elsewhere, ".notarc-site-ad") &&
+                        has(elsewhere, ".notarc-generic-unhidden") && has(elsewhere, ".notarc-not-on-example");
+        BOOL builtInOff = !cb::ShouldBlock("https://doubleclick.net/x", "https://news.example/", false);
+        [dlg toggleBuiltIn];
+        BOOL builtInToggle = SettingBool(kSettingAdBlockBuiltIn) && cb::ShouldBlock("https://doubleclick.net/x", "https://news.example/", false);
+        [dlg toggleBuiltIn];
+        builtInToggle = builtInToggle && !SettingBool(kSettingAdBlockBuiltIn);
+        [w setAdBlocking:NO forHost:@"news.example"];
+        BOOL siteOff = !cb::ShouldBlock("https://ads.fixture.example/a.js", "https://news.example/", false) &&
+                       cb::CosmeticCSS("https://news.example/").empty();
+        [dlg reload];
+        NSArray<NSString*>* rows = dlg.rowSummaries;
+        BOOL dialog = [rows containsObject:@"builtin=0"] && [rows containsObject:@"list=NotArc Test List|on=1|rules=10|updated=1|suggested=0"] &&
+                      [rows containsObject:@"list=EasyList|on=0|rules=0|updated=0|suggested=1"] &&
+                      [rows containsObject:@"list=EasyPrivacy|on=0|rules=0|updated=0|suggested=1"] && [rows containsObject:@"site=news.example"];
+        if (!dialog) std::printf("SELFTEST-ADBLOCKLISTS-DEBUG rows=%s\n", [rows componentsJoinedByString:@","].UTF8String);
+        [dlg removeSiteException:@"news.example"];
+        BOOL siteBack = ![dlg.rowSummaries containsObject:@"site=news.example"] &&
+                        cb::ShouldBlock("https://ads.fixture.example/a.js", "https://news.example/", false);
+        BOOL daily = ![[mgr listsDueForRefreshAt:[NSDate date]] containsObject:url] &&
+                     [[mgr listsDueForRefreshAt:[NSDate dateWithTimeIntervalSinceNow:25 * 3600]] containsObject:url];
+        [[fixture stringByAppendingString:@"||more.fixture.example^\n"] writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [mgr updateList:url done:^(BOOL ok) {
+          WaitUntil(^{ return (BOOL)(!mgr.busy && cb::FilterRuleCount() == 11); }, 10, ^{
+            FilterList* again = nil;
+            for (FilterList* l in mgr.lists) if ([l.url isEqualToString:url]) again = l;
+            BOOL updated = ok && again.rules == 11 && cb::ShouldBlock("https://more.fixture.example/x", "https://news.example/", false);
+            BOOL noDownloads = YES;  // the suggestions were never fetched
+            for (FilterList* l in mgr.lists) if (l.suggested && l.updated) noDownloads = NO;
+            std::printf("SELFTEST-ADBLOCKLISTS parsed=%d suggestedOff=%d rejects=%d subscribed=%d network=%d thirdParty=%d "
+                        "domainOpt=%d exception=%d cosmetic=%d builtInOff=%d builtInToggle=%d siteOff=%d dialog=%d siteBack=%d "
+                        "daily=%d updateNow=%d noDownloads=%d\n", parsed, suggestedOff, rejects, subscribed, network, thirdParty,
+                        domainOpt, exception, cosmetic, builtInOff, builtInToggle, siteOff, dialog, siteBack, daily, updated,
+                        noDownloads);
+            std::fflush(stdout);
+            // Cosmetic hiding on a real page: the style sheet goes in on page load and comes out when the list is off.
+            {
+              [w openInNewTab:@"https://example.org/adblock-cosmetic"];
+              ArcItem* t = w.shownItem;
+              NSString* probe = @"(function(){if(!document.getElementById('__notarc_adblock__'))return;"
+                                 "var d=document.getElementById('nab')||document.createElement('div');d.id='nab';"
+                                 "d.innerHTML='<p class=\"notarc-generic-ad\">a</p><p class=\"notarc-site-ad\">b</p>"
+                                 "<p class=\"notarc-generic-unhidden\">c</p><p class=\"notarc-control\">d</p>';"
+                                 "document.body.appendChild(d);document.title='cosm:'+[].map.call(d.children,function(e){"
+                                 "return getComputedStyle(e).display}).join('|');})()";
+              __block BOOL loaded = NO;
+              WaitUntil(^{
+                if (t.liveTitle.length && t.browserId) {
+                  loaded = YES;
+                  [w runJS:probe inItem:t];
+                }
+                return (BOOL)[t.liveTitle hasPrefix:@"cosm:"];
+              }, 20, ^{
+                if (w.shownItem != t) [w showItem:t];
+                NSString* on = t.liveTitle ?: @"-";
+                BOOL hidden = [on hasPrefix:@"cosm:none|none|"];  // generic rule + this site's rule
+                BOOL kept = [on hasSuffix:@"|block|block"];       // "#@#" exception for this site + an unlisted class
+                [mgr setList:url enabled:NO];
+                WaitUntil(^{ return (BOOL)(!mgr.busy && cb::FilterRuleCount() == 0); }, 10, ^{
+                  [w applyAdBlockCosmeticsToBrowser:t.browserId url:t.url];  // what the next page load does
+                  [w runJS:@"document.title='off:'+!!document.getElementById('__notarc_adblock__')+'|'+"
+                            "getComputedStyle(document.querySelector('.notarc-generic-ad')).display" inItem:t];
+                  WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"off:"]; }, 5, ^{
+                    BOOL removed = [t.liveTitle isEqualToString:@"off:false|block"];
+                    if (!hidden || !kept || !removed)
+                      std::printf("SELFTEST-ADBLOCKCOSMETIC-DEBUG loaded=%d on=[%s] off=[%s]\n", loaded, on.UTF8String,
+                                  t.liveTitle.UTF8String);
+                    [mgr removeList:url];
+                    BOOL gone = YES;
+                    for (FilterList* l in mgr.lists) if ([l.url isEqualToString:url]) gone = NO;
+                    [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+                    SettingSetObject(kSettingAdBlockLists, nil);
+                    SettingSetObject(kSettingAdBlockBuiltIn, nil);
+                    SettingSetBool(kSettingBlockAds, NO);
+                    ApplyContentBlockerSettings();
+                    std::printf("SELFTEST-ADBLOCKCOSMETIC hidden=%d kept=%d removed=%d listRemoved=%d off=%d\n", hidden, kept,
+                                removed, gone, !cb::Enabled() && SettingBool(kSettingAdBlockBuiltIn));
+                    gAdBlockTestDone = YES;
+                  });
+                });
+              });
+            }
+          });
+        }];
+      });
+     });
     });
     // Boosts: a Boost for example.org applies on page load (colour overlay, zap, case, custom CSS and JS), a zap
     // picked in the page is added, turning it off removes it from the page, and it's saved.

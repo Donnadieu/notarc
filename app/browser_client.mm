@@ -61,7 +61,20 @@ CefResourceRequestHandler::ReturnValue BrowserClient::OnBeforeResourceLoad(CefRe
   bool main_frame = request->GetResourceType() == RT_MAIN_FRAME;
   std::string page = request->GetFirstPartyForCookies().ToString();
   if (page.empty() && frame) page = frame->GetURL().ToString();
-  return content_blocker::ShouldBlock(request->GetURL().ToString(), page, main_frame) ? RV_CANCEL : RV_CONTINUE;
+  const char* type = "other";  // filter-list resource types ($script, $image, ...)
+  switch (request->GetResourceType()) {
+    case RT_SCRIPT: case RT_WORKER: case RT_SHARED_WORKER: case RT_SERVICE_WORKER: type = "script"; break;
+    case RT_IMAGE: case RT_FAVICON: type = "image"; break;
+    case RT_STYLESHEET: type = "stylesheet"; break;
+    case RT_SUB_FRAME: type = "subdocument"; break;
+    case RT_FONT_RESOURCE: type = "font"; break;
+    case RT_MEDIA: type = "media"; break;
+    case RT_XHR: type = "xmlhttprequest"; break;
+    case RT_PING: case RT_CSP_REPORT: type = "ping"; break;
+    case RT_OBJECT: case RT_PLUGIN_RESOURCE: type = "object"; break;
+    default: break;
+  }
+  return content_blocker::ShouldBlock(request->GetURL().ToString(), page, main_frame, type) ? RV_CANCEL : RV_CONTINUE;
 }
 
 namespace {

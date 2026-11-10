@@ -69,6 +69,10 @@ set(APP_SRCS
   app/settings.mm
   app/content_blocker.h
   app/content_blocker.mm
+  app/filter_lists.h
+  app/filter_lists.mm
+  app/ad_blockers_window.h
+  app/ad_blockers_window.mm
   app/browser_client.h
   app/browser_client.mm
   app/scripting.h
