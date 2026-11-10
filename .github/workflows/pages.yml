@@ -1,0 +1,36 @@
+name: Website
+# The page at https://donnadieu.github.io/notarc/ (site/).
+# The screenshots, promo video and icon come from docs/ and assets/ at deploy time, so the page always shows the
+# README's own files.
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "docs/screenshots/**", "docs/promo/**", "assets/brand/**", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+concurrency:
+  group: pages
+  cancel-in-progress: true
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Add the README's screenshots, promo video and icon
+        run: |
+          mkdir -p site/screenshots
+          cp docs/screenshots/*.png site/screenshots/
+          cp docs/promo/notarc-promo.mp4 docs/promo/notarc-promo-poster.jpg site/
+          cp assets/brand/notarc-icon-1024.png site/notarc-icon.png
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

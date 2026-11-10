@@ -1,51 +1,86 @@
+<p align="center"><img src="assets/brand/notarc-icon-1024.png" width="128" alt="NotArc app icon"></p>
+
 # NotArc
 
-**Arc is shutting down on December 22, 2026.** NotArc is an open-source effort to keep the way Arc works alive:
-the vertical sidebar, Spaces, pinned tabs, folders, the command bar and auto-archiving, in a browser that anyone can
-build, use and improve.
+**Your sidebar, your Spaces, your command bar. Still here.** NotArc is a free, open-source browser for Mac that keeps
+the way Arc works after Arc shuts down on December 22, 2026.
 
-NotArc is not Arc. It isn't affiliated with or endorsed by The Browser Company, it contains none of Arc's code,
-artwork or branding, and it's written from scratch. It aims for the same everyday features so you can keep working the
-way you're used to.
+The vertical sidebar with Favorites, pinned tabs, folders and Today. Spaces with their own colours and their own logins.
+Cmd+T and type. Split view, Little Window, Peek, and old tabs that tidy themselves away. NotArc does all of that today,
+on Chromium, so sites work the way they do in Chrome.
 
-## Why
+VIDEO_LINE
 
-Arc changed how many of us use the web. When it shuts down, those workflows go with it. NotArc keeps them going in the
-open, so no single company can turn them off again.
+A one-minute tour, with sound. [Download it in full quality](docs/promo/notarc-promo.mp4).
 
-## Features
+![NotArc: the sidebar with Favorites, Pinned tabs, a folder and Today, next to the page](docs/screenshots/main.png)
 
-NotArc is at version 0.11.0. 36 of the 80 Arc features on the [parity checklist](docs/feature-parity.md) are done
-and 13 more are partly done. What works today:
+- A native Mac app (Objective-C++ on Chromium), written from scratch. MIT licensed, made by volunteers.
+- On first launch it brings over your Arc Spaces, tabs, Favorites, archive and logins. It only reads Arc's files.
+- Everything stays on your Mac: no account, no server, no sync service.
+- It updates itself from GitHub Releases and checks every download against its published SHA-256.
+
+**Download:** [latest release](https://github.com/Donnadieu/notarc/releases/latest).
+Website: [donnadieu.github.io/notarc](https://donnadieu.github.io/notarc/).
+
+NotArc is not Arc. It isn't affiliated with or endorsed by The Browser Company, and it contains none of Arc's code,
+artwork or branding.
+
+## Install
+
+You need a Mac with Apple Silicon (M1 or newer) and macOS 13 or later.
+
+1. Download `NotArc-<version>-arm64.dmg` from the [latest release](https://github.com/Donnadieu/notarc/releases/latest).
+2. Open the disk image and drag **NotArc** into **Applications**.
+3. The first time only, right-click NotArc in Applications and choose **Open**, then **Open** again. NotArc isn't
+   notarized by Apple yet, so macOS asks you to confirm. If macOS still refuses, go to System Settings > Privacy &
+   Security and click **Open Anyway**.
+
+On first launch NotArc offers to bring everything over from Arc. To bring your logins too, macOS asks once for access
+to the "Arc Safe Storage" Keychain item; click **Allow**. That key decrypts Arc's saved cookies on your own Mac. Nothing
+leaves your computer, and Arc's files are never changed.
+
+After that NotArc checks for a new version once a day and offers **Install and Relaunch** (or use NotArc > Check for
+Updates...). On 0.4.0 or earlier, download the newer release once and replace the app in Applications. Your data stays
+in `~/Library/Application Support/NotArc`.
+
+## What it does
 
 **Sidebar and tabs**
-- Vertical sidebar with a Space switcher, plus Favorites, Pinned and Today sections in each Space
-- Folders and nested folders, drag and drop, pin/unpin (Cmd+D), rename, duplicate tabs and folders
-- Pinned tabs remember their address: Reset to Pinned URL, Replace Pinned URL with Current, Close and Keep Pinned
-- Multi-select (Cmd/Shift-click): copy links (plain or Markdown), New Folder with the selected tabs, pin, move to
-  another Space, archive them all at once
-- Hover cards with a tab's site, state, last use and full address
-- Undo Close Tab (Cmd+Z), reopen the last archived tab (Cmd+Shift+T), Copy URL, Copy URL as Markdown, Copy Clean Link
-- Arc's keyboard shortcuts: Cmd+1-9 for tabs, Cmd+Opt+Up/Down, Ctrl+Tab for the most recent tab, Cmd+S to hide
-  the sidebar
+- Favorites as icon tiles, Pinned tabs and folders (nested, drag and drop), and Today below
+- Pin with Cmd+D; pinned tabs remember their address (Reset to Pinned URL, Replace Pinned URL with Current, Close and
+  Keep Pinned), and pinning gives a tab a short, tidy name, with Undo
+- Multi-select (Cmd/Shift-click) to copy links (plain or Markdown), make a folder, pin, move to another Space or archive
+- Hover cards with a picture of the page, Ctrl+Tab switcher with thumbnails, unread badges, Undo Close Tab (Cmd+Z), Copy URL as Markdown, Copy Clean Link
+- Arc's keyboard shortcuts: Cmd+1-9 for tabs, Cmd+Opt+Up/Down, Ctrl+Tab for the most recent tab, Cmd+S to hide the
+  sidebar, and your own shortcuts for any menu command
 
 **Spaces**
+
+![The same window on another Space, with its own colour](docs/screenshots/space-work.png)
+
 - Each Space has its own browser profile, so work and personal logins stay apart
-- Create, rename, delete and reorder Spaces; Ctrl+1-9 and Cmd+Opt+Left/Right to switch
-- Space colours and gradients (Spaces > Edit Theme Color...) and an emoji icon per Space
+- A colour or a two-colour gradient with grain per Space, an emoji icon, light or dark
+- Ctrl+1-9, Cmd+Opt+Left/Right or a two-finger swipe over the sidebar to switch
 - Each Space reopens on the tab you were last on
 
 **Command bar**
-- Cmd+T and Cmd+L to go to an address or search, with suggestions from open and pinned tabs in every Space, Spaces,
+
+![The command bar: type, and it suggests tabs, history and commands](docs/screenshots/command-bar.png)
+
+- Cmd+T and Cmd+L: go to an address or search, with suggestions from open and pinned tabs in every Space, Spaces,
   history and menu commands, plus your top sites when the field is empty
-- Suggestions you pick rank higher next time
-- Search engine choice: Google, DuckDuckGo, Bing, Ecosia or Kagi
+- It learns what you pick. Search with Google, DuckDuckGo, Bing, Ecosia or Kagi
 
 **Split view, Little Window and Peek**
-- Split view with up to 4 panes in any direction, draggable dividers, Flip Split Layout; a split is one sidebar item
-  and comes back after a restart
-- Little Window for links opened from other apps, with Open in NotArc and Move to Space
+
+![Split view: two pages side by side, as one sidebar item](docs/screenshots/split-view.png)
+
+- Split view with up to 4 panes in any direction; drag a tab onto the page to split; a split is one sidebar item and
+  comes back after a restart
+- Little Window for links opened from other apps (Cmd+Option+N from anywhere), with Open in NotArc and Move to Space
 - Peek: links that leave a pinned site open in an overlay; Open as Tab, or Undo after closing one
+- Air Traffic Control: rules for which Space opens which links (your Arc rules come over)
 - Toolbar mode (Cmd+Shift+S) with back, forward, reload and the full address; Focus Mode and full screen
 
 **Library**
@@ -53,35 +88,26 @@ and 13 more are partly done. What works today:
 - History (Cmd+Y), Downloads (Cmd+Shift+J), Clear Browsing Data (Cmd+Shift+Delete)
 
 **Browsing**
-- Media controls: a speaker on tabs playing sound, a play/pause/mute bar in the sidebar, Mute Tab (Cmd+Shift+M)
-- NotArc asks before sites use your camera, microphone, location or notifications, and before links open other apps
-- Site Settings (Cmd+Shift+I): Ask/Allow/Block per permission, Clear Cookies and Refresh
+- Media controls in the sidebar, automatic picture-in-picture, mute and camera buttons during calls
+- NotArc asks before sites use your camera, microphone, location or notifications; Site Settings (Cmd+Shift+I)
 - Crashed pages show a Reload button; frozen pages offer Wait or Exit Page; after a crash, your open tabs come back
-- Built-in PDF viewer, find in page, zoom, print, DevTools
+- Built-in PDF viewer, find in page, zoom, print, Translate, DevTools
 
-**Moving over from Arc.** On first launch NotArc reads your Arc data on your own Mac and imports your Spaces, tabs,
-archive and logins. It only reads Arc's files and never changes them.
+**Also built**
+- Passwords: saved when you sign in and filled in for you, addresses and cards too, shown behind Touch ID; imported
+  from Arc, Chrome-family browsers or a CSV file
+- Max, on your Mac with Apple's built-in model: Ask on Page (Cmd+Shift+A), Summarize Page, link previews, Tidy Today
+  Tabs into folders, plus "Ask ChatGPT" from the command bar with your own sign-in
+- Chrome extensions from the Chrome Web Store (with Chrome-style pages turned on), ad and tracker blocking with filter
+  lists
+- Capture (area, visible page, full page, portrait), Boosts (per-site colours, fonts, zaps, CSS and JavaScript),
+  Notes (with Markdown export and split view), Easels (drawing and live clips), Live Folders (RSS, GitHub, YouTube)
+- Next meeting from the Mac's Calendar with a Join button; Gmail and calendar previews on Favorites
+- Multiple windows, Incognito windows, AppleScript
+- Import bookmarks and history from Chrome, Brave, Edge, Vivaldi, Chromium, Firefox and Safari
 
-Not built yet: Boosts, Easel, Notes, extensions, password autofill, multiple windows, Incognito and more. The
-[parity checklist](docs/feature-parity.md) tracks every item, and [CHANGELOG.md](CHANGELOG.md) lists what each
+The [parity checklist](docs/feature-parity.md) tracks every Arc feature, and [CHANGELOG.md](CHANGELOG.md) lists what each
 release added.
-
-## Install
-
-1. Download the latest `NotArc-<version>-arm64.dmg` from [Releases](https://github.com/Donnadieu/notarc/releases).
-   NotArc currently needs an Apple Silicon Mac (M1 or newer) running macOS 13 or later.
-2. Open the disk image and drag NotArc into Applications.
-3. The first time only, right-click NotArc in Applications and choose **Open**, then **Open** again. NotArc isn't
-   signed with a paid Apple developer certificate yet, so macOS asks you to confirm. If macOS still refuses, go to
-   System Settings > Privacy & Security and click **Open Anyway**.
-
-On first launch NotArc imports your Arc Spaces, tabs and archive. To bring your logins over too, macOS asks once for
-access to the "Arc Safe Storage" Keychain item; click **Allow**. NotArc only reads Arc's data and never changes it.
-
-From 0.5.0 on, NotArc checks GitHub Releases once a day and offers **Install and Relaunch** when a new
-version is out (or use NotArc > Check for Updates...). Each download is checked against its published
-SHA-256 before it's installed. On 0.4.0 or earlier, download the newer release once and replace the app in
-Applications. Your data stays in `~/Library/Application Support/NotArc`.
 
 ## Built on Chromium, upgraded with Chromium
 
@@ -102,9 +128,6 @@ Requirements: an Apple Silicon Mac, Apple's Command Line Tools (Xcode isn't need
 3. Open `build/Release/NotArc.app`
 4. Optional: `scripts/package.sh` makes the release disk image in `dist/`
 
-The first time NotArc imports your Arc logins, macOS asks for permission to read the "Arc Safe Storage" Keychain item.
-That key decrypts Arc's saved cookies on your own Mac. Nothing leaves your computer.
-
 Developer flags: `--selftest` runs the automated self-test (separate test data; it never touches your own profiles,
 settings or Keychain), `--dump-arc` prints what would be imported from Arc, and `--dump-store` prints NotArc's saved
 sidebar.
@@ -113,16 +136,19 @@ sidebar.
 
 - `app/`: the browser (window, sidebar, command bar, archive, downloads, history, updater, Arc import)
 - `scripts/`: packaging (`package.sh`) and end-to-end tests for updates and crash recovery
+- `site/`: the website, published to GitHub Pages
+- `assets/brand/`: the app icon and the ¬ mark
 - `docs/feature-parity.md`: checklist of every Arc feature and its status in NotArc
-- `CHANGELOG.md`: what each release added
+- `docs/decisions.md`: why some Arc features are out of scope
 - `docs/arc-data-format.md`: how Arc stores your sidebar and archive on disk, so they can be imported
+- `CHANGELOG.md`: what each release added
 - `CONTRIBUTING.md`: how to build, test and contribute
 
 ## Help wanted
 
-NotArc is built by volunteers, and there's a lot of Arc left to rebuild: Boosts, Easel, Notes, extensions, password
-autofill, multiple windows and more. If you know C++, Objective-C++ or macOS development, or just use Arc every day and can test,
-we'd love your help.
+NotArc is built by volunteers, and there's always more to polish: the partly done items on the checklist, bugs, and
+whatever you miss from Arc. If you know C++, Objective-C++ or macOS development, or
+just use Arc every day and can test, we'd love your help.
 
 - See what's missing in the [parity checklist](docs/feature-parity.md).
 - Pick an issue labelled [good first issue](https://github.com/Donnadieu/notarc/labels/good%20first%20issue) or
