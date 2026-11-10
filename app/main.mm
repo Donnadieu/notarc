@@ -27,6 +27,7 @@
 #import "app/note_editor.h"
 #import "app/live_folder.h"
 #import "app/settings.h"
+#import "app/app_icons.h"
 #include "app/content_blocker.h"
 #include "app/browser_client.h"
 #import "app/history_store.h"
@@ -248,6 +249,8 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [view addItem:[NSMenuItem separatorItem]];
   NSMenuItem* dev = [view addItemWithTitle:@"Developer Tools" action:@selector(toggleDevTools:) keyEquivalent:@"i"];
   dev.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  [view addItemWithTitle:@"Turn On Developer Mode for This Site" action:@selector(toggleDeveloperMode:) keyEquivalent:@""];
+  [view addItemWithTitle:@"Reset Developer Mode Sites" action:@selector(resetDeveloperModeSites:) keyEquivalent:@""];
   viewItem.submenu = view;
 
   NSMenuItem* splitItem = [NSMenuItem new];
@@ -359,6 +362,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
 
 - (void)start {
   [self buildMenu];
+  ApplyAppIcon();  // the chosen NotArc icon (#74) in the Dock; the app bundle is never changed
   NSString* arcDir = ArcDataDirectory();
   NSString* storePath = SidebarStorePath(self.selfTest);
   if (self.selfTest && !self.selfTestReload)
@@ -2845,6 +2849,182 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                     tidied, sticks, undone, renameSticks);
       }
       [w saveSidebarNow];
+    });
+    // Settings window panes (#72), app icon choice (#74) and per-site Developer Mode (#68). Settings are memory-only in
+    // test runs; everything changed here is put back before the block ends. Never opens DevTools or shows a window.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 27 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      // App icon at launch (#74): the default NotArc icon is already in place before anything below changes it.
+      CGFloat launchDiff = AppIconDifference(NSApp.applicationIconImage, AppIconImage(@"classic"));
+      SettingsWindowController* sw = [SettingsWindowController shared];
+      NSDictionary* savedSettings = SettingsMemorySnapshotForTest();
+      __block NSButton* (^findButton)(NSView*, NSString*) = nil;
+      NSButton* (^find)(NSView*, NSString*) = ^NSButton*(NSView* v, NSString* title) {
+        if ([v isKindOfClass:NSButton.class] && [((NSButton*)v).title isEqualToString:title]) return (NSButton*)v;
+        for (NSView* c in v.subviews)
+          if (NSButton* b = findButton(c, title)) return b;
+        return nil;
+      };
+      findButton = find;
+      if (const char* dir = getenv("NOTARC_SETTINGS_SNAPSHOT_DIR")) {  // design checks only, never in normal runs
+        NSString* folder = [NSString stringWithUTF8String:dir];
+        [sw writePaneSnapshotsTo:folder];
+        NSArray* names = AppIconNames();
+        NSImage* strip = [NSImage imageWithSize:NSMakeSize(140 * names.count, 140) flipped:NO drawingHandler:^BOOL(NSRect r) {
+          for (NSUInteger i = 0; i < names.count; ++i)
+            [AppIconImage(names[i]) drawInRect:NSMakeRect(140 * i + 6, 6, 128, 128)];
+          return YES;
+        }];
+        NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithCGImage:[strip CGImageForProposedRect:nil context:nil hints:nil]];
+        [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}]
+            writeToFile:[folder stringByAppendingPathComponent:@"icons.png"] atomically:YES];
+      }
+      {  // #72: Arc's panes, everything that was in Settings is still there, Profiles / Appearance / Advanced work.
+        BOOL panes = [sw.paneIdentifiers isEqualToArray:@[ @"general", @"profiles", @"appearance", @"links", @"advanced" ]];
+        [sw selectPane:@"advanced"];
+        BOOL select = [sw.selectedPane isEqualToString:@"advanced"];
+        [sw selectPane:@"general"];
+        BOOL kept = [find([sw viewOfPane:@"links"], @"Air Traffic Control...") action] == @selector(showAirTrafficControl:);
+        for (NSString* k in @[ kSettingSearchSuggestions, kSettingBlockAds, kSettingAutoPiP, kSettingSoundEffects,
+                               kSettingReorderHaptics, kSettingPeekPinnedLinks, kSettingPeekShiftClick ])
+          kept = kept && [sw checkboxForSetting:k] != nil;
+        NSArray* rows = sw.profileRows;
+        ArcSpace* sp = w.currentSpace;
+        NSString* mine = [NSString stringWithFormat:@"%@: ", [w nameOfProfile:sp.profileDirectory]];
+        BOOL listed = rows.count == w.profileDirectories.count && rows.count > 0;
+        BOOL spaceShown = NO;
+        for (NSString* r in rows)
+          if ([r hasPrefix:mine] && [r containsString:sp.title.length ? sp.title : @"Space"]) spaceShown = YES;
+        NSString* dir = [sw createProfileNamed:@"SelfTest Settings Profile"];
+        BOOL created = dir && [w.profileDirectories containsObject:dir] &&
+                       [sw.profileRows containsObject:@"SelfTest Settings Profile: No Spaces"];
+        BOOL renamed = [sw renameProfileAtRow:[w.profileDirectories indexOfObject:dir] to:@"SelfTest Settings Renamed"] &&
+                       [[w nameOfProfile:dir] isEqualToString:@"SelfTest Settings Renamed"] &&
+                       [sw.profileRows containsObject:@"SelfTest Settings Renamed: No Spaces"];
+        // Appearance: the default applies to Spaces without their own choice; a Space's own choice wins.
+        NSString* own = sp.colorScheme;
+        [w setColorScheme:nil forSpace:sp];
+        [sw chooseSpaceAppearance:@"dark"];
+        [w.window displayIfNeeded];
+        BOOL darkDefault = w.sidebarIsDark && [DefaultSpaceAppearance() isEqualToString:@"dark"];
+        [sw chooseSpaceAppearance:@"light"];
+        [w.window displayIfNeeded];
+        BOOL lightDefault = !w.sidebarIsDark;
+        [w setColorScheme:@"dark" forSpace:sp];
+        [w.window displayIfNeeded];
+        BOOL spaceWins = w.sidebarIsDark;
+        [sw chooseSpaceAppearance:@"auto"];
+        [w setColorScheme:own forSpace:sp];
+        BOOL autoBack = [DefaultSpaceAppearance() isEqualToString:@"auto"] && (own || w.window.appearance == nil);
+        // Advanced: Chrome-style pages and Developer Mode switches, Clear Browsing Data and Reset buttons.
+        NSView* adv = [sw viewOfPane:@"advanced"];
+        BOOL advanced = [sw checkboxForSetting:kSettingChromePages] &&
+                        [[sw checkboxForSetting:kSettingChromePages] boolValue] == SettingBool(kSettingChromePages) &&
+                        [[sw checkboxForSetting:kSettingDeveloperModeLocal] boolValue] &&
+                        find(adv, @"Clear Browsing Data...").action == @selector(clearBrowsingData:) &&
+                        find(adv, @"Reset Developer Mode Sites").action == @selector(resetDeveloperModeSites:) &&
+                        find(adv, @"Reset All Settings...").action == @selector(resetAllSettings:);
+        SettingSetBool(kSettingSoundEffects, NO);
+        [sw chooseAppIcon:@"forest"];
+        [sw chooseSpaceAppearance:@"dark"];
+        SetDeveloperMode(YES, @"reset.example");
+        ResetAllSettings();
+        BOOL reset = SettingBool(kSettingSoundEffects) && [CurrentAppIconName() isEqualToString:@"classic"] &&
+                     [DefaultSpaceAppearance() isEqualToString:@"auto"] && !DeveloperModeOnForHost(@"reset.example") &&
+                     SettingDouble(kSettingAutoArchiveHours) == 12;
+        SettingsMemoryRestoreForTest(savedSettings);
+        ApplyContentBlockerSettings();
+        ApplyAppIcon();
+        SettingsDidChange();
+        [sw selectPane:@"general"];
+        std::printf("SELFTEST-SETTINGSPANES panes=%d select=%d kept=%d listed=%d spaceShown=%d created=%d renamed=%d "
+                    "darkDefault=%d lightDefault=%d spaceWins=%d autoBack=%d advanced=%d reset=%d\n", panes, select, kept,
+                    listed, spaceShown, created, renamed, darkDefault, lightDefault, spaceWins, autoBack, advanced, reset);
+      }
+      {  // #74: 4-6 NotArc icons, picked in Appearance, applied at once and at launch, saved; the bundle isn't touched.
+        NSArray* names = AppIconNames();
+        BOOL distinct = names.count >= 4 && names.count <= 6;
+        for (NSUInteger i = 0; i < names.count; ++i)
+          for (NSUInteger j = i + 1; j < names.count; ++j)
+            distinct = distinct && AppIconDifference(AppIconImage(names[i]), AppIconImage(names[j])) > 8;
+        BOOL (^shows)(NSString*) = ^BOOL(NSString* n) {
+          CGFloat d = AppIconDifference(NSApp.applicationIconImage, AppIconImage(n));
+          for (NSString* o in names)
+            if (![o isEqualToString:n] && AppIconDifference(NSApp.applicationIconImage, AppIconImage(o)) <= d) return NO;
+          return d < 12;  // a bitmap copy of the same icon differs by ~6; other icons by 20+
+        };
+        BOOL atLaunch = launchDiff < 12 && shows(@"classic");
+        NSString* plist = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Contents/Info.plist"];
+        NSDate* plistDate = [[NSFileManager.defaultManager attributesOfItemAtPath:plist error:nil] fileModificationDate];
+        [sw chooseAppIcon:@"sunset"];
+        BOOL applied = shows(@"sunset");
+        BOOL saved = [SettingObject(kSettingAppIcon) isEqual:@"sunset"] && [sw.appIconShownAsChosen isEqualToString:@"sunset"];
+        [sw chooseAppIcon:@"no-such-icon"];
+        BOOL unknownIgnored = [CurrentAppIconName() isEqualToString:@"sunset"];
+        SettingSetObject(kSettingAppIcon, @"midnight");  // as if saved last time: launch applies it
+        ApplyAppIcon();
+        BOOL relaunch = shows(@"midnight");
+        [sw chooseAppIcon:@"classic"];
+        BOOL restored = shows(@"classic") && [sw.appIconShownAsChosen isEqualToString:@"classic"];
+        BOOL bundle = [[[NSFileManager.defaultManager attributesOfItemAtPath:plist error:nil] fileModificationDate]
+                          isEqualToDate:plistDate];
+        std::printf("SELFTEST-APPICON variants=%d distinct=%d atLaunch=%d applied=%d saved=%d unknownIgnored=%d "
+                    "relaunch=%d restored=%d bundleUntouched=%d\n", names.count >= 4, distinct, atLaunch, applied, saved,
+                    unknownIgnored, relaunch, restored, bundle);
+      }
+      {  // #68 pure rules: local sites on by default; the pill shows host:port/path in Developer Mode.
+        BOOL local = DeveloperModeOnForURL(@"http://localhost:3000/") && DeveloperModeOnForURL(@"http://127.0.0.1:8080/x") &&
+                     DeveloperModeOnForURL(@"http://myapp.local/") && DeveloperModeOnForURL(@"http://api.localhost:5173/") &&
+                     DeveloperModeOnForURL(@"http://[::1]:4000/") && !DeveloperModeOnForURL(@"https://example.com/") &&
+                     !DeveloperModeOnForURL(@"http://127.0.0.1.example.com/") && !DeveloperModeOnForURL(@"file:///tmp/x.html") &&
+                     !DeveloperModeOnForURL(@"http://localhost.example.com/");
+        BOOL pillText = [SidebarAddressTextForURL(@"http://localhost:3000/app?x=1") isEqualToString:@"localhost:3000/app?x=1"] &&
+                        [SidebarAddressTextForURL(@"https://www.example.com/a") isEqualToString:@"example.com"];
+        SetDeveloperMode(NO, @"localhost");
+        BOOL localOff = !DeveloperModeOnForURL(@"http://localhost:3000/") && DeveloperModeOnForURL(@"http://127.0.0.1:3000/");
+        ResetDeveloperModeHosts();
+        SettingSetBool(kSettingDeveloperModeLocal, NO);
+        BOOL autoOff = !DeveloperModeOnForURL(@"http://localhost:3000/");
+        SettingSetBool(kSettingDeveloperModeLocal, YES);
+        BOOL localBack = DeveloperModeOnForURL(@"http://localhost:3000/");
+        __block NSMenuItem* (^findItem)(NSMenu*, SEL) = nil;
+        NSMenuItem* (^findMenu)(NSMenu*, SEL) = ^NSMenuItem*(NSMenu* menu, SEL a) {
+          for (NSMenuItem* i in menu.itemArray) {
+            if (i.action == a) return i;
+            if (NSMenuItem* f = i.submenu ? findItem(i.submenu, a) : nil) return f;
+          }
+          return nil;
+        };
+        findItem = findMenu;
+        BOOL menus = findMenu(NSApp.mainMenu, @selector(toggleDeveloperMode:)) && findMenu(NSApp.mainMenu, @selector(resetDeveloperModeSites:));
+        // A real tab: turned on from the menu command, then reset.
+        [w openInNewTab:@"https://example.org/devmode?x=1"];
+        ArcItem* t = w.shownItem;
+        WaitUntil(^{ if (w.shownItem != t) [w showItem:t]; return (BOOL)([[w currentURL] hasPrefix:@"https://example.org/devmode"] && ![w isLoading]); }, 20, ^{
+          [w showItem:t];
+          BOOL offBefore = ![w devToolsButtonShown] && ![w itemKeptFromAutoArchive:t] && [w.sidebarAddressText isEqualToString:@"example.org"];
+          NSMenuItem* mi = [[NSMenuItem alloc] initWithTitle:@"" action:@selector(toggleDeveloperMode:) keyEquivalent:@""];
+          BOOL menuOn = [(id<NSMenuItemValidation>)w validateMenuItem:mi] && [mi.title isEqualToString:@"Turn On Developer Mode for This Site"];
+          [w toggleDeveloperMode:mi];
+          BOOL toggled = DeveloperModeOnForHost(@"example.org") && [DeveloperModeChosenHosts() isEqualToArray:@[ @"example.org" ]];
+          BOOL fullURL = [w.sidebarAddressText isEqualToString:@"example.org/devmode?x=1"];
+          BOOL devTools = [w devToolsButtonShown];
+          BOOL kept = [w itemKeptFromAutoArchive:t];
+          BOOL menuOff = [(id<NSMenuItemValidation>)w validateMenuItem:mi] && [mi.title isEqualToString:@"Turn Off Developer Mode for This Site"];
+          BOOL listed = [sw.developerModeSitesText containsString:@"example.org"];
+          [sw resetDeveloperModeSites:nil];
+          BOOL reset = !DeveloperModeOnForHost(@"example.org") && DeveloperModeChosenHosts().count == 0 &&
+                       DeveloperModeOnForURL(@"http://localhost:3000/") && ![w devToolsButtonShown] &&
+                       [w.sidebarAddressText isEqualToString:@"example.org"] && ![w itemKeptFromAutoArchive:t];
+          std::printf("SELFTEST-DEVMODE local=%d pillText=%d localOff=%d autoOff=%d localBack=%d menus=%d offBefore=%d "
+                      "menuOn=%d toggled=%d fullURL=%d devTools=%d kept=%d menuOff=%d listed=%d reset=%d\n", local,
+                      pillText, localOff, autoOff, localBack, menus, offBefore, menuOn, toggled, fullURL, devTools, kept,
+                      menuOff, listed, reset);
+          if (!(fullURL && offBefore))
+            std::printf("SELFTEST-DEVMODE-DEBUG url=%s pill=%s\n", [w currentURL].UTF8String ?: "-", w.sidebarAddressText.UTF8String ?: "-");
+          if (w.shownItem == t) [w closeTab:nil];
+        });
+      }
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 29 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;

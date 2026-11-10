@@ -879,6 +879,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSString* _lastClosedPeekURL;
   NSView* _sidebar;
   SidebarPillView* _addressPill;
+  NSButton* _devToolsButton;  // Developer Mode (#68)
   NSMutableDictionary<NSString*, NoteEditorView*>* _noteEditors;  // notes on screen (one per pane), by item ID
   EaselView* _easelView;      // Easel canvas, shown in the page card
   NSScrollView* _easelScroll;
@@ -1159,6 +1160,15 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
     [_addressPill addSubview:b];
     px += 26;
   }
+  // Developer Mode sites get a Developer Tools button left of the others (hidden otherwise).
+  _devToolsButton = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"hammer" accessibilityDescription:@"Developer Tools"]
+                                       target:self action:@selector(toggleDevTools:)];
+  _devToolsButton.bordered = NO;
+  _devToolsButton.toolTip = @"Developer Tools (Developer Mode)";
+  _devToolsButton.contentTintColor = NSColor.secondaryLabelColor;
+  _devToolsButton.frame = NSMakeRect(_addressPill.bounds.size.width - 6 - 4 * 26, 5, 26, 26);
+  _devToolsButton.hidden = YES;
+  [_addressPill addSubview:_devToolsButton];
   [sidebar addSubview:_addressPill];
 
   // Bottom bar, as in Arc: archive (Library) at the left, one icon per Space in the middle, "+" menu at the right.
@@ -2934,6 +2944,12 @@ static NSArray<NSArray*>* SiteSettingRows() {
     ads.state = [self adBlockingOnForHost:u.host] ? NSControlStateValueOn : NSControlStateValueOff;
     [views addObject:ads];
   }
+  if ([u.scheme isEqualToString:@"http"] || [u.scheme isEqualToString:@"https"]) {
+    NSButton* dev = [NSButton checkboxWithTitle:@"Developer Mode" target:self action:@selector(siteDeveloperModeToggled:)];
+    dev.state = DeveloperModeOnForHost(u.host) ? NSControlStateValueOn : NSControlStateValueOff;
+    dev.toolTip = @"Full address with port in the sidebar, never archived, Developer Tools in the address pill";
+    [views addObject:dev];
+  }
   NSButton* clear = [NSButton buttonWithTitle:@"Clear Cookies and Refresh" target:self action:@selector(siteSettingsClearCookies:)];
   NSButton* reset = [NSButton buttonWithTitle:@"Reset Permissions" target:self action:@selector(siteSettingsReset:)];
   [views addObject:[NSStackView stackViewWithViews:@[ clear, reset ]]];
@@ -2981,6 +2997,10 @@ static NSString* AdBlockSiteKey(NSString* host) {
   NSString* host = [NSURL URLWithString:_siteSettingsOrigin].host;
   [self setAdBlocking:sender.state == NSControlStateValueOn forHost:host];
   if (auto b = [self currentBrowser]) b->Reload();  // Arc reloaded so the change shows
+}
+
+- (void)siteDeveloperModeToggled:(NSButton*)sender {
+  SetDeveloperMode(sender.state == NSControlStateValueOn, [NSURL URLWithString:_siteSettingsOrigin].host);
 }
 
 - (void)sitePermissionChosen:(NSPopUpButton*)pop {
@@ -3481,6 +3501,27 @@ static NSString* RelativeAgo(NSDate* d) {
 }
 - (NSString*)lastTranslateOffer { return _lastTranslateOffer; }  // tests
 - (NSSize)lastCopiedImageSize { return _lastCopiedImageSize; }  // tests
+
+// Developer Mode (#68): Arc's "Turn on/off Developer Mode for this site".
+- (IBAction)toggleDeveloperMode:(id)sender {
+  NSURL* u = [NSURL URLWithString:[self currentURL] ?: @""];
+  if (!u.host.length) {
+    NSBeep();
+    return;
+  }
+  SetDeveloperMode(!DeveloperModeOnForHost(u.host), u.host);
+}
+- (IBAction)resetDeveloperModeSites:(id)sender { ResetDeveloperModeHosts(); }
+- (BOOL)devToolsButtonShown { return _devToolsButton && !_devToolsButton.hidden; }
+
++ (MainWindowController*)mainController { return gMainWindow; }
++ (void)settingsDidChange {
+  for (MainWindowController* w in [gWindows copy]) {
+    [w applyColorScheme];
+    [w applySpaceHeader:SettingBool(kSettingShowSpaceHeader)];
+    [w layoutContentArea];  // toolbar on/off, and the pill
+  }
+}
 
 - (IBAction)translatePage:(id)sender {
   NSString* url = [self currentURL];
@@ -5036,7 +5077,7 @@ static ArcItem* NewSection(NSString* title) {
     if ([e[1] isEqualToString:@"changeSpaceIcon:"]) {
       NSMenuItem* ap = [m addItemWithTitle:@"Appearance" action:nil keyEquivalent:@""];
       ap.submenu = [[NSMenu alloc] initWithTitle:@"Appearance"];
-      for (NSArray* o in @[ @[ @"Automatic", @"auto" ], @[ @"Light", @"light" ], @[ @"Dark", @"dark" ] ]) {
+      for (NSArray* o in @[ @[ @"Default (Settings)", @"auto" ], @[ @"Light", @"light" ], @[ @"Dark", @"dark" ] ]) {
         NSMenuItem* i = [ap.submenu addItemWithTitle:o[0] action:@selector(setSpaceAppearance:) keyEquivalent:@""];
         i.target = self;
         i.representedObject = o[1];
@@ -5213,7 +5254,7 @@ static ArcItem* NewSection(NSString* title) {
 // Arc lets each Space follow the system or force Light/Dark. Every Arc colour in NotArc is resolved from the view's
 // effective appearance, so setting the window's appearance switches the sidebar, rows, pills and command bar together.
 - (void)applyColorScheme {
-  NSString* cs = _space.colorScheme;
+  NSString* cs = _space.colorScheme ?: DefaultSpaceAppearance();  // Settings > Appearance for Spaces that didn't choose
   NSAppearance* ap = [cs isEqualToString:@"light"]  ? [NSAppearance appearanceNamed:NSAppearanceNameAqua]
                      : [cs isEqualToString:@"dark"] ? [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]
                                                     : nil;
@@ -6085,10 +6126,17 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (NSRect)sidebarAddressFrame { return [_addressPill convertRect:_addressPill.bounds toView:nil]; }
 
 // Arc shows just the site (host without "www.") in the sidebar pill; the full address is in the command bar.
+// Developer Mode (#68): the full address with its port, and a Developer Tools button in the pill.
 - (void)updateSidebarAddress {
   NSString* url = _shown ? ([self itemCurrentURL:_shown] ?: @"") : @"";
-  NSString* host = [NSURL URLWithString:url].host ?: url;
-  if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
+  NSString* host = SidebarAddressTextForURL(url);
+  BOOL dev = _shown && !_shown.noteID && !_shown.easelID && DeveloperModeOnForURL(url);
+  if (_devToolsButton.hidden == dev) {
+    _devToolsButton.hidden = !dev;
+    NSRect f = _addressPillText.frame;
+    f.size.width = _addressPill.bounds.size.width - 11 - 86 - (dev ? 26 : 0);
+    _addressPillText.frame = f;
+  }
   if (_shown.noteID) host = @"Note";
   if (_shown.easelID) host = @"Easel";
   _addressPillText.stringValue = host ?: @"";
@@ -8270,6 +8318,12 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
     mi.title = translated ? @"Show Original" : @"Translate Page";
     return translated || (url && TranslateURLFor(url, @"en"));
   }
+  if (mi.action == @selector(toggleDeveloperMode:)) {
+    NSString* url = [self currentURL];
+    mi.title = DeveloperModeOnForURL(url) ? @"Turn Off Developer Mode for This Site" : @"Turn On Developer Mode for This Site";
+    NSURL* u = url.length ? [NSURL URLWithString:url] : nil;
+    return u.host.length && ([u.scheme isEqualToString:@"http"] || [u.scheme isEqualToString:@"https"]);
+  }
   if (mi.action == @selector(toggleToolbar:)) mi.title = SettingBool(kSettingShowToolbar) ? @"Hide Toolbar" : @"Show Toolbar";
   if (mi.action == @selector(toggleSpaceHeader:))
     mi.title = SettingBool(kSettingShowSpaceHeader) ? @"Hide Space Header" : @"Show Space Header";
@@ -8371,6 +8425,7 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
   for (ArcSpace* space in _spaces) {
     for (ArcItem* item in [space.unpinned.children copy]) {
       if (item == _shown || [_splitItems containsObject:item] || item.isFolder || !item.url.length) continue;
+      if ([self itemKeptFromAutoArchive:item]) continue;
       if (!item.lastActiveAt) item.lastActiveAt = now;  // unknown age: start the clock now
       if ([now timeIntervalSinceDate:item.lastActiveAt] < threshold) continue;
       [self archiveItem:item space:space reason:@"auto"];
@@ -8386,6 +8441,9 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
   }
   return archived;
 }
+
+// Developer Mode sites (#68) stay put, like Pinned tabs.
+- (BOOL)itemKeptFromAutoArchive:(ArcItem*)item { return DeveloperModeOnForURL([self itemCurrentURL:item]); }
 
 - (void)startAutoArchiveTimer {
   __weak MainWindowController* weakSelf = self;

@@ -85,6 +85,8 @@ set(APP_SRCS
   app/arc_history.mm
   app/favicons.h
   app/favicons.mm
+  app/app_icons.h
+  app/app_icons.mm
   app/main_window.h
   app/main_window.mm
 )

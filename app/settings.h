@@ -57,7 +57,55 @@ NSArray<NSString*>* ParseSearchSuggestions(NSData* json);   // uses the chosen s
 BOOL SettingBool(NSString* key);
 double SettingDouble(NSString* key);
 
+// Appearance (#72): Spaces that haven't chosen their own Light/Dark in their menu use this. "auto" follows macOS.
+extern NSString* const kSettingSpaceAppearance;     // "auto" | "light" | "dark", default "auto"
+NSString* DefaultSpaceAppearance(void);
+extern NSString* const kSettingChromePages;         // BOOL "chromePages", default NO; read once at launch
+
+// Developer Mode (#68), per site as in Arc: shows the full address with its port in the sidebar pill, keeps the tab
+// from being auto-archived and puts Developer Tools in the pill. On by itself for local sites (localhost, *.localhost,
+// 127.x.x.x, ::1, *.local) unless that's turned off; any site can be turned on or off. Hosts are stored without "www.".
+extern NSString* const kSettingDeveloperModeLocal;  // BOOL, default YES: local sites start in Developer Mode
+extern NSString* const kSettingDeveloperModeHosts;  // NSDictionary host -> @YES/@NO (only choices that differ)
+BOOL DeveloperModeIsLocalHost(NSString* host);
+BOOL DeveloperModeOnForHost(NSString* host);
+BOOL DeveloperModeOnForURL(NSString* url);          // http(s) pages only
+void SetDeveloperMode(BOOL on, NSString* host);
+NSArray<NSString*>* DeveloperModeChosenHosts(void); // sites turned on by hand, sorted
+void ResetDeveloperModeHosts(void);                 // forgets every per-site choice (Arc: "Reset developer mode enabled hosts")
+// What the sidebar address pill shows: the site without "www." normally, the full address (port, path, query) for a
+// page in Developer Mode.
+NSString* SidebarAddressTextForURL(NSString* url);
+
+// Reset settings (Settings > Advanced): every preference shown in Settings goes back to its default. Spaces, tabs,
+// profiles, history, site permissions and keyboard shortcuts are kept.
+void ResetAllSettings(void);
+NSDictionary* SettingsMemorySnapshotForTest(void);  // memory-only runs: save and put back the in-memory settings
+void SettingsMemoryRestoreForTest(NSDictionary* snapshot);
+// Tells every browser window to re-read the settings (appearance, toolbar, Space header, pill, Developer Mode).
+void SettingsDidChange(void);
+
+// Settings window (Cmd+,): one pane per toolbar tab, like Arc's. Panes are listed in -buildPanes in settings.mm;
+// to add one (e.g. Max), write a method that returns its view and add one -addPane:... line there.
 @interface SettingsWindowController : NSWindowController
 + (instancetype)shared;
 - (BOOL)defaultBrowserRowConsistent;  // tests
+- (void)addPane:(NSString*)identifier title:(NSString*)title symbol:(NSString*)sfSymbol view:(NSView*)view;
+- (NSArray<NSString*>*)paneIdentifiers;
+- (void)selectPane:(NSString*)identifier;
+- (NSString*)selectedPane;
+- (NSView*)viewOfPane:(NSString*)identifier;
+- (BOOL)writePaneSnapshotsTo:(NSString*)folder;  // design checks: <pane>.png for each pane
+// Profiles pane (tests drive the same code as its buttons, without the name prompt).
+- (NSArray<NSString*>*)profileRows;  // "Name: Space A, Space B" per profile, in table order
+- (NSString*)createProfileNamed:(NSString*)name;
+- (BOOL)renameProfileAtRow:(NSInteger)row to:(NSString*)name;
+// Appearance pane.
+- (void)chooseSpaceAppearance:(NSString*)scheme;  // same as the pop-up
+- (void)chooseAppIcon:(NSString*)name;            // same as clicking an icon
+- (NSString*)appIconShownAsChosen;                // the icon the picker marks as chosen
+// Advanced pane.
+- (NSNumber*)checkboxForSetting:(NSString*)settingKey;  // @YES/@NO as shown, nil if no pane has one
+- (NSString*)developerModeSitesText;
+- (IBAction)resetDeveloperModeSites:(id)sender;
 @end

@@ -175,3 +175,27 @@ trackpad; everything else is checked by the hidden self-test.
 4. **Font tiles:** Page, System, Georgia, Helvetica, Avenir, Menlo, Times, Futura, Gill Sans and Rounded (Arial
    Rounded MT Bold, which ships with macOS). Baskerville left the list; a Boost that already uses it keeps it.
 5. **Text case cycles Original, UPPER, lower, Title** (Arc's Boosts had capitalize as well).
+
+## 2026-11-09: Settings panes, app icon choice, Developer Mode (#72, #74, #68)
+
+1. **Settings panes follow Arc's names** (General, Profiles, Links, Max, Advanced), with Arc's separate App Icon pane
+   folded into a new **Appearance** pane next to the default Space appearance. Panes are listed in one place
+   (`-buildPanes` in `app/settings.mm`); the Max pane goes between Links and Advanced and is added by its own PR.
+2. **Default Space appearance:** Settings > Appearance sets Light, Dark or Automatic for every Space that hasn't chosen
+   its own. The Space menu's "Automatic" entry is renamed "Default (Settings)", because it now means "use the
+   Settings choice", which is still "follow macOS" until changed.
+3. **App icons are NotArc's own**, drawn in code (`app/app_icons.mm`): six colourways of one mark, a window with a
+   sidebar. Nothing comes from Arc. The choice is applied with `NSApp.applicationIconImage` at launch and at once
+   when picked. The signed app bundle is never changed, so Finder, and the Dock while NotArc is closed, keep the
+   bundle's icon. Arc kept its icon in the Dock after quitting with a Dock tile plug-in; that is left out because it
+   means shipping a second signed bundle.
+4. **Developer Mode is per site and stored by host** (without "www.", ports ignored), as in Arc's
+   `developerModeEnabledForHosts`. It is on by itself for localhost, *.localhost, 127.x.x.x, ::1 and *.local; a
+   setting in Settings > Advanced turns that off, and each site can still be switched either way. In Developer Mode
+   the sidebar pill shows the address without its scheme (host:port/path?query), so the port stays visible in the
+   narrow pill; the full address is in the pill's tooltip.
+5. **Developer Tools from the pill is a click away, never automatic.** The pitfalls rule (no DevTools sessions on tabs
+   in the background) still holds; the self-test only checks that the button is shown, it never opens DevTools.
+6. **Reset All Settings** resets every preference shown in Settings (including the app icon, Space appearance and
+   Developer Mode sites). Spaces, tabs, profiles, history, site permissions, ad-blocking exceptions and keyboard
+   shortcuts are kept: those are data or have their own reset.
