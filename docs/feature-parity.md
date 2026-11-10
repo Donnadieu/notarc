@@ -141,3 +141,21 @@ Not built on purpose. These aren't counted above; the reasons are in [decisions.
 - Translating pages in place with Chromium's translate engine: CEF doesn't ship it, and Google's translation API needs a paid key; NotArc uses Google's free web translator instead (#52).
 - Notion and Slack previews on Favorites: Arc read them through Notion's and Slack's private internal web APIs; NotArc can't build and test against those without accounts on both, and their unread counts already show as badges (#20).
 - An Arc account, Arc membership and Arc's own cloud AI service: NotArc's AI features run on your Mac (#58, #59).
+
+## Needs Omar's eyes
+
+Built and checked by the hidden self-test, but only a real screen, trackpad, mouse or macOS prompt can confirm these.
+They aren't separate items.
+
+- Look next to a real Arc window: the page card (edge and shadow), Space-switch and card animations, command bar (#122, #126, #127).
+- Trackpad: swipe back/forward over the page and between Spaces over the sidebar (#27, #77).
+- macOS asks once: notifications (#78), Calendar access (#56), reading a real Chrome profile's passwords (#63).
+- Tab thumbnails: the hover card picture and the Ctrl+Tab panel in light and dark, holding a real Ctrl+Tab (#65, #19).
+- Notes: the format bar and title look, ticking a checklist box with the mouse, the Add Link sheet (#50).
+- Boost editor card in light and dark, dragging the colour wheel with a real mouse (#51).
+- Live Folders: GitHub: My Pull Requests in a Space signed in to GitHub (the live request isn't run by the self-test), the unread dot and folder count (#55).
+- Passwords: where the fill menu sits next to a field, the save toast, the Add... form, Touch ID before Show/Copy (#67).
+- Settings panes and the chosen app icon in the Dock (#72, #74).
+- Max with Apple Intelligence turned on (macOS 26): the self-test uses a stand-in model, never the real one (#58, #59).
+- Easels: drawing and resizing with a real mouse; a live clip of a signed-in page (#49).
+- Ad blocking: downloading EasyList/EasyPrivacy for real (the self-test uses a local list) (#53).
