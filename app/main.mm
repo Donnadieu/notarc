@@ -23,6 +23,7 @@
 #include <sqlite3.h>
 #import "app/boost_store.h"
 #import "app/easel.h"
+#import "app/easel_clip.h"
 #import "app/live_folder.h"
 #import "app/settings.h"
 #include "app/content_blocker.h"
@@ -75,6 +76,7 @@
 @end
 
 static BOOL gCrashTestDone = NO;
+static BOOL gEaselToolsDone = NO;  // self-test: the easel tools check printed (#49)
 static BOOL gLateTestsDone = NO;  // self-test: the last chained page checks (call, capture, PiP) printed  // self-test: the hang check finished (later page tests wait for it)
 
 // Self-test: poll a condition every 0.25 s instead of a fixed wait, then continue (also on timeout).
@@ -155,6 +157,10 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"Capture to Easel" action:@selector(captureToEasel:) keyEquivalent:@"2"].keyEquivalentModifierMask =
       NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [file addItemWithTitle:@"Add Text to Easel" action:@selector(addEaselText:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Capture Area to Easel" action:@selector(captureAreaToEasel:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Capture Full Page to Easel" action:@selector(captureFullPageToEasel:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Add Live Clip to Easel" action:@selector(liveClipToEasel:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Refresh Live Clips" action:@selector(refreshLiveClipsFromMenu:) keyEquivalent:@""];
   NSMenuItem* captureItem = [file addItemWithTitle:@"Capture" action:nil keyEquivalent:@""];
   NSMenu* capture = [[NSMenu alloc] initWithTitle:@"Capture"];
   [capture addItemWithTitle:@"Capture Area" action:@selector(captureArea:) keyEquivalent:@"3"].keyEquivalentModifierMask =
@@ -604,7 +610,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         [self.window setTestCookie:@"notarc_saved_login" value:@"1" url:@"https://example.org/" session:NO done:nil];
       });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 170 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-     WaitUntil(^{ return (BOOL)(gLateTestsDone || self.selfTestReload); }, 30, ^{
+     WaitUntil(^{ return (BOOL)((gLateTestsDone && gEaselToolsDone) || self.selfTestReload); }, 45, ^{
       void (^finish)(void) = ^{
         for (NSDictionary* tab in [self.window tabSnapshot])
           std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
@@ -2111,6 +2117,170 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         }];
       });
     });
+    // Easel tools (#49): drawing (arrow, rectangle, ellipse, pen) and resizing with real mouse events on the canvas,
+    // colours, Delete and Esc, all saved; then a live web clip of a local test page that refreshes off-screen (menu and
+    // easel opening, never a tab switch), and area / full-page captures into the easel. Runs after the capture chain
+    // (it needs the shown tab to itself); the multi-window check waits for gEaselToolsDone.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 135 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+     WaitUntil(^{ return gLateTestsDone; }, 60, ^{
+      MainWindowController* w = self.window;
+      NSString* dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"NotArcEaselClipSelfTest"];
+      [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+      NSString* html = [dir stringByAppendingPathComponent:@"clip.html"];
+      NSString* (^page)(NSString*) = ^(NSString* lower) {
+        return [NSString stringWithFormat:@"<html><head><title>clip</title></head><body style=\"margin:0\"><div style=\""
+                                          @"height:300px;background:#00c040\"></div><div style=\"height:1700px;background:%@\">"
+                                          @"</div></body></html>", lower];
+      };
+      [page(@"#0040ff") writeToFile:html atomically:YES encoding:NSUTF8StringEncoding error:nil];
+      NSString* pageURL = [NSURL fileURLWithPath:html].absoluteString;
+      [w openInNewTab:pageURL];
+      ArcItem* tab = w.shownItem;
+      // Drawing.
+      ArcItem* easel = [w createEaselWithID:nil];
+      EaselView* ev = [w easelView];
+      BOOL toolbar = ev.toolbar.superview != nil && !ev.toolbar.hidden && ev.toolbar.frame.size.width > 200;
+      NSArray<NSString*>* pal = [EaselView palette];
+      ev.color = pal[5];
+      ev.tool = @"arrow";
+      [ev testDragFrom:NSMakePoint(60, 100) to:NSMakePoint(260, 180) steps:6];
+      EaselObject* arrow = ev.objects.lastObject;
+      BOOL arrowOK = [arrow.kind isEqualToString:@"arrow"] && arrow.points.count == 2 && [arrow.color isEqualToString:pal[5]] &&
+                     NSEqualRects(arrow.frame, NSMakeRect(50, 90, 220, 100));
+      ev.tool = @"rect";
+      [ev testDragFrom:NSMakePoint(60, 220) to:NSMakePoint(200, 300) steps:4];
+      EaselObject* rect = ev.objects.lastObject;
+      BOOL rectOK = [rect.kind isEqualToString:@"rect"] && NSEqualRects(rect.frame, NSMakeRect(50, 210, 160, 100));
+      ev.tool = @"ellipse";
+      [ev testDragFrom:NSMakePoint(240, 220) to:NSMakePoint(380, 300) steps:4];
+      EaselObject* ellipse = ev.objects.lastObject;
+      BOOL ellipseOK = [ellipse.kind isEqualToString:@"ellipse"] && NSEqualRects(ellipse.frame, NSMakeRect(230, 210, 160, 100));
+      ev.tool = @"pen";
+      NSUInteger before = ev.objects.count;
+      [ev testDragFrom:NSMakePoint(60, 360) to:NSMakePoint(300, 380) steps:12];
+      EaselObject* pen = ev.objects.lastObject;
+      [ev testDragFrom:NSMakePoint(500, 500) to:NSMakePoint(500, 500) steps:1];  // a click draws nothing
+      BOOL penOK = ev.objects.count == before + 1 && [pen.kind isEqualToString:@"pen"] && pen.points.count >= 8 &&
+                   [ev.tool isEqualToString:@"pen"];
+      NSEvent* (^key)(NSString*, unsigned short) = ^(NSString* ch, unsigned short code) {
+        return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0
+                            windowNumber:w.window.windowNumber context:nil characters:ch charactersIgnoringModifiers:ch
+                               isARepeat:NO keyCode:code];
+      };
+      [ev keyDown:key(@"\e", 53)];
+      BOOL escape = [ev.tool isEqualToString:@"select"];
+      [ev keyDown:key(@"r", 15)];
+      escape = escape && [ev.tool isEqualToString:@"rect"];
+      [ev keyDown:key(@"\e", 53)];
+      [ev selectObject:rect];
+      ev.color = pal[2];
+      BOOL colour = [rect.color isEqualToString:pal[2]] && [arrow.color isEqualToString:pal[5]];
+      NSView* rectView = [ev viewForObject:rect];
+      NSView* (^hit)(NSPoint) = ^(NSPoint pt) { return [ev hitTest:[ev.superview convertPoint:pt fromView:ev]]; };
+      BOOL hitThrough = hit(NSMakePoint(130, 260)) != rectView && hit(NSMakePoint(60, 260)) == rectView;
+      // Resizing by the corner handles.
+      NSRect rf = rect.frame;
+      [ev testDragFrom:NSMakePoint(NSMaxX(rf) - 5, NSMaxY(rf) - 5) to:NSMakePoint(NSMaxX(rf) + 55, NSMaxY(rf) + 35) steps:5];
+      BOOL resized = NSEqualRects(rect.frame, NSMakeRect(50, 210, 215, 135)) && NSEqualRects(rectView.frame, rect.frame);
+      EaselObject* txt = [ev addText:@"Plan" at:NSMakePoint(420, 100)];
+      [w.window makeFirstResponder:ev];
+      NSRect tf = txt.frame;
+      [ev testDragFrom:NSMakePoint(NSMaxX(tf) - 5, NSMaxY(tf) - 5) to:NSMakePoint(NSMaxX(tf) + 75, NSMaxY(tf) + 15) steps:3];
+      BOOL textResized = NSEqualRects(txt.frame, NSMakeRect(420, 100, NSMaxX(tf) + 75 - 420, NSMaxY(tf) + 15 - 100));
+      NSBitmapImageRep* pr = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:200 pixelsHigh:100 bitsPerSample:8
+          samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+      EaselObject* pic = [ev addImagePNG:[pr representationUsingType:NSBitmapImageFileTypePNG properties:@{}] link:@"https://example.org/pic"];
+      NSRect pf = pic.frame;
+      [ev testDragFrom:NSMakePoint(NSMaxX(pf) - 5, NSMaxY(pf) - 5) to:NSMakePoint(NSMaxX(pf) + 95, NSMaxY(pf) - 5) steps:4];
+      BOOL aspect = NSEqualPoints(pic.frame.origin, pf.origin) && pic.frame.size.width == pf.size.width + 95 &&
+                    fabs(pic.frame.size.width / pic.frame.size.height - pf.size.width / pf.size.height) < 0.02;
+      if (!aspect) std::printf("SELFTEST-EASELDRAW-DEBUG pic=%s before=%s\n", NSStringFromRect(pic.frame).UTF8String, NSStringFromRect(pf).UTF8String);
+      [ev selectObject:pen];
+      [w.window makeFirstResponder:ev];
+      NSUInteger n0 = ev.objects.count;
+      [ev keyDown:key([NSString stringWithFormat:@"%C", (unichar)NSDeleteCharacter], 51)];
+      BOOL deleted = ev.objects.count == n0 - 1 && ![ev.objects containsObject:pen];
+      NSArray* kinds = [ev.objects valueForKey:@"kind"];
+      NSString* rectFrame = NSStringFromRect(rect.frame);
+      [w showItem:tab];
+      BOOL barHidden = ev.toolbar.hidden;
+      [w showItem:easel];
+      EaselView* ev2 = [w easelView];
+      BOOL saved = [[ev2.objects valueForKey:@"kind"] isEqual:kinds] && ev2.objects.count == 5 &&
+                   [NSStringFromRect(ev2.objects[1].frame) isEqualToString:rectFrame] && [ev2.objects[1].color isEqualToString:pal[2]] &&
+                   ev2.objects[0].points.count == 2 && [ev2.tool isEqualToString:@"select"];
+      std::printf("SELFTEST-EASELDRAW toolbar=%d arrow=%d rect=%d ellipse=%d pen=%d escape=%d colour=%d hitThrough=%d "
+                  "resized=%d textResized=%d aspect=%d deleted=%d barHidden=%d saved=%d\n", toolbar, arrowOK, rectOK,
+                  ellipseOK, penOK, escape, colour, hitThrough, resized, textResized, aspect, deleted, barHidden, saved);
+      [w closeTab:nil];  // the drawing easel; the clip below goes into a fresh one
+      // Live web clip.
+      WaitUntil(^{ if (w.shownItem != tab) [w showItem:tab]; return (BOOL)([tab.liveTitle isEqualToString:@"clip"] && ![w isLoading]); }, 20, ^{
+        [w runJS:@"window.scrollTo(0,300);document.title='scrolled'" inItem:tab];
+        WaitUntil(^{ return [tab.liveTitle isEqualToString:@"scrolled"]; }, 5, ^{
+          if (w.shownItem != tab) [w showItem:tab];
+          [w liveClipArea:NSMakeRect(20, 20, 200, 120) done:^(EaselObject* clip) {
+            ArcItem* clipEasel = w.shownItem;
+            EaselView* cv = [w easelView];
+            BOOL clipped = clip && [clip.kind isEqualToString:@"clip"] && [clip.link isEqualToString:pageURL] &&
+                           NSEqualRects(clip.region, NSMakeRect(20, 20, 200, 120)) && clip.viewport.width > 220 &&
+                           [NSFileManager.defaultManager fileExistsAtPath:[cv.directory stringByAppendingPathComponent:clip.image ?: @"-"]];
+            BOOL scrolled = fabs(clip.scroll.y - 300) < 2;
+            NSInteger started0 = EaselClipRendersStarted();
+            [w showItem:tab];
+            [w showItem:clipEasel];
+            BOOL notOnSwitch = EaselClipRendersStarted() == started0;  // fresh clip: opening again doesn't re-render
+            [page(@"#ff2020") writeToFile:html atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            NSMenuItem* mi = [[NSMenuItem alloc] initWithTitle:@"Refresh Live Clips" action:@selector(refreshLiveClipsFromMenu:) keyEquivalent:@""];
+            BOOL menu = [(id<NSMenuItemValidation>)w validateMenuItem:mi];
+            NSString* oldImage = clip.image;
+            NSInteger done0 = w.clipRefreshesFinished;
+            [w refreshLiveClipsFromMenu:nil];
+            WaitUntil(^{ return (BOOL)(w.clipRefreshesFinished > done0); }, 30, ^{
+              EaselView* cv2 = [w easelView];
+              EaselObject* c = cv2.liveClips.firstObject;
+              NSData* png = [NSData dataWithContentsOfFile:[cv2.directory stringByAppendingPathComponent:c.image ?: @"-"]];
+              NSBitmapImageRep* rep = png ? [NSBitmapImageRep imageRepWithData:png] : nil;
+              NSColor* px = rep ? [[rep colorAtX:rep.pixelsWide / 2 y:rep.pixelsHigh / 2] colorUsingColorSpace:NSColorSpace.sRGBColorSpace] : nil;
+              BOOL refreshed = c && ![c.image isEqualToString:oldImage] && rep.pixelsWide >= 200 && c.refreshedAt.timeIntervalSinceNow > -30;
+              // Red, from the scrolled part of the page (unscrolled, the region would be green).
+              BOOL live = px && px.redComponent - px.blueComponent > 0.3 && px.redComponent - px.greenComponent > 0.3;
+              if (!live) std::printf("SELFTEST-EASELCLIP-DEBUG px=%s size=%ldx%ld\n", px.description.UTF8String ?: "-", (long)rep.pixelsWide, (long)rep.pixelsHigh);
+              // Opening an easel refreshes clips older than a minute.
+              c.refreshedAt = [NSDate dateWithTimeIntervalSinceNow:-3600];
+              [cv2 save];
+              [w showItem:tab];
+              NSInteger s1 = EaselClipRendersStarted();
+              [w showItem:clipEasel];
+              BOOL onOpen = EaselClipRendersStarted() == s1 + 1;
+              NSInteger done1 = w.clipRefreshesFinished;
+              WaitUntil(^{ return (BOOL)(w.clipRefreshesFinished > done1); }, 30, ^{
+                // Area and full-page captures straight into the easel (the Capture code from #48).
+                [w showItem:tab];
+                [w captureToEaselMode:@"area" rect:NSMakeRect(10, 10, 100, 50) done:^(EaselObject* a) {
+                  BOOL area = a && [a.kind isEqualToString:@"image"] && [a.link isEqualToString:pageURL] && w.shownItem == clipEasel &&
+                              a.frame.size.width > 90 && a.frame.size.width < 340;
+                  [w showItem:tab];
+                  [w captureToEaselMode:@"full" rect:NSZeroRect done:^(EaselObject* f) {
+                    BOOL full = f && [f.kind isEqualToString:@"image"] && f.frame.size.height > f.frame.size.width &&
+                                [w easelView].objects.count == 3 && w.shownItem == clipEasel;
+                    std::printf("SELFTEST-EASELCLIP clipped=%d scrolled=%d notOnSwitch=%d menu=%d refreshed=%d live=%d onOpen=%d "
+                                "area=%d full=%d closed=%d\n", clipped, scrolled, notOnSwitch, menu, refreshed, live, onOpen,
+                                area, full, EaselClipRenderersActive() <= 1);
+                    [w showItem:clipEasel];
+                    [w closeTab:nil];
+                    [w showItem:tab];
+                    [w closeTab:nil];
+                    [NSFileManager.defaultManager removeItemAtPath:dir error:nil];
+                    gEaselToolsDone = YES;
+                  }];
+                }];
+              });
+            });
+          }];
+        });
+      });
+     });
+    });
     // Notes: a new note shows the editor (no web view), typing names it from its first line and saves rich text,
     // switching away and back reloads it, closing archives it and reopening from the archive brings the text back.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 110 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -2751,6 +2921,8 @@ int main(int argc, char* argv[]) {
     CefString(&settings.cache_path) = cache.UTF8String;
     // Keep session-only logins across restarts, as Arc and Chrome do with "continue where you left off".
     settings.persist_session_cookies = true;
+    // Live easel clips (#49) refresh in a hidden off-screen browser; tabs stay windowed.
+    settings.windowless_rendering_enabled = true;
 
     if (!CefInitialize(main_args, settings, nullptr, nullptr)) return CefGetExitCode();
     SettingsRegisterDefaults();
