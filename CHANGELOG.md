@@ -3,7 +3,7 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.24.0
 - Favorites: Move to > Favorites for any tab, and Remove from Favorites / Move to Pinned on a Favorite (also from the
   File menu and the command bar).
 - Tidy tab titles: pinning a tab gives it a short, clean name ("Pull requests" instead of "Pull requests · GitHub"),

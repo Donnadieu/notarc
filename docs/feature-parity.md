@@ -3,7 +3,7 @@
 70 done, 12 partial, 4 not started, of 86 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a
-checked line's issue is closed. Lines without a number were done before issues were opened. Status as of NotArc 0.23.0;
+checked line's issue is closed. Lines without a number were done before issues were opened. Status as of NotArc 0.24.0;
 see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc deliberately won't copy are listed under
 [Out of scope](#out-of-scope) at the end, with the reason, and aren't counted. Every scope call is recorded in
 [decisions.md](decisions.md).
