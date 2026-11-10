@@ -9,6 +9,9 @@
 #import "app/chrome_page.h"
 #import "app/arc_extensions.h"
 #import "app/extensions.h"
+#import "app/extension_popup.h"
+#import "app/updater.h"
+#import "app/downloads.h"
 #import "app/link_routing.h"
 #import "app/link_routing_editor.h"
 #import "app/bookmark_import.h"
@@ -910,6 +913,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSButton* _boostButton;   // Arc: Boost indicator in the address pill
   NSButton* _extensionsButton;  // puzzle piece in the address pill (Chrome-style pages only, #66)
   NSInteger _relaunchRequests;
+  ExtensionPopup* _extensionPopup;  // the open extension popup bubble, if any (#66)
   NSString* _boostIndicator; // tests: "on" / "off" / "none"
   NSTextField* _addressPillText;
   NSView* _sidebarNav;
@@ -2021,6 +2025,7 @@ static NSString* const kPiPExitJS =
 
 - (void)closeAllBrowsers {
   [self saveNoteNow];  // the last half second of typing in a note
+  [_extensionPopup closeBecause:@"quit"];
   [MainWindowController prepareForQuit];
   _closing = YES;
   for (MainWindowController* w in [gWindows copy])
@@ -3974,8 +3979,43 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   NSString* rel = [page hasPrefix:@"/"] ? [page substringFromIndex:1] : page;
   [self openInNewTab:[NSString stringWithFormat:@"chrome-extension://%@/%@", x.extensionID, rel]];
 }
-// CEF has no extension toolbar to hang Chromium's popup bubble on, so the popup page opens as a tab.
-- (IBAction)openExtensionPopup:(NSMenuItem*)sender { [self openExtensionPage:((NotArcExtension*)sender.representedObject).popupPage of:sender.representedObject]; }
+// An extension's popup shows in a bubble under the picker button (CEF has no extension toolbar of its own).
+- (IBAction)openExtensionPopup:(NSMenuItem*)sender { [self showPopupOfExtension:sender.representedObject]; }
+
+- (ExtensionPopup*)extensionPopup { return _extensionPopup.isOpen ? _extensionPopup : nil; }
+- (NSView*)extensionPopupAnchor {
+  return _extensionsButton && !_extensionsButton.isHiddenOrHasHiddenAncestor ? _extensionsButton : _addressPill;
+}
+
+- (ExtensionPopup*)showPopupOfExtension:(NotArcExtension*)x {
+  [_extensionPopup closeBecause:@"replaced"];
+  _extensionPopup = nil;
+  if (!x.popupPage.length || !x.extensionID || !_space) return nil;
+  if (![self contextIsReady:_space.profileDirectory]) return nil;
+  NSString* rel = [x.popupPage hasPrefix:@"/"] ? [x.popupPage substringFromIndex:1] : x.popupPage;
+  NSString* url = [NSString stringWithFormat:@"chrome-extension://%@/%@", x.extensionID, rel];
+  ExtensionPopup* popup = [[ExtensionPopup alloc] initWithURL:url
+                                                       context:[self contextForSpace:_space]
+                                                        parent:self.window
+                                                        anchor:[self extensionPopupAnchor]
+                                                        hidden:self.selfTestProfiles];
+  if (!popup) {  // couldn't make a Chrome-style page: show it the old way, in a tab
+    [self openExtensionPage:x.popupPage of:x];
+    return nil;
+  }
+  __weak MainWindowController* weakSelf = self;
+  __weak ExtensionPopup* weakPopup = popup;
+  popup.openURL = ^(NSString* link) {
+    [weakPopup closeBecause:@"link"];
+    [weakSelf openInNewTab:link];
+  };
+  popup.onClose = ^{
+    MainWindowController* me = weakSelf;
+    if (me && me->_extensionPopup == weakPopup) me->_extensionPopup = nil;
+  };
+  _extensionPopup = popup;
+  return popup;
+}
 - (IBAction)openExtensionOptions:(NSMenuItem*)sender { [self openExtensionPage:((NotArcExtension*)sender.representedObject).optionsPage of:sender.representedObject]; }
 - (IBAction)manageExtensions:(id)sender { [self openInNewTab:@"chrome://extensions"]; }
 - (IBAction)manageChromeExtension:(NSMenuItem*)sender {
@@ -3995,8 +4035,7 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
 - (IBAction)toggleExtension:(NSMenuItem*)sender {
   NotArcExtension* x = sender.representedObject;
   [self setExtension:x.extensionID enabled:!x.enabled];
-  [self offerRelaunchForExtensions:[NSString stringWithFormat:x.enabled ? @"%@ turns off when NotArc relaunches." :
-                                                                          @"%@ turns on when NotArc relaunches.", x.name]];
+  [self offerRelaunchForExtensions:[NSString stringWithFormat:x.enabled ? @"%@ is turned off." : @"%@ is turned on.", x.name]];
 }
 
 - (BOOL)removeExtensionWithID:(NSString*)extensionID {
@@ -4032,7 +4071,10 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   }
   __weak MainWindowController* weakSelf = self;
   InstallExtensionFromWebStore(extID, [self extensionsDirectory], ^(NSString* installedID, NSString* name, NSError* error) {
-    if (name) [weakSelf setExtension:installedID enabled:YES];  // a reinstall turns it back on
+    if (name) {
+      [weakSelf setExtension:installedID enabled:YES];  // a reinstall turns it back on
+      [weakSelf turnOnChromePagesForExtensions];
+    }
     done(name, error);
   });
 }
@@ -4048,32 +4090,52 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   [self offerRelaunchForExtensions:[NSString stringWithFormat:@"%@ is installed.", name]];
 }
 
+// CEF loads extensions only at startup, so every change offers a relaunch, in the usual toast. With Chrome-style
+// pages turned off for next time, there's nothing a relaunch would run, so the toast just says so.
 - (void)offerRelaunchForExtensions:(NSString*)message {
-  NSAlert* a = [NSAlert new];
-  a.messageText = message;
-  if (!ChromePagesEnabled()) {
-    a.informativeText = @"Extensions run once Chrome-style pages are on (Settings) and NotArc relaunches.";
-    [a beginSheetModalForWindow:self.window completionHandler:nil];
+  if (!SettingBool(kSettingChromePages)) {
+    [self showToast:[message stringByAppendingString:@" Extensions need Chrome-style pages (Settings > Advanced)."]
+            buttons:@[] target:self duration:8];
     return;
   }
-  a.informativeText = @"Changes to extensions take effect when NotArc relaunches. Your tabs come back where they were.";
-  [a addButtonWithTitle:@"Relaunch Now"];
-  [a addButtonWithTitle:@"Later"];
-  __weak MainWindowController* weakSelf = self;
-  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
-    if (r == NSAlertFirstButtonReturn)
-      dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf relaunchToApplyExtensions:nil]; });
-  }];
+  [self showToast:[message stringByAppendingString:@" Relaunch to apply."]
+          buttons:@[ @[ @"Relaunch Now", @"relaunchToApplyExtensions:" ] ]
+           target:self
+           duration:15];
+}
+
+- (NSButton*)toastButtonTitled:(NSString*)title {  // tests
+  for (NSView* v in _toast.subviews)
+    if ([v isKindOfClass:NSButton.class] && [((NSButton*)v).title isEqualToString:title]) return (NSButton*)v;
+  return nil;
 }
 
 - (IBAction)relaunchToApplyExtensions:(id)sender {
   ++_relaunchRequests;
   if (self.selfTestProfiles) return;  // tests count the request; they never quit or reopen anything
-  NSTask* t = [NSTask new];
-  t.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
-  t.arguments = @[ @"-c", @"while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; open \"$2\"", @"notarc-relaunch",
-                   @(getpid()).stringValue, NSBundle.mainBundle.bundlePath ];
-  if ([t launchAndReturnError:nil]) [NSApp terminate:nil];
+  [self hideToast];
+  NSUInteger active = [DownloadManager shared].inProgressCount;
+  if (active) {  // ask before quitting cancels them; once asked, the relaunch can't be called off halfway
+    NSAlert* a = [NSAlert new];
+    a.messageText = active == 1 ? @"A download is in progress." : [NSString stringWithFormat:@"%lu downloads are in progress.", (unsigned long)active];
+    a.informativeText = @"Relaunching NotArc will cancel them.";
+    [a addButtonWithTitle:@"Relaunch"];
+    [a addButtonWithTitle:@"Cancel"];
+    if ([a runModal] != NSAlertFirstButtonReturn) return;
+  }
+  [[Updater shared] relaunch];  // the updater's path: reopen once this copy has quit (tabs come back)
+}
+
+// Extensions only run in Chrome-style pages, so installing or importing one turns them on (for the next launch).
+- (BOOL)turnOnChromePagesForExtensions {
+  if (SettingBool(kSettingChromePages)) return NO;
+  SettingSetBool(kSettingChromePages, YES);
+  return YES;
+}
+
+- (NSString*)chromePagesNeededText:(NSString*)verb {
+  return [NSString stringWithFormat:@"Extensions need Chrome-style pages, which are off (Settings > Advanced). %@ turns "
+                                    @"them on; they start the next time NotArc opens.", verb];
 }
 
 - (IBAction)installExtensionFromPage:(NSMenuItem*)sender {
@@ -4099,7 +4161,9 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   NSString* here = [self currentURL];
   if (ExtensionIDFromInput(here ?: @"")) field.stringValue = here;
   a.accessoryView = field;
-  [a addButtonWithTitle:@"Install"];
+  if (!SettingBool(kSettingChromePages))  // one sheet: the link, why, and the switch in the button
+    a.informativeText = [a.informativeText stringByAppendingFormat:@"\n\n%@", [self chromePagesNeededText:@"Installing"]];
+  [a addButtonWithTitle:SettingBool(kSettingChromePages) ? @"Install" : @"Turn On and Install"];
   [a addButtonWithTitle:@"Cancel"];
   a.window.initialFirstResponder = field;
   __weak MainWindowController* weakSelf = self;
@@ -4114,10 +4178,38 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   }];
 }
 
+// File > Import Extensions from Arc. Copying any turns Chrome-style pages on, since that's where they run.
+- (NSArray<ArcExtensionCopy*>*)importArcExtensionsTurningOnPagesInto:(NSString*)destination fromArcUserData:(NSString*)userData {
+  NSArray<ArcExtensionCopy*>* copies = [self importArcExtensionsInto:destination fromArcUserData:userData];
+  BOOL any = NO;
+  for (ArcExtensionCopy* c in copies) if (!c.skippedMV2) any = YES;
+  if (any) {
+    [self turnOnChromePagesForExtensions];
+    gExtensionsChanged = YES;
+  }
+  return copies;
+}
+
 - (IBAction)importArcExtensionsFromMenu:(id)sender {
+  if (!SettingBool(kSettingChromePages)) {
+    NSAlert* ask = [NSAlert new];
+    ask.messageText = @"Import Extensions from Arc";
+    ask.informativeText = [self chromePagesNeededText:@"Importing"];
+    [ask addButtonWithTitle:@"Turn On and Import"];
+    [ask addButtonWithTitle:@"Cancel"];
+    __weak MainWindowController* weakSelf = self;
+    [ask beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+      if (r == NSAlertFirstButtonReturn) dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf importArcExtensionsNow]; });
+    }];
+    return;
+  }
+  [self importArcExtensionsNow];
+}
+
+- (void)importArcExtensionsNow {
   NSArray<ArcExtensionCopy*>* copies =
-      [self importArcExtensionsInto:NotArcExtensionsDirectory(NO)
-                    fromArcUserData:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]];
+      [self importArcExtensionsTurningOnPagesInto:NotArcExtensionsDirectory(NO)
+                                  fromArcUserData:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]];
   NSMutableArray* names = [NSMutableArray array], *skipped = [NSMutableArray array];
   for (ArcExtensionCopy* c in copies) [(c.skippedMV2 ? skipped : names) addObject:c.name];
   NSAlert* a = [NSAlert new];
@@ -4126,10 +4218,14 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   NSMutableString* info = [NSMutableString stringWithString:[names componentsJoinedByString:@", "]];
   if (skipped.count)
     [info appendFormat:@"\n\nNot supported by current Chromium: %@ (try uBlock Origin Lite).", [skipped componentsJoinedByString:@", "]];
-  [info appendString:ChromePagesEnabled() ? @"\n\nThey load the next time NotArc starts. Password managers need one sign-in."
-                                          : @"\n\nThey load once Chrome-style pages are on (Settings) and NotArc relaunches."];
+  if (names.count) [info appendString:@"\n\nThey load when NotArc relaunches. Password managers need one sign-in."];
   a.informativeText = info;
-  [a beginSheetModalForWindow:self.window completionHandler:nil];
+  __weak MainWindowController* weakSelf = self;
+  NSUInteger count = names.count;
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse) {
+    if (count) [weakSelf offerRelaunchForExtensions:count == 1 ? @"1 extension copied from Arc." :
+                         [NSString stringWithFormat:@"%lu extensions copied from Arc.", (unsigned long)count]];
+  }];
 }
 
 - (NSDictionary<NSString*, NSNumber*>*)importEverythingFromArcInto:(NSString*)extensionsDir userData:(NSString*)userData {
@@ -6445,6 +6541,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 
 - (void)switchToSpace:(ArcSpace*)space {
   if (!space || space == _space) return;
+  [_extensionPopup closeBecause:@"space"];  // the popup runs in the old Space's profile
   NSUInteger from = _space ? [_spaces indexOfObject:_space] : 0, to = [_spaces indexOfObject:space];
   [self slideSidebarFromRight:to > from];
   _space = space;

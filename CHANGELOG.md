@@ -3,6 +3,12 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- Chrome extensions: an extension's popup opens in a bubble under the puzzle-piece button in the address pill,
+  sized to the popup, instead of in a tab; Esc or a click outside closes it. After installing, updating, removing or
+  turning an extension on or off, a toast offers Relaunch Now (extensions load when NotArc starts, and your tabs come
+  back). Installing or importing extensions turns on Chrome-style pages, which extensions need.
+
 ## 0.25.0
 - Tab thumbnails: sidebar hover cards show a small picture of the page as it last looked, and holding Ctrl+Tab
   opens a switcher of your recent tabs with their pictures (Tab or Shift+Tab to move, let go of Ctrl to switch, Esc

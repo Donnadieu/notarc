@@ -16,6 +16,9 @@ NSString* CleanLinkURL(NSString* url);
 @class EaselView;
 @class NoteEditorView;
 @class EaselObject;
+@class ExtensionPopup;
+@class NotArcExtension;
+@class ArcExtensionCopy;
 NSInteger UnreadCountFromTitle(NSString* title);
 NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL began);  // -1 back, 1 forward, 0 none  // "Inbox (12)" -> 12
 
@@ -231,7 +234,7 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (BOOL)moveToMainButtonShown;              // tests
 - (BOOL)chromePageOfItem:(ArcItem*)item isInWindow:(NSWindow*)win;  // tests
 // Chrome extensions (#66). The puzzle-piece button in the address pill (Chrome-style pages on) opens the picker:
-// each extension with Open (its popup page, in a tab), Options, Turn Off/On and Remove, plus Install Extension...
+// each extension with Open (its popup, in a bubble under the button), Options, Turn Off/On and Remove, plus Install Extension...
 // (Chrome Web Store link or ID), Chrome Web Store and Manage Extensions (chrome://extensions). Installs, removals
 // and on/off take effect when NotArc relaunches (CEF can only load extensions at startup).
 @property(nonatomic, copy) NSString* extensionsDirectoryOverride;  // tests: picker and installs use this folder
@@ -244,6 +247,16 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (BOOL)removeExtensionWithID:(NSString*)extensionID;
 - (BOOL)extensionPickerButtonShown;  // tests
 - (NSInteger)relaunchRequestsForTest;
+// The extension's action popup in a bubble under the picker button (Chrome-style pages; see extension_popup.h).
+- (ExtensionPopup*)showPopupOfExtension:(NotArcExtension*)extension;
+@property(nonatomic, readonly) ExtensionPopup* extensionPopup;  // the open bubble, or nil
+- (NSView*)extensionPopupAnchor;                                // the picker button, or the address pill without it
+// After Install, Remove, Turn Off/On, Update or an import: a toast with Relaunch Now (CEF loads extensions at startup).
+- (void)offerRelaunchForExtensions:(NSString*)message;
+- (NSButton*)toastButtonTitled:(NSString*)title;  // tests
+// Installing or importing an extension turns Chrome-style pages on (they're where extensions run); NO if already on.
+- (BOOL)turnOnChromePagesForExtensions;
+- (NSArray<ArcExtensionCopy*>*)importArcExtensionsTurningOnPagesInto:(NSString*)destination fromArcUserData:(NSString*)userData;
 // AppleScript (#76): "select", "back", "forward", "reload", "stop", "close", or "loading" (returns it) for a tab.
 - (BOOL)scriptItem:(ArcItem*)item command:(NSString*)command;
 // Call controls (#47): the tab using the camera/mic, and the sidebar's mute / camera-off toggles.

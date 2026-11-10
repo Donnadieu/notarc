@@ -351,3 +351,38 @@ trackpad; everything else is checked by the hidden self-test.
     Shapes are outlines, not filled, and are only clickable near their line, so a capture under an arrow can still be
     picked. Single-letter tool keys (V, T, A, R, O, P) are a guess; Arc's own key bindings weren't recoverable.
 87. **Resizing uses four corner handles; pictures and clips keep their proportions, text boxes and drawings don't.**
+
+## 2026-11-09: extension popups and relaunch (#66)
+
+88. **An extension's popup opens in a bubble, not a tab** (replaces 74). Open in the picker shows the extension's
+    action popup (manifest `action.default_popup`) in a small borderless panel just under the picker button, left
+    edges lined up and kept inside the window, as Chrome and Arc do. The page is a Chrome-style page of its own
+    (ChromePageHost, CEF's Views) in the Space's profile, hosted in NotArc's panel, so extension APIs work and the
+    popup sees the Space's sign-ins. Links and windows it opens become NotArc tabs. Extensions without a popup have
+    no Open item, as before.
+89. **The bubble takes the popup's own size, within Chrome's limits** (25x25 to 800x600): Chromium's auto-resize
+    reports the page's preferred size (CefBrowserHost::SetAutoResizeEnabled); if it never reports, a small script
+    measures the page at its natural width on load and whenever its body changes size. The bubble opens once the
+    size is known, or after a second at the smallest size, growing when the page reports.
+90. **It closes on** Esc, a click anywhere outside it, the window moving, resizing, closing or changing full screen,
+    another window taking focus, NotArc going to the background, a Space switch, or the page calling window.close().
+    Esc always closes it: unlike Chrome, the page doesn't get Esc first.
+91. **The picker stays a menu**, so an extension's popup is the first item of its row, Open: a menu row that holds
+    the extension's actions can't also be clicked.
+92. **A relaunch stays necessary.** CEF 156 has no API to load, unload, turn off or update an extension while
+    running; Chrome-style extensions load at startup (`--load-extension`). After Install, Update, Remove, Turn
+    Off/On or an Arc import, NotArc's usual toast says "Relaunch to apply" with Relaunch Now, which quits and reopens
+    the same copy of NotArc through the updater's relaunch path (it asks first if downloads are running, since
+    quitting cancels them); session restore brings the tabs back. If Chrome-style pages are set to be off next time,
+    the toast says extensions need them instead.
+93. **Installing or importing an extension turns Chrome-style pages on** (replaces "Install Extension... works either
+    way" in 71). CEF 156's default (Alloy) pages can't run extensions at all: the extension system only exists in
+    Chrome-style pages. So with them off, Install Extension... says so in its sheet and its button reads "Turn On and
+    Install", and File > Import Extensions from Arc asks "Turn On and Import" / Cancel first. The setting flips only
+    once something was actually installed or copied, and takes effect on the relaunch. Import Everything from Arc
+    (the first-launch offer) leaves the setting alone: it's a broad import, and Chrome-style pages are still being
+    checked on screen.
+94. **Self-tests load the fixture extension in every run**, with either setting, so the bubble (a Chrome-style page of
+    its own) is checked every time; tabs stay Alloy-style unless Chrome-style pages are on. The bubble never becomes
+    key in a test, keeps the test window's 1% alpha and ignores clicks; Esc and an outside click go through the
+    bubble's own event handler, and Relaunch Now is counted instead of relaunching.

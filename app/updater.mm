@@ -160,6 +160,14 @@ static int Run(NSString* tool, NSArray<NSString*>* args, NSString** output) {
   [t launchAndReturnError:nil];
 }
 
+- (void)relaunch {
+  NSTask* t = [NSTask new];
+  t.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
+  t.arguments = @[ @"-c", @"while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; open \"$2\"; exit 0", @"notarc-relaunch",
+                   @(getpid()).stringValue, NSBundle.mainBundle.bundlePath ];
+  if ([t launchAndReturnError:nil]) [NSApp terminate:nil];
+}
+
 - (void)checkInteractive:(BOOL)interactive {
   if (_busy) return;
   _busy = YES;
