@@ -24,6 +24,7 @@ static NSDictionary* EncodeItem(ArcItem* item) {
   if (item.pinnedURL.length) d[@"pinnedURL"] = item.pinnedURL;
   if (item.hideUnreadBadge) d[@"hideUnread"] = @YES;
   if (item.renamed) d[@"renamed"] = @YES;
+  if (item.liveUnread) d[@"liveUnread"] = @YES;
   if (item.browserId) d[@"open"] = @YES;
   if (item.lastActiveAt) d[@"lastActiveAt"] = @(item.lastActiveAt.timeIntervalSinceReferenceDate);
   d[@"folder"] = @(item.isFolder);
@@ -33,6 +34,7 @@ static NSDictionary* EncodeItem(ArcItem* item) {
     NSMutableDictionary* live = [@{@"kind" : item.liveKind, @"source" : item.liveSource} mutableCopy];
     if (item.liveRefreshedAt) live[@"refreshed"] = @(item.liveRefreshedAt.timeIntervalSinceReferenceDate);
     if (item.liveDismissed.count) live[@"dismissed"] = item.liveDismissed;
+    if (item.liveFilled) live[@"filled"] = @YES;
     d[@"live"] = live;
   }
   if (item.isSplit) {
@@ -60,6 +62,7 @@ static ArcItem* DecodeItem(NSDictionary* d, int depth) {
   item.isFolder = [d[@"folder"] boolValue];
   item.hideUnreadBadge = [d[@"hideUnread"] boolValue];
   item.renamed = [d[@"renamed"] boolValue];
+  item.liveUnread = [d[@"liveUnread"] boolValue];
   item.isSplit = [d[@"split"] boolValue];
   if ([d[@"note"] isKindOfClass:NSString.class]) item.noteID = d[@"note"];
   if ([d[@"easel"] isKindOfClass:NSString.class] && [d[@"easel"] rangeOfString:@"/"].location == NSNotFound) item.easelID = d[@"easel"];
@@ -69,6 +72,7 @@ static ArcItem* DecodeItem(NSDictionary* d, int depth) {
     item.liveSource = live[@"source"];
     if ([live[@"refreshed"] isKindOfClass:NSNumber.class])
       item.liveRefreshedAt = [NSDate dateWithTimeIntervalSinceReferenceDate:[live[@"refreshed"] doubleValue]];
+    item.liveFilled = [live[@"filled"] boolValue];
     item.liveDismissed = [NSMutableArray array];
     if ([live[@"dismissed"] isKindOfClass:NSArray.class])
       for (id u in live[@"dismissed"]) if ([u isKindOfClass:NSString.class]) [item.liveDismissed addObject:u];

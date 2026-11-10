@@ -143,3 +143,21 @@ trackpad; everything else is checked by the hidden self-test.
     Symbols. No keyboard shortcuts were added for the new commands (Arc's aren't known); Cmd+B/I/U still work.
 18. **A note is one document:** Open in Split View on a note moves it into the split rather than opening a copy, and
     pasting or typing a `notarc://note/...` address into a split does the same.
+
+## 2026-11-09: Live Folders, finished (#55)
+
+15. **My Pull Requests reads GitHub's own search pages** (`is:pr is:open archived:false author:@me`, then
+    `review-requested:@me`, newest updated first) with the Space's cookies through a CEF request in that Space's
+    request context, and parses the page: the pull request links in the server-rendered results, or the page data
+    GitHub embeds as JSON when a page is client-rendered. Signed in or not comes from GitHub's `user-login` meta tag.
+    Not signed in shows one "Sign in to GitHub to see your pull requests" entry that opens GitHub's sign-in page in that
+    Space; when that tab lands back on github.com the folder refreshes. Signed in with nothing open shows "No open
+    pull requests". One such folder per Space (asking again shows the existing one). Arc's GitHub SSO prompt, review
+    status subtitles and team pull requests are not copied.
+16. **YouTube channels:** an address with `/channel/UC...` is used as is; `@handle`, `/c/`, `/user/` and video
+    addresses are read once to find the channel id (the page's canonical link, else its channel id fields), and the
+    folder is named after the channel. Videos come from `youtube.com/feeds/videos.xml?channel_id=...` (newest 15, as
+    YouTube serves them).
+17. **Unread:** entries added by a refresh after the folder's first fill come in unread (Arc: showNewItemsAsUnread);
+    the first fill and the sign-in / "No open pull requests" entries never do. The tab shows a small accent-colour dot,
+    the folder row a count; opening the tab clears it. Unread is saved with the sidebar.

@@ -33,6 +33,9 @@ or later. From 0.5.0 on, NotArc updates itself.
 - Notes in split view: Split View > New Note in Split View opens a note beside the page, and Add Split from a note
   opens a page beside it. Open in Split View on a note moves that note into the split.
 - File > Export Note as Markdown... saves the note as a .md file; Copy Note as Markdown copies it.
+- Live Folders: + menu > New Live Folder > GitHub: My Pull Requests shows your open pull requests and the ones waiting
+  for your review, using the Space's own github.com sign-in (no token). YouTube Channel... follows a channel by its
+  address or @handle. New entries come in unread (a dot on the tab, a count on the folder) until you open them.
 - The parity checklist is up to date with 0.23.0, with an Out of scope section and docs/decisions.md for every
   scope call.
 
