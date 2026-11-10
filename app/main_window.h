@@ -474,7 +474,9 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (void)endSidebarPeekForTest;
 - (BOOL)sidebarDimmedForTest:(BOOL)inactive;    // tests (V8)
 - (NSString*)todayClearState;                   // tests (V17)
+- (NSString*)folderRowStateForItem:(ArcItem*)folder;  // tests (V18)
 - (NSString*)peekStyle;                         // tests (V39)
+- (NSString*)littleWindowStyle;                 // tests (V38)
 - (NSString*)findBarStyle;                      // tests (V35)
 - (IBAction)closeFindBar:(id)sender;
 - (NSString*)splitRowStateForItem:(ArcItem*)split;  // tests (V19)

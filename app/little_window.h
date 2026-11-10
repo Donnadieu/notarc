@@ -28,6 +28,9 @@ typedef void (^LittleWindowMoveToSpace)(NSString* url, NSUInteger spaceIndex);
 - (void)presentAsPeekOver:(NSWindow*)parent;
 - (void)presentAsPeekOver:(NSWindow*)parent inRect:(NSRect)screenRect;  // the card's frame, in screen points
 - (NSString*)peekStyleDescription;  // tests
+// Little Arc look: frame in the Space's colour, the page as a rounded card, the site and an "Open in" capsule on top.
+- (void)applySpaceTint:(NSColor*)tint dark:(BOOL)dark;
+- (NSString*)littleStyleDescription;  // tests
 @property(nonatomic, readonly) NSString* currentURL;
 @property(nonatomic, readonly) NSString* pageTitle;
 // Incognito (#40): dark window, nothing saved (in-memory profile), no history, no archive, can't move into a Space.

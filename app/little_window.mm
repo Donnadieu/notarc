@@ -20,6 +20,7 @@ static const CGFloat kToolbarHeight = 34;
   BOOL _moved;
   BOOL _incognito;
   BOOL _peekMode;
+  BOOL _tinted;
   NSView* _peekCard;
   NSView* _peekButtons;
 }
@@ -203,12 +204,59 @@ static const CGFloat kToolbarHeight = 34;
 
 - (void)pageTitleChanged:(NSString*)title {
   _pageTitle = [title copy];
-  _titleLabel.stringValue = title;
+  if (!_tinted) _titleLabel.stringValue = title;
   self.window.title = _incognito ? [@"Incognito - " stringByAppendingString:title] : title;
 }
 
 - (void)pageURLChanged:(NSString*)url {
   if (url.length) _lastURL = [url copy];
+  if (_tinted) [self showHost];
+}
+
+// Arc's Little Arc: the page as a rounded card inside a frame in the Space's colour; the thin top bar shows the
+// site (not the page title) and an "Open in" capsule at the right.
+- (void)applySpaceTint:(NSColor*)tint dark:(BOOL)dark {
+  if (_incognito || _peekMode || !tint) return;
+  _tinted = YES;
+  NSWindow* w = self.window;
+  w.appearance = [NSAppearance appearanceNamed:dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
+  w.backgroundColor = tint;
+  NSView* root = w.contentView;
+  NSRect b = root.bounds;
+  _webContainer.frame = NSMakeRect(6, 6, b.size.width - 12, b.size.height - kToolbarHeight - 6);
+  _webContainer.wantsLayer = YES;
+  _webContainer.layer.cornerRadius = 8;
+  _webContainer.layer.masksToBounds = YES;
+  NSColor* fg = dark ? [NSColor colorWithWhite:1 alpha:0.6] : [NSColor colorWithWhite:0 alpha:0.55];
+  _titleLabel.textColor = fg;
+  _titleLabel.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
+  _openButton.bordered = NO;
+  _openButton.wantsLayer = YES;
+  _openButton.layer.cornerRadius = 11;
+  _openButton.layer.backgroundColor = [NSColor colorWithWhite:dark ? 1 : 0 alpha:dark ? 0.14 : 0.08].CGColor;
+  _openButton.attributedTitle = [[NSAttributedString alloc]
+      initWithString:_openButton.title
+          attributes:@{NSForegroundColorAttributeName : dark ? NSColor.whiteColor : NSColor.blackColor,
+                       NSFontAttributeName : [NSFont systemFontOfSize:12 weight:NSFontWeightSemibold]}];
+  NSRect of = _openButton.frame;
+  of.size = NSMakeSize(ceil(_openButton.attributedTitle.size.width) + 22, 22);
+  of.origin = NSMakePoint(b.size.width - 8 - of.size.width, 6);
+  _openButton.frame = of;
+  NSRect sf = _spaceMenu.frame;
+  sf.origin.x = NSMinX(of) - 4 - sf.size.width;
+  _spaceMenu.frame = sf;
+  _spaceMenu.bordered = NO;
+  _titleLabel.frame = NSMakeRect(80, 8, NSMinX(sf) - 8 - 80, 18);
+  [self showHost];
+}
+- (void)showHost {
+  NSString* host = [NSURL URLWithString:self.currentURL ?: @""].host ?: @"";
+  if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
+  if (host.length) _titleLabel.stringValue = host;
+}
+- (NSString*)littleStyleDescription {  // tests (V38)
+  return [NSString stringWithFormat:@"tinted=%d card=%.0f host=%@ capsule=%d", _tinted, _webContainer.layer.cornerRadius,
+                                    _titleLabel.stringValue, !_openButton.bordered && _openButton.layer.cornerRadius > 0];
 }
 
 - (NSString*)currentURL {

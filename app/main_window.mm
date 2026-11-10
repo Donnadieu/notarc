@@ -417,6 +417,46 @@ static NSColor* SpaceDotColor(BOOL current) {
   }];
 }
 
+// Arc's folder glyphs (drawn here, 16 pt templates): a closed folder, and an open one whose front leans forward.
+static NSImage* FolderGlyph(BOOL open) {
+  static NSImage* glyphs[2];
+  if (glyphs[open]) return glyphs[open];
+  NSImage* img = [NSImage imageWithSize:NSMakeSize(16, 16) flipped:NO drawingHandler:^BOOL(NSRect) {
+    [NSColor.blackColor setStroke];
+    NSBezierPath* back = [NSBezierPath bezierPath];
+    back.lineWidth = 1.4;
+    back.lineJoinStyle = NSLineJoinStyleRound;
+    // back panel with the tab
+    [back moveToPoint:NSMakePoint(1.7, 3)];
+    [back lineToPoint:NSMakePoint(1.7, 12.6)];
+    [back lineToPoint:NSMakePoint(5.8, 12.6)];
+    [back lineToPoint:NSMakePoint(7.3, 11)];
+    [back lineToPoint:NSMakePoint(13.6, 11)];
+    [back lineToPoint:NSMakePoint(13.6, open ? 8.4 : 3)];
+    if (!open) [back lineToPoint:NSMakePoint(1.7, 3)];
+    [back stroke];
+    NSBezierPath* front = [NSBezierPath bezierPath];
+    front.lineWidth = 1.4;
+    front.lineJoinStyle = NSLineJoinStyleRound;
+    if (open) {  // the front flap, tilted toward the viewer
+      [front moveToPoint:NSMakePoint(1.7, 3)];
+      [front lineToPoint:NSMakePoint(4.2, 8.4)];
+      [front lineToPoint:NSMakePoint(15.2, 8.4)];
+      [front lineToPoint:NSMakePoint(12.6, 3)];
+      [front closePath];
+      [front stroke];
+    } else {
+      [front moveToPoint:NSMakePoint(1.7, 9.2)];
+      [front lineToPoint:NSMakePoint(13.6, 9.2)];
+      [front stroke];
+    }
+    return YES;
+  }];
+  [img setTemplate:YES];
+  glyphs[open] = img;
+  return img;
+}
+
 static BOOL IsDark(NSView* v) {
   return [v.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
          NSAppearanceNameDarkAqua;
@@ -1435,7 +1475,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _outline.rowHeight = kRowHeight;
   _outline.style = NSTableViewStylePlain;
   _outline.intercellSpacing = NSMakeSize(0, 0);  // rows carry Arc's 5 pt gap themselves (41 pt pitch)
-  _outline.indentationPerLevel = 14;
+  _outline.indentationPerLevel = 16;  // Arc: folder contents sit 16 pt in
   _outline.columnAutoresizingStyle = NSTableViewUniformColumnAutoresizingStyle;
   _outline.floatsGroupRows = NO;
   _outline.allowsMultipleSelection = YES;
@@ -2579,9 +2619,10 @@ static NSString* const kPiPExitJS =
 - (NSString*)folderChevronForItem:(ArcItem*)folder {  // tests: "right" / "down" / ""
   NSInteger row = [_outline rowForItem:folder];
   NSTableCellView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
-  NSImageView* chev = [cell viewWithTag:77];
-  if (!chev || chev.hidden) return @"";
-  return [chev.image.accessibilityDescription isEqualToString:@"Collapse"] ? @"down" : @"right";
+  // Arc shows the folder's state with its own icon (open / closed folder) instead of a chevron.
+  if (cell.imageView.image == FolderGlyph(YES)) return @"down";
+  if (cell.imageView.image == FolderGlyph(NO)) return @"right";
+  return @"";
 }
 - (BOOL)stockDisclosureShown { return !NSIsEmptyRect([_outline frameOfOutlineCellAtRow:0]); }  // tests
 - (void)hoverSidebarItem:(ArcItem*)item { [self setSidebarHoverRow:item ? [_outline rowForItem:item] : -1]; }  // tests
@@ -2615,7 +2656,7 @@ static NSString* const kPiPExitJS =
     [cell addSubview:chev];
   }
   NSImageView* chev = [cell viewWithTag:77];
-  chev.hidden = !a.isFolder;
+  chev.hidden = YES;  // Arc has no chevron: the folder's own icon opens and closes
   if (a.isFolder) {
     BOOL open = [ov isItemExpanded:a];
     chev.image = [NSImage imageWithSystemSymbolName:open ? @"chevron.down" : @"chevron.right"
@@ -2668,7 +2709,8 @@ static NSString* const kPiPExitJS =
   cell.textField.stringValue = newTab ? @"New Tab" : (a.isSection ? @"" : title);
   cell.textField.editable = a.isFolder;
   cell.textField.delegate = a.isFolder ? self : nil;
-  cell.textField.font = [NSFont systemFontOfSize:14 weight:NSFontWeightMedium];
+  // Arc: folder names are bold.
+  cell.textField.font = [NSFont systemFontOfSize:14 weight:a.isFolder && !newTab ? NSFontWeightSemibold : NSFontWeightMedium];
   cell.textField.textColor = newTab ? [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.45]
                                     : (indigo ? ArcDefaultTabText() : NSColor.labelColor);
   // Cells fill the row; the header row's "+ New Tab" sits in its bottom 41 pt.
@@ -2788,7 +2830,7 @@ static NSString* const kPiPExitJS =
     image = [NSImage imageWithSystemSymbolName:@"plus" accessibilityDescription:@"New Tab"];
     cell.imageView.contentTintColor = [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.45];
   } else if (!a.isSection) {
-    NSString* symbol = a.isFolder ? (a.liveKind ? @"dot.radiowaves.up.forward" : ([ov isItemExpanded:a] ? @"folder.fill" : @"folder"))
+    NSString* symbol = a.isFolder ? (a.liveKind ? @"dot.radiowaves.up.forward" : nil)
                                   : (a.noteID ? @"note.text" : (a.easelID ? @"scribble.variable" : nil));
     if (a.isSplit) symbol = a.splitHorizontal ? @"rectangle.split.1x2" : @"rectangle.split.2x1";
     if (a.crashed) symbol = @"exclamationmark.triangle";
@@ -2796,6 +2838,20 @@ static NSString* const kPiPExitJS =
     else if (a.mediaPlaying) symbol = @"speaker.wave.2.fill";
     image = symbol ? [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil] : [self iconImageForItem:a];
     cell.imageView.contentTintColor = indigo ? [ArcDefaultTabText() colorWithAlphaComponent:0.85] : NSColor.secondaryLabelColor;
+    if (a.isFolder && !a.liveKind) {
+      BOOL open = [ov isItemExpanded:a];
+      image = FolderGlyph(open);
+      // Arc tints an open folder with the Space's colour (deeper); a closed one matches the text.
+      NSColor* sc = _space.themeColors.count ? ColorFromHex(_space.themeColors.firstObject) : nil;
+      if (open && sc) {
+        CGFloat hh, ss, bb, aa;
+        [[sc colorUsingColorSpace:NSColorSpace.sRGBColorSpace] getHue:&hh saturation:&ss brightness:&bb alpha:&aa];
+        cell.imageView.contentTintColor = dark ? [NSColor colorWithHue:hh saturation:MIN(1, ss * 0.6) brightness:MIN(1, bb + 0.45) alpha:1]
+                                               : [NSColor colorWithHue:hh saturation:MIN(1, ss * 1.4 + 0.25) brightness:MAX(0.45, bb * 0.8) alpha:1];
+      } else {
+        cell.imageView.contentTintColor = indigo ? ArcDefaultTabText() : NSColor.labelColor;
+      }
+    }
   }
   cell.imageView.image = image;
   NSProgressIndicator* spin = nil;
@@ -5876,7 +5932,14 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   };
   if (!_littleWindows) _littleWindows = [NSMutableArray array];
   [_littleWindows addObject:little];
+  BOOL dark = [space.colorScheme isEqual:@"dark"] || (![space.colorScheme isEqual:@"light"] && IsDark(self.window.contentView));
+  NSColor* tint = space.themeColors.count ? ColorFromHex(space.themeColors.firstObject) : nil;
+  if (!tint) tint = dark ? ColorFromHex(@"#120C39") : [NSColor colorWithSRGBRed:0.93 green:0.92 blue:0.97 alpha:1];
+  [little applySpaceTint:tint dark:dark];
   [little showWindow:nil];
+}
+- (NSString*)littleWindowStyle {  // tests (V38): the newest Little Window
+  return [(LittleWindowController*)_littleWindows.lastObject littleStyleDescription] ?: @"none";
 }
 
 // A Little Window that's closed without being moved still lands in the Archive, like Arc.
@@ -7776,6 +7839,16 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   }
   return [NSString stringWithFormat:@"segments=%lu slashes=%lu dim=%lu single=%d", (unsigned long)labels, (unsigned long)slashes,
                                     (unsigned long)dim, segs && !segs.hidden && cell.textField.hidden];
+}
+- (NSString*)folderRowStateForItem:(ArcItem*)folder {  // tests (V18)
+  NSInteger row = [_outline rowForItem:folder];
+  NSTableCellView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
+  BOOL open = [_outline isItemExpanded:folder];
+  BOOL bold = [cell.textField.font.fontDescriptor.fontAttributes[NSFontTraitsAttribute][NSFontWeightTrait] doubleValue] >= 0.3;
+  NSInteger childRow = open && folder.children.count ? [_outline rowForItem:folder.children.firstObject] : -1;
+  CGFloat indent = childRow >= 0 ? NSMinX([_outline frameOfCellAtColumn:0 row:childRow]) - NSMinX([_outline frameOfCellAtColumn:0 row:row]) : -1;
+  return [NSString stringWithFormat:@"glyph=%d chevron=%d bold=%d indent=%.0f", cell.imageView.image == FolderGlyph(open),
+                                    ![cell viewWithTag:77].hidden, bold, indent];
 }
 - (NSString*)todayClearState {  // tests (V17): "hidden/shown" before and while the Today header is hovered
   NSInteger hr = [_outline rowForItem:_space.unpinned];
