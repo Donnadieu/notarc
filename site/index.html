@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>NotArc: a free browser for Mac that keeps the way Arc works</title>
+<meta name="description" content="Sidebar, Spaces, command bar, split view. NotArc is a free, open-source browser for Mac that keeps the way Arc works after Arc shuts down on December 22, 2026.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://donnadieu.github.io/notarc/">
+<meta property="og:title" content="NotArc. Still here.">
+<meta property="og:description" content="A free, open-source browser for Mac that keeps the way Arc works. Sidebar, Spaces, command bar. Made by volunteers.">
+<meta property="og:image" content="https://donnadieu.github.io/notarc/social-preview.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="NotArc. Still here. A free browser for Mac.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="NotArc. Still here.">
+<meta name="twitter:description" content="A free, open-source browser for Mac that keeps the way Arc works.">
+<meta name="twitter:image" content="https://donnadieu.github.io/notarc/social-preview.png">
+<meta name="theme-color" content="#120C39">
+<link rel="icon" type="image/png" href="notarc-icon.png">
+<link rel="apple-touch-icon" href="notarc-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400..800&amp;family=Figtree:wght@400..700&amp;family=JetBrains+Mono:wght@500&amp;display=swap">
+<style>
+:root{--indigo-1000:#08061C;--indigo-950:#0D0930;--indigo-900:#120C39;--indigo-850:#140D40;--indigo-800:#1C1452;--indigo-700:#2A2170;--lavender-300:#B9B6F2;--lavender-200:#DAD9FE;--lavender-100:#ECEBFF;--paper-0:#FFFFFF;--paper-50:#FBFAF7;--paper-100:#F4F2EC;--paper-200:#E8E5DD;--paper-300:#D3CFC6;--ink-500:#77748A;--ink-600:#575470;--ink-700:#3A3753;--ink-900:#16122E;--violet-500:#604FD6;--violet-300:#A99FFF;--violet-600:#4A3BB8;--marigold-500:#FFC24B;--marigold-400:#FFD27A;--marigold-600:#E9A62A;--command-blue:#2930C1;--space-rose:#F27BB0;--space-coral:#FF7A59;--space-mint:#39C79B;--space-sky:#58B2F2;
+--grad-sidebar:linear-gradient(180deg,#120C39 0%,#140D40 100%);--grad-night:linear-gradient(160deg,#2A2170 0%,#120C39 70%);--grad-dusk:linear-gradient(140deg,#604FD6 0%,#F27BB0 100%);--grad-ember:linear-gradient(140deg,#FF7A59 0%,#FFC24B 100%);--grad-tide:linear-gradient(140deg,#2930C1 0%,#58B2F2 100%);--grad-moss:linear-gradient(140deg,#39C79B 0%,#58B2F2 100%);
+--grain:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='180' height='180'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 .22 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+--on-night:#DAD9FE;--on-night-muted:#9A97CF;--border-on-night:rgba(218,217,254,.14);--focus-ring:0 0 0 3px rgba(255,194,75,.55);
+--font-display:'Bricolage Grotesque','Figtree',ui-sans-serif,system-ui,sans-serif;--font-text:'Figtree',ui-sans-serif,system-ui,-apple-system,sans-serif;--font-mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,monospace;
+--shadow-3:0 18px 40px -12px rgba(18,12,57,.28),0 0 0 1px rgba(18,12,57,.06);--shadow-window:0 40px 80px -24px rgba(8,6,28,.55),0 12px 24px -12px rgba(8,6,28,.35),0 0 0 1px rgba(8,6,28,.25);--inner-highlight:inset 0 1px 0 rgba(255,255,255,.16);
+--ease-out:cubic-bezier(.2,.8,.2,1);--ease-spring:cubic-bezier(.34,1.45,.64,1);
+--content-max:1120px;--gutter:clamp(20px,4vw,40px);--section:clamp(72px,10vw,128px)}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale;scroll-padding-top:24px}
+@media (prefers-reduced-motion:no-preference){html{scroll-behavior:smooth}}
+body{margin:0;font:400 15px/1.5 var(--font-text);color:var(--ink-700);background:var(--paper-50)}
+img,video{display:block;max-width:100%}
+a{color:var(--violet-600);text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:3px}
+a:hover{color:var(--violet-500);text-decoration-thickness:2px}
+.night a:not(.btn){color:var(--violet-300)}.night a:not(.btn):hover{color:#C4BDFF}
+::selection{background:var(--marigold-400);color:var(--indigo-900)}
+:focus-visible{outline:none;box-shadow:var(--focus-ring);border-radius:6px}
+.skip{position:absolute;left:12px;top:-60px;z-index:10;background:var(--marigold-500);color:var(--indigo-900);padding:10px 14px;border-radius:10px;font-weight:600;text-decoration:none}.skip:focus{top:12px}
+.wrap{max-width:var(--content-max);margin:0 auto;padding:0 var(--gutter)}
+.night{position:relative;background:var(--grad-night);color:var(--on-night);isolation:isolate}
+.night::before,.grain::before{content:"";position:absolute;inset:0;background-image:var(--grain);mix-blend-mode:overlay;opacity:.55;pointer-events:none;z-index:-1}
+h1,h2,h3{font-family:var(--font-display);margin:0;text-wrap:balance}
+p{margin:0;text-wrap:pretty}
+/* nav */
+.nav{display:flex;align-items:center;gap:28px;padding-top:20px;padding-bottom:20px}
+.logo{display:inline-flex;align-items:center;gap:10px;text-decoration:none;border-radius:10px}
+.logo img{width:34px;height:34px;margin:-3px}
+.wm{font:800 22px/1 var(--font-display);letter-spacing:-.04em;color:#fff}.wm span{font-weight:500;color:var(--lavender-300)}
+.nav nav{display:flex;gap:24px;margin-left:auto;align-items:center}
+.nav nav a:not(.btn){color:var(--on-night);text-decoration:none;font:500 15px/1 var(--font-text);display:inline-flex;gap:6px;align-items:center}
+.nav nav a:not(.btn):hover{color:#fff}
+@media (max-width:720px){.nav nav a:not(.btn){display:none}}
+/* buttons */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:10px;height:52px;padding:0 22px;border-radius:10px;border:0;font:650 17px/1 var(--font-text);letter-spacing:-.005em;text-decoration:none;white-space:nowrap;cursor:pointer;transition:background 120ms var(--ease-out),transform 120ms var(--ease-out)}
+.btn:active{transform:translateY(1px) scale(.985)}
+.btn svg{width:18px;height:18px;flex:none}
+.btn-primary{background:var(--marigold-500);color:var(--indigo-900);box-shadow:var(--inner-highlight),0 1px 0 rgba(18,12,57,.25)}
+.btn-primary:hover{background:var(--marigold-400);color:var(--indigo-900)}
+.btn-primary:focus-visible{box-shadow:var(--inner-highlight),var(--focus-ring)}
+.btn-night{background:rgba(218,217,254,.10);color:#fff;box-shadow:inset 0 0 0 1px var(--border-on-night)}
+.btn-night:hover{background:rgba(218,217,254,.16);color:#fff}
+.btn-night:focus-visible{box-shadow:inset 0 0 0 1px var(--border-on-night),var(--focus-ring)}
+.btn-sm{height:32px;padding:0 12px;border-radius:6px;font:600 13px/1 var(--font-text);gap:6px}.btn-sm svg{width:15px;height:15px}
+.btn-full{display:flex;width:100%}
+/* hero */
+.hero{padding-top:clamp(40px,7vw,88px);padding-bottom:var(--section)}
+.eyebrow-note{font:600 13px/1.2 var(--font-text);color:var(--marigold-500);margin-bottom:20px}
+.hero h1{font:800 clamp(56px,9vw,112px)/.94 var(--font-display);letter-spacing:-.04em;color:#fff}
+.lead{font:400 clamp(18px,2vw,20px)/1.5 var(--font-text);margin-top:24px;max-width:560px}
+.hero .lead{color:var(--on-night)}
+.ctas{display:flex;gap:10px;flex-wrap:wrap;margin-top:32px}
+.meta{display:flex;flex-wrap:wrap;gap:4px 0;margin-top:14px;font:400 13px/1.45 var(--font-text);color:var(--on-night-muted)}
+.meta>span:not(:last-child)::after{content:"·";margin:0 8px}
+.meta [data-version]{font-family:var(--font-mono);font-size:12px}
+.film{margin-top:clamp(48px,7vw,80px)}
+.film-frame{position:relative;aspect-ratio:16/9;border-radius:28px;overflow:hidden;background:var(--grad-sidebar);box-shadow:var(--shadow-window),inset 0 0 0 1px var(--border-on-night)}
+.film-frame video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:transparent}
+.film figcaption{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-top:14px;font:400 13px/1.45 var(--font-text);color:var(--on-night-muted)}
+/* screenshot frame: real app image on a Space ground */
+.shot{position:relative;min-width:0}
+.shot-img{position:relative;aspect-ratio:1440/900}
+.shot-img img{width:100%;height:100%;object-fit:contain;filter:drop-shadow(0 24px 32px rgba(8,6,28,.28)) drop-shadow(0 6px 10px rgba(8,6,28,.18))}
+.shot-img.is-missing{border-radius:14px;background:var(--paper-200)}.shot-img.is-missing .missing{color:var(--ink-600)}
+.shot-img .missing{position:absolute;inset:0;display:none;place-items:center;font:500 12px/1.4 var(--font-mono);color:rgba(255,255,255,.9);text-align:center;padding:12px}
+.shot-img.is-missing img{visibility:hidden}.shot-img.is-missing .missing{display:grid}
+/* why */
+.why{padding-top:var(--section);padding-bottom:clamp(40px,6vw,72px)}
+.why-grid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:clamp(24px,5vw,64px);align-items:start}
+.h2{font:750 clamp(36px,5vw,56px)/1 var(--font-display);letter-spacing:-.035em;color:var(--ink-900)}
+.body-l{font:400 17px/1.55 var(--font-text)}
+.why .body-l+.body-l{margin-top:14px}
+/* features */
+.features{padding-bottom:var(--section)}
+.row{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:clamp(28px,5vw,64px);align-items:center;padding-top:clamp(56px,8vw,104px)}
+.row.flip .row-text{order:2}
+.eyebrow{display:inline-flex;align-items:center;gap:8px;font:600 12px/1 var(--font-text);letter-spacing:.08em;text-transform:uppercase;color:var(--ink-600)}
+.eyebrow i{width:8px;height:8px;border-radius:99px;flex:none}
+.row h3,.pair h3{font:700 clamp(28px,3.4vw,40px)/1.06 var(--font-display);letter-spacing:-.03em;color:var(--ink-900);margin-top:16px}
+.row p,.pair p{margin-top:14px;font:400 17px/1.55 var(--font-text);max-width:46ch}
+.keys{display:flex;flex-direction:column;gap:10px;margin-top:22px;font:400 15px/1.4 var(--font-text);color:var(--ink-600)}
+.keys div{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+kbd{display:inline-flex;align-items:center;justify-content:center;min-width:26px;height:26px;padding:0 6px;font:500 14px/1 var(--font-mono);border-radius:6px;background:var(--paper-0);color:var(--ink-900);box-shadow:inset 0 0 0 1px var(--paper-300),inset 0 -2px 0 var(--paper-200)}
+.kgroup{display:inline-flex;gap:4px}
+.switch{display:inline-flex;gap:4px;padding:4px;margin-top:22px;border-radius:999px;background:var(--paper-100);box-shadow:inset 0 0 0 1px var(--paper-200)}
+.switch button{display:inline-flex;align-items:center;gap:8px;height:34px;padding:0 14px;border:0;border-radius:999px;background:transparent;cursor:pointer;font:600 13px/1 var(--font-text);color:var(--ink-600);transition:background 120ms var(--ease-out),color 120ms var(--ease-out)}
+.switch button i{width:10px;height:10px;border-radius:99px}
+.switch button[aria-pressed="true"]{background:var(--paper-0);color:var(--ink-900);box-shadow:0 1px 2px rgba(18,12,57,.08),0 0 0 1px rgba(18,12,57,.06)}
+.switch button:focus-visible{box-shadow:var(--focus-ring);border-radius:999px}
+.spaces-stage{position:relative}
+.spaces-stage .shot{transition:opacity 360ms var(--ease-out)}
+.spaces-stage .shot+.shot{position:absolute;inset:0}
+.spaces-stage .shot[data-off]{opacity:0;pointer-events:none}
+.pair{display:grid;grid-template-columns:1fr 1fr;gap:clamp(28px,5vw,64px);margin-top:clamp(56px,8vw,104px);padding-top:clamp(40px,5vw,56px);border-top:1px solid var(--paper-200)}
+.pair h3{font-size:clamp(24px,2.6vw,30px);line-height:1.1}
+/* moving over */
+.move{background:var(--paper-100);padding:var(--section) 0}
+.move-grid{display:grid;grid-template-columns:minmax(0,5fr) minmax(0,7fr);gap:clamp(28px,5vw,64px);align-items:start}
+.move .lead{color:var(--ink-700);margin-top:20px}
+.promise{margin-top:28px;padding-top:20px;border-top:1px solid var(--paper-300);font:700 20px/1.25 var(--font-display);letter-spacing:-.015em;color:var(--ink-900);max-width:40ch}
+.imports{display:grid;gap:0;margin:0;padding:0;list-style:none}
+.imports li{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:16px;padding:18px 0;border-bottom:1px solid var(--paper-300);font:400 17px/1.5 var(--font-text)}
+.imports li:first-child{border-top:1px solid var(--paper-300)}
+.imports b{font-weight:600;color:var(--ink-900)}
+/* also */
+.also{padding:var(--section) 0}
+.also ul{list-style:none;margin:32px 0 0;padding:28px 0 0;border-top:1px solid var(--paper-200);display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px 40px;font:400 17px/1.45 var(--font-text)}
+.also li b{font-weight:600;color:var(--ink-900)}
+.notyet{margin-top:40px;font:400 15px/1.5 var(--font-text);color:var(--ink-600);max-width:70ch}
+.notyet b{font-weight:600;color:var(--ink-900)}
+/* download */
+.download{padding:var(--section) 0;background:var(--grad-sidebar)}
+.dl-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,440px);gap:48px;align-items:center}
+.download h2{font:800 clamp(44px,6vw,72px)/.96 var(--font-display);letter-spacing:-.04em;color:#fff}
+.download .lead{color:var(--on-night)}
+.card{position:relative;isolation:isolate;overflow:hidden;border-radius:20px;background:var(--grad-night);box-shadow:var(--shadow-3),var(--inner-highlight),inset 0 0 0 1px var(--border-on-night);padding:28px}
+.card-head{display:flex;align-items:center;gap:16px}
+.card-head img{width:76px;height:76px;margin:-6px}
+.card-head b{display:block;font:700 22px/1.1 var(--font-display);letter-spacing:-.02em;color:#fff}
+.card-head [data-version]{display:block;margin-top:6px;font:500 12px/1.4 var(--font-mono);color:var(--on-night-muted)}
+.card .btn-primary{margin-top:24px}
+.req{margin-top:14px;font:400 13px/1.45 var(--font-text);color:var(--on-night-muted);text-align:center}
+.first{margin-top:22px;padding-top:20px;border-top:1px solid var(--border-on-night);font:400 15px/1.5 var(--font-text)}
+.first b{display:block;font-weight:600;color:#fff;margin-bottom:6px}
+.card .btn-night{margin-top:20px}
+/* footer */
+footer{background:var(--indigo-950);color:var(--on-night-muted);padding:40px 0;font:400 13px/1.45 var(--font-text)}
+.foot{display:flex;flex-wrap:wrap;gap:20px 32px;align-items:center}
+.foot .wm{font-size:18px}.foot .logo img{width:26px;height:26px}
+.foot ul{list-style:none;margin:0 0 0 auto;padding:0;display:flex;flex-wrap:wrap;gap:8px 20px}
+footer a{color:var(--on-night-muted)!important;text-decoration:none}footer a:hover{color:#fff!important;text-decoration:underline}
+@media (max-width:860px){
+.why-grid,.row,.move-grid,.dl-grid{grid-template-columns:minmax(0,1fr)}
+.row.flip .row-text{order:0}
+.pair{grid-template-columns:1fr}
+.also ul{grid-template-columns:repeat(2,minmax(0,1fr))}
+.foot ul{margin-left:0}
+}
+@media (max-width:560px){
+.also ul{grid-template-columns:1fr}
+.imports li{grid-template-columns:1fr;gap:4px}
+.ctas .btn{flex:1 1 100%}
+.film-frame{border-radius:16px}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<div class="night">
+<header class="wrap nav">
+<a class="logo" href="./" aria-label="NotArc home"><img src="notarc-icon.png" alt="" width="34" height="34"><span class="wm"><span>not</span>arc</span></a>
+<nav aria-label="Main">
+<a href="#features">Features</a>
+<a href="#from-arc">Moving from Arc</a>
+<a href="https://github.com/Donnadieu/notarc"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path><path d="M9 18c-4.51 2-5-2-7-2"></path></svg>GitHub</a>
+<a class="btn btn-primary btn-sm" href="#download">Download</a>
+</nav>
+</header>
+<main id="main">
+<section class="wrap hero" aria-labelledby="hero-title">
+<p class="eyebrow-note">Arc shuts down on December 22, 2026.</p>
+<h1 id="hero-title">Still here.</h1>
+<p class="lead">Your sidebar, your Spaces, your command bar. NotArc is a free, open-source browser for Mac that keeps the way Arc works.</p>
+<div class="ctas">
+<a class="btn btn-primary" data-dl href="https://github.com/Donnadieu/notarc/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>Download for Mac</a>
+<a class="btn btn-night" href="https://github.com/Donnadieu/notarc"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4"></path><path d="M9 18c-4.51 2-5-2-7-2"></path></svg>View on GitHub</a>
+</div>
+<p class="meta"><span data-version hidden></span><span>Apple Silicon</span><span>macOS 13 or later</span><span>Free, MIT licensed</span></p>
+<figure class="film" style="margin-left:0;margin-right:0;margin-bottom:0">
+<div class="film-frame">
+<video controls preload="metadata" playsinline poster="notarc-promo-poster.jpg" width="1920" height="1080" aria-label="NotArc promo video, about one minute, with voiceover">
+<source src="notarc-promo.mp4" type="video/mp4">
+<a href="notarc-promo.mp4">Download the promo video</a>
+</video>
+</div>
+<figcaption><span>The tour. About a minute, with sound.</span><span>Press play when you're ready.</span></figcaption>
+</figure>
+</section>
+</main>
+</div>
+<section class="wrap why" aria-labelledby="why-title">
+<div class="why-grid">
+<h2 class="h2" id="why-title">Why “NotArc”?</h2>
+<div>
+<p class="body-l">Because it isn't Arc. It's a new browser, written from scratch in Objective-C++ on Chromium (CEF), so sites work like they do in Chrome. It contains none of Arc's code, artwork or branding.</p>
+<p class="body-l">Volunteers make it, it's MIT licensed, and it has nothing to do with The Browser Company. We liked how Arc worked and didn't want that to go away.</p>
+</div>
+</div>
+</section>
+<section id="features" class="wrap features" aria-label="Features">
+<div class="row">
+<div class="row-text">
+<span class="eyebrow"><i style="background:var(--violet-500)"></i>Sidebar</span>
+<h3>Your tabs live on the side.</h3>
+<p>Favorites sit at the top as icon tiles. Below them, Pinned tabs and folders, nested and sorted by drag and drop. Today tabs go underneath.</p>
+<div class="keys">
+<div><span class="kgroup"><kbd>⌘</kbd><kbd>D</kbd></span>Pin a tab</div>
+<div><span class="kgroup"><kbd>⌘</kbd><kbd>S</kbd></span>Hide the sidebar</div>
+</div>
+</div>
+<div class="shot"><div class="shot-img"><img src="screenshots/main.png" alt="NotArc window with the sidebar showing Favorites, Pinned tabs, a folder and Today tabs, with a page open" width="1440" height="900"><span class="missing">screenshots/main.png</span></div></div>
+</div>
+<div class="row flip">
+<div class="row-text">
+<span class="eyebrow"><i style="background:var(--space-rose)"></i>Spaces</span>
+<h3>One window, several lives.</h3>
+<p>Each Space has its own browser profile, so work logins stay at work and personal ones stay home. Give it a colour or a two-colour gradient with grain, and an emoji icon.</p>
+<div class="switch" role="group" aria-label="Show a Space">
+<button type="button" aria-pressed="true" data-space="work"><i style="background:var(--grad-dusk)"></i>Work</button>
+<button type="button" aria-pressed="false" data-space="side"><i style="background:var(--grad-ember)"></i>Side</button>
+</div>
+<div class="keys">
+<div><span class="kgroup"><kbd>⌃</kbd><kbd>1</kbd></span>to<span class="kgroup"><kbd>⌃</kbd><kbd>9</kbd></span>or a two-finger swipe</div>
+</div>
+</div>
+<div class="spaces-stage">
+<div class="shot" data-panel="work"><div class="shot-img"><img src="screenshots/space-work.png" alt="NotArc window on a violet-pink Space" width="1440" height="900" loading="lazy"><span class="missing">screenshots/space-work.png</span></div></div>
+<div class="shot" data-panel="side" data-off aria-hidden="true"><div class="shot-img"><img src="screenshots/space-side.png" alt="The same NotArc window on a coral-marigold Space" width="1440" height="900" loading="lazy"><span class="missing">screenshots/space-side.png</span></div></div>
+</div>
+</div>
+<div class="row">
+<div class="row-text">
+<span class="eyebrow"><i style="background:var(--command-blue)"></i>Command bar</span>
+<h3>Cmd+T, then type.</h3>
+<p>Enter goes to an address or searches. Along the way it suggests open and pinned tabs from every Space, your history and menu commands, and it learns what you pick.</p>
+<p>Search with Google, DuckDuckGo, Bing, Ecosia or Kagi.</p>
+<div class="keys"><div><span class="kgroup"><kbd>⌘</kbd><kbd>T</kbd></span>Open the command bar</div></div>
+</div>
+<div class="shot"><div class="shot-img"><img src="screenshots/command-bar.png" alt="The NotArc command bar open over a page, with suggestions" width="1440" height="900" loading="lazy"><span class="missing">screenshots/command-bar.png</span></div></div>
+</div>
+<div class="row flip">
+<div class="row-text">
+<span class="eyebrow"><i style="background:var(--space-mint)"></i>Split view</span>
+<h3>Up to four pages at once.</h3>
+<p>Drag a tab onto the page to split it. Keep going until four sit side by side.</p>
+</div>
+<div class="shot"><div class="shot-img"><img src="screenshots/split-view.png" alt="NotArc in split view with several pages side by side" width="1440" height="900" loading="lazy"><span class="missing">screenshots/split-view.png</span></div></div>
+</div>
+<div class="pair">
+<div>
+<span class="eyebrow"><i style="background:var(--space-sky)"></i>Little Window and Peek</span>
+<h3>Links from elsewhere stay out of the way.</h3>
+<p>Links from other apps open in a Little Window instead of a new tab. Links that leave a pinned site open in Peek, an overlay over the page you were on.</p>
+<div class="keys"><div><span class="kgroup"><kbd>⌘</kbd><kbd>⌥</kbd><kbd>N</kbd></span>Little Window, from any app</div></div>
+</div>
+<div>
+<span class="eyebrow"><i style="background:var(--space-coral)"></i>Auto-archive</span>
+<h3>Old tabs tidy themselves.</h3>
+<p>Today tabs you haven't used for 12 hours move to a searchable Archive. Pick anything from 6 hours to 30 days, or never.</p>
+</div>
+</div>
+</section>
+<section id="from-arc" class="move" aria-labelledby="move-title">
+<div class="wrap move-grid">
+<div>
+<h2 class="h2" id="move-title">Bring your Arc with you.</h2>
+<p class="lead">On first launch NotArc imports what you had in Arc. The rest is one menu item away.</p>
+<p class="promise">It only reads Arc's files. It never changes them.</p>
+</div>
+<ul class="imports">
+<li><b>On first launch</b><span>Your Arc Spaces, tabs, Favorites, archive and logins.</span></li>
+<li><b>File &gt; Import Everything from Arc</b><span>Also brings history, extensions, link rules, saved passwords, addresses and cards.</span></li>
+<li><b>From other browsers</b><span>Bookmarks, history and passwords from Chrome, Brave, Edge, Vivaldi, Firefox and Safari.</span></li>
+</ul>
+</div>
+</section>
+<section class="wrap also" aria-labelledby="also-title">
+<h2 class="h2" id="also-title">Also in there.</h2>
+<ul>
+<li><b>Passwords</b> saved and filled in, behind Touch ID</li>
+<li><b>Max</b>: ask about a page or summarise it, on your Mac</li>
+<li><b>Chrome extensions</b>, from the Web Store</li>
+<li><b>Air Traffic Control</b> link rules</li>
+<li><b>Media controls</b> and picture-in-picture</li>
+<li><b>Capture</b>, an area or the full page</li>
+<li><b>Boosts</b>: per-site colours, fonts and zaps</li>
+<li><b>Notes</b></li>
+<li><b>Easels</b> with live clips and drawing</li>
+<li><b>Live Folders</b> for RSS, GitHub and YouTube</li>
+<li><b>Next meeting</b> from your Mac's Calendar</li>
+<li><b>Multiple windows</b></li>
+<li><b>Incognito windows</b></li>
+<li><b>AppleScript</b></li>
+<li><b>Automatic updates</b>, checked against a published SHA-256</li>
+</ul>
+<p class="notyet">The <a href="https://github.com/Donnadieu/notarc/blob/main/docs/feature-parity.md">parity checklist</a> tracks what's done and what isn't.</p>
+</section>
+<section id="download" class="download night" aria-labelledby="dl-title">
+<div class="wrap dl-grid">
+<div>
+<h2 id="dl-title">Get it before the 22nd.</h2>
+<p class="lead">Or after. It'll still be here.</p>
+</div>
+<div class="card grain">
+<div class="card-head"><img src="notarc-icon.png" alt="NotArc app icon" width="76" height="76"><div><b>NotArc for Mac</b><span data-version hidden></span></div></div>
+<a class="btn btn-primary btn-full" data-dl href="https://github.com/Donnadieu/notarc/releases/latest"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><path d="m7 10 5 5 5-5"></path><path d="M12 15V3"></path></svg>Download for Mac</a>
+<p class="req">Apple Silicon Mac (M1 or newer), macOS 13 or later</p>
+<div class="first"><b>The first time you open it</b>The app isn't notarized by Apple yet. Right-click NotArc in Applications and choose Open, then Open again. Updates come in by themselves after that.</div>
+<a class="btn btn-night btn-full" href="https://github.com/Donnadieu/notarc">View on GitHub</a>
+</div>
+</div>
+</section>
+<footer>
+<div class="wrap foot">
+<a class="logo" href="./" aria-label="NotArc home"><img src="notarc-icon.png" alt="" width="26" height="26"><span class="wm"><span>not</span>arc</span></a>
+<span>Made by volunteers. Not affiliated with The Browser Company.</span>
+<ul>
+<li><a href="https://github.com/Donnadieu/notarc">GitHub</a></li>
+<li><a href="https://github.com/Donnadieu/notarc/blob/main/CHANGELOG.md">Changelog</a></li>
+<li><a href="https://github.com/Donnadieu/notarc/blob/main/docs/feature-parity.md">Parity checklist</a></li>
+<li><a href="https://github.com/Donnadieu/notarc/blob/main/CONTRIBUTING.md">Contributing</a></li>
+<li><a href="https://github.com/Donnadieu/notarc/discussions">Discussions</a></li>
+</ul>
+</div>
+</footer>
+<script>
+(function(){
+document.querySelectorAll('.shot-img img').forEach(function(img){
+function miss(){img.parentNode.classList.add('is-missing')}
+if(img.complete&&img.naturalWidth===0&&img.getAttribute('src'))miss();
+img.addEventListener('error',miss);
+img.addEventListener('load',function(){img.parentNode.classList.remove('is-missing')});
+});
+var btns=document.querySelectorAll('[data-space]');
+btns.forEach(function(b){b.addEventListener('click',function(){
+var k=b.getAttribute('data-space');
+btns.forEach(function(x){x.setAttribute('aria-pressed',String(x===b))});
+document.querySelectorAll('[data-panel]').forEach(function(p){
+var on=p.getAttribute('data-panel')===k;
+if(on){p.removeAttribute('data-off');p.removeAttribute('aria-hidden')}else{p.setAttribute('data-off','');p.setAttribute('aria-hidden','true')}
+});
+})});
+fetch('https://api.github.com/repos/Donnadieu/notarc/releases/latest',{headers:{Accept:'application/vnd.github+json'}})
+.then(function(r){if(!r.ok)throw 0;return r.json()})
+.then(function(d){
+var a=(d.assets||[]).filter(function(x){return /-arm64\.dmg$/.test(x.name)})[0];
+if(a)document.querySelectorAll('[data-dl]').forEach(function(el){el.href=a.browser_download_url});
+if(d.tag_name){var v=String(d.tag_name).replace(/^v/i,'');document.querySelectorAll('[data-version]').forEach(function(el){el.textContent='Version '+v;el.hidden=false})}
+})
+.catch(function(){});
+})();
+</script>
+</body>
+</html>

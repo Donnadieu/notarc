@@ -3,6 +3,9 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- NotArc has its own app icon: a marigold ¬ on indigo night (source files in assets/brand).
+
 ## 0.25.0
 - Tab thumbnails: sidebar hover cards show a small picture of the page as it last looked, and holding Ctrl+Tab
   opens a switcher of your recent tabs with their pictures (Tab or Shift+Tab to move, let go of Ctrl to switch, Esc
