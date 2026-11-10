@@ -1,9 +1,9 @@
 # Feature parity with Arc 1.169
 
-85 done, 1 partial, 0 not started, of 86 items.
+86 done, 0 partial, 0 not started, of 86 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a
-checked line's issue is closed. Lines without a number were done before issues were opened. Status as of NotArc 0.25.0;
+checked line's issue is closed. Lines without a number were done before issues were opened. Status as of NotArc 0.26.0;
 see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc deliberately won't copy are listed under
 [Out of scope](#out-of-scope) at the end, with the reason, and aren't counted. Every scope call is recorded in
 [decisions.md](decisions.md).
@@ -111,7 +111,7 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 
 ## Browser basics
 
-- [ ] Chrome extensions (Web Store), extension picker (partial: with Chrome-style pages on (Settings, off by default): Install Extension... from a Web Store link or ID (signature checked), a puzzle-piece picker in the address pill (Open, Options, Turn Off/On, Update, Remove, Manage Extensions), File > Import Extensions from Arc. Missing: extensions in the default page mode (CEF's Alloy pages can't run them), popups as bubbles (they open in a tab), and changes without a relaunch) (#66)
+- [x] Chrome extensions (Web Store), extension picker (in Chrome-style pages, which installing or importing an extension turns on: Install Extension... from a Web Store link or ID (signature checked), File > Import Extensions from Arc, and a puzzle-piece picker in the address pill: each extension's popup opens in a bubble under it, sized to the popup, plus Options, Turn Off/On, Update, Remove and Manage Extensions. Changes apply after Relaunch Now in a toast, since CEF loads extensions only at startup) (#66)
 - [x] Password saving/autofill, address/card autofill (#67)
 - [x] DevTools (show/hide), developer mode (per-site Developer Mode: on by itself for localhost, 127.0.0.1 and .local; full address with port in the sidebar pill, never auto-archived, Developer Tools in the pill; View menu, Site Settings and Settings > Advanced, with a reset) (#68)
 - [x] Set as default browser, open links from other apps (#69)
@@ -159,3 +159,5 @@ They aren't separate items.
 - Max with Apple Intelligence turned on (macOS 26): the self-test uses a stand-in model, never the real one (#58, #59).
 - Easels: drawing and resizing with a real mouse; a live clip of a signed-in page (#49).
 - Ad blocking: downloading EasyList/EasyPrivacy for real (the self-test uses a local list) (#53).
+- Extensions: the popup bubble's look, position and focus on screen (typing in it, Esc, clicking outside) with a real
+  extension such as a password manager, a real Web Store install, and Relaunch Now bringing the tabs back (#66).

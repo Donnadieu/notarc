@@ -93,7 +93,7 @@ NSImage* AppIconImage(NSString* name) {
 }
 
 NSString* CurrentAppIconName(void) {
-  id v = SettingObject(kSettingAppIcon) ?: [NSUserDefaults.standardUserDefaults objectForKey:kSettingAppIcon];
+  id v = SettingValueOrDefault(kSettingAppIcon);
   return [v isKindOfClass:NSString.class] && VariantNamed(v) ? v : @"classic";
 }
 

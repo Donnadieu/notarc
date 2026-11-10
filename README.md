@@ -32,9 +32,9 @@ You need a Mac with Apple Silicon (M1 or newer) and macOS 13 or later.
 
 1. Download `NotArc-<version>-arm64.dmg` from the [latest release](https://github.com/Donnadieu/notarc/releases/latest).
 2. Open the disk image and drag **NotArc** into **Applications**.
-3. The first time only, right-click NotArc in Applications and choose **Open**, then **Open** again. NotArc isn't
-   notarized by Apple yet, so macOS asks you to confirm. If macOS still refuses, go to System Settings > Privacy &
-   Security and click **Open Anyway**.
+3. Open NotArc. From 0.26.0 on it's signed with an Apple Developer ID and notarized by Apple, so macOS opens it like
+   any other downloaded app. (0.25.0 and earlier weren't: macOS asked you to allow them in System Settings > Privacy &
+   Security > **Open Anyway**.)
 
 On first launch NotArc offers to bring everything over from Arc. To bring your logins too, macOS asks once for access
 to the "Arc Safe Storage" Keychain item; click **Allow**. That key decrypts Arc's saved cookies on your own Mac. Nothing
@@ -106,8 +106,9 @@ in `~/Library/Application Support/NotArc`.
 - Multiple windows, Incognito windows, AppleScript
 - Import bookmarks and history from Chrome, Brave, Edge, Vivaldi, Chromium, Firefox and Safari
 
-The [parity checklist](docs/feature-parity.md) tracks every Arc feature, and [CHANGELOG.md](CHANGELOG.md) lists what each
-release added.
+Every item on the [parity checklist](docs/feature-parity.md) is built as of 0.26.0. A few things Arc ran on its own
+servers (sidebar sync, share links, Arc's cloud AI) are listed there as out of scope. [CHANGELOG.md](CHANGELOG.md)
+lists what each release added.
 
 ## Built on Chromium, upgraded with Chromium
 
@@ -150,7 +151,7 @@ NotArc is built by volunteers, and there's always more to polish: the partly don
 whatever you miss from Arc. If you know C++, Objective-C++ or macOS development, or
 just use Arc every day and can test, we'd love your help.
 
-- See what's missing in the [parity checklist](docs/feature-parity.md).
+- See what's built and what's out of scope in the [parity checklist](docs/feature-parity.md).
 - Pick an issue labelled [good first issue](https://github.com/Donnadieu/notarc/labels/good%20first%20issue) or
   [parity](https://github.com/Donnadieu/notarc/labels/parity).
 - Read [CONTRIBUTING.md](CONTRIBUTING.md) for how to build, test and send a pull request.
