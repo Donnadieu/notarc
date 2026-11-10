@@ -386,3 +386,18 @@ trackpad; everything else is checked by the hidden self-test.
     its own) is checked every time; tabs stay Alloy-style unless Chrome-style pages are on. The bubble never becomes
     key in a test, keeps the test window's 1% alpha and ignores clicks; Esc and an outside click go through the
     bubble's own event handler, and Relaunch Now is counted instead of relaunching.
+
+## 2026-11-09: signed and notarized releases
+
+95. **Releases are signed with a Developer ID Application certificate and notarized** (from 0.26.0; until 0.25.0 they
+    were ad-hoc signed and macOS made people allow them by hand). `scripts/package.sh` signs inside-out with the
+    hardened runtime: CEF's dylibs, the framework, each `NotArc Helper*.app` (`app/helper.entitlements`), then the app
+    (`app/NotArc.entitlements`). Chromium needs JIT and unsigned executable memory under the hardened runtime, and
+    library validation is off as Chrome-family apps do; the app also gets the camera, microphone, location, USB,
+    Bluetooth, print and calendar keys its Info.plist already describes. The app is notarized and stapled before it
+    goes into the dmg (the updater copies the app out of the dmg), then the dmg is signed, notarized and stapled. The
+    identity and notary profile come from the environment; `NOTARC_ADHOC=1` makes a local unsigned build that must
+    never be published.
+96. **The updater still checks only the SHA-256**, not the signing identity, so ad-hoc copies (0.25.0 and earlier)
+    update to signed ones. Because the signature changes, macOS treats the first signed launch as a new app for
+    Keychain items and privacy permissions, and may ask once more.

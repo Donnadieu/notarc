@@ -62,8 +62,9 @@ and 13 more are partly done. What works today:
 **Moving over from Arc.** On first launch NotArc reads your Arc data on your own Mac and imports your Spaces, tabs,
 archive and logins. It only reads Arc's files and never changes them.
 
-Not built yet: Boosts, Easel, Notes, extensions, password autofill, multiple windows, Incognito and more. The
-[parity checklist](docs/feature-parity.md) tracks every item, and [CHANGELOG.md](CHANGELOG.md) lists what each
+Every item on the [parity checklist](docs/feature-parity.md) is built as of 0.26.0, including Boosts, Easels, Notes,
+Chrome extensions, password autofill, multiple windows and Incognito. A few things Arc ran on its own servers (sidebar
+sync, share links, Arc's cloud AI) are listed there as out of scope. [CHANGELOG.md](CHANGELOG.md) lists what each
 release added.
 
 ## Install
@@ -71,9 +72,9 @@ release added.
 1. Download the latest `NotArc-<version>-arm64.dmg` from [Releases](https://github.com/Donnadieu/notarc/releases).
    NotArc currently needs an Apple Silicon Mac (M1 or newer) running macOS 13 or later.
 2. Open the disk image and drag NotArc into Applications.
-3. The first time only, right-click NotArc in Applications and choose **Open**, then **Open** again. NotArc isn't
-   signed with a paid Apple developer certificate yet, so macOS asks you to confirm. If macOS still refuses, go to
-   System Settings > Privacy & Security and click **Open Anyway**.
+3. Open NotArc. From 0.26.0 on it's signed with an Apple Developer ID and notarized by Apple, so macOS opens it like
+   any other downloaded app. (0.25.0 and earlier weren't: macOS asked you to allow them in System Settings > Privacy &
+   Security > **Open Anyway**.)
 
 On first launch NotArc imports your Arc Spaces, tabs and archive. To bring your logins over too, macOS asks once for
 access to the "Arc Safe Storage" Keychain item; click **Allow**. NotArc only reads Arc's data and never changes it.

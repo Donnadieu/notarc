@@ -3,7 +3,11 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.26.0
+- NotArc is now signed with an Apple Developer ID and notarized by Apple, so macOS opens the download without asking
+  you to allow it in System Settings. The first launch after updating, macOS may ask once more for the Keychain item
+  NotArc keeps your cookies and passwords locked with, and for permissions you gave before (Calendar,
+  notifications): click **Always Allow** / **Allow**.
 - Chrome extensions: an extension's popup opens in a bubble under the puzzle-piece button in the address pill,
   sized to the popup, instead of in a tab; Esc or a click outside closes it. After installing, updating, removing or
   turning an extension on or off, a toast offers Relaunch Now (extensions load when NotArc starts, and your tabs come

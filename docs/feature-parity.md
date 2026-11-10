@@ -3,7 +3,7 @@
 86 done, 0 partial, 0 not started, of 86 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a
-checked line's issue is closed. Lines without a number were done before issues were opened. Status as of NotArc 0.25.0;
+checked line's issue is closed. Lines without a number were done before issues were opened. Status as of NotArc 0.26.0;
 see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc deliberately won't copy are listed under
 [Out of scope](#out-of-scope) at the end, with the reason, and aren't counted. Every scope call is recorded in
 [decisions.md](decisions.md).
@@ -159,4 +159,5 @@ They aren't separate items.
 - Max with Apple Intelligence turned on (macOS 26): the self-test uses a stand-in model, never the real one (#58, #59).
 - Easels: drawing and resizing with a real mouse; a live clip of a signed-in page (#49).
 - Ad blocking: downloading EasyList/EasyPrivacy for real (the self-test uses a local list) (#53).
-- Chrome extensions: the popup bubble under the puzzle piece, and Relaunch Now after an install (#66).
+- Extensions: the popup bubble's look, position and focus on screen (typing in it, Esc, clicking outside) with a real
+  extension such as a password manager, a real Web Store install, and Relaunch Now bringing the tabs back (#66).
