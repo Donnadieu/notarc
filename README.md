@@ -9,9 +9,9 @@ The vertical sidebar with Favorites, pinned tabs, folders and Today. Spaces with
 Cmd+T and type. Split view, Little Window, Peek, and old tabs that tidy themselves away. NotArc does all of that today,
 on Chromium, so sites work the way they do in Chrome.
 
-[![Watch the one-minute NotArc tour](docs/promo/notarc-promo-poster.jpg)](https://donnadieu.github.io/notarc/)
+https://github.com/user-attachments/assets/4dd923eb-5cb3-4b30-a4db-7007a79d8930
 
-A one-minute tour, with sound: [watch it on the website](https://donnadieu.github.io/notarc/) or [download it](docs/promo/notarc-promo.mp4).
+A one-minute tour, with sound. [Download it in full quality](docs/promo/notarc-promo.mp4).
 
 ![NotArc: the sidebar with Favorites, Pinned tabs, a folder and Today, next to the page](docs/screenshots/main.png)
 
