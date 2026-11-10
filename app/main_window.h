@@ -459,6 +459,7 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (NSUInteger)liveUnreadCountOf:(ArcItem*)folder;
 - (void)deleteSidebarItem:(ArcItem*)item;  // tests
 - (BOOL)writeSidebarSnapshot:(NSString*)path;  // design checks
+- (BOOL)sidebarScrollerIsOverlay;               // tests (visual parity V1)
 - (void)setTestCookie:(NSString*)name value:(NSString*)value url:(NSString*)url session:(BOOL)session done:(void (^)(BOOL ok))done;  // tests
 - (void)testCookieDetailsForURL:(NSString*)url done:(void (^)(NSArray<NSDictionary*>*))done;  // tests
 - (void)testDeleteCookiesForURL:(NSString*)url done:(void (^)(void))done;                      // tests

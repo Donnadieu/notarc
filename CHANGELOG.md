@@ -3,6 +3,11 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- The sidebar never shows a scrollbar track, even with a mouse plugged in or "Show scroll bars: Always" set in macOS;
+  a thin scroller appears only while you scroll a long list, as in Arc. Tab rows now reach their full width, so the
+  selected row's right corners are rounded.
+
 ## 0.26.1
 - The Dock shows NotArc's own icon (the gold "¬" on indigo, the same one Finder shows) instead of a colourway from
   the icon picker. It's now the first choice in Settings > Appearance and the default; a colourway saved by an older

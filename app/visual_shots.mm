@@ -1,0 +1,222 @@
+// Hidden design renders for the visual parity checklist. See visual_shots.h for the plan format.
+#import "app/visual_shots.h"
+
+#include <dlfcn.h>
+#include <objc/runtime.h>
+#include <cstdio>
+#include <string>
+
+#import "app/arc_import.h"
+#import "app/main_window.h"
+#import "app/settings.h"
+
+static const CGFloat kOffscreen = -30000;
+static NSSize gSize = {1280, 820};
+
+BOOL VisualShotsRequested(int argc, char* argv[], NSString** planPath) {
+  for (int i = 1; i < argc; ++i)
+    if (std::string(argv[i]).rfind("--visual-shots=", 0) == 0) {
+      if (planPath) *planPath = [NSString stringWithUTF8String:argv[i] + strlen("--visual-shots=")];
+      return YES;
+    }
+  return NO;
+}
+
+// macOS keeps windows on a screen; renders need them far away from every screen, so frames pass through as asked.
+static NSRect PassThroughConstrain(id, SEL, NSRect r, NSScreen*) { return r; }
+
+void VisualShotsPrepareWindow(NSWindow* window) {
+  class_replaceMethod(window.class, @selector(constrainFrameRect:toScreen:), (IMP)PassThroughConstrain,
+                      "{CGRect={CGPoint=dd}{CGSize=dd}}@:{CGRect={CGPoint=dd}{CGSize=dd}}@");
+  [window setFrame:NSMakeRect(kOffscreen, kOffscreen, gSize.width, gSize.height) display:NO];
+}
+
+void VisualShotsKeepOffscreen(MainWindowController* controller) {
+  NSWindow* main = controller.window;
+  if (NSMinX(main.frame) > kOffscreen / 3) [main setFrameOrigin:NSMakePoint(kOffscreen, kOffscreen)];
+  static NSMutableSet<Class>* patched = [NSMutableSet set];
+  for (NSWindow* w in NSApp.windows) {
+    if (![patched containsObject:w.class]) {
+      [patched addObject:w.class];
+      class_replaceMethod(w.class, @selector(constrainFrameRect:toScreen:), (IMP)PassThroughConstrain,
+                          "{CGRect={CGPoint=dd}{CGSize=dd}}@:{CGRect={CGPoint=dd}{CGSize=dd}}@");
+    }
+    BOOL off = NSMaxX(w.frame) < kOffscreen / 3;
+    w.alphaValue = off ? 1 : 0.01;  // anything that ever lands on a screen stays invisible
+    w.ignoresMouseEvents = YES;
+  }
+}
+
+typedef CGImageRef (*WindowImageFn)(CGRect, CGWindowListOption, CGWindowID, CGWindowImageOption);
+
+static CGImageRef CopyWindowImage(NSWindow* w) {
+  static WindowImageFn fn = (WindowImageFn)dlsym(RTLD_DEFAULT, "CGWindowListCreateImage");
+  if (!fn) return NULL;
+  return fn(CGRectNull, kCGWindowListOptionIncludingWindow, (CGWindowID)w.windowNumber,
+            kCGWindowImageBoundsIgnoreFraming | kCGWindowImageBestResolution);
+}
+
+static BOOL WritePNG(CGImageRef img, NSString* path) {
+  NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithCGImage:img];
+  return [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES];
+}
+
+// The main window plus every offscreen panel above it (command bar, popovers, hover cards), drawn where they sit.
+static BOOL ShootWindow(MainWindowController* c, NSString* path) {
+  NSWindow* main = c.window;
+  CGImageRef base = CopyWindowImage(main);
+  if (!base) return NO;
+  CGFloat scale = main.backingScaleFactor ?: 2;
+  size_t W = CGImageGetWidth(base), H = CGImageGetHeight(base);
+  CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
+  CGContextRef ctx = CGBitmapContextCreate(NULL, W, H, 8, 0, cs, kCGImageAlphaPremultipliedLast);
+  CGColorSpaceRelease(cs);
+  CGContextDrawImage(ctx, CGRectMake(0, 0, W, H), base);
+  CGImageRelease(base);
+  int children = 0;
+  NSMutableArray<NSWindow*>* order = [NSMutableArray array];
+  for (NSNumber* n in [NSWindow windowNumbersWithOptions:0].reverseObjectEnumerator) {  // back to front
+    NSWindow* w = [NSApp windowWithWindowNumber:n.integerValue];
+    if (w && w != main) [order addObject:w];
+  }
+  for (NSWindow* w in NSApp.windows)
+    if (w != main && ![order containsObject:w]) [order addObject:w];
+  for (NSWindow* w in order) {
+    if (!w.isVisible || NSMaxX(w.frame) > kOffscreen / 3 || w.alphaValue < 0.9) continue;
+    if (!NSIntersectsRect(NSInsetRect(main.frame, -400, -400), w.frame)) continue;
+    CGImageRef ci = CopyWindowImage(w);
+    if (!ci) continue;
+    CGFloat x = (NSMinX(w.frame) - NSMinX(main.frame)) * scale, y = (NSMinY(w.frame) - NSMinY(main.frame)) * scale;
+    CGContextDrawImage(ctx, CGRectMake(x, y, CGImageGetWidth(ci), CGImageGetHeight(ci)), ci);
+    CGImageRelease(ci);
+    children++;
+  }
+  CGImageRef out = CGBitmapContextCreateImage(ctx);
+  CGContextRelease(ctx);
+  BOOL ok = WritePNG(out, path);
+  CGImageRelease(out);
+  std::printf("VISUAL shot %s %s %zux%zu panels=%d\n", path.lastPathComponent.UTF8String, ok ? "ok" : "failed", W, H,
+              children);
+  return ok;
+}
+
+static ArcItem* FindTab(ArcSpace* space, NSString* text) {
+  for (ArcItem* t in space.allTabs)
+    if ([t.url containsString:text] || [t.displayTitle containsString:text]) return t;
+  return nil;
+}
+
+@interface VisualPlan : NSObject
+@property(nonatomic, weak) MainWindowController* controller;
+@property(nonatomic, strong) NSArray<NSString*>* lines;
+@property(nonatomic) NSUInteger next;
+@property(nonatomic, copy) NSString* outDir;
+- (void)step;
+@end
+
+@implementation VisualPlan
+- (void)after:(double)sec {
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(sec * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [self step];
+  });
+}
+- (void)step {
+  MainWindowController* c = self.controller;
+  if (!c) return;
+  while (self.next < self.lines.count) {
+    NSString* line = [self.lines[self.next++] stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    if (!line.length || [line hasPrefix:@"#"]) continue;
+    NSRange sp = [line rangeOfString:@" "];
+    NSString* cmd = sp.location == NSNotFound ? line : [line substringToIndex:sp.location];
+    NSString* arg = sp.location == NSNotFound ? @"" : [[line substringFromIndex:sp.location + 1]
+                                                         stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    NSArray<NSString*>* args = [arg componentsSeparatedByString:@" "];
+    std::printf("VISUAL %s\n", line.UTF8String);
+    std::fflush(stdout);
+    if ([cmd isEqual:@"wait"]) { [self after:arg.doubleValue]; return; }
+    if ([cmd isEqual:@"out"]) {
+      self.outDir = arg.stringByExpandingTildeInPath;
+      [NSFileManager.defaultManager createDirectoryAtPath:self.outDir withIntermediateDirectories:YES attributes:nil error:nil];
+    } else if ([cmd isEqual:@"size"] && args.count >= 2) {
+      gSize = NSMakeSize(args[0].doubleValue, args[1].doubleValue);
+      [c.window setFrame:NSMakeRect(kOffscreen, kOffscreen, gSize.width, gSize.height) display:YES];
+    } else if ([cmd isEqual:@"appearance"]) {
+      NSApp.appearance = [arg isEqual:@"dark"]    ? [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]
+                         : [arg isEqual:@"light"] ? [NSAppearance appearanceNamed:NSAppearanceNameAqua]
+                                                  : nil;
+    } else if ([cmd isEqual:@"space"]) {
+      NSUInteger i = (NSUInteger)arg.integerValue;
+      if (i < c.spaces.count) [c switchToSpace:c.spaces[i]];
+    } else if ([cmd isEqual:@"theme"] && args.count >= 3) {
+      NSUInteger i = (NSUInteger)args[0].integerValue;
+      NSArray* colors = [args subarrayWithRange:NSMakeRange(1, args.count - 2)];
+      if (i < c.spaces.count) [c setTheme:colors intensity:args.lastObject.doubleValue forSpace:c.spaces[i]];
+    } else if ([cmd isEqual:@"open"]) {
+      [c openInNewTab:arg];
+    } else if ([cmd isEqual:@"show"]) {
+      ArcItem* t = FindTab(c.currentSpace, arg);
+      if (t) [c showItem:t];
+      std::printf("VISUAL show %s\n", t ? t.url.UTF8String : "not found");
+    } else if ([cmd isEqual:@"load"]) {
+      [c openTabsForSelfTest:(NSUInteger)arg.integerValue];
+    } else if ([cmd isEqual:@"do"]) {
+      SEL s = NSSelectorFromString(arg);
+      if ([c respondsToSelector:s]) [NSApp sendAction:s to:c from:nil];
+      else std::printf("VISUAL no action %s\n", arg.UTF8String);
+    } else if ([cmd isEqual:@"setting"] && args.count >= 2) {
+      SettingSetBool(args[0], args[1].boolValue);
+    } else if ([cmd isEqual:@"cmdbar"] || [cmd isEqual:@"cmdbar-current"]) {
+      [c showCommandBarForNewTab:[cmd isEqual:@"cmdbar"]];
+      if ([cmd isEqual:@"cmdbar"] && arg.length) {
+        NSTextField* f = [c valueForKey:@"_commandField"];
+        f.stringValue = arg;
+        [(id<NSTextFieldDelegate>)c controlTextDidChange:[NSNotification notificationWithName:NSControlTextDidChangeNotification
+                                                                                       object:f]];
+      }
+    } else if ([cmd isEqual:@"kv"]) {  // print a value, e.g. kv _sidebarScroll.contentView.frame
+      id val = nil;
+      @try {
+        val = [c valueForKeyPath:arg];
+      } @catch (NSException* e) {
+        val = e.reason;
+      }
+      std::printf("VISUAL kv %s = %s\n", arg.UTF8String, [val description].UTF8String ?: "nil");
+    } else if ([cmd isEqual:@"close-cmdbar"]) {
+      [c hideCommandBar];
+    } else if ([cmd isEqual:@"shot"]) {
+      ShootWindow(c, [self.outDir stringByAppendingPathComponent:[arg stringByAppendingString:@".png"]]);
+    } else if ([cmd isEqual:@"sidebar"]) {
+      NSString* p = [self.outDir stringByAppendingPathComponent:[arg stringByAppendingString:@".png"]];
+      std::printf("VISUAL sidebar %s %s\n", arg.UTF8String, [c writeSidebarSnapshot:p] ? "ok" : "failed");
+    } else if ([cmd isEqual:@"quit"]) {
+      std::printf("VISUAL done\n");
+      std::fflush(stdout);
+      [c closeAllBrowsers];
+      return;
+    } else {
+      std::printf("VISUAL unknown command %s\n", cmd.UTF8String);
+    }
+    std::fflush(stdout);
+  }
+  std::printf("VISUAL done\n");
+  std::fflush(stdout);
+  [c closeAllBrowsers];
+}
+@end
+
+static VisualPlan* gPlan;
+
+void VisualShotsRun(MainWindowController* controller, NSString* planPath) {
+  NSString* text = [NSString stringWithContentsOfFile:planPath encoding:NSUTF8StringEncoding error:nil];
+  if (!text) {
+    std::printf("VISUAL no plan at %s\n", planPath.UTF8String);
+    std::fflush(stdout);
+    [controller closeAllBrowsers];
+    return;
+  }
+  gPlan = [VisualPlan new];
+  gPlan.controller = controller;
+  gPlan.lines = [text componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet];
+  gPlan.outDir = planPath.stringByDeletingLastPathComponent;
+  [gPlan step];
+}

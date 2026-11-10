@@ -19,6 +19,8 @@ list(APPEND CEF_COMPILER_FLAGS -fobjc-arc)
 
 set(APP_SRCS
   app/main.mm
+  app/visual_shots.h
+  app/visual_shots.mm
   app/tab_thumbnails.h
   app/tab_thumbnails.mm
   app/arc_import.h

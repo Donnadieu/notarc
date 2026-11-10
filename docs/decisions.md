@@ -425,3 +425,14 @@ trackpad; everything else is checked by the hidden self-test.
     sites may still ask to sign in again (sessions tied to a device or an IP address). Saved passwords NotArc already
     has are counted as "already here" rather than shown as 0 added.
 
+## 2026-11-10: visual parity with Arc
+
+101. **"Done" now means it looks like Arc, not only that it works.** `docs/visual-parity.md` lists every screen and
+    state (66 items) with what Arc does and the reference used. A box is ticked only after a hidden render of NotArc
+    matches the reference. Arc is never launched for this: the references are Omar's own Arc screenshots, Arc's
+    colours and labels, Arc's help pages and public screenshots and videos.
+102. **Hidden renders are a built-in switch, `--visual-shots=<plan>`.** It runs with the self-test's isolation and
+    keeps the window 30,000 pt off screen at full opacity, so each check is a PNG and no window ever shows. It's kept
+    in the app (not a local patch) because every visual item needs it, before and after.
+103. **The sidebar scroller is always the overlay kind (V1).** macOS switches scroll views to the always-visible style
+    when a mouse is attached; Arc's sidebar never shows a track, so the sidebar's scroll view refuses that switch.

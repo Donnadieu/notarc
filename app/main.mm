@@ -11,6 +11,7 @@
 #import "app/tidy_title.h"
 #import "app/global_hotkey.h"
 #import "app/email_peek.h"
+#import "app/visual_shots.h"
 #import "app/web_notifications.h"
 #import "app/calendar_preview.h"
 #import "app/main_window_max.h"
@@ -84,6 +85,7 @@
 @property(nonatomic) BOOL selfTest;
 @property(nonatomic) BOOL selfTestReload;  // phase 2: reopen the saved store, no actions
 @property(nonatomic, copy) NSString* snapshotPath;  // --sidebar-snapshot=<png>: hidden run that renders the sidebar and quits
+@property(nonatomic, copy) NSString* visualPlan;  // --visual-shots=<plan>: hidden design renders (app/visual_shots.h)
 @property(nonatomic, copy) NSString* pendingSource;
 @property(nonatomic, strong) NSMutableArray<NSString*>* pendingURLs;  // links that arrived before the window
 @end
@@ -594,6 +596,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     self.window.window.alphaValue = 0.01;
     self.window.window.ignoresMouseEvents = YES;
+    if (self.visualPlan) VisualShotsPrepareWindow(self.window.window);
   }
   [self.window showWindow:nil];
   [self.window createBrowsers];
@@ -608,12 +611,20 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
     // so a test never shows up on screen or takes focus. Chromium is told not to throttle hidden windows.
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     [NSTimer scheduledTimerWithTimeInterval:0.05 repeats:YES block:^(NSTimer*) {
+      if (self.visualPlan) {
+        VisualShotsKeepOffscreen(self.window);
+        return;
+      }
       for (NSWindow* win in NSApp.windows) {
         if (win.alphaValue > 0.011) win.alphaValue = 0.01;
         win.ignoresMouseEvents = YES;
       }
     }];
     [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
+    if (self.visualPlan) {
+      VisualShotsRun(self.window, self.visualPlan);
+      return;
+    }
     if (self.snapshotPath) {
       ArcSpace* busiest = self.window.currentSpace;
       for (ArcSpace* s in self.window.spaces)
@@ -1933,8 +1944,8 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           [[NSFileManager defaultManager] removeItemAtPath:saved error:nil];
         }
       }
-      std::printf("SELFTEST-SIDEBARLOOK grid=%d defaultTheme=%d\n", gridOK,
-                  w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown);
+      std::printf("SELFTEST-SIDEBARLOOK grid=%d defaultTheme=%d noScrollTrack=%d\n", gridOK,
+                  w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown, w.sidebarScrollerIsOverlay);
       if (!rowsOK) std::printf("SELFTEST-ROWS-DEBUG sel=[%s] hov=[%s] off=[%s]\n", selStyle.UTF8String, hovStyle.UTF8String, offStyle.UTF8String);
       [w toggleFocusMode:nil];
       NSRect ff = w.pageCardFrame;
@@ -4605,7 +4616,7 @@ int main(int argc, char* argv[]) {
   static char noMacOcclusion[] = "--disable-features=MacWebContentsOcclusion";  // pages in hidden test windows stay "visible"
   for (int i = 1; i < argc; ++i)
     if (std::string(argv[i]) == "--selftest" || std::string(argv[i]) == "--selftest-reload" ||
-        std::string(argv[i]).rfind("--sidebar-snapshot=", 0) == 0) {
+        std::string(argv[i]).rfind("--sidebar-snapshot=", 0) == 0 || std::string(argv[i]).rfind("--visual-shots=", 0) == 0) {
       args.push_back(mockKeychain);
       args.push_back(autoplay);
       args.push_back(fakeDevices);
@@ -4654,6 +4665,8 @@ int main(int argc, char* argv[]) {
     BOOL selfTestReload = NO;
     for (int i = 1; i < argc; ++i)
       if (std::string(argv[i]) == "--selftest-reload") selfTest = selfTestReload = YES;
+    NSString* visualPlan = nil;
+    if (VisualShotsRequested(argc, argv, &visualPlan)) selfTest = YES;  // same isolation as the self-test
     NSString* snapshotPath = nil;
     for (int i = 1; i < argc; ++i)
       if (std::string(argv[i]).rfind("--sidebar-snapshot=", 0) == 0) {
@@ -4684,6 +4697,7 @@ int main(int argc, char* argv[]) {
     delegate.selfTest = selfTest;
     delegate.selfTestReload = selfTestReload;
     delegate.snapshotPath = snapshotPath;
+    delegate.visualPlan = visualPlan;
     NSApp.delegate = delegate;
     [delegate performSelectorOnMainThread:@selector(start) withObject:nil waitUntilDone:NO];
 

@@ -381,7 +381,9 @@ static BOOL IsDark(NSView* v) {
     CGFloat inset = (kRowPitch - kRowHeight) / 2;
     return NSMakeRect(0, self.flipped ? self.bounds.size.height - kRowPitch + inset : inset, self.bounds.size.width, kRowHeight);
   }
-  return NSInsetRect(self.bounds, 0, (self.bounds.size.height - kRowHeight) / 2);
+  NSRect r = NSInsetRect(self.bounds, 0, (self.bounds.size.height - kRowHeight) / 2);
+  r.size.width -= 2;  // Arc: the row pill ends 2 pt short of the address pill (x 8-262 vs 8-264)
+  return r;
 }
 - (void)drawBackgroundInRect:(NSRect)r {
   if (self.separatorAbove) {  // Arc: SidebarSeparator, 15% white (dark) / black (light)
@@ -401,10 +403,29 @@ static BOOL IsDark(NSView* v) {
 }
 @end
 
+// Arc's sidebar never shows a scrollbar track, even with a mouse attached or "Show scroll bars: Always": the
+// scroller is always the thin overlay kind and only appears while you scroll a list that doesn't fit.
+@interface SidebarScroller : NSScroller
+@end
+@implementation SidebarScroller
++ (BOOL)isCompatibleWithOverlayScrollers { return YES; }
+@end
+@interface SidebarScrollView : NSScrollView
+@end
+@implementation SidebarScrollView
+- (void)setScrollerStyle:(NSScrollerStyle)style { [super setScrollerStyle:NSScrollerStyleOverlay]; }
+@end
+
 // Arc doesn't indent top-level tabs under the Pinned/Today headers; only folder contents are indented.
 @interface SidebarOutlineView : NSOutlineView
 @end
 @implementation SidebarOutlineView
+// Rows are exactly as wide as the visible sidebar (no hidden scroller gutter), so the pill's right corners show.
+- (void)setFrameSize:(NSSize)size {
+  NSClipView* clip = (NSClipView*)self.superview;
+  if ([clip isKindOfClass:NSClipView.class] && clip.bounds.size.width > 0) size.width = clip.bounds.size.width;
+  [super setFrameSize:size];
+}
 // Arc has no disclosure triangles: folders show their own chevron and toggle on click.
 - (NSRect)frameOfOutlineCellAtRow:(NSInteger)row { return NSZeroRect; }
 - (void)mouseDown:(NSEvent*)e {
@@ -1108,11 +1129,14 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   [sidebar addSubview:_favGrid];
   [self updateSpaceHeader];
 
-  NSScrollView* scroll = [[NSScrollView alloc]
+  NSScrollView* scroll = [[SidebarScrollView alloc]
       initWithFrame:NSMakeRect(8, 42, kSidebarWidth - 17, bounds.size.height - 166)];
   scroll.autoresizingMask = NSViewHeightSizable;
   scroll.drawsBackground = NO;
+  scroll.verticalScroller = [SidebarScroller new];
   scroll.hasVerticalScroller = YES;
+  scroll.hasHorizontalScroller = NO;
+  scroll.autohidesScrollers = YES;
   scroll.scrollerStyle = NSScrollerStyleOverlay;
   scroll.automaticallyAdjustsContentInsets = NO;
   _sidebarScroll = scroll;
@@ -6066,6 +6090,11 @@ static ArcItem* NewSection(NSString* title) {
 }
 - (IBAction)setSpaceAppearance:(NSMenuItem*)sender { [self setColorScheme:sender.representedObject forSpace:_space]; }
 - (BOOL)sidebarIsDark { return IsDark(_sidebarScroll); }  // tests
+- (BOOL)sidebarScrollerIsOverlay {  // tests: no track, even after the system asks for the legacy (always shown) style
+  _sidebarScroll.scrollerStyle = NSScrollerStyleLegacy;
+  return _sidebarScroll.scrollerStyle == NSScrollerStyleOverlay && _sidebarScroll.autohidesScrollers &&
+         !_sidebarScroll.hasHorizontalScroller && NSWidth(_outline.frame) <= NSWidth(_sidebarScroll.contentView.bounds);
+}
 
 - (void)applyTheme {
   [self applyColorScheme];
