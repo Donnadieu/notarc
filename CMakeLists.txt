@@ -149,6 +149,9 @@ COPY_MAC_FRAMEWORK("${APP_NAME}" "${CEF_BINARY_DIR}" "${APP_BUNDLE}")
 # AppleScript dictionary (#76).
 add_custom_command(TARGET ${APP_NAME} POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/app/NotArc.sdef" "${APP_BUNDLE}/Contents/Resources/NotArc.sdef")
+# App icon (assets/brand has the Claude Design source SVGs).
+add_custom_command(TARGET ${APP_NAME} POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_CURRENT_SOURCE_DIR}/app/NotArc.icns" "${APP_BUNDLE}/Contents/Resources/NotArc.icns")
 
 # CEF needs one helper bundle per process type (renderer, GPU, ...).
 foreach(_suffix_list ${CEF_HELPER_APP_SUFFIXES})
