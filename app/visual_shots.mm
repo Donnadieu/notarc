@@ -160,6 +160,42 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
       ArcItem* t = FindTab(c.currentSpace, arg);
       if (t) [c showItem:t];
       std::printf("VISUAL show %s\n", t ? t.url.UTF8String : "not found");
+    } else if ([cmd isEqual:@"split"] && args.count >= 2) {  // split <url> <url> [<url> ...]
+      [c openSplitFromText:[args componentsJoinedByString:@"\n"]];
+    } else if ([cmd isEqual:@"newspace"]) {
+      ArcSpace* s = [c createSpaceNamed:arg.length ? arg : @"Empty"];
+      if (s) [c switchToSpace:s];
+    } else if ([cmd isEqual:@"peek-sidebar"]) {
+      if (!c.sidebarHidden) [c toggleSidebar:nil];
+      [c beginSidebarPeekForTest];
+    } else if ([cmd isEqual:@"loading"]) {
+      if (c.shownItem) [c setItem:c.shownItem loadingForTest:![arg isEqual:@"0"]];
+    } else if ([cmd isEqual:@"inactive"]) {
+      [c sidebarDimmedForTest:![arg isEqual:@"0"]];
+    } else if ([cmd isEqual:@"hover-today"]) {
+      SEL s = NSSelectorFromString(@"setSidebarHoverRow:");
+      NSOutlineView* ov = [c valueForKey:@"_outline"];
+      NSInteger row = [ov rowForItem:c.currentSpace.unpinned];
+      ((void (*)(id, SEL, NSInteger))[c methodForSelector:s])(c, s, row);
+    } else if ([cmd isEqual:@"peek"]) {
+      [c openPeek:arg];
+      // macOS moves a window onto a screen when it's first ordered in; put the Peek back where it was asked to be.
+      NSWindowController* pk = [c valueForKey:@"_peek"];
+      NSView* content = [c valueForKey:@"_content"];
+      NSRect card = [c.window convertRectToScreen:[content convertRect:content.bounds toView:nil]];
+      [pk.window setFrame:NSMakeRect(NSMinX(card) + card.size.width * 0.05, NSMinY(card) + card.size.height * 0.04,
+                                     card.size.width * 0.90, card.size.height * 0.96 - 8)
+                  display:YES];
+    } else if ([cmd isEqual:@"close-peek"]) {
+      [c closePeek];
+    } else if ([cmd isEqual:@"toast"]) {
+      SEL s = NSSelectorFromString(@"showToast:action:selector:");
+      ((void (*)(id, SEL, id, id, SEL))[c methodForSelector:s])(c, s, arg, @"Undo", NSSelectorFromString(@"hideToast"));
+    } else if ([cmd isEqual:@"find"]) {
+      [c findInPage:nil];
+      NSTextField* f = [c valueForKey:@"_findField"];
+      f.stringValue = arg;
+      [c findText:arg forward:YES];
     } else if ([cmd isEqual:@"hover"]) {
       ArcItem* t = arg.length ? FindTab(c.currentSpace, arg) : nil;
       [c hoverSidebarItem:t];

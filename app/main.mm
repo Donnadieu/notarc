@@ -1164,6 +1164,11 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       std::printf("SELFTEST-BASICS afterBack=%s zoomReset=%.1f\n", [w currentURL].UTF8String, [w currentZoomLevel]);
       [w findText:@"domain" forward:YES];
       WaitUntil(^{ return (BOOL)(w.lastFindCount > 0); }, 5, ^{
+        [w findInPage:nil];  // Visual parity V35: Arc's floating find bar at the card's top-right
+        NSString* fb = w.findBarStyle;
+        [w closeFindBar:nil];
+        std::printf("SELFTEST-FINDBAR arcStyle=%d\n", [fb isEqual:@"buttons=3 card=1 corner=1"]);
+        if (![fb isEqual:@"buttons=3 card=1 corner=1"]) std::printf("SELFTEST-FINDBAR-DEBUG %s\n", fb.UTF8String);
         [w copyCurrentURLAsMarkdown:nil];
         std::printf("SELFTEST-BASICS findDomainCount=%d markdown=%s\n", w.lastFindCount,
                     [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString].UTF8String);
@@ -1502,6 +1507,10 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                   [w shouldPeekFromItem:today toURL:@"https://en.wikipedia.org/wiki/Peek"]);
       [w openPeek:@"https://example.net/peeked"];
       BOOL open = [w isPeeking];
+      NSString* peekStyle = w.peekStyle;  // Visual parity V39: Arc's floating card, no title bar, page dimmed
+      BOOL peekLook = [peekStyle isEqual:@"peek=1 titlebar=0 radius=10 buttons=2 clear=1 scrim=1"];
+      std::printf("SELFTEST-PEEKLOOK card=%d\n", peekLook);
+      if (!peekLook) std::printf("SELFTEST-PEEKLOOK-DEBUG %s\n", peekStyle.UTF8String);
       [w promotePeekToTab];
       std::printf("SELFTEST-PEEK opened=%d afterPromote=%d promotedInSidebar=%d\n", open, [w isPeeking],
                   [w tabWithURLPrefix:@"https://example.net/peeked"] != nil);
@@ -1677,7 +1686,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       NSString* offStyle = otherTab ? [w sidebarRowStyleForItem:otherTab] : @"";
       BOOL rowsOK = [selStyle hasPrefix:@"h=36 r=8 sel=1"] && [hovStyle containsString:@"hover=1"] &&
                     [offStyle hasSuffix:@"alpha=0.00"];
-      {  // Visual parity V2: close button on the hovered row only, long titles fade (no "...").
+      {  // Visual parity V2: close button on the hovered row only, long titles end in "..." as in Arc 1.169.
         NSString* selAcc = shownTab ? [w tabRowAccessoriesForItem:shownTab] : @"";
         [w hoverSidebarItem:otherTab];
         NSString* hovAcc = otherTab ? [w tabRowAccessoriesForItem:otherTab] : @"";
@@ -1694,11 +1703,10 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         longTab.renamed = YES;
         [w reloadSidebarItemForTest:longTab];
         NSString* longAcc = longTab ? [w tabRowAccessoriesForItem:longTab] : @"";
-        BOOL fade = [longAcc containsString:@"fade=1 clip=1"];
+        BOOL fade = [longAcc containsString:@"ellipsis=1"];  // Arc 1.169: long titles end in "..."
         longTab.title = savedTitle;
         longTab.renamed = savedRenamed;
         [w reloadSidebarItemForTest:longTab];
-        BOOL shortNoFade = [[w tabRowAccessoriesForItem:longTab] containsString:@"fade=0"] || longTab.displayTitle.length > 30;
         // The close button on a row that isn't shown closes that tab (archived) and leaves the shown tab alone.
         NSUInteger todayBefore = w.currentSpace.unpinned.children.count;
         [w openInNewTab:@"https://closebutton.example/" background:YES];
@@ -1708,8 +1716,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         BOOL pressed = extra && [w pressCloseButtonOfItem:extra];
         BOOL closeOther = pressed && w.shownItem == shownTab && w.currentSpace.unpinned.children.count == todayBefore &&
                           ![w.currentSpace.unpinned.children containsObject:extra];
-        std::printf("SELFTEST-TABROWS closeShown=%d room=%d fade=%d shortNoFade=%d closeOther=%d\n", closeShown, room, fade,
-                    shortNoFade, closeOther);
+        std::printf("SELFTEST-TABROWS closeShown=%d room=%d ellipsis=%d closeOther=%d\n", closeShown, room, fade, closeOther);
         if (!closeShown || !room || !fade)
           std::printf("SELFTEST-TABROWS-DEBUG sel=[%s] hov=[%s] off=[%s] long=[%s]\n", selAcc.UTF8String, hovAcc.UTF8String,
                       offAcc.UTF8String, longAcc.UTF8String);
@@ -1982,8 +1989,45 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           [[NSFileManager defaultManager] removeItemAtPath:saved error:nil];
         }
       }
-      std::printf("SELFTEST-SIDEBARLOOK grid=%d defaultTheme=%d noScrollTrack=%d\n", gridOK,
-                  w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown, w.sidebarScrollerIsOverlay);
+      [w showItem:shownTab];
+      NSString* pillIdle = w.pillButtonState;
+      [w setPillHoveredForTest:YES];
+      NSString* pillHover = w.pillButtonState;
+      [w setPillHoveredForTest:NO];
+      BOOL pillButtons = ([pillIdle hasPrefix:@"0/"] || ([pillIdle hasPrefix:@"1/"] && [w.boostIndicatorState isEqual:@"on"])) && [pillHover componentsSeparatedByString:@"/"].firstObject.integerValue >= 2 &&
+                         [[pillHover componentsSeparatedByString:@"/"].firstObject isEqual:[pillHover componentsSeparatedByString:@"/"].lastObject];
+      std::printf("SELFTEST-SIDEBARLOOK grid=%d defaultTheme=%d noScrollTrack=%d dots=%d pillButtons=%d\n", gridOK,
+                  w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown, w.sidebarScrollerIsOverlay,
+                  w.spaceDotsAreArcStyle, pillButtons);
+      if (!pillButtons) std::printf("SELFTEST-SIDEBARLOOK-DEBUG pill idle=%s hover=%s\n", pillIdle.UTF8String, pillHover.UTF8String);
+      {  // Visual parity V8, V9, V17, V23: inactive dimming, loading spinner + glow, Today's Clear, the floating sidebar.
+        BOOL dim = [w sidebarDimmedForTest:YES];
+        BOOL undim = ![w sidebarDimmedForTest:NO];
+        [w showItem:shownTab];
+        [w setItem:shownTab loadingForTest:YES];
+        NSString* loadOn = [w loadingIndicatorStateForItem:shownTab];
+        [w setItem:shownTab loadingForTest:NO];
+        NSString* loadOff = [w loadingIndicatorStateForItem:shownTab];
+        BOOL spinner = [loadOn isEqual:@"spinner=1 icon=0 glow=1"] && [loadOff isEqual:@"spinner=0 icon=1 glow=0"];
+        NSString* clear = w.todayClearState;
+        BOOL clearOK = w.currentSpace.unpinned.children.count == 0 || [clear isEqual:@"before=0 during=1 after=0"];
+        BOOL wasHidden = w.sidebarHidden;
+        if (!wasHidden) [w toggleSidebar:nil];
+        NSString* strip = w.sidebarPeekState;
+        [w beginSidebarPeekForTest];
+        NSString* peek = w.sidebarPeekState;
+        [w endSidebarPeekForTest];
+        NSString* after = w.sidebarPeekState;
+        if (!wasHidden) [w toggleSidebar:nil];
+        BOOL peekOK = [strip hasPrefix:@"peeking=0 strip=1"] && [peek hasPrefix:@"peeking=1 strip=0 floating=1 radius=10"] &&
+                      [peek hasSuffix:@"cardFull=1"] && [after hasPrefix:@"peeking=0 strip=1"] && w.sidebarHidden == wasHidden &&
+                      !w.sidebarHidden;
+        std::printf("SELFTEST-SIDEBARSTATES inactiveDim=%d activeFull=%d spinner=%d clear=%d peek=%d\n", dim, undim, spinner, clearOK,
+                    peekOK);
+        if (!spinner || !clearOK || !peekOK)
+          std::printf("SELFTEST-SIDEBARSTATES-DEBUG load=[%s][%s] clear=[%s] peek=[%s][%s][%s]\n", loadOn.UTF8String, loadOff.UTF8String,
+                      clear.UTF8String, strip.UTF8String, peek.UTF8String, after.UTF8String);
+      }
       if (!rowsOK) std::printf("SELFTEST-ROWS-DEBUG sel=[%s] hov=[%s] off=[%s]\n", selStyle.UTF8String, hovStyle.UTF8String, offStyle.UTF8String);
       [w toggleFocusMode:nil];
       NSRect ff = w.pageCardFrame;
@@ -2172,19 +2216,17 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
             {  // Visual parity V3: Arc's mini player card (what's playing, the site, back/play/forward, mute on hover).
               [w pollMediaNow];
               NSString* card = w.mediaCardDescription;
-              BOOL meta = [card containsString:@"title=Test Track subtitle=Test Artist"];
-              BOOL buttons = [card containsString:@"prev=0 play=1 next=1"];
-              BOOL muteHidden = [card containsString:@"mute=0"];
-              [w setMediaCardHoveredForTest:YES];
-              BOOL muteOnHover = [w.mediaCardDescription containsString:@"mute=1"];
-              [w setMediaCardHoveredForTest:NO];
-              BOOL size = [card hasPrefix:@"h=48"] && [card hasSuffix:@"art=1"];
+              BOOL meta = [card containsString:@"title=Test Track subtitle=Test Artist"] &&
+                          [card containsString:@"tip=Test Track — Test Artist"];
+              BOOL buttons = [card containsString:@"prev=1 play=1 next=1 mute=1"];
+              BOOL noText = [card hasSuffix:@"text=0"];  // Arc shows no text in the bar
+              BOOL size = [card hasPrefix:@"h=32"] && [card containsString:@"art=1"];
               BOOL clock = [MediaBarTitle(@"brain.fm (2:52)") isEqualToString:@"brain.fm"] &&
                            [MediaBarTitle(@"\u25B6 Song - Artist 1:02 / 3:40") isEqualToString:@"Song - Artist"] &&
                            [MediaBarTitle(@"Lisbon - Wikipedia") isEqualToString:@"Lisbon - Wikipedia"];
               [w mediaBarNext:nil];
-              std::printf("SELFTEST-MINIPLAYER meta=%d buttons=%d muteHidden=%d muteOnHover=%d size=%d clock=%d\n", meta, buttons,
-                          muteHidden, muteOnHover, size, clock);
+              std::printf("SELFTEST-MINIPLAYER meta=%d buttons=%d noText=%d size=%d clock=%d\n", meta, buttons, noText, size,
+                          clock);
               if (!meta || !buttons || !size) std::printf("SELFTEST-MINIPLAYER-DEBUG %s\n", card.UTF8String);
             }
             [w toggleMuteItem:m];
@@ -2881,7 +2923,12 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           NSRange wr = [style rangeOfString:@"width="];
           double width = wr.location == NSNotFound ? 0 : [[style substringFromIndex:wr.location + 6] doubleValue];
           BOOL wide = width >= 480 && width <= 780;
-          std::printf("SELFTEST-CMDBARLOOK card=%d centred=%d hint=%d wide=%d\n", card, centred, hint, wide);
+          [w showCommandBarForNewTab:NO];
+          NSString* inPlace = w.commandBarStyle;
+          [w hideCommandBar];
+          BOOL onPill = [inPlace hasSuffix:@"scrim=0 centred=1"];
+          std::printf("SELFTEST-CMDBARLOOK card=%d centred=%d hint=%d wide=%d onPill=%d\n", card, centred, hint, wide, onPill);
+          if (!onPill) std::printf("SELFTEST-CMDBARLOOK-DEBUG cmdL %s\n", inPlace.UTF8String);
           if (!card || !centred || !hint || !wide) std::printf("SELFTEST-CMDBARLOOK-DEBUG %s\n", style.UTF8String);
         }
         std::printf("SELFTEST-SUGGEST goFirst=%d tab=%d space=%d action=%d history=%d topSites=%d switched=%d learned=%d "
@@ -4509,6 +4556,12 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           if (it.isSplit && it.children.count == 3 && it.splitFractions.count == 3 &&
               fabs(it.splitFractions[0].doubleValue - 0.5) < 0.03)
             persisted = YES;
+      {  // Visual parity V19: Arc's split row, one icon + title per pane with slashes, other panes dimmed.
+        NSString* sr = group ? [w splitRowStateForItem:group] : @"";
+        BOOL splitRow = [sr isEqual:@"segments=3 slashes=2 dim=2 single=1"];
+        std::printf("SELFTEST-SPLITROW arcStyle=%d\n", splitRow);
+        if (!splitRow) std::printf("SELFTEST-SPLITROW-DEBUG %s\n", sr.UTF8String);
+      }
       std::printf("SELFTEST-SPLIT3 oneSidebarItem=%d dividers=%lu dragResized=%d persisted=%d\n", oneItem,
                   (unsigned long)dividers, resized, persisted);
       [w closeSplitPane:nil];

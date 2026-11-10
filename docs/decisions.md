@@ -454,3 +454,26 @@ trackpad; everything else is checked by the hidden self-test.
     dimmed in the Space's colour and the selected row is the Space's colour, a shade deeper (Arc blue on the default
     theme). The card is opaque, so the page never shows through. "Switch to Tab" and its arrow show on every open-tab
     row; other rows show Return's action only when selected.
+108. **Omar's own Arc screenshot (Oct 26, 1x, dark) is the first reference for the sidebar.** A hidden NotArc render
+    at the same window height is measured against it pixel by pixel (pill, Favorites rows, divider, rows, media bar,
+    bottom bar all within 2 pt). Where it disagrees with an earlier call, the screenshot wins: long titles end in
+    "..." (replaces 104's fade), and the mini player is Arc's 32 pt icon-and-controls bar with no text (replaces 105's
+    two-line card; title, artist and artwork are still read from the page, for the tooltip and the icon).
+109. **Back and forward in the mini player always show.** Arc shows them for every site; a page without its own
+    previous / next track handler skips 10 s back or forward instead.
+110. **The pill's site buttons show on hover only (V12).** The screenshot shows a bare pill with just the site; the
+    buttons appear when the pointer is over it. A site with a Boost on keeps its Boost button visible, so you can
+    still see the Boost is on.
+111. **The floating sidebar opens from a 6 pt strip at the window's left edge (V23)** and closes a quarter second after
+    the pointer leaves it (not while the command bar is open). It's drawn in the Space's first colour with Arc's
+    rounded corners and shadow; Reduce Motion turns the slide off.
+112. **The loading glow is a short band in the Space's colour sweeping along the card's top edge (V9).** Arc's own
+    glow is a Metal shader we can't copy; this keeps the idea (a moving glow, not a progress bar) with plain Core
+    Animation. Reduce Motion leaves it still.
+113. **Inactive windows dim the sidebar's content to 55% (V8),** the Space colour stays. The window counts as active
+    while it's the main window, so the command bar (a child panel taking key focus) doesn't dim it.
+114. **Cmd+L opens the command bar on the address pill, without dimming (V29);** only Cmd+T (a new tab) gets the big
+    centred bar over a dimmed window. Arc names both placements (top-left and centred); which one dims is our call.
+115. **Peek stays a separate child window, drawn as a card (V39).** It keeps its own browser so Open as Tab still
+    moves the page without reloading; the title bar is hidden and the window is clear around a rounded card, so it
+    looks like Arc's in-window card.

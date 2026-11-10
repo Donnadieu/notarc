@@ -42,6 +42,7 @@
 @property(nonatomic) BOOL mediaPlaying;  // audio or video playing (not saved)
 @property(nonatomic) BOOL mediaPaused;   // has media that was playing and is now paused (not saved)
 @property(nonatomic) BOOL audioMuted;
+@property(nonatomic) BOOL loading;  // the page is loading (not saved): a spinner replaces its icon
 // What the page says is playing (navigator.mediaSession, not saved): shown in the sidebar's mini player.
 @property(nonatomic, copy) NSString* mediaTitle;
 @property(nonatomic, copy) NSString* mediaArtist;

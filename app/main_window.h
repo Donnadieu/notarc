@@ -464,6 +464,22 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (void)deleteSidebarItem:(ArcItem*)item;  // tests
 - (BOOL)writeSidebarSnapshot:(NSString*)path;  // design checks
 - (BOOL)sidebarScrollerIsOverlay;               // tests (visual parity V1)
+- (BOOL)spaceDotsAreArcStyle;                   // tests (V24)
+- (NSString*)navButtonState;                    // tests (V11)
+- (NSString*)pillButtonState;                   // tests (V12)
+- (void)setPillHoveredForTest:(BOOL)hovered;
+- (void)updateNavButtons;
+- (NSString*)sidebarPeekState;                  // tests (V23)
+- (void)beginSidebarPeekForTest;
+- (void)endSidebarPeekForTest;
+- (BOOL)sidebarDimmedForTest:(BOOL)inactive;    // tests (V8)
+- (NSString*)todayClearState;                   // tests (V17)
+- (NSString*)peekStyle;                         // tests (V39)
+- (NSString*)findBarStyle;                      // tests (V35)
+- (IBAction)closeFindBar:(id)sender;
+- (NSString*)splitRowStateForItem:(ArcItem*)split;  // tests (V19)
+- (NSString*)loadingIndicatorStateForItem:(ArcItem*)item;  // tests (V9)
+- (void)setItem:(ArcItem*)item loadingForTest:(BOOL)loading;
 - (NSString*)tabRowAccessoriesForItem:(ArcItem*)item;  // tests (V2): "close=1 fade=1 clip=1 room=1"
 - (BOOL)pressCloseButtonOfItem:(ArcItem*)item;        // tests (V2)
 - (void)reloadSidebarItemForTest:(ArcItem*)item;

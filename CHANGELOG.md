@@ -4,14 +4,28 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Cmd+L (or a click on the address) opens the command bar in place over the address pill, as in Arc; Cmd+T keeps the
+  big centred bar.
+- Peek is Arc's floating card over the dimmed page, with no title bar and round Open as Tab and close buttons.
+- The find bar is a rounded floating bar at the page's top-right with up / down arrows and a close button.
+- Toasts are dark capsules with an icon and a blue text action.
+- With the sidebar hidden, moving the pointer to the window's left edge slides it in as a floating panel over the
+  page, as in Arc; moving away hides it again.
+- Loading tabs show a spinner in place of their icon, and a soft glow in the Space's colour runs along the top of
+  the page while it loads.
+- Split views show in the sidebar as Arc draws them: each pane's icon and title side by side with a thin slash, the
+  pane on screen brighter.
+- Hovering the Today divider shows "Clear", which archives Today's tabs.
+- The sidebar dims its text and icons while the window isn't the active one.
+- Measured against Omar's own Arc screenshot to the pixel: the mini player is Arc's 32 pt bar (site icon, back,
+  play/pause, forward, speaker, no text; hover the icon for what's playing), long tab titles end in "..." as in Arc
+  1.169, the address pill shows its site buttons only while the pointer is over it, back / forward dim when there's
+  nowhere to go, the Space dots are filled (the current one brighter), and the sidebar icons use Arc's brightness.
 - The sidebar never shows a scrollbar track, even with a mouse plugged in or "Show scroll bars: Always" set in macOS;
   a thin scroller appears only while you scroll a long list, as in Arc. Tab rows now reach their full width, so the
   selected row's right corners are rounded.
-- Tab rows look like Arc's: a long title fades out at the right edge instead of ending in "...", and a close button
-  shows on the row under the pointer. Closing a row that isn't shown leaves the shown tab alone.
-- The mini player is now Arc's card: the artwork (or the site's icon), what's playing and the artist or site on two
-  lines, and back, play/pause and forward when the site supports them; mute shows while the pointer is over it.
-  Running clocks in page titles, like "brain.fm (2:52)", are left out.
+- Tab rows show a close button on the row under the pointer. Closing a row that isn't shown leaves the shown tab
+  alone.
 - Archive opens inside the sidebar, as in Arc, instead of a separate table window: a search field and your
   archived tabs grouped by day (Today, Yesterday, weekdays, Last Week, then months), each a normal tab row with the
   time it was archived. Click one to bring it back; Back, Esc or picking a Space closes it.
