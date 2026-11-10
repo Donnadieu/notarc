@@ -12,6 +12,7 @@ or later. From 0.5.0 on, NotArc updates itself.
   sized to the popup, instead of in a tab; Esc or a click outside closes it. After installing, updating, removing or
   turning an extension on or off, a toast offers Relaunch Now (extensions load when NotArc starts, and your tabs come
   back). Installing or importing extensions turns on Chrome-style pages, which extensions need.
+- NotArc has its own app icon: a marigold ¬ on indigo night (source files in assets/brand).
 
 ## 0.25.0
 - Tab thumbnails: sidebar hover cards show a small picture of the page as it last looked, and holding Ctrl+Tab
