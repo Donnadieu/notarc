@@ -4,6 +4,9 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Folders use Arc's open and closed folder icons (open ones in the Space's colour) with bold names and no chevron.
+- Little Windows are framed in the Space's colour with the page as a rounded card, the site's name and an "Open in"
+  capsule on top.
 - Cmd+L (or a click on the address) opens the command bar in place over the address pill, as in Arc; Cmd+T keeps the
   big centred bar.
 - Peek is Arc's floating card over the dimmed page, with no title bar and round Open as Tab and close buttons.

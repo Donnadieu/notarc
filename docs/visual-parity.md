@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-27 done of 66 items.
+30 done of 66 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -69,8 +69,9 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   command bar. Ref: shot, app.
 - [x] **V17 Today and Clear.** Today's tabs under New Tab; hovering the divider shows a small "↓ Clear" at its right
   that archives them. Ref: app (Clear), video.
-- [ ] **V18 Folders.** Folder icon that opens and closes, child rows indented, folder count; nested folders indent
-  again. Ref: app, video.
+- [x] **V18 Folders.** A drawn folder icon that opens (front flap tilted, in the Space's colour) and closes, bold
+  name, no chevron; child rows 16 pt in, nested folders indent again. Arc's video shows no tab count on folders, so
+  there is none. Ref: app, video.
 - [x] **V19 Split view rows.** A split is one row: each pane's icon and title side by side, separated by a thin
   slanted slash (white 30%); the pane on screen is full brightness, the others dimmed. Ref: colours (slash), video.
 - [x] **V20 Hover, selected and pressed states.** Selected white ~20%, hovered previous ~12%, pressed ~6.5%,
@@ -110,15 +111,15 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   Ref: app (hover card), video.
 - [x] **V35 Find in page.** A small rounded floating bar 10 pt in from the page card's top-right: glass, field, match
   count, up / down arrows and a close button. Ref: video.
-- [ ] **V36 Toolbar mode.** View > Show Toolbar puts a thin bar with back/forward/reload and the full address above
+- [x] **V36 Toolbar mode.** View > Show Toolbar puts a thin bar with back/forward/reload and the full address above
   the page. Ref: app.
 
 ## Split view, Little Arc, Peek
 
 - [x] **V37 Split panes on the page.** Each pane is its own rounded card with a small gap; the focused pane has a
   subtle outline. Ref: video, app.
-- [ ] **V38 Little Arc window.** A small window with a thin top bar (domain, Space colour) and an "Open in" button;
-  no sidebar. Ref: help (Little Arc), app.
+- [x] **V38 Little Arc window.** A small window framed in the Space's colour, the page as a rounded card, a thin top
+  bar with the site's domain and an "Open in" capsule; no sidebar. Ref: help (Little Arc), app, video.
 - [x] **V39 Peek.** Links open in a large rounded card (10 pt corners, deep shadow, no title bar) floating over the
   dimmed page card, with round Open as Tab and close buttons above its top-right corner. Ref: help (Peek), video.
 - [ ] **V40 Picture in picture.** Video PiP and the document PiP for calls with a thin top bar. Ref: app (PiP top bar).

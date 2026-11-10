@@ -196,6 +196,34 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
       NSTextField* f = [c valueForKey:@"_findField"];
       f.stringValue = arg;
       [c findText:arg forward:YES];
+    } else if ([cmd isEqual:@"hovercard"]) {
+      ArcItem* t = FindTab(c.currentSpace, arg);
+      if (t) [c showHoverCardForItem:t];
+    } else if ([cmd isEqual:@"switcher"]) {
+      [c openTabSwitcherHolding:0];  // shown at once (a held Ctrl would wait for the key to be let go)
+    } else if ([cmd isEqual:@"close-switcher"]) {
+      [c cancelTabSwitcher];
+    } else if ([cmd isEqual:@"little"]) {
+      [c openLittleWindow:arg];
+    } else if ([cmd isEqual:@"place"]) {  // place <window class> <dx> <dy>: put a child/other window next to the main one
+      NSArray* a2 = [arg componentsSeparatedByString:@" "];
+      for (NSWindow* w in NSApp.windows)
+        if (w != c.window && [NSStringFromClass(w.class) isEqual:a2.firstObject] && w.isVisible && a2.count >= 3) {
+          NSRect f = c.window.frame;
+          [w setFrameOrigin:NSMakePoint(NSMinX(f) + [a2[1] doubleValue], NSMaxY(f) - [a2[2] doubleValue] - w.frame.size.height)];
+        }
+    } else if ([cmd isEqual:@"shot-window"]) {  // shot-window <class> <name>: one non-main window on its own
+      NSArray* a2 = [arg componentsSeparatedByString:@" "];
+      for (NSWindow* w in NSApp.windows)
+        if (w != c.window && [NSStringFromClass(w.class) isEqual:a2.firstObject] && w.isVisible && a2.count >= 2) {
+          CGImageRef img = CopyWindowImage(w);
+          if (img) {
+            WritePNG(img, [self.outDir stringByAppendingPathComponent:[a2[1] stringByAppendingString:@".png"]]);
+            std::printf("VISUAL shot-window %s %zux%zu\n", [a2[1] UTF8String], CGImageGetWidth(img), CGImageGetHeight(img));
+            CGImageRelease(img);
+          }
+          break;
+        }
     } else if ([cmd isEqual:@"hover"]) {
       ArcItem* t = arg.length ? FindTab(c.currentSpace, arg) : nil;
       [c hoverSidebarItem:t];

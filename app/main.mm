@@ -1457,6 +1457,12 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       [w openLittleWindow:@"https://example.com/little-moved"];
       [w openLittleWindow:@"https://example.org/little-closed"];
       std::printf("SELFTEST-LITTLE open=%lu\n", (unsigned long)[w littleWindowCount]);
+      {  // Visual parity V38: Arc's Little Arc frame (Space colour, rounded page card, "Open in" capsule)
+        NSString* ls = w.littleWindowStyle;
+        BOOL look = [ls hasPrefix:@"tinted=1 card=8 "] && [ls hasSuffix:@" capsule=1"];
+        std::printf("SELFTEST-LITTLELOOK arcStyle=%d\n", look);
+        if (!look) std::printf("SELFTEST-LITTLELOOK-DEBUG %s\n", ls.UTF8String);
+      }
       {  // Incognito: in-memory profile, nothing in History or the Archive, wiped when the last window closes.
         NSUInteger histBefore = [w historyVisits].count, archBefore = [w archivedTabs].count;
         [w openIncognitoWindow:@"https://example.com/incognito-selftest"];
@@ -2598,6 +2604,14 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       BOOL sep = [[w sidebarRowStyleForItem:w.currentSpace.unpinned] containsString:@"sep=1"];
       std::printf("SELFTEST-FOLDERROWS noTriangle=%d chevronToggles=%d pressed=%d separator=%d\n", !w.stockDisclosureShown,
                   toggled, pressed, sep);
+      {  // Visual parity V18: Arc's folder row: open / closed folder glyph, bold name, no chevron, children 16 pt in.
+        if (![w folderExpanded:folder]) [w toggleFolder:folder];
+        NSString* fs = [w folderRowStateForItem:folder];
+        BOOL look = [fs isEqual:@"glyph=1 chevron=0 bold=1 indent=16"];
+        std::printf("SELFTEST-FOLDERLOOK arcStyle=%d\n", look);
+        if (!look) std::printf("SELFTEST-FOLDERLOOK-DEBUG %s\n", fs.UTF8String);
+        if (!wasOpen) [w toggleFolder:folder];
+      }
       std::printf("SELFTEST-MULTI selected=%d links=%d markdown=%d folder=%d archived=%d\n", selected, linksOK, md,
                   folderOK, archived);
     });
