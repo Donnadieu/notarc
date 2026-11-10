@@ -50,6 +50,14 @@ void SettingsRegisterDefaults(void) {
 static NSMutableDictionary* g_memorySettings;
 void SettingsUseMemoryOnly(void) { g_memorySettings = [NSMutableDictionary dictionary]; }
 BOOL SettingsMemoryOnly(void) { return g_memorySettings != nil; }
+// What a key reads as when it isn't set in memory. Memory-only (self-test) runs skip the user's saved preferences
+// (read through cfprefsd even with CFFIXED_USER_HOME set, so a real "appIcon" or "defaultSpaceAppearance" made checks
+// fail) and read only the argument domain (tests' volatile overrides) and the registered defaults.
+static id FallbackObject(NSString* key) {
+  NSUserDefaults* d = NSUserDefaults.standardUserDefaults;
+  if (!g_memorySettings) return [d objectForKey:key];
+  return [d volatileDomainForName:NSArgumentDomain][key] ?: [d volatileDomainForName:NSRegistrationDomain][key];
+}
 void SettingSetBool(NSString* key, BOOL value) {
   if (g_memorySettings) g_memorySettings[key] = @(value);
   else [NSUserDefaults.standardUserDefaults setBool:value forKey:key];
@@ -64,9 +72,17 @@ void SettingSetObject(NSString* key, id value) {
 }
 BOOL SettingBool(NSString* key) {
   if (NSNumber* v = g_memorySettings[key]) return v.boolValue;
+  if (g_memorySettings) return [FallbackObject(key) respondsToSelector:@selector(boolValue)] && [FallbackObject(key) boolValue];
   return [NSUserDefaults.standardUserDefaults boolForKey:key];
 }
-double SettingDouble(NSString* key) { return [NSUserDefaults.standardUserDefaults doubleForKey:key]; }
+double SettingDouble(NSString* key) {
+  if (g_memorySettings) {
+    id v = g_memorySettings[key] ?: FallbackObject(key);
+    return [v respondsToSelector:@selector(doubleValue)] ? [v doubleValue] : 0;
+  }
+  return [NSUserDefaults.standardUserDefaults doubleForKey:key];
+}
+id SettingValueOrDefault(NSString* key) { return SettingObject(key) ?: FallbackObject(key); }
 
 static NSArray<NSArray<NSString*>*>* Engines() {
   return @[
@@ -239,7 +255,7 @@ NSString* const kSettingDeveloperModeLocal = @"developerModeLocalSites";
 NSString* const kSettingDeveloperModeHosts = @"developerModeHosts";
 
 // Memory-only runs keep only what they changed, so fall back to the registered defaults.
-static id SettingValue(NSString* key) { return SettingObject(key) ?: [NSUserDefaults.standardUserDefaults objectForKey:key]; }
+static id SettingValue(NSString* key) { return SettingValueOrDefault(key); }
 
 NSString* DefaultSpaceAppearance(void) {
   id v = SettingValue(kSettingSpaceAppearance);
