@@ -161,3 +161,17 @@ trackpad; everything else is checked by the hidden self-test.
 17. **Unread:** entries added by a refresh after the folder's first fill come in unread (Arc: showNewItemsAsUnread);
     the first fill and the sign-in / "No open pull requests" entries never do. The tab shows a small accent-colour dot,
     the folder row a count; opening the tab clears it. Unread is saved with the sidebar.
+
+## 2026-11-09: Boost editor and colour wheel (#51)
+1. **The Boost tint is a "color" blend now, not a "hue" blend.** The new wheel has saturation toward its centre, and
+   a hue blend ignores the overlay's saturation, so the wheel's radius would do nothing. With a colour blend the page
+   keeps its lightness, the rim gives full colour and the centre greys the page; the Intensity slider sets how much
+   of it shows. Older Boosts (no saturation saved) start at 85% saturation, the old fixed value.
+2. **The editor's slider is Intensity (the overlay's strength),** standing in for Arc's brightness control. Arc's
+   advanced colour controls (secondary hue, invert lightness) are not built.
+3. **The editor is a floating card, not Arc's shelf docked to the window.** It follows the Space's light/dark look and
+   uses NotArc's Arc colours (tile fills from the sidebar rows, Arc blue for the chosen tile). The wheel, tiles and
+   icons are drawn in code or are SF Symbols; nothing comes from Arc's app.
+4. **Font tiles:** Page, System, Georgia, Helvetica, Avenir, Menlo, Times, Futura, Gill Sans and Rounded (Arial
+   Rounded MT Bold, which ships with macOS). Baskerville left the list; a Boost that already uses it keeps it.
+5. **Text case cycles Original, UPPER, lower, Title** (Arc's Boosts had capitalize as well).

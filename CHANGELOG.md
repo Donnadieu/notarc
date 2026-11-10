@@ -36,6 +36,9 @@ or later. From 0.5.0 on, NotArc updates itself.
 - Live Folders: + menu > New Live Folder > GitHub: My Pull Requests shows your open pull requests and the ones waiting
   for your review, using the Space's own github.com sign-in (no token). YouTube Channel... follows a channel by its
   address or @handle. New entries come in unread (a dot on the tab, a count on the folder) until you open them.
+- Boost editor redesigned after Arc's: a compact card with a colour wheel (drag for hue and how colourful, with an
+  Intensity slider), font tiles, text size, text case (now also Title Case), Zap and Code. Dragging the wheel
+  previews on the page as you go and saves when you let go.
 - The parity checklist is up to date with 0.23.0, with an Out of scope section and docs/decisions.md for every
   scope call.
 

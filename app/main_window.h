@@ -11,6 +11,7 @@
 NSString* CleanLinkURL(NSString* url);
 
 @class Boost;
+@class BoostColorWheel;
 @class EaselView;
 @class NoteEditorView;
 NSInteger UnreadCountFromTitle(NSString* title);
@@ -373,6 +374,11 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (void)handleZapSelector:(NSString*)selector browser:(int)browserId;               // tests
 - (NSUInteger)savedBoostCount;                                                      // tests
 - (IBAction)shuffleBoost:(id)sender;
+- (BoostColorWheel*)boostColorWheel;            // tests: the editor's colour wheel (after editBoost:)
+- (Boost*)boostBeingEdited;                     // tests
+- (void)setBoostIntensity:(double)value;        // tests: as if the Intensity slider moved
+- (BOOL)pickBoostFontTile:(NSString*)name;      // tests: as if a font tile (e.g. "Georgia") was clicked
+- (NSArray<NSString*>*)boostPanelSections;      // tests: header, color, font, size, case, zap, code
 // Live Folders
 - (IBAction)newLiveFolder:(id)sender;
 - (ArcItem*)createLiveFolderKind:(NSString*)kind source:(NSString*)source title:(NSString*)title;

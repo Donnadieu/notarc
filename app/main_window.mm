@@ -15,6 +15,7 @@
 #import "app/little_window.h"
 #import "app/settings.h"
 #import "app/boost_store.h"
+#import "app/boost_color_wheel.h"
 #import "app/easel.h"
 #import "app/note_editor.h"
 #import "app/live_folder.h"
@@ -909,7 +910,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSMutableArray<Boost*>* _boosts;
   NSPanel* _boostPanel;
   Boost* _boostEditing;
-  NSMutableDictionary<NSString*, NSControl*>* _boostControls;
+  NSMutableDictionary<NSString*, NSView*>* _boostControls;
+  BoostColorWheel* _boostWheel;
   int _zapBrowser;
   NSUInteger _cardPops;        // tests
   NSHashTable* _sidebarDirtyFrom;  // windows whose sidebar change other windows haven't picked up yet
@@ -5218,6 +5220,7 @@ static ArcItem* NewSection(NSString* title) {
   if (self.window.appearance != ap && ![self.window.appearance.name isEqualToString:ap.name]) {
     self.window.appearance = ap;
     _commandBar.appearance = ap;
+    _boostPanel.appearance = ap;
     [_outline enumerateAvailableRowViewsUsingBlock:^(NSTableRowView* rv, NSInteger r) { rv.needsDisplay = YES; }];
     _cardEdge.needsDisplay = YES;
   }
@@ -5329,9 +5332,10 @@ static ArcItem* NewSection(NSString* title) {
 - (IBAction)shuffleBoost:(id)sender {
   Boost* b = _boostEditing ?: [self boostForCurrentSiteCreate:YES];
   if (!b) { NSBeep(); return; }
-  NSArray* fonts = @[ @"Georgia", @"Helvetica Neue", @"Avenir Next", @"Menlo", @"Futura", @"Baskerville", @"Gill Sans" ];
+  NSArray* fonts = @[ @"Georgia", @"Helvetica Neue", @"Avenir Next", @"Menlo", @"Futura", @"Arial Rounded MT Bold", @"Gill Sans" ];
   double old = b.hue;
   do { b.hue = arc4random_uniform(360); } while (fabs(b.hue - old) < 30);
+  b.saturation = 0.6 + arc4random_uniform(41) / 100.0;
   b.colorStrength = 0.5 + arc4random_uniform(40) / 100.0;
   b.font = fonts[arc4random_uniform((uint32_t)fonts.count)];
   b.enabled = YES;
@@ -5395,129 +5399,320 @@ static ArcItem* NewSection(NSString* title) {
   [_boostPanel setFrameTopLeftPoint:NSMakePoint(NSMaxX(wf) - _boostPanel.frame.size.width - 24, NSMaxY(wf) - 60)];
   if (!self.selfTestProfiles) [_boostPanel orderFront:nil];
 }
+// Arc's Boost editor look: a compact rounded card (no title bar) with a header (name, Shuffle, menu, on/off),
+// the colour wheel and Intensity slider on top, then font tiles, then text size, case, Zap and Code tiles.
+// Colours come from NotArc's Arc palette and follow the window's light/dark appearance.
+static NSArray<NSArray<NSString*>*>* BoostFontChoices() {
+  // value ("" = the page's own font), short name
+  return @[ @[ @"", @"Page" ], @[ @"-apple-system", @"System" ], @[ @"Georgia", @"Georgia" ], @[ @"Helvetica Neue", @"Helvetica" ],
+            @[ @"Avenir Next", @"Avenir" ], @[ @"Menlo", @"Menlo" ], @[ @"Times New Roman", @"Times" ], @[ @"Futura", @"Futura" ],
+            @[ @"Gill Sans", @"Gill Sans" ], @[ @"Arial Rounded MT Bold", @"Rounded" ] ];
+}
+static NSArray<NSNumber*>* BoostZoomSteps() { return @[ @0.8, @0.9, @1.0, @1.1, @1.25, @1.5, @1.75 ]; }
 - (void)buildBoostPanel {
+  const CGFloat W = 280, M = 12, H = 462;
   _boostControls = [NSMutableDictionary dictionary];
-  _boostPanel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 300, 470)
+  _boostPanel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, W, H)
                                            styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                                                     NSWindowStyleMaskUtilityWindow | NSWindowStyleMaskHUDWindow
+                                                     NSWindowStyleMaskFullSizeContentView
                                              backing:NSBackingStoreBuffered defer:YES];
+  _boostPanel.titlebarAppearsTransparent = YES;
+  _boostPanel.titleVisibility = NSWindowTitleHidden;
+  for (NSWindowButton wb : {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton})
+    [_boostPanel standardWindowButton:wb].hidden = YES;
+  _boostPanel.movableByWindowBackground = YES;
+  _boostPanel.backgroundColor = NSColor.clearColor;
+  _boostPanel.opaque = NO;
+  _boostPanel.hasShadow = YES;
   _boostPanel.floatingPanel = YES;
   _boostPanel.releasedWhenClosed = NO;
   _boostPanel.hidesOnDeactivate = YES;
-  NSView* v = _boostPanel.contentView;
-  __block CGFloat y = 438;
-  void (^label)(NSString*) = ^(NSString* t) {
-    NSTextField* l = [NSTextField labelWithString:t];
-    l.font = [NSFont systemFontOfSize:11 weight:NSFontWeightSemibold];
-    l.textColor = NSColor.secondaryLabelColor;
-    l.frame = NSMakeRect(14, y, 272, 16);
-    [v addSubview:l];
-    y -= 26;
+  NSVisualEffectView* card = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0, 0, W, H)];
+  card.material = NSVisualEffectMaterialPopover;
+  card.state = NSVisualEffectStateActive;
+  card.wantsLayer = YES;
+  card.layer.cornerRadius = 14;
+  card.layer.masksToBounds = YES;
+  card.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  [_boostPanel.contentView addSubview:card];
+  NSView* v = card;
+  CGFloat y = H - 10;
+
+  // Header: the site's name, Shuffle, a menu (original colours, delete), the on/off switch and close.
+  y -= 28;
+  NSView* header = [[NSView alloc] initWithFrame:NSMakeRect(M, y, W - 2 * M, 28)];
+  header.identifier = @"header";
+  [v addSubview:header];
+  NSTextField* title = [NSTextField labelWithString:@""];
+  title.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
+  title.textColor = [NSColor.labelColor colorWithAlphaComponent:0.85];
+  title.lineBreakMode = NSLineBreakByTruncatingTail;
+  title.frame = NSMakeRect(2, 5, header.bounds.size.width - 136, 18);
+  [header addSubview:title];
+  _boostControls[@"title"] = title;
+  NSButton* (^corner)(NSString*, NSString*, SEL) = ^NSButton*(NSString* sym, NSString* tip, SEL sel) {
+    NSButton* bt = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:sym accessibilityDescription:tip] target:self action:sel];
+    bt.bordered = NO;
+    bt.toolTip = tip;
+    bt.contentTintColor = NSColor.secondaryLabelColor;
+    return bt;
   };
-  NSButton* on = [NSButton checkboxWithTitle:@"Boost on" target:self action:@selector(boostControlChanged:)];
-  on.frame = NSMakeRect(14, y, 140, 20);
+  NSButton* shuffle = corner(@"shuffle", @"Shuffle", @selector(shuffleBoost:));
+  shuffle.frame = NSMakeRect(header.bounds.size.width - 130, 2, 26, 24);
+  [header addSubview:shuffle];
+  NSButton* more = corner(@"ellipsis.circle", @"More", @selector(showBoostMenu:));
+  more.frame = NSMakeRect(header.bounds.size.width - 102, 2, 26, 24);
+  [header addSubview:more];
+  NSSwitch* on = [[NSSwitch alloc] initWithFrame:NSMakeRect(header.bounds.size.width - 72, 3, 40, 22)];
+  on.controlSize = NSControlSizeSmall;
+  on.target = self;
+  on.action = @selector(boostControlChanged:);
+  on.toolTip = @"Turn this Boost on or off";
+  [header addSubview:on];
   _boostControls[@"enabled"] = on;
-  [v addSubview:on];
-  y -= 32;
-  label(@"COLOR");
-  NSButton* useColor = [NSButton checkboxWithTitle:@"" target:self action:@selector(boostControlChanged:)];
-  useColor.frame = NSMakeRect(14, y, 22, 20);
-  _boostControls[@"useColor"] = useColor;
-  [v addSubview:useColor];
-  NSSlider* hue = [NSSlider sliderWithValue:220 minValue:0 maxValue:359 target:self action:@selector(boostControlChanged:)];
-  hue.frame = NSMakeRect(40, y, 246, 20);
-  hue.continuous = YES;
-  _boostControls[@"hue"] = hue;
-  [v addSubview:hue];
-  y -= 26;
+  NSButton* close = corner(@"xmark.circle.fill", @"Close", @selector(closeBoostPanel:));
+  close.frame = NSMakeRect(header.bounds.size.width - 26, 2, 26, 24);
+  [header addSubview:close];
+
+  // Colour: the wheel (hue around, saturation toward the centre) and the Intensity slider.
+  y -= 8 + 216 + 4 + 22;
+  NSView* color = [[NSView alloc] initWithFrame:NSMakeRect(M, y, W - 2 * M, 216 + 4 + 22)];
+  color.identifier = @"color";
+  [v addSubview:color];
+  BoostColorWheel* wheel = [[BoostColorWheel alloc] initWithFrame:NSMakeRect((color.bounds.size.width - 216) / 2, 26, 216, 216)];
+  __weak MainWindowController* weakSelf = self;
+  wheel.onChange = ^(BoostColorWheel* w, BOOL final) { [weakSelf boostWheelChanged:w final:final]; };
+  [color addSubview:wheel];
+  _boostWheel = wheel;
+  NSButton* reset = corner(@"arrow.counterclockwise", @"Original colours", @selector(resetBoostColor:));
+  reset.frame = NSMakeRect(0, 0, 24, 22);
+  [color addSubview:reset];
+  NSImageView* dim = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"sun.min" accessibilityDescription:nil]];
+  dim.frame = NSMakeRect(30, 2, 18, 18);
+  dim.contentTintColor = NSColor.tertiaryLabelColor;
+  [color addSubview:dim];
   NSSlider* strength = [NSSlider sliderWithValue:0.6 minValue:0.1 maxValue:1 target:self action:@selector(boostControlChanged:)];
-  strength.frame = NSMakeRect(40, y, 246, 20);
+  strength.frame = NSMakeRect(52, 0, color.bounds.size.width - 52 - 26, 22);
   strength.continuous = YES;
+  strength.controlSize = NSControlSizeSmall;
+  strength.toolTip = @"Intensity";
+  [color addSubview:strength];
   _boostControls[@"strength"] = strength;
-  [v addSubview:strength];
-  y -= 34;
-  label(@"FONT");
-  NSPopUpButton* font = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(12, y, 276, 24) pullsDown:NO];
-  [font addItemsWithTitles:@[ @"Page Font", @"System", @"Georgia", @"Helvetica Neue", @"Avenir Next", @"Menlo",
-                              @"Times New Roman", @"Futura", @"Baskerville", @"Gill Sans" ]];
-  font.target = self;
-  font.action = @selector(boostControlChanged:);
-  _boostControls[@"font"] = font;
-  [v addSubview:font];
-  y -= 34;
-  NSSegmentedControl* zoom = [NSSegmentedControl segmentedControlWithLabels:@[ @"90%", @"100%", @"110%", @"125%", @"150%" ]
-                                                               trackingMode:NSSegmentSwitchTrackingSelectOne
-                                                                     target:self action:@selector(boostControlChanged:)];
-  zoom.frame = NSMakeRect(12, y, 276, 24);
-  _boostControls[@"zoom"] = zoom;
-  [v addSubview:zoom];
-  y -= 32;
-  NSSegmentedControl* tcase = [NSSegmentedControl segmentedControlWithLabels:@[ @"Aa", @"AA", @"aa" ]
-                                                                trackingMode:NSSegmentSwitchTrackingSelectOne
-                                                                      target:self action:@selector(boostControlChanged:)];
-  tcase.frame = NSMakeRect(12, y, 140, 24);
-  _boostControls[@"case"] = tcase;
+  NSImageView* bright = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"sun.max.fill" accessibilityDescription:nil]];
+  bright.frame = NSMakeRect(color.bounds.size.width - 20, 2, 18, 18);
+  bright.contentTintColor = NSColor.tertiaryLabelColor;
+  [color addSubview:bright];
+
+  // Fonts: two rows of sample tiles.
+  y -= 12 + 84;
+  NSView* fonts = [[NSView alloc] initWithFrame:NSMakeRect(M, y, W - 2 * M, 84)];
+  fonts.identifier = @"font";
+  [v addSubview:fonts];
+  NSArray* choices = BoostFontChoices();
+  CGFloat tw = (fonts.bounds.size.width - 4 * 4) / 5;
+  for (NSUInteger i = 0; i < choices.count; i++) {
+    NSString* family = choices[i][0];
+    BoostTile* t = [[BoostTile alloc] initWithFrame:NSMakeRect((i % 5) * (tw + 4), i < 5 ? 44 : 0, tw, 40)];
+    t.title = @"Aa";
+    NSFont* f = family.length && ![family hasPrefix:@"-"] ? [NSFont fontWithName:family size:16] : nil;
+    t.titleFont = f ?: [NSFont systemFontOfSize:16 weight:i == 0 ? NSFontWeightRegular : NSFontWeightMedium];
+    t.subtitle = choices[i][1];
+    t.value = family;
+    t.toolTip = i == 0 ? @"The page's own font" : choices[i][0];
+    t.target = self;
+    t.action = @selector(boostFontPicked:);
+    [fonts addSubview:t];
+    _boostControls[[@"font:" stringByAppendingString:choices[i][1]]] = t;
+  }
+
+  // Text size, case, Zap, Code.
+  y -= 8 + 58;
+  CGFloat qw = (W - 2 * M - 3 * 4) / 4;
+  BoostTile* size = [[BoostTile alloc] initWithFrame:NSMakeRect(M, y, qw, 58)];
+  size.identifier = @"size";
+  size.subtitle = @"100%";
+  size.toolTip = @"Change text size";
+  [v addSubview:size];
+  _boostControls[@"zoom"] = size;
+  // A small A and a big A step the text size down and up; the percentage shows underneath.
+  NSButton* smaller = corner(@"textformat.size.smaller", @"Smaller text", @selector(boostZoomStep:));
+  smaller.tag = -1;
+  smaller.frame = NSMakeRect(qw / 2 - 26, 22, 24, 26);
+  [size addSubview:smaller];
+  NSButton* bigger = corner(@"textformat.size.larger", @"Bigger text", @selector(boostZoomStep:));
+  bigger.tag = 1;
+  bigger.frame = NSMakeRect(qw / 2 + 2, 22, 24, 26);
+  [size addSubview:bigger];
+  for (NSButton* bt in @[ smaller, bigger ]) {
+    bt.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:15 weight:NSFontWeightMedium];
+    bt.contentTintColor = [NSColor.labelColor colorWithAlphaComponent:0.8];
+  }
+  BoostTile* tcase = [[BoostTile alloc] initWithFrame:NSMakeRect(M + (qw + 4), y, qw, 58)];
+  tcase.identifier = @"case";
+  tcase.titleFont = [NSFont systemFontOfSize:16 weight:NSFontWeightMedium];
+  tcase.toolTip = @"Change text case";
+  tcase.target = self;
+  tcase.action = @selector(boostCaseCycled:);
   [v addSubview:tcase];
-  y -= 38;
-  label(@"ZAPS");
-  NSButton* zap = [NSButton buttonWithTitle:@"Zap Element" target:self action:@selector(zapElements:)];
-  zap.frame = NSMakeRect(10, y - 2, 130, 28);
+  _boostControls[@"case"] = tcase;
+  BoostTile* zap = [[BoostTile alloc] initWithFrame:NSMakeRect(M + 2 * (qw + 4), y, qw, 58)];
+  zap.identifier = @"zap";
+  zap.symbolName = @"bolt.fill";
+  zap.toolTip = @"Zap: click an element on the page to hide it (Option-click hides all like it)";
+  zap.target = self;
+  zap.action = @selector(boostZapTile:);
   [v addSubview:zap];
-  NSButton* clear = [NSButton buttonWithTitle:@"Clear Zaps" target:self action:@selector(clearZaps:)];
-  clear.frame = NSMakeRect(150, y - 2, 130, 28);
-  _boostControls[@"clearZaps"] = clear;
-  [v addSubview:clear];
-  y -= 40;
-  label(@"CODE");
-  NSButton* code = [NSButton buttonWithTitle:@"Edit CSS…" target:self action:@selector(editBoostCSS:)];
-  code.frame = NSMakeRect(10, y - 2, 130, 28);
+  _boostControls[@"zap"] = zap;
+  BoostTile* code = [[BoostTile alloc] initWithFrame:NSMakeRect(M + 3 * (qw + 4), y, qw, 58)];
+  code.identifier = @"code";
+  code.symbolName = @"chevron.left.forwardslash.chevron.right";
+  code.toolTip = @"Custom CSS and JavaScript for this site";
+  code.target = self;
+  code.action = @selector(boostCodeTile:);
   [v addSubview:code];
-  NSButton* js = [NSButton buttonWithTitle:@"Edit JavaScript…" target:self action:@selector(editBoostJS:)];
-  js.frame = NSMakeRect(150, y - 2, 130, 28);
-  [v addSubview:js];
-  y -= 44;
-  NSButton* shuffle = [NSButton buttonWithTitle:@"Shuffle" target:self action:@selector(shuffleBoost:)];
-  shuffle.frame = NSMakeRect(150, 12, 130, 28);
-  [v addSubview:shuffle];
-  NSButton* del = [NSButton buttonWithTitle:@"Delete Boost" target:self action:@selector(deleteCurrentBoost:)];
-  del.frame = NSMakeRect(10, 12, 130, 28);
-  del.contentTintColor = NSColor.systemRedColor;
-  [v addSubview:del];
+  _boostControls[@"code"] = code;
 }
 - (void)refreshBoostPanel {
   if (!_boostPanel || !_boostEditing) return;
   Boost* b = _boostEditing;
   _boostPanel.title = [NSString stringWithFormat:@"Boost: %@", b.host];
-  ((NSButton*)_boostControls[@"enabled"]).state = b.enabled;
-  ((NSButton*)_boostControls[@"useColor"]).state = b.hue >= 0;
-  if (b.hue >= 0) ((NSSlider*)_boostControls[@"hue"]).doubleValue = b.hue;
+  ((NSTextField*)_boostControls[@"title"]).stringValue = b.host ?: @"";
+  ((NSSwitch*)_boostControls[@"enabled"]).state = b.enabled ? NSControlStateValueOn : NSControlStateValueOff;
+  [_boostWheel setHue:MAX(0, b.hue) saturation:b.saturation];
+  _boostWheel.hasColor = b.hue >= 0;
+  _boostWheel.intensity = b.colorStrength;
   ((NSSlider*)_boostControls[@"strength"]).doubleValue = b.colorStrength;
-  NSPopUpButton* font = (NSPopUpButton*)_boostControls[@"font"];
-  if (b.font.length && [font itemWithTitle:b.font]) [font selectItemWithTitle:b.font]; else [font selectItemAtIndex:0];
-  NSArray* zooms = @[ @0.9, @1.0, @1.1, @1.25, @1.5 ];
-  NSUInteger zi = 1;
-  for (NSUInteger i = 0; i < zooms.count; i++) if (fabs([zooms[i] doubleValue] - b.textZoom) < 0.01) zi = i;
-  ((NSSegmentedControl*)_boostControls[@"zoom"]).selectedSegment = (NSInteger)zi;
-  ((NSSegmentedControl*)_boostControls[@"case"]).selectedSegment =
-      [b.textTransform isEqualToString:@"uppercase"] ? 1 : [b.textTransform isEqualToString:@"lowercase"] ? 2 : 0;
-  ((NSButton*)_boostControls[@"clearZaps"]).title = [NSString stringWithFormat:@"Clear Zaps (%lu)", (unsigned long)b.zaps.count];
+  for (NSArray* c in BoostFontChoices()) {
+    BoostTile* t = (BoostTile*)_boostControls[[@"font:" stringByAppendingString:c[1]]];
+    t.selected = [c[0] length] ? [b.font isEqualToString:c[0]] : b.font.length == 0;
+  }
+  BoostTile* size = (BoostTile*)_boostControls[@"zoom"];
+  size.subtitle = [NSString stringWithFormat:@"%.0f%%", (b.textZoom > 0 ? b.textZoom : 1) * 100];
+  BoostTile* tcase = (BoostTile*)_boostControls[@"case"];
+  NSString* tt = b.textTransform;
+  tcase.title = [tt isEqualToString:@"uppercase"] ? @"AA" : [tt isEqualToString:@"lowercase"] ? @"aa" : [tt isEqualToString:@"capitalize"] ? @"Aa Bb" : @"Aa";
+  tcase.subtitle = [tt isEqualToString:@"uppercase"] ? @"Upper" : [tt isEqualToString:@"lowercase"] ? @"Lower" : [tt isEqualToString:@"capitalize"] ? @"Title" : @"Case";
+  tcase.selected = tt.length > 0;
+  BoostTile* zap = (BoostTile*)_boostControls[@"zap"];
+  zap.subtitle = b.zaps.count ? [NSString stringWithFormat:@"%lu Zapped", (unsigned long)b.zaps.count] : @"Zap";
+  BoostTile* code = (BoostTile*)_boostControls[@"code"];
+  code.subtitle = b.css.length && b.js.length ? @"CSS + JS" : b.css.length ? @"CSS" : b.js.length ? @"JS" : @"Code";
+  code.selected = b.css.length || b.js.length;
 }
 - (void)boostControlChanged:(id)sender {
   Boost* b = _boostEditing;
   if (!b) return;
-  b.enabled = ((NSButton*)_boostControls[@"enabled"]).state == NSControlStateValueOn;
-  if (sender == _boostControls[@"hue"]) ((NSButton*)_boostControls[@"useColor"]).state = NSControlStateValueOn;
-  BOOL useColor = ((NSButton*)_boostControls[@"useColor"]).state == NSControlStateValueOn;
-  b.hue = useColor ? ((NSSlider*)_boostControls[@"hue"]).doubleValue : -1;
+  b.enabled = ((NSSwitch*)_boostControls[@"enabled"]).state == NSControlStateValueOn;
   b.colorStrength = ((NSSlider*)_boostControls[@"strength"]).doubleValue;
-  NSPopUpButton* font = (NSPopUpButton*)_boostControls[@"font"];
-  b.font = font.indexOfSelectedItem <= 0 ? nil : ([font.titleOfSelectedItem isEqualToString:@"System"] ? @"-apple-system" : font.titleOfSelectedItem);
-  NSArray* zooms = @[ @0.9, @1.0, @1.1, @1.25, @1.5 ];
-  NSInteger zi = ((NSSegmentedControl*)_boostControls[@"zoom"]).selectedSegment;
-  b.textZoom = zi >= 0 ? [zooms[(NSUInteger)zi] doubleValue] : 1;
-  NSInteger ci = ((NSSegmentedControl*)_boostControls[@"case"]).selectedSegment;
-  b.textTransform = ci == 1 ? @"uppercase" : ci == 2 ? @"lowercase" : nil;
+  _boostWheel.intensity = b.colorStrength;
+  // While the slider is being dragged, only preview; save when it's let go.
+  if (sender == _boostControls[@"strength"] && NSApp.currentEvent.type == NSEventTypeLeftMouseDragged) [self applyBoostsEverywhere];
+  else [self boostChanged];
+}
+// Dragging the wheel previews live on the page; letting go (or a programmatic pick) saves.
+- (void)boostWheelChanged:(BoostColorWheel*)wheel final:(BOOL)final {
+  Boost* b = _boostEditing;
+  if (!b) return;
+  b.hue = wheel.hue;
+  b.saturation = wheel.saturation;
+  b.enabled = YES;
+  ((NSSwitch*)_boostControls[@"enabled"]).state = NSControlStateValueOn;
+  if (final) [self boostChanged]; else [self applyBoostsEverywhere];
+}
+- (IBAction)resetBoostColor:(id)sender {
+  if (!_boostEditing) return;
+  _boostEditing.hue = -1;
   [self boostChanged];
+  [self refreshBoostPanel];
+}
+- (void)boostFontPicked:(BoostTile*)tile {
+  if (!_boostEditing) return;
+  _boostEditing.font = tile.value.length ? tile.value : nil;
+  _boostEditing.enabled = YES;
+  [self boostChanged];
+  [self refreshBoostPanel];
+}
+- (void)boostZoomStep:(NSButton*)sender {
+  Boost* b = _boostEditing;
+  if (!b) return;
+  NSArray* steps = BoostZoomSteps();
+  NSUInteger i = 0;
+  double best = 1e9;
+  for (NSUInteger k = 0; k < steps.count; k++)
+    if (fabs([steps[k] doubleValue] - b.textZoom) < best) best = fabs([steps[k] doubleValue] - b.textZoom), i = k;
+  NSInteger n = MAX(0, MIN((NSInteger)steps.count - 1, (NSInteger)i + sender.tag));
+  b.textZoom = [steps[(NSUInteger)n] doubleValue];
+  [self boostChanged];
+  [self refreshBoostPanel];
+}
+- (void)boostCaseCycled:(id)sender {
+  Boost* b = _boostEditing;
+  if (!b) return;
+  NSArray* order = @[ @"", @"uppercase", @"lowercase", @"capitalize" ];
+  NSUInteger i = [order indexOfObject:b.textTransform ?: @""];
+  NSString* next = order[(i == NSNotFound ? 0 : i + 1) % order.count];
+  b.textTransform = next.length ? next : nil;
+  [self boostChanged];
+  [self refreshBoostPanel];
+}
+- (void)popUpBoostMenu:(NSMenu*)menu from:(NSView*)view {
+  if (self.selfTestProfiles) return;  // never block a test run on a menu
+  [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, -4) inView:view];
+}
+- (void)boostZapTile:(BoostTile*)tile {
+  if (!_boostEditing.zaps.count) { [self zapElements:tile]; return; }
+  NSMenu* m = [NSMenu new];
+  [m addItemWithTitle:@"Zap an Element" action:@selector(zapElements:) keyEquivalent:@""].target = self;
+  [m addItemWithTitle:[NSString stringWithFormat:@"Clear Zaps (%lu)", (unsigned long)_boostEditing.zaps.count]
+               action:@selector(clearZaps:) keyEquivalent:@""].target = self;
+  [self popUpBoostMenu:m from:tile];
+}
+- (void)boostCodeTile:(BoostTile*)tile {
+  NSMenu* m = [NSMenu new];
+  [m addItemWithTitle:@"Edit CSS…" action:@selector(editBoostCSS:) keyEquivalent:@""].target = self;
+  [m addItemWithTitle:@"Edit JavaScript…" action:@selector(editBoostJS:) keyEquivalent:@""].target = self;
+  [self popUpBoostMenu:m from:tile];
+}
+- (void)showBoostMenu:(NSButton*)sender {
+  NSMenu* m = [NSMenu new];
+  [m addItemWithTitle:@"Shuffle" action:@selector(shuffleBoost:) keyEquivalent:@""].target = self;
+  [m addItemWithTitle:@"Original Colours" action:@selector(resetBoostColor:) keyEquivalent:@""].target = self;
+  [m addItem:NSMenuItem.separatorItem];
+  [m addItemWithTitle:@"Delete Boost" action:@selector(deleteCurrentBoost:) keyEquivalent:@""].target = self;
+  [self popUpBoostMenu:m from:sender];
+}
+- (IBAction)closeBoostPanel:(id)sender { [_boostPanel orderOut:nil]; }
+// Tests.
+- (BoostColorWheel*)boostColorWheel { return _boostWheel; }
+- (Boost*)boostBeingEdited { return _boostEditing; }
+- (void)setBoostIntensity:(double)value {
+  ((NSSlider*)_boostControls[@"strength"]).doubleValue = value;
+  [self boostControlChanged:_boostControls[@"strength"]];
+}
+- (BOOL)pickBoostFontTile:(NSString*)name {
+  BoostTile* t = (BoostTile*)_boostControls[[@"font:" stringByAppendingString:name]];
+  if (![t isKindOfClass:BoostTile.class]) return NO;
+  [self boostFontPicked:t];
+  return YES;
+}
+// The editor's sections, top to bottom then left to right (identifiers: header, color, font, size, case, zap, code).
+- (NSArray<NSString*>*)boostPanelSections {
+  NSMutableArray<NSView*>* found = [NSMutableArray array];
+  NSMutableArray<NSView*>* stack = [NSMutableArray arrayWithObject:_boostPanel.contentView ?: [NSView new]];
+  while (stack.count) {
+    NSView* x = stack.lastObject;
+    [stack removeLastObject];
+    if (x.identifier.length && ![x.identifier hasPrefix:@"_"] && x != _boostPanel.contentView) [found addObject:x];
+    [stack addObjectsFromArray:x.subviews];
+  }
+  [found sortUsingComparator:^NSComparisonResult(NSView* p, NSView* q) {
+    NSRect a = [p convertRect:p.bounds toView:nil], c = [q convertRect:q.bounds toView:nil];
+    if (fabs(NSMaxY(a) - NSMaxY(c)) > 1) return NSMaxY(a) > NSMaxY(c) ? NSOrderedAscending : NSOrderedDescending;
+    return NSMinX(a) < NSMinX(c) ? NSOrderedAscending : NSOrderedDescending;
+  }];
+  NSMutableArray* ids = [NSMutableArray array];
+  for (NSView* x in found) [ids addObject:x.identifier];
+  return ids;
 }
 - (IBAction)clearZaps:(id)sender {
   [_boostEditing.zaps removeAllObjects];
