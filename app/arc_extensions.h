@@ -17,3 +17,5 @@ NSArray<ArcExtensionCopy*>* ArcCopyExtensions(NSString* arcUserData, NSArray<NSS
 // Folders already copied (one per extension), for loading at startup.
 NSArray<NSString*>* ArcCopiedExtensionPaths(NSString* destination);
 NSString* NotArcExtensionsDirectory(BOOL selfTest);
+// The manifest's name, with "__MSG_...__" looked up in the default locale.
+NSString* ExtensionDisplayName(NSDictionary* manifest, NSString* dir);

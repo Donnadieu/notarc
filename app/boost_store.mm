@@ -6,6 +6,7 @@
     _enabled = YES;
     _hue = -1;
     _colorStrength = 0.6;
+    _saturation = 0.85;
     _textZoom = 1;
     _zaps = [NSMutableArray array];
   }
@@ -21,14 +22,17 @@ static NSString* CSSString(NSString* s) {
 - (NSString*)styleSheet {
   NSMutableString* css = [NSMutableString string];
   if (_hue >= 0) {
-    // Arc tints the page with a hue blend over the content; same idea, as a fixed overlay that ignores clicks.
+    // Arc tints the page with a colour blend over the content; same idea, as a fixed overlay that ignores clicks.
+    // The wheel's hue and saturation set the overlay colour (a "color" blend keeps the page's lightness, so the
+    // centre of the wheel greys the page and the rim gives full colour); the Intensity slider sets its opacity.
     [css appendFormat:@"html::after{content:\"\";position:fixed;inset:0;pointer-events:none;z-index:2147483646;"
-                      @"background:hsl(%.0f,85%%,50%%);mix-blend-mode:hue;opacity:%.2f}\n",
-                      fmod(_hue, 360), MAX(0.05, MIN(1, _colorStrength))];
+                      @"background:hsl(%.0f,%.0f%%,50%%);mix-blend-mode:color;opacity:%.2f}\n",
+                      fmod(_hue, 360), MAX(0, MIN(1, _saturation)) * 100, MAX(0.05, MIN(1, _colorStrength))];
   }
   if (_font.length) [css appendFormat:@"body,body *:not(code):not(pre):not(kbd):not(samp){font-family:\"%@\",system-ui !important}\n", CSSString(_font)];
   if (_textZoom > 0 && fabs(_textZoom - 1) > 0.01) [css appendFormat:@"html{zoom:%.2f}\n", _textZoom];
-  if ([_textTransform isEqualToString:@"uppercase"] || [_textTransform isEqualToString:@"lowercase"])
+  if ([_textTransform isEqualToString:@"uppercase"] || [_textTransform isEqualToString:@"lowercase"] ||
+      [_textTransform isEqualToString:@"capitalize"])
     [css appendFormat:@"body{text-transform:%@ !important}\n", _textTransform];
   for (NSString* z in _zaps)
     if (z.length) [css appendFormat:@"%@{display:none !important}\n", z];
@@ -36,7 +40,7 @@ static NSString* CSSString(NSString* s) {
   return css;
 }
 - (NSDictionary*)dict {
-  NSMutableDictionary* d = [@{ @"host" : _host ?: @"", @"enabled" : @(_enabled), @"hue" : @(_hue),
+  NSMutableDictionary* d = [@{ @"host" : _host ?: @"", @"enabled" : @(_enabled), @"hue" : @(_hue), @"saturation" : @(_saturation),
                                @"colorStrength" : @(_colorStrength), @"textZoom" : @(_textZoom), @"zaps" : _zaps ?: @[] } mutableCopy];
   if (_font.length) d[@"font"] = _font;
   if (_textTransform.length) d[@"textTransform"] = _textTransform;
@@ -50,6 +54,7 @@ static NSString* CSSString(NSString* s) {
   b.host = d[@"host"];
   b.enabled = [d[@"enabled"] respondsToSelector:@selector(boolValue)] ? [d[@"enabled"] boolValue] : YES;
   if ([d[@"hue"] respondsToSelector:@selector(doubleValue)]) b.hue = [d[@"hue"] doubleValue];
+  if ([d[@"saturation"] respondsToSelector:@selector(doubleValue)]) b.saturation = [d[@"saturation"] doubleValue];
   if ([d[@"colorStrength"] respondsToSelector:@selector(doubleValue)]) b.colorStrength = [d[@"colorStrength"] doubleValue];
   if ([d[@"textZoom"] respondsToSelector:@selector(doubleValue)]) b.textZoom = [d[@"textZoom"] doubleValue];
   if ([d[@"font"] isKindOfClass:NSString.class]) b.font = d[@"font"];

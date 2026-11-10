@@ -3,6 +3,60 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## 0.25.0
+- Tab thumbnails: sidebar hover cards show a small picture of the page as it last looked, and holding Ctrl+Tab
+  opens a switcher of your recent tabs with their pictures (Tab or Shift+Tab to move, let go of Ctrl to switch, Esc
+  to cancel). Pictures stay in memory only and need macOS 14.4 or later.
+- Notes look like Arc's: the first line is a large title, text sits in a centred reading column, and a format bar
+  offers paragraph styles (Body, Heading 1-3), bold, italic, underline, strikethrough, bulleted and numbered lists,
+  checklists and links (also in the Format menu). It follows the Space's light or dark look.
+- Notes in split view: Split View > New Note in Split View opens a note beside the page, and Add Split from a note
+  opens a page beside it. Open in Split View on a note moves that note into the split.
+- File > Export Note as Markdown... saves the note as a .md file; Copy Note as Markdown copies it.
+- Live Folders: + menu > New Live Folder > GitHub: My Pull Requests shows your open pull requests and the ones waiting
+  for your review, using the Space's own github.com sign-in (no token). YouTube Channel... follows a channel by its
+  address or @handle. New entries come in unread (a dot on the tab, a count on the folder) until you open them.
+- Boost editor redesigned after Arc's: a compact card with a colour wheel (drag for hue and how colourful, with an
+  Intensity slider), font tiles, text size, text case (now also Title Case), Zap and Code. Dragging the wheel
+  previews on the page as you go and saves when you let go.
+- Settings has panes like Arc's: General, Profiles (every profile with its Spaces; new and rename), Appearance (Light,
+  Dark or Automatic for Spaces, and the app icon), Links and Advanced (Chrome-style pages, Developer Mode, Clear
+  Browsing Data, Reset All Settings).
+- App icon: pick one of six NotArc icons in Settings > Appearance. It shows in the Dock while NotArc is open.
+- Developer Mode, per site as in Arc: on by itself for localhost, 127.0.0.1 and .local sites, and for any site from
+  View > Turn On Developer Mode for This Site or Site Settings. The sidebar shows the full address with its port, the
+  tab is never auto-archived, and Developer Tools is one click away in the address pill. View > Reset Developer Mode
+  Sites forgets the sites you turned on.
+- Max, NotArc's take on Arc Max, runs on your Mac with Apple's built-in model (macOS 26 with Apple Intelligence on):
+  View > Ask on Page... (Cmd+Shift+A) answers questions from the page, View > Summarize Page, Shift + point at a link
+  for a short preview of it, Tabs > Tidy Today Tabs sorts Today's tabs into topic folders (Undo puts them back), and
+  tidy tab titles come from the model. Without Apple Intelligence each falls back to a non-AI version (best-matching
+  sentences, key sentences, folders by site, the built-in title rules). The command bar offers "Ask ChatGPT" for questions (opens chatgpt.com
+  with your own sign-in), and Edit > Copy Page as Markdown copies any page as Markdown. Settings > Max has the
+  switches. Nothing goes to a NotArc server.
+- Passwords and autofill: NotArc offers to save a password when you sign in (Save, Never for This Site, or Update
+  when it changed), and clicking into a login, address or card field shows your saved entries to fill in. Edit >
+  AutoFill > Fill Password (Cmd+\\) fills the page's login. NotArc > Passwords... lists them, with Add, and Show and
+  Copy behind Touch ID or your Mac's password. Everything is stored encrypted on your Mac.
+- File > Import Everything from Arc now brings your saved passwords, addresses and cards too, and File > Import
+  Passwords... brings them from Chrome, Brave, Edge, Vivaldi, Chromium or a passwords CSV file (Safari: export from
+  Apple's Passwords app first).
+- Chrome extensions (with Chrome-style pages on): a puzzle-piece button in the sidebar's address pill lists your
+  extensions, with Open (its popup page, in a tab), Options, Turn Off/On, Update and Remove, plus Install
+  Extension..., Chrome Web Store and Manage Extensions (chrome://extensions). File > Install Extension... takes a
+  Chrome Web Store link or extension ID, downloads it from the Web Store and checks its signature before installing.
+  Changes take effect when NotArc relaunches (one click; your tabs come back). Settings has a new "Use Chrome-style
+  pages" switch, still off by default. Installing asks the Chrome Web Store (Google) for the extension's package.
+- Ad blocking: Manage Ad Blockers... (Settings and Site Settings) lets you subscribe to filter lists such as
+  EasyList and EasyPrivacy (downloaded only when you turn them on, refreshed daily or with Update Now) or any list by
+  address. Lists block ad and tracker requests and hide ad elements on pages. The built-in list can be turned off, and
+  the sites where blocking is off are listed with a Remove button.
+- Easels: draw arrows, rectangles, ellipses and freehand pen strokes in eight colours (tool bar over the canvas, or
+  V/T/A/R/O/P; Esc goes back to Select); drag the corner handles to resize anything (captures keep their shape).
+  File > Capture Area to Easel and Capture Full Page to Easel. File > Add Live Clip to Easel: drag over part of a page
+  and the clip keeps the address and that area; it refreshes when you open the easel (if older than a minute) and from
+  File > Refresh Live Clips.
+
 ## 0.24.0
 - Favorites: Move to > Favorites for any tab, and Remove from Favorites / Move to Pinned on a Favorite (also from the
   File menu and the command bar).

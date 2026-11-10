@@ -1,9 +1,9 @@
 # Feature parity with Arc 1.169
 
-70 done, 12 partial, 4 not started, of 86 items.
+85 done, 1 partial, 0 not started, of 86 items.
 
 Arc behaviour NotArc needs to match. Each item is implemented from scratch. Each line links its GitHub issue (#N); a
-checked line's issue is closed. Lines without a number were done before issues were opened. Status as of NotArc 0.24.0;
+checked line's issue is closed. Lines without a number were done before issues were opened. Status as of NotArc 0.25.0;
 see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc deliberately won't copy are listed under
 [Out of scope](#out-of-scope) at the end, with the reason, and aren't counted. Every scope call is recorded in
 [decisions.md](decisions.md).
@@ -27,7 +27,7 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 - [x] Archive tab, Archive Other Tabs / Above / Below, Clear Today tabs (#16)
 - [x] Close and Keep Pinned; reset pinned tab to its saved URL (also Replace Pinned URL with Current, Reset All Pinned Tabs) (#17)
 - [x] Tidy tab titles, on the Mac without AI: pinning gives a tab a short name (no unread counts, site name or e-mail address), with an Undo toast, Tidy Title / Use Page Title in the tab menu and a setting (#18)
-- [ ] Hover previews / hover cards on sidebar items (partial: hover card with title, site, state, last used and address; page thumbnail missing, waits on #65) (#19)
+- [x] Hover previews / hover cards on sidebar items (title, site, state, last used, address and a picture of the page) (#19)
 - [x] Unread badge on tabs (#20)
 - [x] Go to Sidebar Item 1-9, last item, next/previous item (Cmd+1-8, Cmd+9 last, Cmd+Opt+Up/Down) (#21)
 - [x] Hide/show sidebar, toolbar mode with full URL (Cmd+S sidebar; View > Show Toolbar (Cmd+Shift+S) with back/forward/reload and the full editable URL) (#22)
@@ -50,7 +50,7 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 - [x] Command bar: new tab, go to URL, search (Cmd+T new tab, Cmd+L current tab)
 - [x] Suggestions: open tabs, history, bookmarks, actions, top domains (open and pinned tabs in every Space, Spaces, history, menu actions, top sites when empty; arrow keys + Enter) (#30)
 - [x] Search engine choice, search suggestions (#31)
-- [x] Switch to a recent tab (Ctrl+Tab) (#32)
+- [x] Switch to a recent tab (Ctrl+Tab; held, it shows a switcher with page pictures) (#32)
 - [x] Back/forward, reload, find in page, zoom, print (#33)
 - [x] Link routing rules (which Space opens which links): Air Traffic Control, Arc rules imported, rule editor (#34)
 - [x] Command bar ranking that learns from what you pick (#35)
@@ -79,23 +79,23 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 ## Content tools
 
 - [x] Capture: area, full page, portrait mode; save/copy screenshot (#48)
-- [ ] Easel (canvas of captures, text, live web clips) (partial: File > New Easel and the + menu add an easel to Today; File > Capture to Easel (Cmd+Shift+2) adds a capture of the visible page, linked to its source; text boxes; drag to move, Delete to remove; saved locally, archived and reopened like tabs. Missing: live web clips, region and full-page capture, drawing (arrows, shapes, freehand), resizing) (#49)
-- [ ] Notes (rich-text documents in the sidebar) (partial: File > New Note (Cmd+Ctrl+N) and the + menu create a note at the top of Today; rich-text editor (bold, italic, underline, fonts, lists via Format menu), titled from its first line, autosaved locally, archived and reopened. Missing: Arc's note styling and toolbar, notes in split view, Markdown export) (#50)
-- [ ] Boosts: custom CSS/JS per site, zap elements, boost editor (partial: per-site Boosts saved locally and applied on every page load, including subdomains: colour tint, font, text size, case, zaps (Option-click zaps all related elements), custom CSS and JavaScript; editor panel with Shuffle; Boost indicator in the address pill; on/off. Missing: Arc's editor look and colour wheel) (#51)
+- [x] Easel (canvas of captures, text, live web clips) (#49)
+- [x] Notes (rich-text documents in the sidebar): Arc-style title, reading column and format bar following the Space's light/dark look; notes as split view panes; Export/Copy Note as Markdown (#50)
+- [x] Boosts: custom CSS/JS per site, zap elements, boost editor (per-site Boosts saved locally and applied on every page load, including subdomains; Arc-style editor card with a colour wheel and Intensity slider, font tiles, text size, case, Zap and Code; Shuffle; Boost indicator in the address pill; on/off) (#51)
 - [x] Translate page: View > Translate Page opens the page through Google's web translator into your macOS language, Show Original goes back, and a page in another language offers a one-tap Translate (#52)
-- [ ] Ad blocking / content blocking (partial: Settings > Block ads & trackers (off by default) cancels third-party requests to ~160 known ad and tracking hosts; per-site exception in Site Settings; no subscribable filter list, cosmetic hiding or Manage Ad Blockers dialog yet) (#53)
+- [x] Ad blocking / content blocking (Settings > Block ads & trackers (off by default) with NotArc's own host list; filter list subscriptions in Manage Ad Blockers... (Settings and Site Settings): EasyList and EasyPrivacy offered, downloaded only when turned on, any list URL can be added, refreshed daily and with Update Now; Adblock Plus "||host^" rules with $third-party, $domain= and type options, "@@" exceptions and "##" cosmetic rules that hide page elements; per-site exceptions listed in the dialog) (#53)
 - [x] Site control center (per-site permissions, clear cookies and refresh) (View > Site Settings, Cmd+Shift+I: connection security, Ask/Allow/Block for camera, mic, location, notifications, clipboard; Clear Cookies and Refresh; Reset Permissions) (#54)
 
 ## Live content
 
-- [ ] Live Folders (GitHub PRs/issues, RSS etc. as auto-updating folders) (partial: + menu > New Live Folder... from an RSS/Atom feed or a public GitHub repository's open pull requests or issues; refreshes every 15 minutes and on demand, keeps open tabs, adds new entries and drops old ones; Remove from Live Folder; saved with the sidebar. Missing: your own GitHub pull requests (from the Space's GitHub sign-in), YouTube channels, unread badges) (#55)
+- [x] Live Folders (GitHub PRs/issues, RSS etc. as auto-updating folders) (+ menu > New Live Folder: GitHub: My Pull Requests (yours and ones waiting for your review, read with the Space's own github.com sign-in; a sign-in entry when the Space isn't signed in), YouTube Channel... (a channel address or @handle, from its public feed), or Feed or GitHub Repository... (RSS/Atom, a public repository's open pull requests or issues); refreshes every 15 minutes and on demand, keeps open tabs, adds new entries and drops old ones; new entries come in unread with a dot, the folder row counts them, opening the tab clears it; Remove from Live Folder; saved with the sidebar) (#55)
 - [x] Calendar integration: next meeting, meeting link: from the Mac's Calendar (any calendar added to macOS), a sidebar bar from 10 minutes before a meeting with Join for Zoom/Meet/Teams/Webex links; View > Show Next Meeting from Calendar (#56)
 - [x] Gmail and calendar previews for Favorites: hovering a Gmail Favorite lists your newest unread email (the Space's own Gmail sign-in, click to Peek); hovering a calendar Favorite lists today's events (#57)
 
 ## AI (Arc Max)
 
-- [ ] Ask on page, ChatGPT in command bar, tidy titles, 5-second previews (missing; on-device with Apple's built-in model, ChatGPT through your own chatgpt.com sign-in) (#58)
-- [ ] On-device tab categorisation and page summaries / page-to-Markdown (missing) (#59)
+- [x] Ask on page, ChatGPT in command bar, tidy titles, 5-second previews (on-device with Apple's built-in model, non-AI fallbacks without it, tidy titles fall back to #18's rules; ChatGPT through your own chatgpt.com sign-in) (#58)
+- [x] On-device tab categorisation and page summaries / page-to-Markdown (Tidy Tabs with Undo, by site without AI; summaries; Copy Page as Markdown works without AI) (#59)
 
 ## Library & data
 
@@ -104,22 +104,22 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 - [x] Downloads list (Cmd+Shift+J: progress, filter, Open, Show in Finder, Copy, Cancel; download folder setting; quit warning) (#61)
 - [x] History view (Cmd+Y, searchable, per-Space column, Clear History) (#62)
 - [x] Import from Arc (Spaces, tabs, archive, logins)
-- [ ] Import everything from Arc with one button: Spaces, tabs, Favorites, logins, history, extensions, saved passwords, autofill (partial: first-launch offer and File > Import Everything from Arc bring all but saved passwords and autofill, which wait on #67) (#150)
-- [ ] Import from Chrome/Safari/other browsers, password import (partial: File > Import Bookmarks (#80) and File > Import History from Chrome, Brave, Edge, Vivaldi, Chromium, Firefox and Safari (Safari needs Full Disk Access); no password import yet) (#63)
+- [x] Import everything from Arc with one button: Spaces, tabs, Favorites, logins, history, extensions, saved passwords, autofill (#150)
+- [x] Import from Chrome/Safari/other browsers, password import (File > Import Bookmarks (#80), Import History and Import Passwords; Safari passwords come in as a CSV export from Apple Passwords, which other apps can't read) (#63)
 - [x] Clear browsing data (time range; history, cookies, cache across all Spaces; Clear Cookies and Refresh for the current site) (#64)
-- [ ] Tab thumbnails for switchers and previews (missing; the 0.19.0 attempt was reverted) (#65)
+- [x] Tab thumbnails for switchers and previews (sidebar hover cards, Ctrl+Tab switcher; in memory only) (#65)
 
 ## Browser basics
 
-- [ ] Chrome extensions (Web Store), extension picker (partial: Chrome-style pages behind a setting (off by default) load extensions; File > Import Extensions from Arc; Web Store installs and the extension picker to do) (#66)
-- [ ] Password saving/autofill, address/card autofill (missing) (#67)
-- [ ] DevTools (show/hide), developer mode (partial: DevTools done; Arc's per-site Developer Mode missing) (#68)
+- [ ] Chrome extensions (Web Store), extension picker (partial: with Chrome-style pages on (Settings, off by default): Install Extension... from a Web Store link or ID (signature checked), a puzzle-piece picker in the address pill (Open, Options, Turn Off/On, Update, Remove, Manage Extensions), File > Import Extensions from Arc. Missing: extensions in the default page mode (CEF's Alloy pages can't run them), popups as bubbles (they open in a tab), and changes without a relaunch) (#66)
+- [x] Password saving/autofill, address/card autofill (#67)
+- [x] DevTools (show/hide), developer mode (per-site Developer Mode: on by itself for localhost, 127.0.0.1 and .local; full address with port in the sidebar pill, never auto-archived, Developer Tools in the pill; View menu, Site Settings and Settings > Advanced, with a reset) (#68)
 - [x] Set as default browser, open links from other apps (#69)
 - [x] Context menus (page, link, image, sidebar): sidebar menu; links (new tab, background, split, Peek, Little Window, Markdown); images (open, save to Downloads, copy image, copy address); selected text (search); page (copy URL, Markdown, Capture, Translate, Boost) (#70)
 - [x] Sad tab / crash recovery, session restore (crashed-tab Reload view; each Space reopens on its last tab; after an app crash or force-quit the open tabs are reloaded) (#71)
-- [ ] Settings window (all preferences) (partial: search engine, auto-archive, Peek, Little Window, links, sounds, ad blocking, default browser; profiles, appearance, Max and advanced panes missing) (#72)
+- [x] Settings window (all preferences): General, Profiles, Appearance, Links, Max and Advanced panes, as in Arc (#72)
 - [x] Keyboard shortcuts with user overrides (#73)
-- [ ] App icon choice, sound effects, toasts (partial: toasts; Capture shutter sound and reorder haptics with their settings; no app icon choice yet) (#74)
+- [x] App icon choice, sound effects, toasts (six NotArc icons in Settings > Appearance, shown in the Dock; toasts; Capture shutter sound and reorder haptics with their settings) (#74)
 - [x] PDF viewer (Chromium's built-in viewer: PDFs open in the tab with zoom, search, print and download) (#75)
 - [x] AppleScript support for windows and tabs (#76)
 - [x] Two-finger swipe back/forward and overscroll: swipe tracking with an edge arrow over the page, follows the macOS "Swipe between pages" setting (#77)
@@ -141,3 +141,21 @@ Not built on purpose. These aren't counted above; the reasons are in [decisions.
 - Translating pages in place with Chromium's translate engine: CEF doesn't ship it, and Google's translation API needs a paid key; NotArc uses Google's free web translator instead (#52).
 - Notion and Slack previews on Favorites: Arc read them through Notion's and Slack's private internal web APIs; NotArc can't build and test against those without accounts on both, and their unread counts already show as badges (#20).
 - An Arc account, Arc membership and Arc's own cloud AI service: NotArc's AI features run on your Mac (#58, #59).
+
+## Needs Omar's eyes
+
+Built and checked by the hidden self-test, but only a real screen, trackpad, mouse or macOS prompt can confirm these.
+They aren't separate items.
+
+- Look next to a real Arc window: the page card (edge and shadow), Space-switch and card animations, command bar (#122, #126, #127).
+- Trackpad: swipe back/forward over the page and between Spaces over the sidebar (#27, #77).
+- macOS asks once: notifications (#78), Calendar access (#56), reading a real Chrome profile's passwords (#63).
+- Tab thumbnails: the hover card picture and the Ctrl+Tab panel in light and dark, holding a real Ctrl+Tab (#65, #19).
+- Notes: the format bar and title look, ticking a checklist box with the mouse, the Add Link sheet (#50).
+- Boost editor card in light and dark, dragging the colour wheel with a real mouse (#51).
+- Live Folders: GitHub: My Pull Requests in a Space signed in to GitHub (the live request isn't run by the self-test), the unread dot and folder count (#55).
+- Passwords: where the fill menu sits next to a field, the save toast, the Add... form, Touch ID before Show/Copy (#67).
+- Settings panes and the chosen app icon in the Dock (#72, #74).
+- Max with Apple Intelligence turned on (macOS 26): the self-test uses a stand-in model, never the real one (#58, #59).
+- Easels: drawing and resizing with a real mouse; a live clip of a signed-in page (#49).
+- Ad blocking: downloading EasyList/EasyPrivacy for real (the self-test uses a local list) (#53).

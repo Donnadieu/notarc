@@ -40,6 +40,7 @@ NotArc is Objective-C++ (AppKit for the window and sidebar) on top of CEF (Chrom
 | `app/history_store.mm`, `app/archive_window.mm` | History and the History/Archive windows |
 | `app/downloads.mm` | Downloads list and window |
 | `app/settings.mm` | Settings and the Settings window |
+| `app/arc_max.mm`, `app/main_window_max.mm`, `app/on_device_ai.swift` | Max (Arc Max): Ask on Page, summaries, link previews, Tidy Tabs, Copy Page as Markdown, ChatGPT row; Apple's on-device model with non-AI fallbacks |
 | `app/updater.mm` | Update check, download, SHA-256 check and install |
 | `app/arc_import.mm`, `app/arc_cookies.mm` | One-time import of a user's Arc sidebar, archive and logins |
 | `docs/arc-data-format.md` | The files in a user's Arc data folder that the importer reads |

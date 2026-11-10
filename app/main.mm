@@ -13,8 +13,11 @@
 #import "app/email_peek.h"
 #import "app/web_notifications.h"
 #import "app/calendar_preview.h"
+#import "app/main_window_max.h"
+#import "app/arc_max.h"
 #import "app/little_window.h"
 #import "app/arc_extensions.h"
+#import "app/extensions.h"
 #import "app/link_routing.h"
 #import "app/link_routing_editor.h"
 #import "app/bookmark_import.h"
@@ -22,10 +25,16 @@
 #import "app/chrome_page.h"
 #include <sqlite3.h>
 #import "app/boost_store.h"
+#import "app/boost_color_wheel.h"
 #import "app/easel.h"
+#import "app/note_editor.h"
+#import "app/easel_clip.h"
 #import "app/live_folder.h"
 #import "app/settings.h"
+#import "app/app_icons.h"
 #include "app/content_blocker.h"
+#import "app/filter_lists.h"
+#import "app/ad_blockers_window.h"
 #include "app/browser_client.h"
 #import "app/history_store.h"
 #import "app/updater.h"
@@ -33,6 +42,9 @@
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
 #import "app/arc_cookies.h"
+#import "app/tab_thumbnails.h"
+#import "app/autofill.h"
+#import "app/password_store.h"
 #include "include/cef_app.h"
 #include "include/cef_application_mac.h"
 #include "include/wrapper/cef_library_loader.h"
@@ -75,6 +87,27 @@
 @end
 
 static BOOL gCrashTestDone = NO;
+static BOOL gMaxTestDone = NO;    // self-test: the Arc Max checks (#58, #59) printed
+// Self-test fixture extension (#66): popup and options pages with known titles, no scripts.
+static NSString* gTestExtensionID;  // installed at launch when Chrome-style pages are on
+static NSDictionary<NSString*, NSData*>* TestExtensionFiles(NSString* name, int manifestVersion) {
+  NSString* manifest = [NSString stringWithFormat:@"{\"manifest_version\":%d,\"name\":\"%@\",\"version\":\"1.2\","
+                                                  @"\"action\":{\"default_popup\":\"popup.html\"},\"options_page\":\"options.html\"}",
+                                                  manifestVersion, name];
+  return @{
+    @"manifest.json" : [manifest dataUsingEncoding:NSUTF8StringEncoding],
+    @"popup.html" : [@"<!doctype html><title>NotArc Extension Popup</title><p>popup</p>" dataUsingEncoding:NSUTF8StringEncoding],
+    @"options.html" : [@"<!doctype html><title>NotArc Extension Options</title><p>options</p>" dataUsingEncoding:NSUTF8StringEncoding],
+  };
+}
+static void InstallSelfTestExtension(NSString* dir) {
+  [NSFileManager.defaultManager removeItemAtPath:dir error:nil];
+  NSString* extID = nil;
+  NSData* crx = BuildTestCRX(TestExtensionFiles(@"NotArc Test Extension", 3), &extID);
+  if (crx && InstallExtensionCRX(crx, extID, dir, nil)) gTestExtensionID = extID;
+}
+static BOOL gAdBlockTestDone = NO;  // self-test: the filter-list page check (#53) printed
+static BOOL gEaselToolsDone = NO;  // self-test: the easel tools check printed (#49)
 static BOOL gLateTestsDone = NO;  // self-test: the last chained page checks (call, capture, PiP) printed  // self-test: the hang check finished (later page tests wait for it)
 
 // Self-test: poll a condition every 0.25 s instead of a fixed wait, then continue (also on timeout).
@@ -83,6 +116,67 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
     WaitUntil(cond, timeoutSec - 0.25, then);
   });
+}
+
+
+// Self-test fixtures for password import (#67): Chromium-format "Login Data" and "Web Data" files encrypted with a
+// throwaway key, never a real browser's.
+static void SelfTestExec(sqlite3* db, NSString* sql, NSArray* binds) {
+  sqlite3_stmt* st = NULL;
+  if (sqlite3_prepare_v2(db, sql.UTF8String, -1, &st, NULL) != SQLITE_OK) return;
+  int i = 1;
+  for (id b in binds) {
+    if ([b isKindOfClass:NSData.class]) sqlite3_bind_blob(st, i, [b bytes], (int)[b length], SQLITE_TRANSIENT);
+    else if ([b isKindOfClass:NSNumber.class]) sqlite3_bind_int64(st, i, [b longLongValue]);
+    else sqlite3_bind_text(st, i, [b UTF8String], -1, SQLITE_TRANSIENT);
+    ++i;
+  }
+  sqlite3_step(st);
+  sqlite3_finalize(st);
+}
+
+static void SelfTestMakeLoginData(NSString* path, NSData* key, NSArray<NSArray*>* rows) {  // [realm, user, pw|nil=never]
+  [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+  sqlite3* db = NULL;
+  sqlite3_open(path.UTF8String, &db);
+  sqlite3_exec(db, "CREATE TABLE logins(origin_url TEXT, action_url TEXT, username_element TEXT, username_value TEXT,"
+                   " password_element TEXT, password_value BLOB, signon_realm TEXT, date_created INTEGER,"
+                   " blacklisted_by_user INTEGER)", NULL, NULL, NULL);
+  for (NSArray* r in rows) {
+    BOOL never = [r[2] isKindOfClass:NSNull.class];
+    NSData* pw = never ? [NSData data] : [r[2] isKindOfClass:NSData.class] ? r[2]
+                                                                          : ChromiumEncryptValue([r[2] dataUsingEncoding:NSUTF8StringEncoding], key);
+    SelfTestExec(db, @"INSERT INTO logins VALUES(?,?,?,?,?,?,?,?,?)",
+                 @[ [r[0] stringByAppendingString:@"login"], r[0], @"u", r[1], @"p", pw, r[0], @13300000000000000, @(never) ]);
+  }
+  sqlite3_close(db);
+}
+
+static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NSDictionary* a, NSArray* card) {
+  [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+  sqlite3* db = NULL;
+  sqlite3_open(path.UTF8String, &db);
+  if (typeTokens) {  // Chrome 113+
+    sqlite3_exec(db, "CREATE TABLE local_addresses(guid TEXT); CREATE TABLE local_addresses_type_tokens(guid TEXT, type INTEGER,"
+                     " value TEXT)", NULL, NULL, NULL);
+    SelfTestExec(db, @"INSERT INTO local_addresses VALUES('g1')", @[]);
+    NSDictionary* types = @{@"name" : @7, @"line1" : @30, @"city" : @33, @"state" : @34, @"zip" : @35, @"email" : @9};
+    for (NSString* k in a) SelfTestExec(db, @"INSERT INTO local_addresses_type_tokens VALUES('g1',?,?)", @[ types[k], a[k] ]);
+  } else {  // older Chrome and Arc
+    sqlite3_exec(db, "CREATE TABLE autofill_profiles(guid TEXT, company_name TEXT, street_address TEXT, city TEXT, state TEXT,"
+                     " zipcode TEXT, country_code TEXT); CREATE TABLE autofill_profile_names(guid TEXT, first_name TEXT,"
+                     " middle_name TEXT, last_name TEXT, full_name TEXT); CREATE TABLE autofill_profile_emails(guid TEXT,"
+                     " email TEXT); CREATE TABLE autofill_profile_phones(guid TEXT, number TEXT)", NULL, NULL, NULL);
+    SelfTestExec(db, @"INSERT INTO autofill_profiles VALUES('g1','',?,?,?,?,'US')", @[ a[@"line1"], a[@"city"], a[@"state"], a[@"zip"] ]);
+    NSArray* name = [a[@"name"] componentsSeparatedByString:@" "];
+    SelfTestExec(db, @"INSERT INTO autofill_profile_names VALUES('g1',?,'',?,?)", @[ name[0], name[1], a[@"name"] ]);
+    SelfTestExec(db, @"INSERT INTO autofill_profile_emails VALUES('g1',?)", @[ a[@"email"] ]);
+  }
+  sqlite3_exec(db, "CREATE TABLE credit_cards(guid TEXT, name_on_card TEXT, expiration_month INTEGER, expiration_year INTEGER,"
+                   " card_number_encrypted BLOB, nickname TEXT)", NULL, NULL, NULL);
+  SelfTestExec(db, @"INSERT INTO credit_cards VALUES('c1',?,?,?,?,'')",
+               @[ card[0], card[1], card[2], ChromiumEncryptValue([card[3] dataUsingEncoding:NSUTF8StringEncoding], key) ]);
+  sqlite3_close(db);
 }
 
 @implementation AppDelegate
@@ -94,6 +188,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   NSMenu* appMenu = [NSMenu new];
   [appMenu addItemWithTitle:@"Check for Updates..." action:@selector(checkForUpdates:) keyEquivalent:@""];
   [appMenu addItemWithTitle:@"Settings..." action:@selector(showSettings:) keyEquivalent:@","];
+  [appMenu addItemWithTitle:@"Passwords..." action:@selector(showPasswords:) keyEquivalent:@""];
   [appMenu addItemWithTitle:@"Keyboard Shortcuts..." action:@selector(showKeyboardShortcuts:) keyEquivalent:@""];
   [appMenu addItem:[NSMenuItem separatorItem]];
   [appMenu addItemWithTitle:@"Quit NotArc" action:@selector(terminate:) keyEquivalent:@"q"];
@@ -111,12 +206,19 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [edit addItemWithTitle:@"Paste and Go" action:@selector(pasteAndGo:) keyEquivalent:@""];
   [edit addItemWithTitle:@"Select All" action:@selector(selectAll:) keyEquivalent:@"a"];
   [edit addItem:[NSMenuItem separatorItem]];
+  NSMenuItem* autoFillItem = [edit addItemWithTitle:@"AutoFill" action:nil keyEquivalent:@""];
+  NSMenu* autoFill = [[NSMenu alloc] initWithTitle:@"AutoFill"];
+  [autoFill addItemWithTitle:@"Fill Password" action:@selector(fillPassword:) keyEquivalent:@"\\"];
+  [autoFill addItemWithTitle:@"Passwords..." action:@selector(showPasswords:) keyEquivalent:@""];
+  autoFillItem.submenu = autoFill;
+  [edit addItem:[NSMenuItem separatorItem]];
   [edit addItemWithTitle:@"Find..." action:@selector(findInPage:) keyEquivalent:@"f"];
   [edit addItemWithTitle:@"Find Next" action:@selector(findNext:) keyEquivalent:@"g"];
   [edit addItemWithTitle:@"Find Previous" action:@selector(findPrevious:) keyEquivalent:@"G"];
   [edit addItem:[NSMenuItem separatorItem]];
   [edit addItemWithTitle:@"Copy URL" action:@selector(copyCurrentURL:) keyEquivalent:@"C"];
   [edit addItemWithTitle:@"Copy Clean Link" action:@selector(copyCleanLink:) keyEquivalent:@""];
+  [edit addItemWithTitle:@"Copy Page as Markdown" action:@selector(copyPageAsMarkdown:) keyEquivalent:@""];  // #59
   NSMenuItem* md = [edit addItemWithTitle:@"Copy URL as Markdown" action:@selector(copyCurrentURLAsMarkdown:)
                             keyEquivalent:@"c"];
   md.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift | NSEventModifierFlagOption;
@@ -146,15 +248,24 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"New Note" action:@selector(newNote:) keyEquivalent:@"n"].keyEquivalentModifierMask =
       NSEventModifierFlagCommand | NSEventModifierFlagControl;
   [file addItemWithTitle:@"New Easel" action:@selector(newEasel:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Export Note as Markdown..." action:@selector(exportNoteAsMarkdown:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Copy Note as Markdown" action:@selector(copyNoteAsMarkdown:) keyEquivalent:@""];
   [file addItem:NSMenuItem.separatorItem];
   [file addItemWithTitle:@"Import Everything from Arc..." action:@selector(importEverythingFromArcMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import Bookmarks..." action:@selector(importBookmarksFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import History..." action:@selector(importHistoryFromMenu:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Import Passwords..." action:@selector(importPasswordsFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import History from Arc" action:@selector(importArcHistoryFromMenu:) keyEquivalent:@""];
   [file addItemWithTitle:@"Import Extensions from Arc" action:@selector(importArcExtensionsFromMenu:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Install Extension..." action:@selector(installExtension:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Manage Extensions" action:@selector(manageExtensions:) keyEquivalent:@""];  // chrome://extensions
   [file addItemWithTitle:@"Capture to Easel" action:@selector(captureToEasel:) keyEquivalent:@"2"].keyEquivalentModifierMask =
       NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [file addItemWithTitle:@"Add Text to Easel" action:@selector(addEaselText:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Capture Area to Easel" action:@selector(captureAreaToEasel:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Capture Full Page to Easel" action:@selector(captureFullPageToEasel:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Add Live Clip to Easel" action:@selector(liveClipToEasel:) keyEquivalent:@""];
+  [file addItemWithTitle:@"Refresh Live Clips" action:@selector(refreshLiveClipsFromMenu:) keyEquivalent:@""];
   NSMenuItem* captureItem = [file addItemWithTitle:@"Capture" action:nil keyEquivalent:@""];
   NSMenu* capture = [[NSMenu alloc] initWithTitle:@"Capture"];
   [capture addItemWithTitle:@"Capture Area" action:@selector(captureArea:) keyEquivalent:@"3"].keyEquivalentModifierMask =
@@ -180,7 +291,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [file addItemWithTitle:@"Reset All Pinned Tabs" action:@selector(resetAllPinnedTabs:) keyEquivalent:@""];
   fileItem.submenu = file;
 
-  // Format (Notes): bold, italic, underline, fonts and lists come from AppKit's text system.
+  // Format (Notes): bold, italic, underline and fonts come from AppKit's text system; the rest from the note editor.
   NSMenuItem* formatItem = [NSMenuItem new];
   [bar addItem:formatItem];
   NSMenu* format = [[NSMenu alloc] initWithTitle:@"Format"];
@@ -198,7 +309,15 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   format.itemArray.lastObject.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
   format.itemArray[format.itemArray.count - 2].keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagControl;
   [format addItemWithTitle:@"Show Fonts" action:@selector(orderFrontFontPanel:) keyEquivalent:@""].target = fm;  // Cmd+T is New Tab
-  [format addItemWithTitle:@"Lists..." action:@selector(orderFrontListPanel:) keyEquivalent:@""];
+  // The note toolbar's commands (sent to the note being edited): paragraph style, strikethrough, lists, link.
+  [format addItem:[NSMenuItem separatorItem]];
+  [format addItemWithTitle:@"Strikethrough" action:@selector(noteToggleStrikethrough:) keyEquivalent:@""];
+  for (NSArray* e in @[ @[ @"Body", @0 ], @[ @"Heading 1", @1 ], @[ @"Heading 2", @2 ], @[ @"Heading 3", @3 ] ])
+    [format addItemWithTitle:e[0] action:@selector(noteFormatBlock:) keyEquivalent:@""].tag = [e[1] integerValue];
+  [format addItemWithTitle:@"Bulleted List" action:@selector(noteToggleBulletList:) keyEquivalent:@""];
+  [format addItemWithTitle:@"Numbered List" action:@selector(noteToggleNumberedList:) keyEquivalent:@""];
+  [format addItemWithTitle:@"Checklist" action:@selector(noteToggleChecklist:) keyEquivalent:@""];
+  [format addItemWithTitle:@"Add Link..." action:@selector(noteAddLink:) keyEquivalent:@""];
   formatItem.submenu = format;
 
   NSMenuItem* viewItem = [NSMenuItem new];
@@ -210,6 +329,10 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [view addItemWithTitle:@"Hide Space Header" action:@selector(toggleSpaceHeader:) keyEquivalent:@""];
   [view addItemWithTitle:@"Translate Page" action:@selector(translatePage:) keyEquivalent:@""];
   [view addItemWithTitle:@"Show Next Meeting from Calendar" action:@selector(toggleCalendar:) keyEquivalent:@""];
+  // Arc Max (#58, #59): on-device AI, with non-AI fallbacks (app/arc_max.mm).
+  [view addItemWithTitle:@"Ask on Page..." action:@selector(showAskOnPage:) keyEquivalent:@"A"];
+  [view addItemWithTitle:@"Summarize Page" action:@selector(summarizePage:) keyEquivalent:@""];
+  [view addItemWithTitle:@"Tidy Tab Title" action:@selector(tidyTabTitle:) keyEquivalent:@""];
   [view addItemWithTitle:@"Site Settings..." action:@selector(showSiteSettings:) keyEquivalent:@"i"]
       .keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagShift;
   [view addItemWithTitle:@"Reset Site Permissions" action:@selector(resetSitePermissions:) keyEquivalent:@""];
@@ -235,6 +358,8 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [view addItem:[NSMenuItem separatorItem]];
   NSMenuItem* dev = [view addItemWithTitle:@"Developer Tools" action:@selector(toggleDevTools:) keyEquivalent:@"i"];
   dev.keyEquivalentModifierMask = NSEventModifierFlagCommand | NSEventModifierFlagOption;
+  [view addItemWithTitle:@"Turn On Developer Mode for This Site" action:@selector(toggleDeveloperMode:) keyEquivalent:@""];
+  [view addItemWithTitle:@"Reset Developer Mode Sites" action:@selector(resetDeveloperModeSites:) keyEquivalent:@""];
   viewItem.submenu = view;
 
   NSMenuItem* splitItem = [NSMenuItem new];
@@ -248,6 +373,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   [split addItemWithTitle:@"Add Top Split" action:@selector(addTopSplit:) keyEquivalent:@""];
   [split addItemWithTitle:@"Flip Split Layout" action:@selector(flipSplitLayout:) keyEquivalent:@""];
   [split addItemWithTitle:@"Maximize Pane" action:@selector(toggleMaximizePane:) keyEquivalent:@"\r"].keyEquivalentModifierMask = cs;
+  [split addItemWithTitle:@"New Note in Split View" action:@selector(newNoteInSplitView:) keyEquivalent:@""];
   [split addItemWithTitle:@"Close Split Pane" action:@selector(closeSplitPane:) keyEquivalent:@"-"]
       .keyEquivalentModifierMask = cs;
   [split addItemWithTitle:@"Focus Next Pane" action:@selector(focusNextPane:) keyEquivalent:@"]"]
@@ -323,6 +449,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   }
   [tabs addItemWithTitle:@"Switch to Recent Tab" action:@selector(switchToRecentTab:) keyEquivalent:@"\t"]
       .keyEquivalentModifierMask = NSEventModifierFlagControl;
+  [tabs addItemWithTitle:@"Tidy Today Tabs" action:@selector(tidyTodayTabs:) keyEquivalent:@""];  // Arc Max (#59)
   tabsItem.submenu = tabs;
   NSApp.mainMenu = bar;
   ApplyShortcutOverrides(bar);  // the user's own shortcuts (Settings > Keyboard Shortcuts...)
@@ -345,6 +472,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
 
 - (void)start {
   [self buildMenu];
+  ApplyAppIcon();  // the chosen NotArc icon (#74) in the Dock; the app bundle is never changed
   NSString* arcDir = ArcDataDirectory();
   NSString* storePath = SidebarStorePath(self.selfTest);
   if (self.selfTest && !self.selfTestReload)
@@ -383,6 +511,8 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   }
   self.window = [[MainWindowController alloc] initWithSpaces:spaces focusedSpaceID:focused];
   self.window.selfTestProfiles = self.selfTest;
+  // Self-tests never use Apple's real on-device model (#58): checks see "unavailable" unless they install a stub.
+  if (self.selfTest) MaxSetTestModel(@"unavailable:selftest", nil);
   self.window.storePath = storePath;
   self.window.archivePath = ArchiveStorePath(self.selfTest);
   self.window.historyPath = HistoryStorePath(self.selfTest);
@@ -575,9 +705,9 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                                       BOOL offRespected = !t.inPictureInPicture;
                                       SettingSetObject(kSettingAutoPiP, nil);
                                       if (!log) std::printf("PIP-DEBUG %s\n", t.liveTitle.UTF8String);
-                                      gLateTestsDone = YES;
                                       std::printf("SELFTEST-AUTOPIP playing=%d popped=%d back=%d gesture=%d settingOff=%d\n", playing,
                                                   popped, back, log, offRespected);
+                                      [self runThumbnailSelfTest:other leaving:t];
                                     });
                                   });
                                 });
@@ -595,6 +725,10 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         });
        });
       });
+    // Arc Max (#58, #59): after the late page checks, so its background tab never shares the screen with them.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 135 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      WaitUntil(^{ return gLateTestsDone; }, 40, ^{ [self runMaxSelfTest]; });
+    });
     if (!self.selfTestReload)
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 165 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         [self.window openInNewTab:@"https://example.org/session-restore-marker"];
@@ -604,7 +738,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         [self.window setTestCookie:@"notarc_saved_login" value:@"1" url:@"https://example.org/" session:NO done:nil];
       });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 170 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-     WaitUntil(^{ return (BOOL)(gLateTestsDone || self.selfTestReload); }, 30, ^{
+     WaitUntil(^{ return (BOOL)((gLateTestsDone && gMaxTestDone && gAdBlockTestDone && gEaselToolsDone) || self.selfTestReload); }, 45, ^{
       void (^finish)(void) = ^{
         for (NSDictionary* tab in [self.window tabSnapshot])
           std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
@@ -664,6 +798,285 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   }
 }
 
+// Arc Max (#58, #59). Pure parts (ChatGPT address, prompts, reply parsing, HTML and fallbacks) first, then a
+// background tab with a known page for page text, Copy Page as Markdown, Ask on Page and summaries, link previews
+// (fake fetcher, no network), Tidy Tabs on a scratch Space that isn't in the sidebar, and tidy titles. The model is a
+// stub here (both "available" and "off"); the real model's state is only reported (model=available|unavailable:...).
+- (void)runMaxSelfTest {
+  MainWindowController* w = self.window;
+  NSString* liveModel = MaxRealModelAvailability();
+  BOOL chatgptURL = [MaxChatGPTURL(@" what is 2+2? & more ") isEqualToString:@"https://chatgpt.com/?q=what%20is%202%2B2%3F%20%26%20more"];
+  NSDictionary* (^chatRow)(NSString*) = ^NSDictionary*(NSString* q) {
+    for (NSDictionary* d in [w commandSuggestionsFor:q])
+      if ([d[@"kind"] isEqualToString:@"chatgpt"]) return d;
+    return nil;
+  };
+  NSDictionary* row = chatRow(@"how tall is mount everest");
+  BOOL chatgptRow = [row[@"url"] isEqualToString:@"https://chatgpt.com/?q=how%20tall%20is%20mount%20everest"] &&
+                    [[w commandSuggestionsFor:@"how tall is mount everest"].lastObject isEqual:row];
+  BOOL urlNoRow = chatRow(@"example.com/page") == nil;
+  SettingSetBool(kSettingMaxChatGPT, NO);
+  BOOL chatgptOff = chatRow(@"how tall is mount everest") == nil;
+  SettingSetObject(kSettingMaxChatGPT, nil);
+  SettingSetBool(kSettingMaxEnabled, NO);
+  BOOL master = chatRow(@"how tall is mount everest") == nil && !MaxFeatureOn(kSettingMaxPreviews);
+  SettingSetObject(kSettingMaxEnabled, nil);
+  master = master && MaxFeatureOn(kSettingMaxPreviews) && chatRow(@"how tall is mount everest") != nil;
+
+  NSArray* groups = MaxParseTidyGroups(@"Here you go:\n- **Reading**: 1, 3\nBad: 9\nDup: 1, 2\nCode: 2, 4 and 5\n", 5);
+  NSArray* labels = MaxParseTidyGroups(@"3: Programming\n2: Shopping\n3: News\n4: news\n5: Programming", 5);  // line order wins
+  BOOL parse = groups.count == 2 && [groups[0][@"name"] isEqualToString:@"Reading"] && [groups[0][@"indexes"] isEqual:(@[ @0, @2 ])] &&
+               [groups[1][@"name"] isEqualToString:@"Code"] && [groups[1][@"indexes"] isEqual:(@[ @3, @4 ])] && labels.count == 2 &&
+               [labels[0][@"name"] isEqualToString:@"Programming"] && [labels[0][@"indexes"] isEqual:(@[ @0, @4 ])] &&
+               [labels[1][@"indexes"] isEqual:(@[ @2, @3 ])] && MaxParseTidyGroups(@"I can't help with that.", 5).count == 0;
+  NSArray* sites = MaxGroupTabsBySite(@[ @{@"url" : @"https://github.com/a"}, @{@"url" : @"https://www.bbc.co.uk/news"},
+                                         @{@"url" : @"https://gist.github.com/b"}, @{@"url" : @"https://bbc.co.uk/sport"},
+                                         @{@"url" : @"https://example.org/"} ]);
+  BOOL bySite = sites.count == 2 && [sites[0][@"name"] isEqualToString:@"Github"] && [sites[0][@"indexes"] isEqual:(@[ @0, @2 ])] &&
+                [sites[1][@"name"] isEqualToString:@"Bbc"];
+  BOOL titles = [MaxCleanModelTitle(@"\"Swift Concurrency Guide.\"\nmore") isEqualToString:@"Swift Concurrency Guide"] &&
+                [MaxCleanSummary(@"Here:\n- **One** point\n* Two") isEqualToString:@"Here:\n• One point\n• Two"];
+  NSString* longText = [@"" stringByPaddingToLength:20000 withString:@"word " startingAtIndex:0];
+  NSString* ask = MaxAskPrompt(@"Who wrote it?", @"T", @"https://example.org/", longText);
+  BOOL prompt = [ask containsString:@"Question: Who wrote it?"] && ask.length < 7300 && [MaxTidyTabsPrompt(@[ @{@"title" : @"A", @"url" : @"https://www.x.org/"} ]) containsString:@"1. A (x.org)"];
+  NSDictionary* html = MaxParseHTML(@"<html><head><title>Fallback</title><meta property=\"og:title\" content=\"Story &amp; More\">"
+                                    @"<meta content='A short description.' name=description><script>var x='<p>no</p>'</script></head>"
+                                    @"<body><nav><p>Menu item</p></nav><p>First paragraph text here.</p><p>Second &#8220;quoted&#8221; one.</p></body></html>");
+  BOOL htmlOK = [html[@"title"] isEqualToString:@"Story & More"] && [html[@"description"] isEqualToString:@"A short description."] &&
+                [html[@"text"] containsString:@"First paragraph text here."] && [html[@"text"] containsString:@"\u201cquoted\u201d"] &&
+                ![html[@"text"] containsString:@"Menu item"] && ![html[@"text"] containsString:@"no"];
+  BOOL menu = NO;
+  for (NSMenuItem* top in NSApp.mainMenu.itemArray)
+    for (NSMenuItem* mi in top.submenu.itemArray)
+      if (mi.action == @selector(showAskOnPage:) && [mi.keyEquivalent isEqualToString:@"A"]) menu = YES;
+  NSView* section = MaxSettingsSection();
+  NSUInteger boxes = 0;
+  NSMutableArray* stack = [NSMutableArray arrayWithObject:section];
+  while (stack.count) {
+    NSView* v = stack.lastObject;
+    [stack removeLastObject];
+    if ([v isKindOfClass:NSButton.class]) ++boxes;
+    [stack addObjectsFromArray:v.subviews];
+  }
+  BOOL settings = boxes == 6;
+
+  // A page we control, loaded in a background tab (never shown, so no other check's tab is disturbed).
+  [w openInNewTab:@"https://example.org/max-selftest" background:YES];
+  ArcItem* t = w.currentSpace.unpinned.children.firstObject;
+  [w maxLoadItemInBackground:t];
+  WaitUntil(^{ return (BOOL)(t.browserId && [t.liveTitle hasPrefix:@"Example"]); }, 15, ^{
+    [w runJS:@"document.body.innerHTML='<article><h1>Max Test</h1><p>Hello <b>bold</b> and <a href=\"/x\">link</a>.</p>"
+             @"<ul><li>one</li><li>two<ul><li>nested</li></ul></li></ul><ol><li>first</li></ol>"
+             @"<pre><code>let a = 1;\\n  b();</code></pre><blockquote>quoted words</blockquote>"
+             @"<table><tr><th>A</th><th>B</th></tr><tr><td>1</td><td>2</td></tr></table><img src=\"/i.png\" alt=\"pic\">"
+             @"<p>Ada Lovelace wrote the first published program long ago for the engine.</p>"
+             @"<p>The sample code on this page is written in JavaScript for testing.</p>"
+             @"<p style=\"display:none\">hidden words here</p><script>bad()</script></article>';document.title='Max Test Page'"
+          inItem:t];
+    WaitUntil(^{ return [t.liveTitle isEqualToString:@"Max Test Page"]; }, 5, ^{
+      [w maxPageMarkdownOfItem:t done:^(NSString* md) {
+        NSArray* want = @[ @"# Max Test\n\nSource: https://example.org/max-selftest\n\nHello **bold** and [link](https://example.org/x).",
+                           @"- one\n- two\n  - nested", @"1. first", @"```\nlet a = 1;\n  b();\n```", @"> quoted words",
+                           @"| A | B |\n| --- | --- |\n| 1 | 2 |", @"![pic](https://example.org/i.png)" ];
+        BOOL markdown = md.length > 0 && ![md containsString:@"bad()"] && ![md containsString:@"hidden words"];
+        for (NSString* x in want)
+          if (![md containsString:x]) {
+            markdown = NO;
+            std::printf("SELFTEST-MAX-DEBUG missing=[%s]\n", [x stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"].UTF8String);
+          }
+        if (!markdown) std::printf("SELFTEST-MAX-DEBUG md=[%s]\n", [md stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"].UTF8String ?: "nil");
+        NSInteger general = NSPasteboard.generalPasteboard.changeCount;
+        [w copyMarkdownOfItem:t done:^(NSString* md2) {
+          NSPasteboard* pb = [NSPasteboard pasteboardWithName:@"io.github.donnadieu.notarc.selftest"];
+          BOOL copied = md2.length && [[pb stringForType:NSPasteboardTypeString] isEqualToString:md2];
+          BOOL generalUntouched = NSPasteboard.generalPasteboard.changeCount == general;
+          [pb releaseGlobally];
+          [w maxPageTextOfItem:t done:^(NSDictionary* page) {
+            BOOL pageText = [page[@"text"] containsString:@"Hello bold and link."] && [page[@"title"] isEqualToString:@"Max Test Page"] &&
+                            ![page[@"text"] containsString:@"hidden words"];
+            __block NSString* seenPrompt = nil;
+            MaxSetTestModel(@"available", ^(NSString* ins, NSString* p, MaxReply reply) {
+              seenPrompt = p;
+              reply([p containsString:@"Question: Who wrote the first program?"] && [p containsString:@"Hello bold"] ? @"Ada wrote it." : @"bad", nil);
+            });
+            [w askOnPage:@"Who wrote the first program?" item:t done:^(NSString* a1, BOOL ai1) {
+              BOOL askAI = ai1 && [a1 isEqualToString:@"Ada wrote it."] && w.maxPanelShown && [w.maxPanelAnswer isEqualToString:@"Ada wrote it."];
+              MaxSetTestModel(@"unavailable:off", nil);
+              [w askOnPage:@"Who wrote the first program?" item:t done:^(NSString* a2, BOOL ai2) {
+                BOOL askFallback = !ai2 && [a2 containsString:@"Ada Lovelace wrote"] && [w.maxPanelNote containsString:@"Apple Intelligence is off"];
+                BOOL offersChatGPT = w.maxPanelOffersChatGPT;
+                [w summarizeItem:t done:^(NSString* s1, BOOL ai3) {
+                  BOOL summaryFallback = !ai3 && [s1 hasPrefix:@"• "];
+                  MaxSetTestModel(@"available", ^(NSString* ins, NSString* p, MaxReply reply) {
+                    reply([ins containsString:@"bullet"] ? @"- Point one\n- Point two" : @"bad", nil);
+                  });
+                  [w summarizeItem:t done:^(NSString* s2, BOOL ai4) {
+                    BOOL summaryAI = ai4 && [s2 isEqualToString:@"• Point one\n• Point two"] && [w.maxPanelAnswer isEqualToString:s2];
+                    [w hideMaxPanels];
+                    [self runMaxPreviewAndTidyTest:t
+                                           results:[NSString stringWithFormat:
+                        @"model=%@ chatgptURL=%d chatgptRow=%d urlNoRow=%d chatgptOff=%d master=%d parse=%d bySite=%d titles=%d "
+                        @"prompt=%d html=%d menu=%d settings=%d markdown=%d copied=%d generalUntouched=%d pageText=%d askAI=%d "
+                        @"askFallback=%d offersChatGPT=%d summaryFallback=%d summaryAI=%d",
+                        [liveModel isEqualToString:@"available"] ? @"available" : liveModel, chatgptURL, chatgptRow, urlNoRow,
+                        chatgptOff, master, parse, bySite, titles, prompt, htmlOK, menu, settings, markdown, copied,
+                        generalUntouched, pageText, askAI, askFallback, offersChatGPT, summaryFallback, summaryAI]];
+                    (void)seenPrompt;
+                  }];
+                }];
+              }];
+            }];
+          }];
+        }];
+      }];
+    });
+  });
+}
+
+- (void)runMaxPreviewAndTidyTest:(ArcItem*)t results:(NSString*)first {
+  MainWindowController* w = self.window;
+  std::printf("SELFTEST-MAX %s\n", first.UTF8String);
+  NSMutableArray<NSString*>* fetched = [NSMutableArray array];
+  MaxSetTestFetcher(^(NSString* url, MaxFetchDone done) {
+    [fetched addObject:url];
+    done(@"<html><head><title>Linked Story</title><meta name=description content='About the linked page.'></head>"
+         @"<body><p>The linked page explains how previews work in this browser today.</p></body></html>", nil);
+  });
+  MaxSetTestModel(@"unavailable:off", nil);
+  [w maxLinkHovered:@"https://news.example/story" shiftDown:NO];
+  BOOL noShift = !w.maxPreviewShown;
+  [w maxLinkHovered:@"https://news.example/story" shiftDown:YES];
+  WaitUntil(^{ return (BOOL)(w.maxPreviewShown && [w.maxPreviewText isEqualToString:@"About the linked page."]); }, 3, ^{
+    BOOL previewFallback = w.maxPreviewShown && [w.maxPreviewText isEqualToString:@"About the linked page."];
+    MaxSetTestModel(@"available", ^(NSString* ins, NSString* p, MaxReply reply) {
+      reply([p containsString:@"previews work"] ? @"- AI preview point" : @"bad", nil);
+    });
+    [w maxLinkHovered:@"https://news.example/other" shiftDown:YES];
+    WaitUntil(^{ return [w.maxPreviewText isEqualToString:@"• AI preview point"]; }, 3, ^{
+      BOOL previewAI = [w.maxPreviewText isEqualToString:@"• AI preview point"];
+      [w maxLinkHovered:@"" shiftDown:NO];
+      WaitUntil(^{ return (BOOL)!w.maxPreviewShown; }, 2, ^{
+        BOOL previewHidden = !w.maxPreviewShown;
+        SettingSetBool(kSettingMaxPreviews, NO);
+        [w maxLinkHovered:@"https://news.example/third" shiftDown:YES];
+        BOOL previewOff = !w.maxPreviewShown;
+        SettingSetObject(kSettingMaxPreviews, nil);
+        [w maxLinkHovered:@"" shiftDown:NO];
+        BOOL fetchedOK = [fetched isEqualToArray:(@[ @"https://news.example/story", @"https://news.example/other" ])];
+        BOOL notWeb = !MaxPreviewURLAllowed(@"javascript:alert(1)") && !MaxPreviewURLAllowed(@"file:///etc/hosts");
+        MaxSetTestFetcher(nil);
+
+        // Tidy Tabs on a scratch Space that isn't in the sidebar: by site without the model, by topic with it; Undo.
+        ArcSpace* sp = [ArcSpace new];
+        sp.spaceID = @"max-selftest";
+        sp.title = @"Max SelfTest";
+        sp.unpinned = [ArcItem new];
+        sp.unpinned.isSection = YES;
+        sp.unpinned.children = [NSMutableArray array];
+        for (NSArray* d in @[ @[ @"swiftlang/swift", @"https://github.com/swiftlang/swift" ],
+                               @[ @"Cookie recipe", @"https://cooking.example/cookies" ],
+                               @[ @"Pull requests", @"https://github.com/Donnadieu/notarc/pulls" ],
+                               @[ @"Banana bread", @"https://bread.example/banana" ],
+                               @[ @"Weather", @"https://weather.example/paris" ] ]) {
+          ArcItem* it = [ArcItem new];
+          it.itemID = NSUUID.UUID.UUIDString;
+          it.title = d[0];
+          it.url = d[1];
+          it.children = [NSMutableArray array];
+          [sp.unpinned.children addObject:it];
+        }
+        NSArray* before = [sp.unpinned.children copy];
+        MaxSetTestModel(@"unavailable:off", nil);
+        [w tidyTabsInSpace:sp done:^(NSArray<ArcItem*>* folders, BOOL ai) {
+          NSArray* kids = sp.unpinned.children;
+          BOOL tidySite = !ai && folders.count == 1 && kids.count == 4 && kids[0] == folders[0] &&
+                          [folders[0].title isEqualToString:@"Github"] &&
+                          [folders[0].children isEqualToArray:(@[ before[0], before[2] ])];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 5), dispatch_get_main_queue(), ^{
+            NSUndoManager* undo = [w sidebarUndoManager];
+            BOOL named = [undo.undoActionName isEqualToString:@"Tidy Tabs"];
+            if (named) [undo undo];
+            BOOL tidyUndo = named && [sp.unpinned.children isEqualToArray:before];
+            MaxSetTestModel(@"available", ^(NSString* ins, NSString* p, MaxReply reply) {
+              reply([p containsString:@"5. Weather (weather.example)"] ? @"1: Code\n2: Cooking\n3: code\n4: Cooking\n5: Weather" : @"bad", nil);
+            });
+            [w tidyTabsInSpace:sp done:^(NSArray<ArcItem*>* f2, BOOL ai2) {
+              BOOL tidyAI = ai2 && f2.count == 2 && [f2[0].title isEqualToString:@"Code"] && [f2[1].title isEqualToString:@"Cooking"] &&
+                            [f2[1].children isEqualToArray:(@[ before[1], before[3] ])] && sp.unpinned.children.count == 3 &&
+                            sp.unpinned.children.lastObject == before[4];
+              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 5), dispatch_get_main_queue(), ^{
+                [[w sidebarUndoManager] undo];
+                BOOL tidyAIUndo = [sp.unpinned.children isEqualToArray:before];
+                // Tidy tab title. Without the model: the rule-based TidyTabTitle (#18) through the same command
+                // (the unread count goes), and the command stays visible. With the model (stub): its name; an
+                // unusable reply falls back to the rules; the pin entry point (#18's) asks the model. Undo each time.
+                NSString* oldLive = t.liveTitle;
+                BOOL oldRenamed = t.renamed;
+                NSString* oldTitle = t.title;
+                t.renamed = NO;
+                t.title = nil;
+                t.liveTitle = @"(3) Max Test Page";
+                MaxSetTestModel(@"unavailable:off", nil);
+                NSMenuItem* tidyItem = nil;
+                for (NSMenuItem* top in NSApp.mainMenu.itemArray)
+                  for (NSMenuItem* mi in top.submenu.itemArray)
+                    if (mi.action == @selector(tidyTabTitle:)) tidyItem = mi;
+                // The menu follows the shown tab: show this one just for the check, then put the other back at once
+                // (other timed checks switch tabs concurrently).
+                ArcItem* shownBefore = w.shownItem;
+                if (shownBefore != t) [w showItem:t];
+                BOOL tidyEnabled = tidyItem && [(id<NSMenuItemValidation>)w validateMenuItem:tidyItem] && !tidyItem.hidden;
+                if (shownBefore && shownBefore != t) [w showItem:shownBefore];
+                [w tidyTitleOfItem:t announce:NO done:^(NSString* title0, BOOL ai0) {
+                  NSUndoManager* undo2 = [w sidebarUndoManager];
+                  BOOL titleFallback = tidyEnabled && !ai0 && [title0 isEqualToString:@"Max Test Page"] && t.renamed &&
+                                       [t.displayTitle isEqualToString:@"Max Test Page"] &&
+                                       [undo2.undoActionName isEqualToString:@"Tidy Tab Title"];
+                  if (titleFallback) [undo2 undo];
+                  titleFallback = titleFallback && !t.renamed && [t.displayTitle isEqualToString:@"(3) Max Test Page"];
+                  __block int titleCalls = 0;
+                  MaxSetTestModel(@"available", ^(NSString* ins, NSString* p, MaxReply reply) {
+                    BOOL ok = [p containsString:@"Tab title: (3) Max Test Page"];
+                    int call = titleCalls++;
+                    reply(!ok ? @"bad" : (call == 0 ? @"\"Max Test.\"" : call == 1 ? @"" : @"Pinned Name"), nil);
+                  });
+                  [w tidyTitleOfItem:t announce:NO done:^(NSString* title, BOOL ai3) {
+                    BOOL tidyTitle = ai3 && [title isEqualToString:@"Max Test"] && [t.displayTitle isEqualToString:@"Max Test"];
+                    BOOL titleUndo = [undo2.undoActionName isEqualToString:@"Tidy Tab Title"];
+                    if (titleUndo) [undo2 undo];
+                    titleUndo = titleUndo && [t.displayTitle isEqualToString:@"(3) Max Test Page"] && !t.renamed;
+                    [w tidyTitleOfItem:t announce:NO done:^(NSString* title2, BOOL ai4) {  // empty reply -> rules
+                      BOOL titleAIFallback = !ai4 && [title2 isEqualToString:@"Max Test Page"] &&
+                                             [t.displayTitle isEqualToString:@"Max Test Page"];
+                      if ([undo2.undoActionName isEqualToString:@"Tidy Tab Title"]) [undo2 undo];
+                      titleAIFallback = titleAIFallback && !t.renamed;
+                      [w tidyTitleOfItem:t announce:NO];  // what pinning calls (markPinnedURLs)
+                      WaitUntil(^{ return [t.displayTitle isEqualToString:@"Pinned Name"]; }, 2, ^{
+                        BOOL pinTitle = [t.displayTitle isEqualToString:@"Pinned Name"] && t.renamed;
+                        MaxSetTestModel(@"unavailable:selftest", nil);  // the rest of the run never sees the real model
+                        t.title = oldTitle;
+                        t.renamed = oldRenamed;
+                        t.liveTitle = oldLive;
+                        [w hideMaxPanels];
+                        gMaxTestDone = YES;
+                        std::printf("SELFTEST-MAXPAGE previewNoShift=%d previewFallback=%d previewAI=%d previewHidden=%d previewOff=%d "
+                                    "fetched=%d notWeb=%d tidySite=%d tidyUndo=%d tidyAI=%d tidyAIUndo=%d titleFallback=%d tidyTitle=%d "
+                                    "titleUndo=%d titleAIFallback=%d pinTitle=%d\n", noShift, previewFallback, previewAI, previewHidden,
+                                    previewOff, fetchedOK, notWeb, tidySite, tidyUndo, tidyAI, tidyAIUndo, titleFallback, tidyTitle,
+                                    titleUndo, titleAIFallback, pinTitle);
+                      });
+                    }];
+                  }];
+                }];
+              });
+            }];
+          });
+        }];
+      });
+    });
+  });
+}
+
 // Browser-basics test: waits for the new tab's web view (its Space profile may still be starting),
 // then runs navigate -> back -> zoom -> find -> copy as Markdown, each step a little apart.
 - (void)runBasicsTestWhenReady:(int)attempt {
@@ -706,6 +1119,216 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
 - (void)runSelfTestActions {
   [self.window openInNewTab:@"https://example.com"];
   [self runBasicsTestWhenReady:0];
+}
+
+// Tab thumbnails (#65) in hover cards (#19) and the Ctrl+Tab switcher. Runs last in the late chain (sets gLateTestsDone).
+- (void)runThumbnailSelfTest:(ArcItem*)src leaving:(ArcItem*)t {
+  MainWindowController* w = self.window;
+  [w showItem:src];
+  [w runJS:@"document.documentElement.style.background='#3b82f6';document.body.style.background='#3b82f6';"
+           @"document.body.innerHTML='';document.title='thumb:blue'" inItem:src];
+  WaitUntil(^{ return [src.liveTitle isEqualToString:@"thumb:blue"]; }, 5, ^{
+    NSImage* before = src.thumbnail;
+    [w scheduleThumbnailOfShown];  // the page is blue now: copy it 1 s from now
+    WaitUntil(^{
+      if (w.shownItem != src) { [w showItem:src]; }  // other timed checks may switch tabs; showing again restarts the wait
+      return (BOOL)(src.thumbnail != nil && src.thumbnail != before);
+    }, 8, ^{
+      NSImage* th = src.thumbnail;
+      CGImageRef cg = [th CGImageForProposedRect:NULL context:nil hints:nil];
+      NSBitmapImageRep* px = cg ? [[NSBitmapImageRep alloc] initWithCGImage:cg] : nil;
+      BOOL taken = th != nil && th != before;
+      BOOL small = px && px.pixelsWide <= 480 && px.pixelsWide >= 200 && px.pixelsHigh <= px.pixelsWide;
+      NSColor* mid = [[px colorAtX:px.pixelsWide / 2 y:px.pixelsHigh / 2] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+      // The hidden test window is 1% opaque, so the copy keeps the page's hue, not its exact colour: check it's clearly blue.
+      BOOL page = mid && mid.blueComponent - mid.redComponent > 0.15 && mid.blueComponent - mid.greenComponent > 0.15;
+      if (!page) std::printf("THUMB-DEBUG mid=%.2f,%.2f,%.2f %ldx%ld\n", mid.redComponent, mid.greenComponent, mid.blueComponent,
+                             (long)px.pixelsWide, (long)px.pixelsHigh);
+      [w showItem:t];
+      [w showHoverCardForItem:src];
+      BOOL inCard = w.hoverCardHasThumbnail;
+      [w hideHoverCard];
+      [w showHoverCardForItem:t];  // the tab on screen shows no (stale) picture
+      BOOL notShown = !w.hoverCardHasThumbnail;
+      [w hideHoverCard];
+      // Ctrl+Tab held: the shown tab first, the tab just left selected, with its picture; Tab steps, release switches.
+      [w openTabSwitcherHolding:0];
+      NSArray<ArcItem*>* items = w.tabSwitcherItems;
+      BOOL open = w.tabSwitcherShown;
+      BOOL order = items.count >= 2 && items[0] == t && items[1] == src && w.tabSwitcherSelection == src;
+      BOOL thumb = [w tabSwitcherShowsThumbnailFor:src];
+      [w stepTabSwitcher:1];
+      BOOL stepped = w.tabSwitcherSelection == (items.count > 2 ? items[2] : items[0]);
+      [w stepTabSwitcher:-1];
+      [w commitTabSwitcher];
+      BOOL switched = w.shownItem == src && !w.tabSwitcherShown;
+      [w openTabSwitcherHolding:0];
+      [w cancelTabSwitcher];
+      BOOL cancelled = w.shownItem == src && !w.tabSwitcherShown;
+      // Flip between the two tabs every 0.15 s, as someone tapping through tabs would. Each switch only re-arms the
+      // 1 s timer, so no copy may start while flipping, and the thumbnail code's share of a switch must stay tiny.
+      long startedBeforeFlips = TabThumbnailStatsGet().started;
+      NSMutableArray<NSNumber*>* flipMs = [NSMutableArray array];
+      const int kFlips = 10;
+      for (int f = 0; f < kFlips; ++f)
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(f * 0.15 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+          CFAbsoluteTime f0 = CFAbsoluteTimeGetCurrent();
+          [w showItem:(f % 2 == 0) ? t : src];
+          [flipMs addObject:@((CFAbsoluteTimeGetCurrent() - f0) * 1000)];
+        });
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)((kFlips - 1) * 0.15 * NSEC_PER_SEC + 0.3 * NSEC_PER_SEC)),
+                     dispatch_get_main_queue(), ^{
+        // The point of this design (#176 was reverted for it): starting a copy and receiving it cost the main thread
+        // almost nothing, unlike the synchronous window copy (10-110 ms each).
+        TabThumbnailStats s = TabThumbnailStatsGet();
+        BOOL fast = s.started > 0 && s.maxKickoffMs < 5 && s.maxDeliverMs < 5;
+        BOOL flipNoCopy = flipMs.count == kFlips && s.started == startedBeforeFlips;
+        BOOL switchFast = s.switches >= kFlips && s.maxSwitchHookMs < 1;
+        double flipMax = 0, flipSum = 0;
+        for (NSNumber* n in flipMs) {
+          flipMax = MAX(flipMax, n.doubleValue);
+          flipSum += n.doubleValue;
+        }
+        std::printf("THUMB-TIME copies=%ld done=%ld failed=%ld kickoffMaxMs=%.2f kickoffMeanMs=%.3f deliverMaxMs=%.2f "
+                    "latencyMaxMs=%.0f latencyMeanMs=%.0f switches=%ld switchHookMaxMs=%.3f flipShowItemMaxMs=%.2f "
+                    "flipShowItemMeanMs=%.2f\n",
+                    s.started, s.finished, s.failed, s.maxKickoffMs, s.started ? s.totalKickoffMs / s.started : 0, s.maxDeliverMs,
+                    s.maxLatencyMs, s.finished ? s.totalLatencyMs / s.finished : 0, s.switches, s.maxSwitchHookMs, flipMax,
+                    flipMs.count ? flipSum / flipMs.count : 0);
+        std::printf("SELFTEST-THUMBNAIL taken=%d small=%d page=%d inCard=%d notForShown=%d fast=%d switchFast=%d flipNoCopy=%d\n",
+                    taken, small, page, inCard, notShown, fast, switchFast, flipNoCopy);
+        std::printf("SELFTEST-TABSWITCHER open=%d order=%d thumbnail=%d stepped=%d switched=%d cancelled=%d\n", open, order,
+                    thumb, stepped, switched, cancelled);
+        gLateTestsDone = YES;
+      });
+    });
+  });
+}
+
+// Notes (#50), part 2: Arc's note look and format bar, notes as split panes, Markdown export. Runs right after
+// SELFTEST-NOTES in the same timed block, synchronously, so no other check moves the shown tab in between.
+- (void)runNoteFormatSelfTest {
+  MainWindowController* w = self.window;
+  ArcSpace* space = w.currentSpace;
+  NSFontManager* fm = NSFontManager.sharedFontManager;
+  NSInteger generalBefore = NSPasteboard.generalPasteboard.changeCount;
+  ArcItem* n = [w createNoteWithID:nil];
+  NoteEditorView* ed = [w noteEditorForItem:n];
+  NoteTextView* tv = ed.textView;
+  NSUInteger controls = 0;
+  NSButton* italicButton = nil;
+  for (NSControl* c in ed.toolbarControls) {
+    if (c.action && c.target == tv) ++controls;
+    if (c.action == @selector(noteToggleItalic:)) italicButton = (NSButton*)c;
+  }
+  BOOL toolbar = ed && controls >= 9 && ed.toolbar.superview == ed && NSMaxY(ed.toolbar.frame) == NSMaxY(ed.bounds);
+  [w typeInNote:@"Plan\nIntro\nmilk\neggs\nbread\nwash car\nsee the docs now"];
+  NSTextStorage* ts = tv.textStorage;
+  NSFont* (^fontAt)(NSString*) = ^NSFont*(NSString* word) {
+    NSRange r = [ts.string rangeOfString:word];
+    return r.location == NSNotFound ? nil : [ts attribute:NSFontAttributeName atIndex:r.location effectiveRange:nil];
+  };
+  void (^select)(NSString*) = ^(NSString* word) { tv.selectedRange = [ts.string rangeOfString:word]; };
+  BOOL title = fontAt(@"Plan").pointSize >= 28 && fontAt(@"Intro").pointSize < 16 && [n.displayTitle isEqualToString:@"Plan"];
+  BOOL readable = ed.readingWidth > 200 && ed.readingWidth <= 681 && ed.sideMargin >= 28;
+  select(@"Intro");
+  [tv applyBlock:NoteBlockHeading2];
+  BOOL heading = fontAt(@"Intro").pointSize == 20 && ([fm traitsOfFont:fontAt(@"Intro")] & NSBoldFontMask);
+  tv.selectedRange = NSUnionRange([ts.string rangeOfString:@"milk"], [ts.string rangeOfString:@"eggs"]);
+  [tv applyList:NoteListBullet];
+  select(@"bread");
+  [tv applyList:NoteListNumber];
+  select(@"wash car");
+  [tv applyList:NoteListCheck];
+  BOOL checked = [tv toggleCheckboxInParagraphAt:[ts.string rangeOfString:@"wash car"].location];
+  select(@"car");
+  [tv noteToggleUnderline:nil];
+  select(@"see");
+  [tv noteToggleBold:nil];
+  select(@"the");
+  [italicButton performClick:nil];  // through the format bar
+  select(@"docs");
+  [tv setLinkOnSelection:@"https://example.org/docs"];
+  select(@"now");
+  [tv noteToggleStrikethrough:nil];
+  BOOL lists = [ts.string containsString:@"\u2022\tmilk\n\u2022\teggs\n1.\tbread\n\u2611\twash car"];
+  BOOL italic = ([fm traitsOfFont:fontAt(@"the")] & NSItalicFontMask) != 0;
+  NSString* scheme = space.colorScheme;
+  [w setColorScheme:@"dark" forSpace:space];
+  BOOL dark = [ed looksDark];
+  [w setColorScheme:@"light" forSpace:space];
+  BOOL light = [ed looksLight];
+  [w setColorScheme:scheme forSpace:space];
+  NSString* md = [w markdownForNote:n];
+  BOOL roundTrip = [NoteMarkdown([w savedNote:n]) isEqualToString:md];
+  std::printf("SELFTEST-NOTESTYLE toolbar=%d title=%d readable=%d heading=%d lists=%d checked=%d italic=%d dark=%d light=%d "
+              "roundTrip=%d\n", toolbar, title, readable, heading, lists, checked, italic, dark, light, roundTrip);
+
+  // Markdown: File > Export Note as Markdown... (written straight to a temp file here) and Copy Note as Markdown.
+  NSString* expected = @"# Plan\n\n### Intro\n\n- milk\n- eggs\n1. bread\n- [x] wash <u>car</u>\n\n"
+                       @"**see** *the* [docs](https://example.org/docs) ~~now~~\n";
+  BOOL markdown = [md isEqualToString:expected];
+  if (!markdown) std::printf("SELFTEST-NOTEMD-DEBUG got=%s\n", [[md stringByReplacingOccurrencesOfString:@"\n" withString:@"\\n"] UTF8String]);
+  NSMenuItem* exportItem = [[NSMenuItem alloc] initWithTitle:@"" action:@selector(exportNoteAsMarkdown:) keyEquivalent:@""];
+  BOOL menuEnabled = [(id<NSMenuItemValidation>)w validateMenuItem:exportItem];
+  [w copyNoteAsMarkdown:nil];
+  NSPasteboard* pb = [w copyPasteboard];
+  BOOL copied = [[pb stringForType:NSPasteboardTypeString] isEqualToString:md];
+  BOOL markdownType = [[pb stringForType:@"net.daringfireball.markdown"] isEqualToString:md];
+  NSString* path = [NSTemporaryDirectory() stringByAppendingPathComponent:@"notarc-selftest-note.md"];
+  [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+  BOOL exported = [w exportNote:n toPath:path] &&
+                  [[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:nil] isEqualToString:expected];
+  [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+
+  // Split view: a page opened beside a note...
+  [w openInSplit:@"https://example.org/beside-note" horizontal:NO];
+  ArcItem* page = w.shownItem;
+  NoteEditorView* left = [w noteEditorForItem:n];
+  NSArray<NSValue*>* pf = [w paneFrames];
+  NSArray* panes = [w visiblePanesForTest];
+  BOOL pageBesideNote = panes.count == 2 && panes[0] == n && panes[1] == page && left && pf.count == 1 &&
+                        NSMaxX(left.frame) <= NSMinX(pf[0].rectValue) + 0.5 &&
+                        fabs(left.frame.size.width - pf[0].rectValue.size.width) < 10;
+  [w.window makeFirstResponder:left.textView];  // clicking into the note pane focuses it
+  BOOL focusNote = w.shownItem == n && [w visiblePanesForTest].count == 2;
+  [w.window makeFirstResponder:nil];
+  // ...and a new note beside a page (Split View > New Note in Split View).
+  [w openInNewTab:@"https://example.org/note-split"];
+  ArcItem* page2 = w.shownItem;
+  [w newNoteInSplitView:nil];
+  ArcItem* n2 = w.shownItem;
+  NoteEditorView* right = [w noteEditorForItem:n2];
+  NSArray<NSValue*>* pf2 = [w paneFrames];
+  BOOL noteBesidePage = n2.noteID && n2 != n && [[w visiblePanesForTest] isEqualToArray:@[ page2, n2 ]] && right &&
+                        pf2.count == 1 && NSMaxX(pf2[0].rectValue) <= NSMinX(right.frame) + 0.5 && right.frame.size.width > 100;
+  [w typeInNote:@"Side note"];
+  BOOL typed = [right.textView.string isEqualToString:@"Side note"] && [n2.displayTitle isEqualToString:@"Side note"];
+  [w showItem:page2];  // the page pane focused: the note stays on screen beside it
+  BOOL staysBeside = [w noteEditorForItem:n2] == right && [w paneFrames].count == 1 && [w visiblePanesForTest].count == 2;
+  // An existing note moves into another split (one document, never copied).
+  [w openInNewTab:@"https://example.org/note-move"];
+  ArcItem* page3 = w.shownItem;
+  [w openInSplit:n.url horizontal:NO];
+  NSUInteger copies = 0;
+  for (ArcItem* t in space.allTabs) copies += [t.url isEqualToString:n.url];
+  BOOL moved = copies == 1 && w.shownItem == n && [[w visiblePanesForTest] isEqualToArray:@[ page3, n ]] && [w noteEditorForItem:n] &&
+               [[w markdownForNote:n] isEqualToString:md];
+  for (ArcItem* t in @[ n, n2 ]) {
+    [w showItem:t];
+    [w closeTab:nil];
+  }
+  [w showItem:page3];
+  BOOL offForPages = ![(id<NSMenuItemValidation>)w validateMenuItem:exportItem] && [w visiblePanesForTest].count == 1;
+  for (ArcItem* t in @[ page, page2, page3 ]) {
+    [w showItem:t];
+    [w closeTab:nil];
+  }
+  BOOL generalUntouched = NSPasteboard.generalPasteboard.changeCount == generalBefore;
+  std::printf("SELFTEST-NOTESPLIT pageBesideNote=%d focusNote=%d noteBesidePage=%d typed=%d staysBeside=%d moved=%d\n",
+              pageBesideNote, focusNote, noteBesidePage, typed, staysBeside, moved);
+  std::printf("SELFTEST-NOTEMD markdown=%d menuEnabled=%d copied=%d markdownType=%d exported=%d offForPages=%d generalUntouched=%d\n",
+              markdown, menuEnabled, copied, markdownType, exported, offForPages, generalUntouched);
 }
 
 - (void)runRemainingSelfTestActions {
@@ -1517,6 +2140,157 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         });
       });
     });
+    // Chrome extensions (#66), Chrome-style pages only: the fixture extension installed at startup through the real CRX
+    // install path is loaded, the picker's Open and Options show its pages in tabs, chrome://extensions opens, and
+    // a stubbed Chrome Web Store page reports whether Chromium's own Web Store install API is there (info only).
+    // Each wait is capped so this finishes before the hang check (75 s) needs the visible tab to itself.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 57 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      if (!ChromePagesEnabled()) {
+        std::printf("SELFTEST-EXTPAGES chromePagesOff=1\n");
+        return;
+      }
+      NSMenu* menu = [w extensionPickerMenuForURL:nil];
+      NSMenuItem* row = [menu itemWithTitle:@"NotArc Test Extension"];
+      NSMenuItem* open = [row.submenu itemWithTitle:@"Open"];
+      NSMenuItem* options = [row.submenu itemWithTitle:@"Options"];
+      BOOL installedAtStart = gTestExtensionID != nil && row != nil;
+      if (open) [NSApp sendAction:open.action to:open.target from:open];
+      ArcItem* popupTab = open ? w.shownItem : nil;
+      WaitUntil(^{ return [popupTab.liveTitle isEqualToString:@"NotArc Extension Popup"]; }, 4, ^{
+        BOOL popup = [popupTab.liveTitle isEqualToString:@"NotArc Extension Popup"] &&
+                     [popupTab.url hasPrefix:[NSString stringWithFormat:@"chrome-extension://%@/", gTestExtensionID]];
+        if (options) [NSApp sendAction:options.action to:options.target from:options];
+        ArcItem* optionsTab = options ? w.shownItem : nil;
+        WaitUntil(^{ return [optionsTab.liveTitle isEqualToString:@"NotArc Extension Options"]; }, 4, ^{
+          BOOL optionsOK = [optionsTab.liveTitle isEqualToString:@"NotArc Extension Options"];
+          NSMenuItem* manage = [menu itemWithTitle:@"Manage Extensions"];
+          [NSApp sendAction:manage.action to:manage.target from:manage];
+          ArcItem* extTab = w.shownItem;
+          WaitUntil(^{ return [extTab.liveTitle isEqualToString:@"Extensions"]; }, 4, ^{
+            BOOL extensionsPage = [extTab.liveTitle isEqualToString:@"Extensions"] && [extTab.url hasPrefix:@"chrome://extensions"];
+            std::printf("SELFTEST-EXTPAGES installedAtStart=%d popup=%d options=%d extensionsPage=%d\n", installedAtStart, popup,
+                        optionsOK, extensionsPage);
+            NSString* store = [@"https://chromewebstore.google.com/detail/notarc-probe/" stringByAppendingString:gTestExtensionID ?: @""];
+            BrowserClient::SetTestResponse(store.UTF8String, "<!doctype html><title>probe</title><script>document.title='WS:'+"
+                                                  "(window.chrome&&chrome.webstorePrivate?1:0)+':'+(window.chrome&&chrome.management?1:0)"
+                                                  "</script>");
+            [w openInNewTab:store];
+            ArcItem* storeTab = w.shownItem;
+            WaitUntil(^{ return [storeTab.liveTitle hasPrefix:@"WS:"]; }, 4, ^{
+              NSArray* parts = [storeTab.liveTitle componentsSeparatedByString:@":"];
+              std::printf("SELFTEST-WEBSTORE-DEBUG loaded=%d webstorePrivate=%s management=%s\n", parts.count == 3,
+                          parts.count == 3 ? [parts[1] UTF8String] : "-", parts.count == 3 ? [parts[2] UTF8String] : "-");
+              BrowserClient::SetTestResponse(store.UTF8String, "");
+            });
+          });
+        });
+      });
+    });
+    // Chrome extensions (#66), both settings: Install Extension... from a Web Store link or ID (download stubbed with
+    // CRX packages signed here), tampered/wrong-ID/Manifest V2 packages refused, then the picker: listing, on/off,
+    // relaunch offer, Remove, the pill button, the menu bar items and the Settings switch.
+    // The packages are signed off the main thread (RSA keys + zip), so timed checks elsewhere aren't held up.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 58 * NSEC_PER_SEC), dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+     NSString *goodID = nil, *otherID = nil, *oldID = nil;
+     NSData* good = BuildTestCRX(TestExtensionFiles(@"Picker Test", 3), &goodID);
+     NSData* other = BuildTestCRX(TestExtensionFiles(@"Someone Else", 3), &otherID);
+     NSData* old = BuildTestCRX(TestExtensionFiles(@"Old Format", 2), &oldID);
+     dispatch_async(dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSFileManager* fm = NSFileManager.defaultManager;
+      NSString* dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-installed-extensions"];
+      [fm removeItemAtPath:dir error:nil];
+      w.extensionsDirectoryOverride = dir;
+      NSMutableData* tampered = [good mutableCopy];
+      if (tampered.length > 40) ((uint8_t*)tampered.mutableBytes)[tampered.length - 40] ^= 0x5A;
+      NSString* wrongID = @"abcdefghijklmnopabcdefghijklmnop";
+      NSMutableDictionary<NSString*, NSData*>* serve = [NSMutableDictionary dictionary];
+      NSMutableArray<NSString*>* asked = [NSMutableArray array];
+      if (goodID) serve[goodID] = tampered;
+      serve[wrongID] = other;
+      if (oldID) serve[oldID] = old;
+      SetExtensionFetcherForTest(^(NSURL* url, void (^done)(NSData*, NSError*)) {
+        [asked addObject:url.absoluteString];
+        NSData* d = nil;
+        for (NSString* k in serve) if ([url.absoluteString containsString:[@"id%3D" stringByAppendingString:k]]) d = serve[k];
+        done(d, nil);
+      });
+      NSString* storeURL = [NSString stringWithFormat:@"https://chromewebstore.google.com/detail/picker-test/%@?hl=en", goodID];
+      BOOL parse = [ExtensionIDFromInput(storeURL) isEqualToString:goodID] &&
+                   [ExtensionIDFromInput([@"https://chrome.google.com/webstore/detail/x/" stringByAppendingString:goodID]) isEqualToString:goodID] &&
+                   [ExtensionIDFromInput(goodID) isEqualToString:goodID] && !ExtensionIDFromInput([@"https://example.com/detail/" stringByAppendingString:goodID]) &&
+                   !ExtensionIDFromInput(@"not an id");
+      BOOL crxURL = [WebStoreCRXURL(goodID).host isEqualToString:@"clients2.google.com"] && [WebStoreCRXURL(goodID).absoluteString containsString:goodID];
+      [w installExtensionFromInput:goodID done:^(NSString* n1, NSError* e1) {
+        BOOL tamperRefused = !n1 && e1 && ![fm fileExistsAtPath:[dir stringByAppendingPathComponent:goodID]];
+        [w installExtensionFromInput:wrongID done:^(NSString* n2, NSError* e2) {
+          BOOL wrongIDRefused = !n2 && e2 && ExtensionLoadPaths(dir, nil).count == 0;
+          [w installExtensionFromInput:oldID done:^(NSString* n3, NSError* e3) {
+            BOOL mv2Refused = !n3 && [e3.localizedDescription containsString:@"Manifest V2"];
+            __block BOOL badInput = NO;
+            [w installExtensionFromInput:@"https://example.com/not-an-extension" done:^(NSString* n4, NSError* e4) { badInput = !n4 && e4; }];
+            if (goodID) serve[goodID] = good;
+            [w installExtensionFromInput:storeURL done:^(NSString* n5, NSError* e5) {
+              NSString* root = [dir stringByAppendingPathComponent:goodID];
+              NSData* md = [NSData dataWithContentsOfFile:[root stringByAppendingPathComponent:@"manifest.json"]];
+              NSDictionary* m = md ? [NSJSONSerialization JSONObjectWithData:md options:0 error:nil] : nil;
+              NSData* key = [m[@"key"] isKindOfClass:NSString.class] ? [[NSData alloc] initWithBase64EncodedString:m[@"key"] options:0] : nil;
+              BOOL installed = [n5 isEqualToString:@"Picker Test"] && ExtensionLoadPaths(dir, nil).count == 1;
+              BOOL keepsID = key && [ExtensionIDForPublicKey(key) isEqualToString:goodID];
+              BOOL stubbedOnly = asked.count == 4;
+              for (NSString* u in asked) if (![u hasPrefix:@"https://clients2.google.com/service/update2/crx?"]) stubbedOnly = NO;
+              std::printf("SELFTEST-EXTINSTALL parse=%d crxURL=%d tamperRefused=%d wrongIDRefused=%d mv2Refused=%d badInput=%d "
+                          "installed=%d keepsID=%d stubbedOnly=%d\n", parse, crxURL, tamperRefused, wrongIDRefused, mv2Refused,
+                          badInput, installed, keepsID, stubbedOnly);
+              // The picker.
+              NSMenu* menu = [w extensionPickerMenuForURL:@"https://example.com/"];
+              NSMenuItem* row = [menu itemWithTitle:@"Picker Test"];
+              NSArray* sub = [row.submenu.itemArray valueForKey:@"title"];
+              BOOL listed = row && [sub containsObject:@"Open"] && [sub containsObject:@"Options"] && [sub containsObject:@"Turn Off"] &&
+                            [sub containsObject:@"Remove..."];
+              NSArray* titles = [menu.itemArray valueForKey:@"title"];
+              BOOL footer = [titles containsObject:@"Install Extension..."] && [titles containsObject:@"Chrome Web Store"] &&
+                            [titles containsObject:@"Manage Extensions"] &&
+                            [menu itemWithTitle:@"Manage Extensions"].enabled == ChromePagesEnabled();
+              BOOL storePage = [[w extensionPickerMenuForURL:[@"https://chromewebstore.google.com/detail/x/" stringByAppendingString:otherID ?: @""]]
+                                   .itemArray.firstObject.title isEqualToString:@"Add This Extension to NotArc"];
+              [w setExtension:goodID enabled:NO];
+              NSMenu* after = [w extensionPickerMenuForURL:nil];
+              BOOL offShown = [[after itemWithTitle:@"Picker Test (off)"].submenu itemWithTitle:@"Turn On"] != nil;
+              NSSet* disabled = [NSSet setWithArray:SettingObject(kDisabledExtensionsKey) ?: @[]];
+              BOOL offNotLoaded = [disabled containsObject:goodID] && ExtensionLoadPaths(dir, disabled).count == 0;
+              NSMenuItem* relaunch = after.itemArray.firstObject;
+              BOOL relaunchOffered = [relaunch.title isEqualToString:@"Relaunch NotArc to Apply Changes"];
+              NSInteger before = [w relaunchRequestsForTest];
+              if (relaunchOffered) [NSApp sendAction:relaunch.action to:relaunch.target from:relaunch];  // counted, never quits
+              BOOL relaunchCounted = [w relaunchRequestsForTest] == before + 1;
+              [w setExtension:goodID enabled:YES];
+              BOOL onAgain = ExtensionLoadPaths(dir, [NSSet setWithArray:SettingObject(kDisabledExtensionsKey) ?: @[]]).count == 1;
+              BOOL removed = [w removeExtensionWithID:goodID] && ![fm fileExistsAtPath:root] &&
+                             [[w extensionPickerMenuForURL:nil] itemWithTitle:@"No extensions yet"] != nil;
+              BOOL button = [w extensionPickerButtonShown] == ChromePagesEnabled();
+              NSMenuItem *fileInstall = nil, *fileManage = nil;
+              for (NSMenuItem* top in NSApp.mainMenu.itemArray)
+                for (NSMenuItem* mi in top.submenu.itemArray) {
+                  if (mi.action == @selector(installExtension:)) fileInstall = mi;
+                  if (mi.action == @selector(manageExtensions:)) fileManage = mi;
+                }
+              BOOL menuBar = fileInstall && fileManage && [(id<NSMenuItemValidation>)w validateMenuItem:fileManage] == ChromePagesEnabled();
+              BOOL settings = [[SettingsWindowController shared] hasCheckboxForKey:@"chromePages"];
+              std::printf("SELFTEST-EXTPICKER listed=%d footer=%d storePage=%d offShown=%d offNotLoaded=%d relaunchOffered=%d "
+                          "relaunchCounted=%d onAgain=%d removed=%d button=%d menuBar=%d settings=%d\n", listed, footer, storePage,
+                          offShown, offNotLoaded, relaunchOffered, relaunchCounted, onAgain, removed, button, menuBar, settings);
+              SetExtensionFetcherForTest(nil);
+              SettingSetObject(kDisabledExtensionsKey, @[]);
+              w.extensionsDirectoryOverride = nil;
+              [fm removeItemAtPath:dir error:nil];
+            }];
+          }];
+        }];
+      }];
+     });
+    });
     // Multi-select: select three tabs, copy their links, put them in a new folder, archive two others at once.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
@@ -1950,6 +2724,383 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         });
       });
     });
+    // Passwords and autofill (#67): encryption round trip against a Chromium vector, import from fake Arc and Chrome
+    // profiles and a CSV, then on a local login page: save prompt, update, Never, the fill menu (only after a click),
+    // filling login / address / card fields, Fill Password, and the Passwords window. Throwaway key, no Keychain.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 95 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSFileManager* fm = NSFileManager.defaultManager;
+      PasswordStore* store = [PasswordStore shared];
+      // Tests use their own file and an in-memory key, never the Keychain or Passwords.dat.
+      BOOL testStore = PasswordStoreIsSelfTest() && [store.path.lastPathComponent isEqualToString:@"SelfTestPasswords.dat"] &&
+                       store.usable;
+      [fm removeItemAtPath:store.path error:nil];
+      [store reload];
+      // Chromium's scheme: a blob made outside NotArc (python PBKDF2 + openssl) decrypts, and we produce the same bytes.
+      NSData* tk = ArcCookieKey(@"selftest-safe-storage");
+      const unsigned char vec[] = {0x76, 0x31, 0x30, 0x83, 0xe1, 0x9b, 0x0a, 0x8b, 0x48, 0x95,
+                                   0x5e, 0xc8, 0xe0, 0x75, 0x47, 0x7f, 0x38, 0xed, 0x65};
+      NSData* vector = [NSData dataWithBytes:vec length:sizeof(vec)];
+      NSData* plain = ChromiumDecryptValue(vector, tk);
+      BOOL roundTrip = [[[NSString alloc] initWithData:plain encoding:NSUTF8StringEncoding] isEqualToString:@"chromium-vector"] &&
+                       [ChromiumEncryptValue([@"chromium-vector" dataUsingEncoding:NSUTF8StringEncoding], tk) isEqualToData:vector] &&
+                       ![ChromiumDecryptValue(vector, ArcCookieKey(@"wrong")) isEqualToData:plain] &&
+                       [[store unseal:[store seal:@"pässwörd ✓"]] isEqualToString:@"pässwörd ✓"];
+      // Arc: one Space profile with Login Data (one login, one "Never" site, one android row, one wrong-key row) + Web Data.
+      NSString* fake = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-arc-passwords"];
+      NSString* prof = w.currentSpace.profileDirectory.length ? w.currentSpace.profileDirectory : @"Default";
+      NSString* arcProfile = [fake stringByAppendingPathComponent:prof];
+      [fm removeItemAtPath:fake error:nil];
+      [fm createDirectoryAtPath:arcProfile withIntermediateDirectories:YES attributes:nil error:nil];
+      SelfTestMakeLoginData([arcProfile stringByAppendingPathComponent:@"Login Data"], tk, @[
+        @[ @"https://accounts.example.com/", @"arc-user", @"arc-pass-1" ], @[ @"https://never.example/", @"", [NSNull null] ],
+        @[ @"android://hash@com.example/", @"x", @"y" ],
+        @[ @"https://bad.example/", @"b", ChromiumEncryptValue([@"zzz" dataUsingEncoding:NSUTF8StringEncoding], ArcCookieKey(@"other")) ]
+      ]);
+      SelfTestMakeWebData([arcProfile stringByAppendingPathComponent:@"Web Data"], tk, NO,
+                          @{@"name" : @"Jane Doe", @"line1" : @"1 Main St", @"city" : @"San Francisco", @"state" : @"CA",
+                            @"zip" : @"94110", @"email" : @"jane@example.com"},
+                          @[ @"Jane Doe", @4, @2031, @"4111 1111 1111 1111" ]);
+      w.arcSafeStorageKeyOverride = tk;
+      NSDictionary* arc = [w importArcPasswordsFromUserData:fake];
+      NSDictionary* arcAgain = [w importArcPasswordsFromUserData:fake];
+      w.arcSafeStorageKeyOverride = nil;
+      SavedLogin* arcLogin = [store loginForOrigin:@"https://accounts.example.com" username:@"arc-user"];
+      BOOL arcOK = [arc[@"passwords"] intValue] == 1 && [arc[@"addresses"] intValue] == 1 && [arc[@"cards"] intValue] == 1 &&
+                   [[store passwordFor:arcLogin] isEqualToString:@"arc-pass-1"] && [store isNeverOrigin:@"https://never.example"] &&
+                   [arcAgain[@"passwords"] intValue] + [arcAgain[@"addresses"] intValue] + [arcAgain[@"cards"] intValue] == 0;
+      // Chrome (newer address format) and a CSV export (Apple Passwords columns, quoted comma).
+      NSString* chrome = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-chrome-profile"];
+      [fm removeItemAtPath:chrome error:nil];
+      [fm createDirectoryAtPath:chrome withIntermediateDirectories:YES attributes:nil error:nil];
+      SelfTestMakeLoginData([chrome stringByAppendingPathComponent:@"Login Data"], tk,
+                            @[ @[ @"https://chrome.example/", @"c1", @"cp1" ], @[ @"https://chrome.example/", @"c2", @"cp2" ] ]);
+      SelfTestMakeWebData([chrome stringByAppendingPathComponent:@"Web Data"], tk, YES,
+                          @{@"name" : @"John Roe", @"line1" : @"5 Side Ave", @"city" : @"Austin", @"state" : @"TX",
+                            @"zip" : @"73301", @"email" : @"john@example.com"},
+                          @[ @"John Roe", @12, @2030, @"5555555555554444" ]);
+      NSDictionary* cr = [store importChromiumProfile:chrome key:tk source:@"Google Chrome (Test)"];
+      NSDictionary* crAgain = [store importChromiumProfile:chrome key:tk source:@"Google Chrome (Test)"];
+      BOOL chromeOK = [cr[@"passwords"] intValue] == 2 && [cr[@"addresses"] intValue] == 1 && [cr[@"cards"] intValue] == 1 &&
+                      [crAgain[@"passwords"] intValue] + [crAgain[@"addresses"] intValue] + [crAgain[@"cards"] intValue] == 0 &&
+                      [store importChromiumProfile:@"/nonexistent/profile" key:tk source:@"x"] == nil;
+      NSString* csv = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-passwords.csv"];
+      [@"Title,URL,Username,Password,Notes,OTPAuth\ncsv,https://csv.example/login,\"csv,user\",\"p\"\"w\",,\n"
+          writeToFile:csv atomically:YES encoding:NSUTF8StringEncoding error:nil];
+      BOOL csvOK = [store importCSVFile:csv source:@"CSV"] == 1 &&
+                   [[store passwordFor:[store loginForOrigin:@"https://csv.example" username:@"csv,user"]] isEqualToString:@"p\"w"];
+      [fm removeItemAtPath:csv error:nil];
+      [fm removeItemAtPath:fake error:nil];
+      [fm removeItemAtPath:chrome error:nil];
+
+      // The login page (a local file; the page script normally runs only on http(s) pages).
+      BrowserClient::SetAutofillAllowFileURLs(true);
+      NSString* page = [NSTemporaryDirectory() stringByAppendingPathComponent:@"notarc-selftest-login.html"];
+      NSMutableString* months = [NSMutableString string];
+      for (int m = 1; m <= 12; ++m) [months appendFormat:@"<option>%02d</option>", m];
+      [[NSString stringWithFormat:
+          @"<!doctype html><title>login</title><form id=f onsubmit='event.preventDefault()'><input id=u name=username "
+          @"autocomplete=username><input id=p type=password name=password><button type=submit>Sign in</button></form>"
+          @"<form id=a onsubmit='event.preventDefault()'><input id=an autocomplete=name><input id=ae type=email name=email>"
+          @"<input id=as name=address1><input id=ac name=city><select id=ast name=state><option value=''>-</option>"
+          @"<option value=CA>California</option><option value=NY>New York</option></select><input id=az name=zip></form>"
+          @"<form id=c><input id=cn autocomplete=cc-number><input id=cc name=cardholder><select id=cm "
+          @"autocomplete=cc-exp-month>%@</select><input id=cy autocomplete=cc-exp-year maxlength=2></form>", months]
+          writeToFile:page atomically:YES encoding:NSUTF8StringEncoding error:nil];
+      [w openInNewTab:[NSURL fileURLWithPath:page].absoluteString];
+      ArcItem* t = w.shownItem;
+      AutofillController* af = w.autofill;
+      NSString* (^byId)(NSString*) = ^(NSString* js) { return [@"var $=function(i){return document.getElementById(i)};" stringByAppendingString:js]; };
+      WaitUntil(^{ return (BOOL)([t.liveTitle isEqualToString:@"login"] && t.browserId); }, 10, ^{
+        [w runJS:byId(@"setTimeout(function(){document.title='onload:'+(!$('u').value&&!$('p').value)+':'+!!window.__notarcAF},300)") inItem:t];
+        WaitUntil(^{ return [t.liveTitle hasPrefix:@"onload:"]; }, 5, ^{
+          BOOL noFillOnLoad = [t.liveTitle isEqualToString:@"onload:true:true"] && af.menusOffered == 0;
+          [w runJS:byId(@"$('u').value='selftest-user';$('p').value='hunter2-selftest';$('f').requestSubmit()") inItem:t];
+          WaitUntil(^{ return [af.pendingSavePrompt hasPrefix:@"Save password"]; }, 5, ^{
+            BOOL saveOffered = [af.pendingSavePrompt isEqualToString:@"Save password for this file?"] &&
+                               [w.toastText isEqualToString:af.pendingSavePrompt];
+            [af savePending:nil];
+            BOOL saved = [[store passwordFor:[store loginForOrigin:@"file://" username:@"selftest-user"]] isEqualToString:@"hunter2-selftest"] &&
+                         !w.toastText;
+            [w runJS:byId(@"$('p').value='hunter3-selftest';$('f').requestSubmit()") inItem:t];
+            WaitUntil(^{ return [af.pendingSavePrompt hasPrefix:@"Update"]; }, 5, ^{
+              BOOL updatePrompt = [af.pendingSavePrompt hasPrefix:@"Update the saved password for selftest-user"];
+              [af savePending:nil];
+              BOOL updated = [[store passwordFor:[store loginForOrigin:@"file://" username:@"selftest-user"]] isEqualToString:@"hunter3-selftest"] &&
+                             [store checkOrigin:@"file://" username:@"selftest-user" password:@"hunter3-selftest"] == PasswordUnchanged;
+              [w runJS:byId(@"$('u').value='other-user';$('p').value='x-pass';$('f').requestSubmit()") inItem:t];
+              WaitUntil(^{ return [af.pendingSavePrompt hasPrefix:@"Save password"]; }, 5, ^{
+                [af neverPending:nil];
+                [w runJS:byId(@"$('u').value='third-user';$('p').value='y-pass';$('f').requestSubmit()") inItem:t];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1500 * NSEC_PER_MSEC), dispatch_get_main_queue(), ^{
+                  BOOL never = [store isNeverOrigin:@"file://"] && !af.pendingSavePrompt && ![store loginForOrigin:@"file://" username:@"other-user"];
+                  [store setNever:NO forOrigin:@"file://"];
+                  // Fill: a click into the empty username field offers the saved login; choosing it fills both fields.
+                  [w runJS:byId(@"window.__ev=0;['u','p'].forEach(function(i){$(i).value='';$(i).addEventListener('input',function(){window.__ev++})});"
+                                @"$('u').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))") inItem:t];
+                  WaitUntil(^{ return (BOOL)(af.menusOffered >= 1); }, 5, ^{
+                    BOOL menu = [af.lastMenuGroup isEqualToString:@"login"] && [af.lastMenuTitles isEqualToArray:@[ @"selftest-user" ]];
+                    [af chooseMenuItemAtIndex:0];
+                    WaitUntil(^{ return (BOOL)(af.lastFilledCount >= 2); }, 5, ^{
+                      [w runJS:byId(@"document.title='filled:'+$('u').value+'|'+$('p').value+'|'+window.__ev") inItem:t];
+                      WaitUntil(^{ return [t.liveTitle hasPrefix:@"filled:"]; }, 5, ^{
+                        BOOL filled = [t.liveTitle isEqualToString:@"filled:selftest-user|hunter3-selftest|2"];
+                        // Edit > AutoFill > Fill Password finds the login field without a click.
+                        NSInteger menusBefore = af.menusOffered;
+                        [w runJS:byId(@"$('u').value='';$('p').value=''") inItem:t];
+                        [w showItem:t];
+                        [w fillPassword:nil];
+                        WaitUntil(^{ return (BOOL)(af.menusOffered > menusBefore); }, 5, ^{
+                          BOOL fillMenu = af.menusOffered > menusBefore && [af.lastMenuGroup isEqualToString:@"login"];
+                          // Address and card fields offer the imported Arc / Chrome entries; a card asks for device auth.
+                          NSInteger m0 = af.menusOffered;
+                          [w runJS:byId(@"$('an').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))") inItem:t];
+                          WaitUntil(^{ return (BOOL)(af.menusOffered > m0); }, 5, ^{
+                            NSUInteger jane = [af.lastMenuTitles indexOfObjectPassingTest:^BOOL(NSString* s, NSUInteger, BOOL*) {
+                              return [s hasPrefix:@"Jane Doe, 1 Main St"];
+                            }];
+                            BOOL addrMenu = [af.lastMenuGroup isEqualToString:@"address"] && af.lastMenuTitles.count == 2 && jane != NSNotFound;
+                            [af chooseMenuItemAtIndex:(NSInteger)jane];
+                            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                              NSInteger m1 = af.menusOffered, auth0 = AutofillAuthRequestsForTest();
+                              [w runJS:byId(@"$('cn').dispatchEvent(new PointerEvent('pointerdown',{bubbles:true}))") inItem:t];
+                              WaitUntil(^{ return (BOOL)(af.menusOffered > m1); }, 5, ^{
+                                NSUInteger visa = [af.lastMenuTitles indexOfObjectPassingTest:^BOOL(NSString* s, NSUInteger, BOOL*) {
+                                  return [s hasPrefix:@"•••• 1111"];
+                                }];
+                                BOOL cardMenu = [af.lastMenuGroup isEqualToString:@"card"] && af.lastMenuTitles.count == 2 && visa != NSNotFound;
+                                [af chooseMenuItemAtIndex:(NSInteger)visa];
+                                BOOL cardAuth = AutofillAuthRequestsForTest() == auth0 + 1;
+                                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                                  [w runJS:byId(@"document.title='af:'+[$('an').value,$('ae').value,$('as').value,$('ac').value,$('ast').value,"
+                                                @"$('az').value,$('cn').value,$('cc').value,$('cm').value,$('cy').value].join('|')") inItem:t];
+                                  WaitUntil(^{ return [t.liveTitle hasPrefix:@"af:"]; }, 5, ^{
+                                    BOOL address = [t.liveTitle hasPrefix:@"af:Jane Doe|jane@example.com|1 Main St|San Francisco|CA|94110|"];
+                                    BOOL card = [t.liveTitle hasSuffix:@"|4111111111111111|Jane Doe|04|31"];
+                                    if (!address || !card) std::printf("SELFTEST-AUTOFILL-DEBUG %s\n", t.liveTitle.UTF8String);
+                                    // Passwords window: search, Show / Copy behind device auth (private pasteboard), Delete.
+                                    [w showPasswords:nil];
+                                    PasswordsWindowController* pwc = [PasswordsWindowController shared];
+                                    pwc.section = 0;
+                                    NSUInteger all = (NSUInteger)pwc.rowCount;
+                                    [pwc setSearchText:@"selftest-user"];
+                                    BOOL search = all == store.logins.count && all == 5 && pwc.rowCount == 1;
+                                    NSInteger generalBefore = NSPasteboard.generalPasteboard.changeCount, auth1 = AutofillAuthRequestsForTest();
+                                    BOOL hidden = [pwc shownSecretAtRow:0] == nil && [[pwc titleAtRow:0] containsString:@"••••"];
+                                    [pwc showSecretAtRow:0];
+                                    BOOL shown = hidden && [[pwc shownSecretAtRow:0] isEqualToString:@"hunter3-selftest"] &&
+                                                 AutofillAuthRequestsForTest() == auth1 + 1;
+                                    [pwc copySecretAtRow:0];
+                                    BOOL copied = [[[w copyPasteboard] stringForType:NSPasteboardTypeString] isEqualToString:@"hunter3-selftest"] &&
+                                                  NSPasteboard.generalPasteboard.changeCount == generalBefore;
+                                    // On disk: encrypted (no plaintext), readable again, unreadable with another key.
+                                    NSData* disk = [NSData dataWithContentsOfFile:store.path];
+                                    NSData* needle1 = [@"hunter3-selftest" dataUsingEncoding:NSUTF8StringEncoding];
+                                    NSData* needle2 = [@"selftest-user" dataUsingEncoding:NSUTF8StringEncoding];
+                                    BOOL encrypted = disk.length > 3 && [[disk subdataWithRange:NSMakeRange(0, 3)] isEqualToData:[@"v10" dataUsingEncoding:NSUTF8StringEncoding]] &&
+                                                     [disk rangeOfData:needle1 options:0 range:NSMakeRange(0, disk.length)].location == NSNotFound &&
+                                                     [disk rangeOfData:needle2 options:0 range:NSMakeRange(0, disk.length)].location == NSNotFound &&
+                                                     ![[PasswordStore alloc] initWithPath:store.path key:ArcCookieKey(@"wrong")].usable;
+                                    [store reload];
+                                    BOOL reloaded = store.logins.count == 5 && store.addresses.count == 2 && store.cards.count == 2 &&
+                                                    [[store passwordFor:[store loginForOrigin:@"file://" username:@"selftest-user"]] isEqualToString:@"hunter3-selftest"];
+                                    [pwc reload];
+                                    [pwc setSearchText:@"selftest-user"];
+                                    [pwc deleteRow:0];
+                                    BOOL deleted = pwc.rowCount == 0 && ![store loginForOrigin:@"file://" username:@"selftest-user"];
+                                    [pwc setSearchText:@""];
+                                    // Add... in each section (addresses and cards by hand; a card must pass the Luhn check).
+                                    NSDictionary* ann = @{@"name" : @"Ann Lee", @"line1" : @"9 Elm St", @"city" : @"Boston", @"zip" : @"02110"};
+                                    pwc.section = 1;
+                                    BOOL addAddr = [pwc addEntry:ann] && ![pwc addEntry:ann] && store.addresses.count == 3 && pwc.rowCount == 3;
+                                    pwc.section = 2;
+                                    BOOL addCard = ![pwc addEntry:@{@"number" : @"4111 1111 1111 1112", @"month" : @"1", @"year" : @"30"}] &&
+                                                   [pwc addEntry:@{@"number" : @"3782 822463 10005", @"name" : @"Ann Lee", @"month" : @"7", @"year" : @"29"}] &&
+                                                   store.cards.count == 3 && [store.cards.lastObject.summary hasPrefix:@"•••• 0005"] &&
+                                                   store.cards.lastObject.expYear == 2029;
+                                    pwc.section = 0;
+                                    NSDictionary* manual = @{@"website" : @"manual.example", @"username" : @"m", @"password" : @"mp"};
+                                    BOOL addLogin = [pwc addEntry:manual] && ![pwc addEntry:manual] &&
+                                                    [[store passwordFor:[store loginForOrigin:@"https://manual.example" username:@"m"]] isEqualToString:@"mp"];
+                                    BOOL manualAdd = addAddr && addCard && addLogin;
+                                    if (!manualAdd) std::printf("SELFTEST-PASSWORDS-DEBUG addAddr=%d addCard=%d addLogin=%d\n", addAddr, addCard, addLogin);
+                                    std::printf("SELFTEST-PASSWORDS roundTrip=%d saveOffered=%d saved=%d updatePrompt=%d updated=%d never=%d "
+                                                "encrypted=%d reloaded=%d window=%d shown=%d copied=%d deleted=%d testStore=%d manualAdd=%d\n",
+                                                roundTrip, saveOffered, saved, updatePrompt, updated, never, encrypted, reloaded,
+                                                search, shown, copied, deleted, testStore, manualAdd);
+                                    std::printf("SELFTEST-AUTOFILL noFillOnLoad=%d menu=%d filled=%d fillPassword=%d addressMenu=%d address=%d "
+                                                "cardMenu=%d cardAuth=%d card=%d arcImport=%d chromeImport=%d csv=%d\n",
+                                                noFillOnLoad, menu, filled, fillMenu, addrMenu, address, cardMenu, cardAuth, card, arcOK,
+                                                chromeOK, csvOK);
+                                    [fm removeItemAtPath:store.path error:nil];
+                                    [store reload];
+                                    [fm removeItemAtPath:page error:nil];
+                                    [w showItem:t];
+                                    [w closeTab:nil];
+                                    BrowserClient::SetAutofillAllowFileURLs(false);
+                                  });
+                                });
+                              });
+                            });
+                          });
+                        });
+                      });
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+    // Filter lists (#53): a list subscribed from a local file (never the network) is parsed (network, exception and
+    // cosmetic rules), the Manage Ad Blockers dialog shows it with the suggestions and site exceptions, Update Now
+    // re-reads it, and on a page its cosmetic rules hide matching elements. Settings are memory-only.
+    // Runs after the call/capture/PiP chain so its tab never takes the screen from the hang or call checks, and while
+    // it runs blocking is on for every page; the multi-window check at the end waits for it.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 140 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+     WaitUntil(^{ return gLateTestsDone; }, 50, ^{
+      MainWindowController* w = self.window;
+      namespace cb = content_blocker;
+      FilterListManager* mgr = FilterListManager.shared;
+      ManageAdBlockersWindowController* dlg = ManageAdBlockersWindowController.shared;  // built, never shown
+      NSString* path = [NSTemporaryDirectory() stringByAppendingPathComponent:@"notarc-selftest-filters.txt"];
+      NSString* fixture = @"[Adblock Plus 2.0]\n! Title: NotArc Test List\n! a comment\n"
+                           "||ads.fixture.example^\n"
+                           "||track.fixture.example^$third-party\n"
+                           "||cdn.fixture.example^$script,domain=news.example|~sports.news.example\n"
+                           "@@||ok.ads.fixture.example^\n"
+                           "@@||allowed-page.example^$document\n"
+                           "##.notarc-generic-ad\n"
+                           "example.org##.notarc-site-ad\n"
+                           "example.org#@#.notarc-generic-unhidden\n"
+                           "##.notarc-generic-unhidden\n"
+                           "~example.org##.notarc-not-on-example\n"
+                           "||popup.fixture.example^$popup\n/banner/*\nexample.com#?#div:has-text(Ad)\n##+js(noop)\n";
+      [fixture writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+      NSString* url = [NSURL fileURLWithPath:path].absoluteString;
+      BOOL suggestedOff = NO;
+      int suggestions = 0;
+      for (FilterList* l in mgr.lists)
+        if (l.suggested && !l.enabled && !l.updated && ([l.title isEqualToString:@"EasyList"] || [l.title isEqualToString:@"EasyPrivacy"]))
+          ++suggestions;
+      suggestedOff = suggestions == 2;
+      BOOL parsed = cb::CountSupportedRules(fixture.UTF8String) == 10 && cb::ListTitle(fixture.UTF8String) == "NotArc Test List";
+      SettingSetBool(kSettingBlockAds, YES);
+      SettingSetBool(kSettingAdBlockBuiltIn, NO);  // only the fixture's made-up hosts while the page check runs
+      ApplyContentBlockerSettings();
+      BOOL rejects = ![dlg addListFromField:@"javascript:alert(1)"] && ![dlg addListFromField:@"ftp://lists.example/x.txt"];
+      BOOL added = [dlg addListFromField:url];
+      WaitUntil(^{ return (BOOL)(!mgr.busy && cb::FilterRuleCount() > 0); }, 10, ^{
+        FilterList* mine = nil;
+        for (FilterList* l in mgr.lists) if ([l.url isEqualToString:url]) mine = l;
+        BOOL subscribed = added && mine.enabled && mine.rules == 10 && mine.updated && [mine.title isEqualToString:@"NotArc Test List"] &&
+                          cb::FilterRuleCount() == 10;
+        BOOL network = cb::ShouldBlock("https://ads.fixture.example/a.js", "https://news.example/", false, "script") &&
+                       cb::ShouldBlock("https://x.ads.fixture.example/i.png", "https://news.example/", false, "image") &&
+                       !cb::ShouldBlock("https://ads.fixture.example/", "https://ads.fixture.example/", true) &&
+                       !cb::ShouldBlock("https://popup.fixture.example/", "https://news.example/", false);
+        BOOL thirdParty = cb::ShouldBlock("https://track.fixture.example/p", "https://news.example/", false) &&
+                          !cb::ShouldBlock("https://track.fixture.example/p", "https://www.fixture.example/", false);
+        BOOL domainOpt = cb::ShouldBlock("https://cdn.fixture.example/ad.js", "https://www.news.example/", false, "script") &&
+                         !cb::ShouldBlock("https://cdn.fixture.example/logo.png", "https://news.example/", false, "image") &&
+                         !cb::ShouldBlock("https://cdn.fixture.example/ad.js", "https://other.example/", false, "script") &&
+                         !cb::ShouldBlock("https://cdn.fixture.example/ad.js", "https://sports.news.example/", false, "script");
+        BOOL exception = !cb::ShouldBlock("https://ok.ads.fixture.example/x", "https://news.example/", false) &&
+                         !cb::ShouldBlock("https://ads.fixture.example/x", "https://allowed-page.example/", false) &&
+                         cb::CosmeticCSS("https://allowed-page.example/").empty();
+        std::string onSite = cb::CosmeticCSS("https://www.example.org/a"), elsewhere = cb::CosmeticCSS("https://other.example/");
+        auto has = [](const std::string& css, const char* cls) { return css.find(std::string(cls) + "{display:none") != std::string::npos; };
+        BOOL cosmetic = has(onSite, ".notarc-generic-ad") && has(onSite, ".notarc-site-ad") &&
+                        !has(onSite, ".notarc-generic-unhidden") && !has(onSite, ".notarc-not-on-example") &&
+                        has(elsewhere, ".notarc-generic-ad") && !has(elsewhere, ".notarc-site-ad") &&
+                        has(elsewhere, ".notarc-generic-unhidden") && has(elsewhere, ".notarc-not-on-example");
+        BOOL builtInOff = !cb::ShouldBlock("https://doubleclick.net/x", "https://news.example/", false);
+        [dlg toggleBuiltIn];
+        BOOL builtInToggle = SettingBool(kSettingAdBlockBuiltIn) && cb::ShouldBlock("https://doubleclick.net/x", "https://news.example/", false);
+        [dlg toggleBuiltIn];
+        builtInToggle = builtInToggle && !SettingBool(kSettingAdBlockBuiltIn);
+        [w setAdBlocking:NO forHost:@"news.example"];
+        BOOL siteOff = !cb::ShouldBlock("https://ads.fixture.example/a.js", "https://news.example/", false) &&
+                       cb::CosmeticCSS("https://news.example/").empty();
+        [dlg reload];
+        NSArray<NSString*>* rows = dlg.rowSummaries;
+        BOOL dialog = [rows containsObject:@"builtin=0"] && [rows containsObject:@"list=NotArc Test List|on=1|rules=10|updated=1|suggested=0"] &&
+                      [rows containsObject:@"list=EasyList|on=0|rules=0|updated=0|suggested=1"] &&
+                      [rows containsObject:@"list=EasyPrivacy|on=0|rules=0|updated=0|suggested=1"] && [rows containsObject:@"site=news.example"];
+        if (!dialog) std::printf("SELFTEST-ADBLOCKLISTS-DEBUG rows=%s\n", [rows componentsJoinedByString:@","].UTF8String);
+        [dlg removeSiteException:@"news.example"];
+        BOOL siteBack = ![dlg.rowSummaries containsObject:@"site=news.example"] &&
+                        cb::ShouldBlock("https://ads.fixture.example/a.js", "https://news.example/", false);
+        BOOL daily = ![[mgr listsDueForRefreshAt:[NSDate date]] containsObject:url] &&
+                     [[mgr listsDueForRefreshAt:[NSDate dateWithTimeIntervalSinceNow:25 * 3600]] containsObject:url];
+        [[fixture stringByAppendingString:@"||more.fixture.example^\n"] writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        [mgr updateList:url done:^(BOOL ok) {
+          WaitUntil(^{ return (BOOL)(!mgr.busy && cb::FilterRuleCount() == 11); }, 10, ^{
+            FilterList* again = nil;
+            for (FilterList* l in mgr.lists) if ([l.url isEqualToString:url]) again = l;
+            BOOL updated = ok && again.rules == 11 && cb::ShouldBlock("https://more.fixture.example/x", "https://news.example/", false);
+            BOOL noDownloads = YES;  // the suggestions were never fetched
+            for (FilterList* l in mgr.lists) if (l.suggested && l.updated) noDownloads = NO;
+            std::printf("SELFTEST-ADBLOCKLISTS parsed=%d suggestedOff=%d rejects=%d subscribed=%d network=%d thirdParty=%d "
+                        "domainOpt=%d exception=%d cosmetic=%d builtInOff=%d builtInToggle=%d siteOff=%d dialog=%d siteBack=%d "
+                        "daily=%d updateNow=%d noDownloads=%d\n", parsed, suggestedOff, rejects, subscribed, network, thirdParty,
+                        domainOpt, exception, cosmetic, builtInOff, builtInToggle, siteOff, dialog, siteBack, daily, updated,
+                        noDownloads);
+            std::fflush(stdout);
+            // Cosmetic hiding on a real page: the style sheet goes in on page load and comes out when the list is off.
+            {
+              [w openInNewTab:@"https://example.org/adblock-cosmetic"];
+              ArcItem* t = w.shownItem;
+              NSString* probe = @"(function(){if(!document.getElementById('__notarc_adblock__'))return;"
+                                 "var d=document.getElementById('nab')||document.createElement('div');d.id='nab';"
+                                 "d.innerHTML='<p class=\"notarc-generic-ad\">a</p><p class=\"notarc-site-ad\">b</p>"
+                                 "<p class=\"notarc-generic-unhidden\">c</p><p class=\"notarc-control\">d</p>';"
+                                 "document.body.appendChild(d);document.title='cosm:'+[].map.call(d.children,function(e){"
+                                 "return getComputedStyle(e).display}).join('|');})()";
+              __block BOOL loaded = NO;
+              WaitUntil(^{
+                if (t.liveTitle.length && t.browserId) {
+                  loaded = YES;
+                  [w runJS:probe inItem:t];
+                }
+                return (BOOL)[t.liveTitle hasPrefix:@"cosm:"];
+              }, 20, ^{
+                if (w.shownItem != t) [w showItem:t];
+                NSString* on = t.liveTitle ?: @"-";
+                BOOL hidden = [on hasPrefix:@"cosm:none|none|"];  // generic rule + this site's rule
+                BOOL kept = [on hasSuffix:@"|block|block"];       // "#@#" exception for this site + an unlisted class
+                [mgr setList:url enabled:NO];
+                WaitUntil(^{ return (BOOL)(!mgr.busy && cb::FilterRuleCount() == 0); }, 10, ^{
+                  [w applyAdBlockCosmeticsToBrowser:t.browserId url:t.url];  // what the next page load does
+                  [w runJS:@"document.title='off:'+!!document.getElementById('__notarc_adblock__')+'|'+"
+                            "getComputedStyle(document.querySelector('.notarc-generic-ad')).display" inItem:t];
+                  WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"off:"]; }, 5, ^{
+                    BOOL removed = [t.liveTitle isEqualToString:@"off:false|block"];
+                    if (!hidden || !kept || !removed)
+                      std::printf("SELFTEST-ADBLOCKCOSMETIC-DEBUG loaded=%d on=[%s] off=[%s]\n", loaded, on.UTF8String,
+                                  t.liveTitle.UTF8String);
+                    [mgr removeList:url];
+                    BOOL gone = YES;
+                    for (FilterList* l in mgr.lists) if ([l.url isEqualToString:url]) gone = NO;
+                    [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+                    SettingSetObject(kSettingAdBlockLists, nil);
+                    SettingSetObject(kSettingAdBlockBuiltIn, nil);
+                    SettingSetBool(kSettingBlockAds, NO);
+                    ApplyContentBlockerSettings();
+                    std::printf("SELFTEST-ADBLOCKCOSMETIC hidden=%d kept=%d removed=%d listRemoved=%d off=%d\n", hidden, kept,
+                                removed, gone, !cb::Enabled() && SettingBool(kSettingAdBlockBuiltIn));
+                    gAdBlockTestDone = YES;
+                  });
+                });
+              });
+            }
+          });
+        }];
+      });
+     });
+    });
     // Boosts: a Boost for example.org applies on page load (colour overlay, zap, case, custom CSS and JS), a zap
     // picked in the page is added, turning it off removes it from the page, and it's saved.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 100 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -1974,7 +3125,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         [w runJS:probe inItem:t];
         WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"boost:"]; }, 5, ^{
           NSString* on = t.liveTitle;
-          BOOL applied = [on isEqualToString:@"boost:none|uppercase|rgb(1, 2, 3)|ran|true|hue"];
+          BOOL applied = [on isEqualToString:@"boost:none|uppercase|rgb(1, 2, 3)|ran|true|color"];
           [w handleZapSelector:@"a:nth-of-type(1)" browser:t.browserId];
           Boost* b = [w boostForURL:@"https://example.org/x"];
           BOOL zapAdded = [b.zaps containsObject:@"a:nth-of-type(1)"];
@@ -2002,10 +3153,50 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
             NSString* indOff = w.boostIndicatorState;
             BOOL saved = w.savedBoostCount == 1;
             if (!applied || !off) std::printf("SELFTEST-BOOST-DEBUG on=[%s] off=[%s]\n", on.UTF8String, t.liveTitle.UTF8String);
-            [w deleteBoostForHost:@"example.org"];
-            std::printf("SELFTEST-BOOST applied=%d zapAdded=%d subdomain=%d off=%d saved=%d deleted=%d related=%d "
-                        "indicatorOn=%d indicatorOff=%d\n", applied, zapAdded, sub, off, saved, w.savedBoostCount == 0, related,
-                        [indOn isEqualToString:@"on"], [indOff isEqualToString:@"off"]);
+            // Editor (#51): the colour wheel's point -> hue/saturation mapping; a pick on the wheel and the Intensity
+            // slider set the Boost's tint, it's saved and the page gets it; a font tile works; the sections are
+            // laid out in Arc's order.
+            [w setBoostForHost:@"example.org" configure:^(Boost* x) { x.enabled = YES; x.hue = -1; x.font = nil; }];
+            if (w.shownItem != t) [w showItem:t];
+            [w editBoost:nil];
+            BoostColorWheel* wheel = w.boostColorWheel;
+            NSRect wr = wheel.wheelRect;
+            double h1 = -1, s1 = -1, h2 = -1, s2 = -1, h3 = -1, s3 = -1, h4 = -1, s4 = -1;
+            BoostWheelPick(NSMakePoint(NSMidX(wr), NSMidY(wr)), wr, &h1, &s1);
+            BoostWheelPick(NSMakePoint(NSMaxX(wr), NSMidY(wr)), wr, &h2, &s2);
+            BoostWheelPick(NSMakePoint(NSMidX(wr) - wr.size.width / 4, NSMidY(wr)), wr, &h3, &s3);
+            BoostWheelPick(NSMakePoint(NSMidX(wr), NSMaxY(wr) + 30), wr, &h4, &s4);  // outside the rim: clamped
+            BOOL math = wr.size.width > 100 && s1 < 0.01 && fabs(h2) < 0.5 && fabs(s2 - 1) < 0.01 && fabs(h3 - 180) < 0.5 &&
+                        fabs(s3 - 0.5) < 0.01 && fabs(h4 - 90) < 0.5 && fabs(s4 - 1) < 0.01;
+            Boost* eb = w.boostBeingEdited;
+            BOOL editing = eb != nil && [eb.host isEqualToString:@"example.org"];
+            [wheel pickPoint:[wheel pointForHue:120 saturation:0.5]];
+            [w setBoostIntensity:0.8];
+            BOOL stored = fabs(eb.hue - 120) < 1 && fabs(eb.saturation - 0.5) < 0.01 && fabs(eb.colorStrength - 0.8) < 0.01 &&
+                          eb.enabled && wheel.hasColor;
+            BOOL wheelSaved = NO;
+            for (Boost* x in BoostStoreLoad(BoostStorePath(YES)))
+              if ([x.host isEqualToString:@"example.org"] && fabs(x.hue - 120) < 1 && fabs(x.saturation - 0.5) < 0.01 &&
+                  fabs(x.colorStrength - 0.8) < 0.01)
+                wheelSaved = YES;
+            BOOL fontTile = [w pickBoostFontTile:@"Georgia"] && [eb.font isEqualToString:@"Georgia"];
+            NSArray* sections = w.boostPanelSections;
+            BOOL sectionsOK = [sections isEqualToArray:@[ @"header", @"color", @"font", @"size", @"case", @"zap", @"code" ]];
+            if (!sectionsOK) std::printf("SELFTEST-BOOST-DEBUG sections=[%s]\n", [sections componentsJoinedByString:@","].UTF8String);
+            [w runJS:@"(function(){var a=getComputedStyle(document.documentElement,'::after');document.title='tint:'+"
+                      "[a.backgroundColor,a.mixBlendMode,a.opacity,getComputedStyle(document.body).fontFamily].join('|')})()"
+              inItem:t];
+            WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"tint:"]; }, 5, ^{
+              NSString* tint = t.liveTitle;  // hsl(120, 50%, 50%) is rgb(64, 191, 64)
+              BOOL pageTint = [tint hasPrefix:@"tint:rgb(64, 191, 64)|color|0.8|"] && [tint containsString:@"Georgia"];
+              if (!pageTint) std::printf("SELFTEST-BOOST-DEBUG tint=[%s]\n", tint.UTF8String);
+              [w deleteBoostForHost:@"example.org"];
+              std::printf("SELFTEST-BOOST applied=%d zapAdded=%d subdomain=%d off=%d saved=%d deleted=%d related=%d "
+                          "indicatorOn=%d indicatorOff=%d\n", applied, zapAdded, sub, off, saved, w.savedBoostCount == 0, related,
+                          [indOn isEqualToString:@"on"], [indOff isEqualToString:@"off"]);
+              std::printf("SELFTEST-BOOSTEDITOR wheelMath=%d editing=%d wheelTint=%d wheelSaved=%d pageTint=%d fontTile=%d "
+                          "sections=%d\n", math, editing, stored, wheelSaved, pageTint, fontTile, sectionsOK);
+            });
           });
           });
         });
@@ -2036,6 +3227,21 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           NSMutableArray* urls = [NSMutableArray array];
           for (ArcItem* c in f.children) [urls addObject:c.url.lastPathComponent];
           BOOL merged = ok && [[urls componentsJoinedByString:@","] isEqualToString:@"d,b"] && f.children[1] == keep;
+          // Unread (Arc's unread dot): "d" arrived after the first fill, so it's unread and the folder counts it; "b"
+          // was there from the start. It's saved, and opening the tab clears it.
+          ArcItem* fresh = f.children.firstObject;
+          if (![w folderExpanded:f]) [w toggleFolder:f];
+          BOOL marked = fresh.liveUnread && !keep.liveUnread && [w liveUnreadCountOf:f] == 1;
+          BOOL folderCount = [[w liveBadgeForItem:f] isEqualToString:@"1"];
+          BOOL dotShown = [[w liveBadgeForItem:fresh] isEqualToString:@"dot"] && [[w liveBadgeForItem:keep] isEqualToString:@""];
+          [w saveSidebarNow];
+          BOOL unreadSaved = [[NSString stringWithContentsOfFile:SidebarStorePath(YES) encoding:NSUTF8StringEncoding error:nil]
+              containsString:@"\"liveUnread\""];
+          [w showItem:fresh];
+          BOOL cleared = !fresh.liveUnread && [[w liveBadgeForItem:f] isEqualToString:@""] &&
+                         [[w liveBadgeForItem:fresh] isEqualToString:@""];
+          std::printf("SELFTEST-LIVEUNREAD marked=%d folderCount=%d dot=%d saved=%d cleared=%d\n", marked, folderCount,
+                      dotShown, unreadSaved, cleared);
           [w openInNewTab:@"https://example.org/not-in-feed"];
           ArcItem* tab = w.shownItem;
           BOOL noDrop = ![w moveItem:tab toParent:f index:0];
@@ -2065,6 +3271,117 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
           [[NSFileManager defaultManager] removeItemAtPath:feed error:nil];
           std::printf("SELFTEST-LIVEFOLDER filled=%d merged=%d noDrop=%d parse=%d input=%d saved=%d\n", filled, merged, noDrop,
                       parse, input, saved);
+        }];
+      });
+    });
+    // Live Folders from GitHub (My Pull Requests, read with the Space's sign-in) and YouTube channels. Every page comes
+    // from local fixture files (LiveFolderSetTestPages), never the network: signed out shows the sign-in entry; signed in
+    // fills the folder from GitHub's search page (server-rendered links) and its embedded page data; a new pull request
+    // comes in unread; a YouTube @handle resolves to its channel id and fills from the channel feed.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 145 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSString* dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"notarc-selftest-live"];
+      [[NSFileManager defaultManager] createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+      NSString* (^put)(NSString*, NSString*) = ^(NSString* name, NSString* text) {
+        NSString* path = [dir stringByAppendingPathComponent:name];
+        [text writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        return path;
+      };
+      NSString* head = @"<!DOCTYPE html><html><head><meta name=\"user-login\" content=\"%@\"></head><body>%@</body></html>";
+      NSString* (^result)(NSString*, NSString*, NSString*) = ^(NSString* repo, NSString* num, NSString* title) {
+        return [NSString stringWithFormat:@"<div class=\"Result\"><h3><div><a href=\"/%@\"><span>%@</span></a></div><div class=\"search-title\">"
+                                           "<a class=\"prc-Link\" href=\"/%@/pull/%@\"><span class=\"search-match\">%@</span></a></div></h3>"
+                                           "<a class=\"issueNumberLink\" href=\"/%@/pull/%@\" target=\"_blank\">#%@</a>"
+                                           "<a href=\"/%@/pull/%@#issuecomment-1\">2 comments</a></div>",
+                                          repo, repo, repo, num, title, repo, num, num, repo, num];
+      };
+      NSString* signedOut = put(@"out.html", [NSString stringWithFormat:head, @"", @"<a href=\"/login\">Sign in</a>"]);
+      NSString* mine1 = put(@"mine1.html", [NSString stringWithFormat:head, @"octo",
+          [result(@"acme/web", @"12", @"Fix login") stringByAppendingString:result(@"acme/web", @"9", @"Faster &lt;b&gt; builds")]]);
+      NSString* mine2 = put(@"mine2.html", [NSString stringWithFormat:head, @"octo",
+          [@[ result(@"acme/web", @"13", @"Dark mode"), result(@"acme/web", @"12", @"Fix login"), result(@"acme/web", @"9", @"Faster &lt;b&gt; builds") ]
+              componentsJoinedByString:@""]]);
+      NSString* review = put(@"review.html", [NSString stringWithFormat:head, @"octo",
+          @"<script type=\"application/json\" data-target=\"react-app.embeddedData\">{\"payload\":{\"pullRequests\":["
+           "{\"number\":30,\"permalink\":\"https://github.com/acme/api/pull/30\",\"title\":\"Add rate limits\"},"
+           "{\"number\":12,\"permalink\":\"https://github.com/acme/web/pull/12\",\"title\":\"Fix login\"}]}}</script>"]);
+      NSArray<NSString*>* urls = LiveFolderGitHubMineURLs();
+      LiveFolderSetTestPages(@{urls[0] : signedOut, urls[1] : signedOut});
+      ArcItem* f = [w createMyPullRequestsFolder];
+      WaitUntil(^{ return (BOOL)(f.children.count == 1 && f.liveSignInNeeded); }, 10, ^{
+        BOOL signInState = f.children.count == 1 && [f.children[0].url isEqualToString:kLiveFolderGitHubSignInURL] &&
+                           [f.children[0].displayTitle containsString:@"Sign in to GitHub"] && [f.liveError containsString:@"GitHub"] &&
+                           !f.children[0].liveUnread && !f.liveFilled;
+        NSMenu* sub = [w newLiveFolderMenuItem].submenu;
+        BOOL menu = [sub itemWithTitle:@"GitHub: My Pull Requests"].action == @selector(newMyPullRequestsFolder:) &&
+                    [sub itemWithTitle:@"YouTube Channel..."].action == @selector(newYouTubeLiveFolder:) &&
+                    [sub itemWithTitle:@"Feed or GitHub Repository..."].action == @selector(newLiveFolder:);
+        LiveFolderSetTestPages(@{urls[0] : mine1, urls[1] : review});
+        [w refreshLiveFolder:f done:^(BOOL ok) {
+          NSMutableArray* titles = [NSMutableArray array];
+          for (ArcItem* c in f.children) [titles addObject:c.displayTitle ?: @""];
+          BOOL signedIn = ok && !f.liveSignInNeeded && !f.liveError && f.children.count == 3 &&
+                          [f.children[0].url isEqualToString:@"https://github.com/acme/web/pull/12"] &&
+                          [titles[0] isEqualToString:@"Fix login · web#12"] && [titles[1] isEqualToString:@"Faster <b> builds · web#9"] &&
+                          [titles[2] isEqualToString:@"Review: Add rate limits · api#30"];
+          BOOL firstFillRead = f.liveFilled && [w liveUnreadCountOf:f] == 0;
+          BOOL once = [w createMyPullRequestsFolder] == f;  // one per Space
+          LiveFolderSetTestPages(@{urls[0] : mine2, urls[1] : review});
+          if (!signedIn) std::printf("SELFTEST-LIVEGITHUB-DEBUG titles=%s\n", [titles componentsJoinedByString:@"|"].UTF8String);
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+          [w refreshLiveFolder:f done:^(BOOL ok2) {
+            ArcItem* added = nil;
+            for (ArcItem* c in f.children)
+              if ([c.url isEqualToString:@"https://github.com/acme/web/pull/13"]) added = c;
+            BOOL newUnread = ok2 && added.liveUnread && [w liveUnreadCountOf:f] == 1 && f.children.count == 4;
+            BOOL badge = [[w liveBadgeForItem:f] isEqualToString:@"1"];
+            BOOL out = YES, in = NO;
+            NSArray* none = LiveFolderParseGitHubHTML([NSString stringWithContentsOfFile:signedOut encoding:NSUTF8StringEncoding error:nil],
+                                                      25, NO, &out);
+            BOOL parse = none.count == 0 && !out && LiveFolderParseGitHubHTML(@"<html>not github</html>", 25, NO, &in) == nil &&
+                         LiveFolderIsGitHubSignedInLanding(@"https://github.com/pulls") &&
+                         !LiveFolderIsGitHubSignedInLanding(@"https://github.com/login?return_to=x") &&
+                         !LiveFolderIsGitHubSignedInLanding(@"https://github.com/sessions/two-factor");
+            [w deleteSidebarItem:f];
+            std::printf("SELFTEST-LIVEGITHUB signInState=%d menu=%d signedIn=%d firstFillRead=%d once=%d newUnread=%d badge=%d "
+                        "parse=%d\n", signInState, menu, signedIn, firstFillRead, once, newUnread, badge, parse);
+            // YouTube: "@handle" -> the channel page (read once) -> channel id -> its public feed.
+            NSString* cid = @"UCabcdefghijklmnopqrstuv";
+            NSString* page = put(@"channel.html", @"<html><head><link rel=\"canonical\" href=\"https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv\">"
+                                                   "<meta property=\"og:title\" content=\"Test &amp; Channel\"></head><body></body></html>");
+            NSString* feed = put(@"videos.xml",
+                @"<?xml version=\"1.0\" encoding=\"UTF-8\"?><feed xmlns:yt=\"http://www.youtube.com/xml/schemas/2015\" "
+                 "xmlns:media=\"http://search.yahoo.com/mrss/\" xmlns=\"http://www.w3.org/2005/Atom\"><title>Test Channel</title>"
+                 "<link rel=\"alternate\" href=\"https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv\"/>"
+                 "<entry><yt:videoId>vid1</yt:videoId><title>First video</title><link rel=\"alternate\" href=\"https://www.youtube.com/watch?v=vid1\"/>"
+                 "<author><name>Test</name><uri>https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv</uri></author>"
+                 "<media:group><media:title>First video</media:title></media:group></entry>"
+                 "<entry><title>Second video</title><link rel=\"alternate\" href=\"https://www.youtube.com/watch?v=vid2\"/></entry></feed>");
+            NSString* feedURL = LiveFolderFetchURL(@"youtube", cid);
+            LiveFolderSetTestPages(@{@"https://www.youtube.com/@notarctest" : page, feedURL : feed});
+            NSDictionary* in1 = LiveFolderSourceFromInput(@"youtube.com/@notarctest", NO);
+            NSDictionary* in2 = LiveFolderSourceFromInput(@"@notarctest", NO);
+            NSDictionary* in3 = LiveFolderSourceFromInput(@"https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv/videos", NO);
+            BOOL input = [in1[@"kind"] isEqualToString:@"youtube"] && [in1[@"resolve"] isEqualToString:@"https://www.youtube.com/@notarctest"] &&
+                         [in2[@"resolve"] isEqualToString:@"https://www.youtube.com/@notarctest"] && [in3[@"source"] isEqualToString:cid] &&
+                         LiveFolderSourceFromInput(@"https://www.youtube.com/", NO) == nil &&
+                         [feedURL isEqualToString:@"https://www.youtube.com/feeds/videos.xml?channel_id=UCabcdefghijklmnopqrstuv"];
+            BOOL fromVideo = [LiveFolderYouTubeChannelIDFromHTML(@"<meta itemprop=\"channelId\" content=\"UCabcdefghijklmnopqrstuv\">", nil)
+                                 isEqualToString:cid] && LiveFolderYouTubeChannelIDFromHTML(@"<html></html>", nil) == nil;
+            [w createLiveFolderFromInput:@"https://www.youtube.com/@notarctest" done:^(ArcItem* yf) {
+              WaitUntil(^{ return (BOOL)(yf.children.count == 2); }, 10, ^{
+                BOOL resolved = [yf.liveKind isEqualToString:@"youtube"] && [yf.liveSource isEqualToString:cid] &&
+                                [yf.displayTitle isEqualToString:@"Test & Channel"];
+                BOOL filled = yf.children.count == 2 && [yf.children[0].url isEqualToString:@"https://www.youtube.com/watch?v=vid1"] &&
+                              [yf.children[0].displayTitle isEqualToString:@"First video"] && !yf.children[0].liveUnread;
+                if (yf) [w deleteSidebarItem:yf];
+                LiveFolderSetTestPages(nil);
+                [[NSFileManager defaultManager] removeItemAtPath:dir error:nil];
+                std::printf("SELFTEST-LIVEYOUTUBE input=%d resolved=%d filled=%d fromVideo=%d\n", input, resolved, filled, fromVideo);
+              });
+            }];
+          }];
+          });
         }];
       });
     });
@@ -2111,6 +3428,171 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         }];
       });
     });
+    // Easel tools (#49): drawing (arrow, rectangle, ellipse, pen) and resizing with real mouse events on the canvas,
+    // colours, Delete and Esc, all saved; then a live web clip of a local test page that refreshes off-screen (menu and
+    // easel opening, never a tab switch), and area / full-page captures into the easel. Runs after the capture chain
+    // (it needs the shown tab to itself); the multi-window check waits for gEaselToolsDone.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 135 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+     WaitUntil(^{ return gLateTestsDone; }, 60, ^{
+      MainWindowController* w = self.window;
+      NSString* dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"NotArcEaselClipSelfTest"];
+      [NSFileManager.defaultManager createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+      NSString* html = [dir stringByAppendingPathComponent:@"clip.html"];
+      NSString* (^page)(NSString*) = ^(NSString* lower) {
+        return [NSString stringWithFormat:@"<html><head><title>clip</title></head><body style=\"margin:0\"><div style=\""
+                                          @"height:300px;background:#00c040\"></div><div style=\"height:1700px;background:%@\">"
+                                          @"</div></body></html>", lower];
+      };
+      [page(@"#0040ff") writeToFile:html atomically:YES encoding:NSUTF8StringEncoding error:nil];
+      NSString* pageURL = [NSURL fileURLWithPath:html].absoluteString;
+      [w openInNewTab:pageURL];
+      ArcItem* tab = w.shownItem;
+      // Drawing.
+      ArcItem* easel = [w createEaselWithID:nil];
+      EaselView* ev = [w easelView];
+      BOOL toolbar = ev.toolbar.superview != nil && !ev.toolbar.hidden && ev.toolbar.frame.size.width > 200;
+      NSArray<NSString*>* pal = [EaselView palette];
+      ev.color = pal[5];
+      ev.tool = @"arrow";
+      [ev testDragFrom:NSMakePoint(60, 100) to:NSMakePoint(260, 180) steps:6];
+      EaselObject* arrow = ev.objects.lastObject;
+      BOOL arrowOK = [arrow.kind isEqualToString:@"arrow"] && arrow.points.count == 2 && [arrow.color isEqualToString:pal[5]] &&
+                     NSEqualRects(arrow.frame, NSMakeRect(50, 90, 220, 100));
+      ev.tool = @"rect";
+      [ev testDragFrom:NSMakePoint(60, 220) to:NSMakePoint(200, 300) steps:4];
+      EaselObject* rect = ev.objects.lastObject;
+      BOOL rectOK = [rect.kind isEqualToString:@"rect"] && NSEqualRects(rect.frame, NSMakeRect(50, 210, 160, 100));
+      ev.tool = @"ellipse";
+      [ev testDragFrom:NSMakePoint(240, 220) to:NSMakePoint(380, 300) steps:4];
+      EaselObject* ellipse = ev.objects.lastObject;
+      BOOL ellipseOK = [ellipse.kind isEqualToString:@"ellipse"] && NSEqualRects(ellipse.frame, NSMakeRect(230, 210, 160, 100));
+      ev.tool = @"pen";
+      NSUInteger before = ev.objects.count;
+      [ev testDragFrom:NSMakePoint(60, 360) to:NSMakePoint(300, 380) steps:12];
+      EaselObject* pen = ev.objects.lastObject;
+      [ev testDragFrom:NSMakePoint(500, 500) to:NSMakePoint(500, 500) steps:1];  // a click draws nothing
+      BOOL penOK = ev.objects.count == before + 1 && [pen.kind isEqualToString:@"pen"] && pen.points.count >= 8 &&
+                   [ev.tool isEqualToString:@"pen"];
+      NSEvent* (^key)(NSString*, unsigned short) = ^(NSString* ch, unsigned short code) {
+        return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0
+                            windowNumber:w.window.windowNumber context:nil characters:ch charactersIgnoringModifiers:ch
+                               isARepeat:NO keyCode:code];
+      };
+      [ev keyDown:key(@"\e", 53)];
+      BOOL escape = [ev.tool isEqualToString:@"select"];
+      [ev keyDown:key(@"r", 15)];
+      escape = escape && [ev.tool isEqualToString:@"rect"];
+      [ev keyDown:key(@"\e", 53)];
+      [ev selectObject:rect];
+      ev.color = pal[2];
+      BOOL colour = [rect.color isEqualToString:pal[2]] && [arrow.color isEqualToString:pal[5]];
+      NSView* rectView = [ev viewForObject:rect];
+      NSView* (^hit)(NSPoint) = ^(NSPoint pt) { return [ev hitTest:[ev.superview convertPoint:pt fromView:ev]]; };
+      BOOL hitThrough = hit(NSMakePoint(130, 260)) != rectView && hit(NSMakePoint(60, 260)) == rectView;
+      // Resizing by the corner handles.
+      NSRect rf = rect.frame;
+      [ev testDragFrom:NSMakePoint(NSMaxX(rf) - 5, NSMaxY(rf) - 5) to:NSMakePoint(NSMaxX(rf) + 55, NSMaxY(rf) + 35) steps:5];
+      BOOL resized = NSEqualRects(rect.frame, NSMakeRect(50, 210, 215, 135)) && NSEqualRects(rectView.frame, rect.frame);
+      EaselObject* txt = [ev addText:@"Plan" at:NSMakePoint(420, 100)];
+      [w.window makeFirstResponder:ev];
+      NSRect tf = txt.frame;
+      [ev testDragFrom:NSMakePoint(NSMaxX(tf) - 5, NSMaxY(tf) - 5) to:NSMakePoint(NSMaxX(tf) + 75, NSMaxY(tf) + 15) steps:3];
+      BOOL textResized = NSEqualRects(txt.frame, NSMakeRect(420, 100, NSMaxX(tf) + 75 - 420, NSMaxY(tf) + 15 - 100));
+      NSBitmapImageRep* pr = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:200 pixelsHigh:100 bitsPerSample:8
+          samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+      EaselObject* pic = [ev addImagePNG:[pr representationUsingType:NSBitmapImageFileTypePNG properties:@{}] link:@"https://example.org/pic"];
+      NSRect pf = pic.frame;
+      [ev testDragFrom:NSMakePoint(NSMaxX(pf) - 5, NSMaxY(pf) - 5) to:NSMakePoint(NSMaxX(pf) + 95, NSMaxY(pf) - 5) steps:4];
+      BOOL aspect = NSEqualPoints(pic.frame.origin, pf.origin) && pic.frame.size.width == pf.size.width + 95 &&
+                    fabs(pic.frame.size.width / pic.frame.size.height - pf.size.width / pf.size.height) < 0.02;
+      if (!aspect) std::printf("SELFTEST-EASELDRAW-DEBUG pic=%s before=%s\n", NSStringFromRect(pic.frame).UTF8String, NSStringFromRect(pf).UTF8String);
+      [ev selectObject:pen];
+      [w.window makeFirstResponder:ev];
+      NSUInteger n0 = ev.objects.count;
+      [ev keyDown:key([NSString stringWithFormat:@"%C", (unichar)NSDeleteCharacter], 51)];
+      BOOL deleted = ev.objects.count == n0 - 1 && ![ev.objects containsObject:pen];
+      NSArray* kinds = [ev.objects valueForKey:@"kind"];
+      NSString* rectFrame = NSStringFromRect(rect.frame);
+      [w showItem:tab];
+      BOOL barHidden = ev.toolbar.hidden;
+      [w showItem:easel];
+      EaselView* ev2 = [w easelView];
+      BOOL saved = [[ev2.objects valueForKey:@"kind"] isEqual:kinds] && ev2.objects.count == 5 &&
+                   [NSStringFromRect(ev2.objects[1].frame) isEqualToString:rectFrame] && [ev2.objects[1].color isEqualToString:pal[2]] &&
+                   ev2.objects[0].points.count == 2 && [ev2.tool isEqualToString:@"select"];
+      std::printf("SELFTEST-EASELDRAW toolbar=%d arrow=%d rect=%d ellipse=%d pen=%d escape=%d colour=%d hitThrough=%d "
+                  "resized=%d textResized=%d aspect=%d deleted=%d barHidden=%d saved=%d\n", toolbar, arrowOK, rectOK,
+                  ellipseOK, penOK, escape, colour, hitThrough, resized, textResized, aspect, deleted, barHidden, saved);
+      [w closeTab:nil];  // the drawing easel; the clip below goes into a fresh one
+      // Live web clip.
+      WaitUntil(^{ if (w.shownItem != tab) [w showItem:tab]; return (BOOL)([tab.liveTitle isEqualToString:@"clip"] && ![w isLoading]); }, 20, ^{
+        [w runJS:@"window.scrollTo(0,300);document.title='scrolled'" inItem:tab];
+        WaitUntil(^{ return [tab.liveTitle isEqualToString:@"scrolled"]; }, 5, ^{
+          if (w.shownItem != tab) [w showItem:tab];
+          [w liveClipArea:NSMakeRect(20, 20, 200, 120) done:^(EaselObject* clip) {
+            ArcItem* clipEasel = w.shownItem;
+            EaselView* cv = [w easelView];
+            BOOL clipped = clip && [clip.kind isEqualToString:@"clip"] && [clip.link isEqualToString:pageURL] &&
+                           NSEqualRects(clip.region, NSMakeRect(20, 20, 200, 120)) && clip.viewport.width > 220 &&
+                           [NSFileManager.defaultManager fileExistsAtPath:[cv.directory stringByAppendingPathComponent:clip.image ?: @"-"]];
+            BOOL scrolled = fabs(clip.scroll.y - 300) < 2;
+            NSInteger started0 = EaselClipRendersStarted();
+            [w showItem:tab];
+            [w showItem:clipEasel];
+            BOOL notOnSwitch = EaselClipRendersStarted() == started0;  // fresh clip: opening again doesn't re-render
+            [page(@"#ff2020") writeToFile:html atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            NSMenuItem* mi = [[NSMenuItem alloc] initWithTitle:@"Refresh Live Clips" action:@selector(refreshLiveClipsFromMenu:) keyEquivalent:@""];
+            BOOL menu = [(id<NSMenuItemValidation>)w validateMenuItem:mi];
+            NSString* oldImage = clip.image;
+            NSInteger done0 = w.clipRefreshesFinished;
+            [w refreshLiveClipsFromMenu:nil];
+            WaitUntil(^{ return (BOOL)(w.clipRefreshesFinished > done0); }, 30, ^{
+              if (w.shownItem != clipEasel) [w showItem:clipEasel];  // other timed checks switch tabs concurrently
+              EaselView* cv2 = [w easelView];
+              EaselObject* c = cv2.liveClips.firstObject;
+              NSData* png = [NSData dataWithContentsOfFile:[cv2.directory stringByAppendingPathComponent:c.image ?: @"-"]];
+              NSBitmapImageRep* rep = png ? [NSBitmapImageRep imageRepWithData:png] : nil;
+              NSColor* px = rep ? [[rep colorAtX:rep.pixelsWide / 2 y:rep.pixelsHigh / 2] colorUsingColorSpace:NSColorSpace.sRGBColorSpace] : nil;
+              BOOL refreshed = c && ![c.image isEqualToString:oldImage] && rep.pixelsWide >= 200 && c.refreshedAt.timeIntervalSinceNow > -30;
+              // Red, from the scrolled part of the page (unscrolled, the region would be green).
+              BOOL live = px && px.redComponent - px.blueComponent > 0.3 && px.redComponent - px.greenComponent > 0.3;
+              if (!live) std::printf("SELFTEST-EASELCLIP-DEBUG px=%s size=%ldx%ld\n", px.description.UTF8String ?: "-", (long)rep.pixelsWide, (long)rep.pixelsHigh);
+              // Opening an easel refreshes clips older than a minute.
+              c.refreshedAt = [NSDate dateWithTimeIntervalSinceNow:-3600];
+              [cv2 save];
+              [w showItem:tab];
+              NSInteger s1 = EaselClipRendersStarted();
+              [w showItem:clipEasel];
+              BOOL onOpen = EaselClipRendersStarted() == s1 + 1;
+              NSInteger done1 = w.clipRefreshesFinished;
+              WaitUntil(^{ return (BOOL)(w.clipRefreshesFinished > done1); }, 30, ^{
+                // Area and full-page captures straight into the easel (the Capture code from #48).
+                [w showItem:tab];
+                [w captureToEaselMode:@"area" rect:NSMakeRect(10, 10, 100, 50) done:^(EaselObject* a) {
+                  BOOL area = a && [a.kind isEqualToString:@"image"] && [a.link isEqualToString:pageURL] && w.shownItem == clipEasel &&
+                              a.frame.size.width > 90 && a.frame.size.width < 340;
+                  [w showItem:tab];
+                  [w captureToEaselMode:@"full" rect:NSZeroRect done:^(EaselObject* f) {
+                    BOOL full = f && [f.kind isEqualToString:@"image"] && f.frame.size.height > f.frame.size.width &&
+                                [w easelView].objects.count == 3 && w.shownItem == clipEasel;
+                    std::printf("SELFTEST-EASELCLIP clipped=%d scrolled=%d notOnSwitch=%d menu=%d refreshed=%d live=%d onOpen=%d "
+                                "area=%d full=%d closed=%d\n", clipped, scrolled, notOnSwitch, menu, refreshed, live, onOpen,
+                                area, full, EaselClipRenderersActive() <= 1);
+                    [w showItem:clipEasel];
+                    [w closeTab:nil];
+                    [w showItem:tab];
+                    [w closeTab:nil];
+                    [NSFileManager.defaultManager removeItemAtPath:dir error:nil];
+                    gEaselToolsDone = YES;
+                  }];
+                }];
+              });
+            });
+          }];
+        });
+      });
+     });
+    });
     // Notes: a new note shows the editor (no web view), typing names it from its first line and saves rich text,
     // switching away and back reloads it, closing archives it and reopening from the archive brings the text back.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 110 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -2137,6 +3619,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
       [w closeTab:nil];
       std::printf("SELFTEST-NOTES editor=%d titled=%d saved=%d bold=%d hiddenForTabs=%d reloaded=%d archived=%d reopened=%d\n",
                   editor, titled, saved, bold, hidden, reloaded, archived, reopened);
+      [self runNoteFormatSelfTest];
     });
     // Site settings popover: rows reflect remembered answers; changing one is stored; clear cookies works from it.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 90 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -2316,7 +3799,7 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
         {  // Import Extensions from Arc, against a fake Arc profile (never Arc's real one).
           NSFileManager* fm = NSFileManager.defaultManager;
           NSString* fake = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-arc-userdata"];
-          NSString* dest = NotArcExtensionsDirectory(YES);
+          NSString* dest = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-arc-extensions"];  // not the loaded folder
           [fm removeItemAtPath:fake error:nil];
           [fm removeItemAtPath:dest error:nil];
           NSString* prof = w.currentSpace.profileDirectory.length ? w.currentSpace.profileDirectory : @"Default";
@@ -2454,6 +3937,183 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
                     tidied, sticks, undone, renameSticks);
       }
       [w saveSidebarNow];
+    });
+    // Settings window panes (#72), app icon choice (#74) and per-site Developer Mode (#68). Settings are memory-only in
+    // test runs; everything changed here is put back before the block ends. Never opens DevTools or shows a window.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 27 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      // App icon at launch (#74): the default NotArc icon is already in place before anything below changes it.
+      CGFloat launchDiff = AppIconDifference(NSApp.applicationIconImage, AppIconImage(@"classic"));
+      SettingsWindowController* sw = [SettingsWindowController shared];
+      NSDictionary* savedSettings = SettingsMemorySnapshotForTest();
+      __block NSButton* (^findButton)(NSView*, NSString*) = nil;
+      NSButton* (^find)(NSView*, NSString*) = ^NSButton*(NSView* v, NSString* title) {
+        if ([v isKindOfClass:NSButton.class] && [((NSButton*)v).title isEqualToString:title]) return (NSButton*)v;
+        for (NSView* c in v.subviews)
+          if (NSButton* b = findButton(c, title)) return b;
+        return nil;
+      };
+      findButton = find;
+      if (const char* dir = getenv("NOTARC_SETTINGS_SNAPSHOT_DIR")) {  // design checks only, never in normal runs
+        NSString* folder = [NSString stringWithUTF8String:dir];
+        [sw writePaneSnapshotsTo:folder];
+        NSArray* names = AppIconNames();
+        NSImage* strip = [NSImage imageWithSize:NSMakeSize(140 * names.count, 140) flipped:NO drawingHandler:^BOOL(NSRect r) {
+          for (NSUInteger i = 0; i < names.count; ++i)
+            [AppIconImage(names[i]) drawInRect:NSMakeRect(140 * i + 6, 6, 128, 128)];
+          return YES;
+        }];
+        NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithCGImage:[strip CGImageForProposedRect:nil context:nil hints:nil]];
+        [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}]
+            writeToFile:[folder stringByAppendingPathComponent:@"icons.png"] atomically:YES];
+      }
+      {  // #72: Arc's panes, everything that was in Settings is still there, Profiles / Appearance / Advanced work.
+        BOOL panes = [sw.paneIdentifiers isEqualToArray:@[ @"general", @"profiles", @"appearance", @"links", @"max", @"advanced" ]] &&
+                     find([sw viewOfPane:@"max"], @"Turn on Max") != nil;
+        [sw selectPane:@"advanced"];
+        BOOL select = [sw.selectedPane isEqualToString:@"advanced"];
+        [sw selectPane:@"general"];
+        BOOL kept = [find([sw viewOfPane:@"links"], @"Air Traffic Control...") action] == @selector(showAirTrafficControl:);
+        for (NSString* k in @[ kSettingSearchSuggestions, kSettingBlockAds, kSettingAutoPiP, kSettingSoundEffects,
+                               kSettingReorderHaptics, kSettingPeekPinnedLinks, kSettingPeekShiftClick ])
+          kept = kept && [sw checkboxForSetting:k] != nil;
+        NSArray* rows = sw.profileRows;
+        ArcSpace* sp = w.currentSpace;
+        NSString* mine = [NSString stringWithFormat:@"%@: ", [w nameOfProfile:sp.profileDirectory]];
+        BOOL listed = rows.count == w.profileDirectories.count && rows.count > 0;
+        BOOL spaceShown = NO;
+        for (NSString* r in rows)
+          if ([r hasPrefix:mine] && [r containsString:sp.title.length ? sp.title : @"Space"]) spaceShown = YES;
+        NSString* dir = [sw createProfileNamed:@"SelfTest Settings Profile"];
+        BOOL created = dir && [w.profileDirectories containsObject:dir] &&
+                       [sw.profileRows containsObject:@"SelfTest Settings Profile: No Spaces"];
+        BOOL renamed = [sw renameProfileAtRow:[w.profileDirectories indexOfObject:dir] to:@"SelfTest Settings Renamed"] &&
+                       [[w nameOfProfile:dir] isEqualToString:@"SelfTest Settings Renamed"] &&
+                       [sw.profileRows containsObject:@"SelfTest Settings Renamed: No Spaces"];
+        // Appearance: the default applies to Spaces without their own choice; a Space's own choice wins.
+        NSString* own = sp.colorScheme;
+        [w setColorScheme:nil forSpace:sp];
+        [sw chooseSpaceAppearance:@"dark"];
+        [w.window displayIfNeeded];
+        BOOL darkDefault = w.sidebarIsDark && [DefaultSpaceAppearance() isEqualToString:@"dark"];
+        [sw chooseSpaceAppearance:@"light"];
+        [w.window displayIfNeeded];
+        BOOL lightDefault = !w.sidebarIsDark;
+        [w setColorScheme:@"dark" forSpace:sp];
+        [w.window displayIfNeeded];
+        BOOL spaceWins = w.sidebarIsDark;
+        [sw chooseSpaceAppearance:@"auto"];
+        [w setColorScheme:own forSpace:sp];
+        BOOL autoBack = [DefaultSpaceAppearance() isEqualToString:@"auto"] && (own || w.window.appearance == nil);
+        // Advanced: Chrome-style pages and Developer Mode switches, Clear Browsing Data and Reset buttons.
+        NSView* adv = [sw viewOfPane:@"advanced"];
+        BOOL advanced = [sw checkboxForSetting:kSettingChromePages] &&
+                        [[sw checkboxForSetting:kSettingChromePages] boolValue] == SettingBool(kSettingChromePages) &&
+                        [[sw checkboxForSetting:kSettingDeveloperModeLocal] boolValue] &&
+                        find(adv, @"Clear Browsing Data...").action == @selector(clearBrowsingData:) &&
+                        find(adv, @"Reset Developer Mode Sites").action == @selector(resetDeveloperModeSites:) &&
+                        find(adv, @"Reset All Settings...").action == @selector(resetAllSettings:);
+        SettingSetBool(kSettingSoundEffects, NO);
+        [sw chooseAppIcon:@"forest"];
+        [sw chooseSpaceAppearance:@"dark"];
+        SetDeveloperMode(YES, @"reset.example");
+        ResetAllSettings();
+        BOOL reset = SettingBool(kSettingSoundEffects) && [CurrentAppIconName() isEqualToString:@"classic"] &&
+                     [DefaultSpaceAppearance() isEqualToString:@"auto"] && !DeveloperModeOnForHost(@"reset.example") &&
+                     SettingDouble(kSettingAutoArchiveHours) == 12;
+        SettingsMemoryRestoreForTest(savedSettings);
+        ApplyContentBlockerSettings();
+        ApplyAppIcon();
+        SettingsDidChange();
+        [sw selectPane:@"general"];
+        std::printf("SELFTEST-SETTINGSPANES panes=%d select=%d kept=%d listed=%d spaceShown=%d created=%d renamed=%d "
+                    "darkDefault=%d lightDefault=%d spaceWins=%d autoBack=%d advanced=%d reset=%d\n", panes, select, kept,
+                    listed, spaceShown, created, renamed, darkDefault, lightDefault, spaceWins, autoBack, advanced, reset);
+      }
+      {  // #74: 4-6 NotArc icons, picked in Appearance, applied at once and at launch, saved; the bundle isn't touched.
+        NSArray* names = AppIconNames();
+        BOOL distinct = names.count >= 4 && names.count <= 6;
+        for (NSUInteger i = 0; i < names.count; ++i)
+          for (NSUInteger j = i + 1; j < names.count; ++j)
+            distinct = distinct && AppIconDifference(AppIconImage(names[i]), AppIconImage(names[j])) > 8;
+        BOOL (^shows)(NSString*) = ^BOOL(NSString* n) {
+          CGFloat d = AppIconDifference(NSApp.applicationIconImage, AppIconImage(n));
+          for (NSString* o in names)
+            if (![o isEqualToString:n] && AppIconDifference(NSApp.applicationIconImage, AppIconImage(o)) <= d) return NO;
+          return d < 12;  // a bitmap copy of the same icon differs by ~6; other icons by 20+
+        };
+        BOOL atLaunch = launchDiff < 12 && shows(@"classic");
+        NSString* plist = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Contents/Info.plist"];
+        NSDate* plistDate = [[NSFileManager.defaultManager attributesOfItemAtPath:plist error:nil] fileModificationDate];
+        [sw chooseAppIcon:@"sunset"];
+        BOOL applied = shows(@"sunset");
+        BOOL saved = [SettingObject(kSettingAppIcon) isEqual:@"sunset"] && [sw.appIconShownAsChosen isEqualToString:@"sunset"];
+        [sw chooseAppIcon:@"no-such-icon"];
+        BOOL unknownIgnored = [CurrentAppIconName() isEqualToString:@"sunset"];
+        SettingSetObject(kSettingAppIcon, @"midnight");  // as if saved last time: launch applies it
+        ApplyAppIcon();
+        BOOL relaunch = shows(@"midnight");
+        [sw chooseAppIcon:@"classic"];
+        BOOL restored = shows(@"classic") && [sw.appIconShownAsChosen isEqualToString:@"classic"];
+        BOOL bundle = [[[NSFileManager.defaultManager attributesOfItemAtPath:plist error:nil] fileModificationDate]
+                          isEqualToDate:plistDate];
+        std::printf("SELFTEST-APPICON variants=%d distinct=%d atLaunch=%d applied=%d saved=%d unknownIgnored=%d "
+                    "relaunch=%d restored=%d bundleUntouched=%d\n", names.count >= 4, distinct, atLaunch, applied, saved,
+                    unknownIgnored, relaunch, restored, bundle);
+      }
+      {  // #68 pure rules: local sites on by default; the pill shows host:port/path in Developer Mode.
+        BOOL local = DeveloperModeOnForURL(@"http://localhost:3000/") && DeveloperModeOnForURL(@"http://127.0.0.1:8080/x") &&
+                     DeveloperModeOnForURL(@"http://myapp.local/") && DeveloperModeOnForURL(@"http://api.localhost:5173/") &&
+                     DeveloperModeOnForURL(@"http://[::1]:4000/") && !DeveloperModeOnForURL(@"https://example.com/") &&
+                     !DeveloperModeOnForURL(@"http://127.0.0.1.example.com/") && !DeveloperModeOnForURL(@"file:///tmp/x.html") &&
+                     !DeveloperModeOnForURL(@"http://localhost.example.com/");
+        BOOL pillText = [SidebarAddressTextForURL(@"http://localhost:3000/app?x=1") isEqualToString:@"localhost:3000/app?x=1"] &&
+                        [SidebarAddressTextForURL(@"https://www.example.com/a") isEqualToString:@"example.com"];
+        SetDeveloperMode(NO, @"localhost");
+        BOOL localOff = !DeveloperModeOnForURL(@"http://localhost:3000/") && DeveloperModeOnForURL(@"http://127.0.0.1:3000/");
+        ResetDeveloperModeHosts();
+        SettingSetBool(kSettingDeveloperModeLocal, NO);
+        BOOL autoOff = !DeveloperModeOnForURL(@"http://localhost:3000/");
+        SettingSetBool(kSettingDeveloperModeLocal, YES);
+        BOOL localBack = DeveloperModeOnForURL(@"http://localhost:3000/");
+        __block NSMenuItem* (^findItem)(NSMenu*, SEL) = nil;
+        NSMenuItem* (^findMenu)(NSMenu*, SEL) = ^NSMenuItem*(NSMenu* menu, SEL a) {
+          for (NSMenuItem* i in menu.itemArray) {
+            if (i.action == a) return i;
+            if (NSMenuItem* f = i.submenu ? findItem(i.submenu, a) : nil) return f;
+          }
+          return nil;
+        };
+        findItem = findMenu;
+        BOOL menus = findMenu(NSApp.mainMenu, @selector(toggleDeveloperMode:)) && findMenu(NSApp.mainMenu, @selector(resetDeveloperModeSites:));
+        // A real tab: turned on from the menu command, then reset.
+        [w openInNewTab:@"https://example.org/devmode?x=1"];
+        ArcItem* t = w.shownItem;
+        WaitUntil(^{ if (w.shownItem != t) [w showItem:t]; return (BOOL)([[w currentURL] hasPrefix:@"https://example.org/devmode"] && ![w isLoading]); }, 20, ^{
+          [w showItem:t];
+          BOOL offBefore = ![w devToolsButtonShown] && ![w itemKeptFromAutoArchive:t] && [w.sidebarAddressText isEqualToString:@"example.org"];
+          NSMenuItem* mi = [[NSMenuItem alloc] initWithTitle:@"" action:@selector(toggleDeveloperMode:) keyEquivalent:@""];
+          BOOL menuOn = [(id<NSMenuItemValidation>)w validateMenuItem:mi] && [mi.title isEqualToString:@"Turn On Developer Mode for This Site"];
+          [w toggleDeveloperMode:mi];
+          BOOL toggled = DeveloperModeOnForHost(@"example.org") && [DeveloperModeChosenHosts() isEqualToArray:@[ @"example.org" ]];
+          BOOL fullURL = [w.sidebarAddressText isEqualToString:@"example.org/devmode?x=1"];
+          BOOL devTools = [w devToolsButtonShown];
+          BOOL kept = [w itemKeptFromAutoArchive:t];
+          BOOL menuOff = [(id<NSMenuItemValidation>)w validateMenuItem:mi] && [mi.title isEqualToString:@"Turn Off Developer Mode for This Site"];
+          BOOL listed = [sw.developerModeSitesText containsString:@"example.org"];
+          [sw resetDeveloperModeSites:nil];
+          BOOL reset = !DeveloperModeOnForHost(@"example.org") && DeveloperModeChosenHosts().count == 0 &&
+                       DeveloperModeOnForURL(@"http://localhost:3000/") && ![w devToolsButtonShown] &&
+                       [w.sidebarAddressText isEqualToString:@"example.org"] && ![w itemKeptFromAutoArchive:t];
+          std::printf("SELFTEST-DEVMODE local=%d pillText=%d localOff=%d autoOff=%d localBack=%d menus=%d offBefore=%d "
+                      "menuOn=%d toggled=%d fullURL=%d devTools=%d kept=%d menuOff=%d listed=%d reset=%d\n", local,
+                      pillText, localOff, autoOff, localBack, menus, offBefore, menuOn, toggled, fullURL, devTools, kept,
+                      menuOff, listed, reset);
+          if (!(fullURL && offBefore))
+            std::printf("SELFTEST-DEVMODE-DEBUG url=%s pill=%s\n", [w currentURL].UTF8String ?: "-", w.sidebarAddressText.UTF8String ?: "-");
+          if (w.shownItem == t) [w closeTab:nil];
+        });
+      }
     });
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 29 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
@@ -2707,7 +4367,10 @@ int main(int argc, char* argv[]) {
   {
     BOOL testRun = NO;
     for (char* a : args) if (a == noMacOcclusion) testRun = YES;
-    NSArray<NSString*>* paths = ChromePagesEnabled() ? ArcCopiedExtensionPaths(NotArcExtensionsDirectory(testRun)) : @[];
+    NSString* extDir = NotArcExtensionsDirectory(testRun);
+    NSSet* disabled = [NSSet setWithArray:testRun ? @[] : ([NSUserDefaults.standardUserDefaults arrayForKey:kDisabledExtensionsKey] ?: @[])];
+    if (testRun && ChromePagesEnabled()) InstallSelfTestExtension(extDir);  // through the real CRX install path
+    NSArray<NSString*>* paths = ChromePagesEnabled() ? ExtensionLoadPaths(extDir, disabled) : @[];
     if (paths.count) {
       loadExt = std::string("--load-extension=") + [paths componentsJoinedByString:@","].UTF8String;
       features = std::string("--disable-features=DisableLoadExtensionCommandLineSwitch") +
@@ -2751,10 +4414,13 @@ int main(int argc, char* argv[]) {
     CefString(&settings.cache_path) = cache.UTF8String;
     // Keep session-only logins across restarts, as Arc and Chrome do with "continue where you left off".
     settings.persist_session_cookies = true;
+    // Live easel clips (#49) refresh in a hidden off-screen browser; tabs stay windowed.
+    settings.windowless_rendering_enabled = true;
 
     if (!CefInitialize(main_args, settings, nullptr, nullptr)) return CefGetExitCode();
     SettingsRegisterDefaults();
     if (selfTest) SettingsUseMemoryOnly();
+    PasswordStoreConfigure(selfTest);  // tests: throwaway in-memory key, never the Keychain
     ApplyContentBlockerSettings();
 
     AppDelegate* delegate = [AppDelegate new];

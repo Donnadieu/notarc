@@ -29,6 +29,12 @@
 @property(nonatomic, strong) NSDate* liveRefreshedAt;
 @property(nonatomic, strong) NSMutableArray<NSString*>* liveDismissed;
 @property(nonatomic, copy) NSString* liveError;  // last refresh error (not saved)
+// "github-mine" only: the Space isn't signed in to github.com, so the folder shows a sign-in entry (not saved).
+@property(nonatomic) BOOL liveSignInNeeded;
+// The folder has been filled once; entries that arrive after that come in unread (Arc: showNewItemsAsUnread).
+@property(nonatomic) BOOL liveFilled;
+// A Live Folder tab that arrived since you last looked: an unread dot on it and a count on its folder until opened.
+@property(nonatomic) BOOL liveUnread;
 @property(nonatomic) BOOL splitHorizontal;                       // stacked instead of side by side
 @property(nonatomic, copy) NSArray<NSNumber*>* splitFractions;   // pane sizes summing to 1; nil = equal
 @property(nonatomic, strong) NSMutableArray<ArcItem*>* children;
@@ -37,6 +43,9 @@
 @property(nonatomic) BOOL mediaPaused;   // has media that was playing and is now paused (not saved)
 @property(nonatomic) BOOL audioMuted;
 // Calls (#47, not saved): the page has the camera / microphone, and whether the user turned them off.
+// Tab thumbnails (#65, not saved): a small picture of the page from when it was last on screen.
+@property(nonatomic, strong) NSImage* thumbnail;
+@property(nonatomic, strong) NSDate* thumbnailTaken;  // when the last copy was started (throttles copies)
 @property(nonatomic) BOOL inPictureInPicture;  // its video is in a floating PiP window (#46, not saved)
 @property(nonatomic) BOOL usingCamera;
 @property(nonatomic) BOOL usingMic;

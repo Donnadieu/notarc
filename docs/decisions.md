@@ -103,3 +103,251 @@ trackpad; everything else is checked by the hidden self-test.
     both, and their unread counts already show as badges (#20). Gmail uses Gmail's own unread feed with the Space's
     sign-in (same as email peeking, #44); calendar Favorites (Google Calendar, Outlook calendar, iCloud, Proton,
     Cal.com) show today's events from the Mac's Calendar.
+
+## 2026-11-09: tab thumbnails (#65, #19)
+
+31. **Thumbnails are copied asynchronously with ScreenCaptureKit, from NotArc's own window.** The 0.19.0 attempt
+    (#176, reverted) copied the window synchronously with `CGWindowListCreateImage`: 10-110 ms of main-thread time per
+    copy made timing-sensitive self-tests fail at random. DevTools `Page.captureScreenshot` stops Chromium reporting
+    frozen pages, and in-process reads (`cacheDisplayInRect`, layer IOSurfaces) are blank because the page is drawn
+    in the GPU process. `SCScreenshotManager` with `SCShareableContent.getCurrentProcessShareableContent` copies the
+    window in the window server and hands the picture back on a background queue: the main thread only starts the
+    request (well under 1 ms) and stores the result. It needs no Screen Recording permission because the app only
+    copies its own window, which needs macOS 14.4; on macOS 13 to 14.3 there are simply no thumbnails. CEF's
+    off-screen rendering was not used: it would load each page a second time.
+32. **When a copy is made:** 1 s after a tab comes on screen or finishes loading (every switch or load restarts the
+    wait, so flipping quickly through tabs copies nothing), when the pointer moves over the sidebar, and when the
+    Ctrl+Tab switcher opens; at most once every 2 s per tab, one at a time. A copy started before a tab switch is
+    thrown away so a picture never shows the wrong page. Pictures are 480 px wide JPEGs of the top of the page (4:3),
+    kept in memory only, never saved, and never shown for the tab already on screen. At most 40 pictures are kept
+    across all windows (oldest dropped first), so memory stays under about 30 MB however many tabs are open. A tab
+    switch itself only bumps a counter and re-arms the 1 s timer; the self-test flips tabs every 0.15 s and checks
+    that no copy starts and that the thumbnail code adds under 1 ms to a switch.
+33. **Ctrl+Tab held opens a recent-tab switcher**, as Arc's "tab switcher, like Command+Tab": the shown tab first,
+    then the most recently used tabs of the Space (up to 8, fewer if the window is narrow), with the previous tab
+    selected. Tab / Shift+Tab or the arrow keys move, releasing Ctrl switches, Esc cancels, a click picks a tile. The
+    panel only appears after 0.12 s, so a quick Ctrl+Tab still flips straight to the previous tab. Choosing the menu
+    item with the mouse switches directly. Ctrl+Shift+Tab to open it backwards wasn't added (no free shortcut was
+    asked for); Shift+Tab works once it is open.
+
+## 2026-11-09: Notes look, split panes and Markdown export (#50)
+34. **Note lists are text markers, not AppKit text lists.** Bulleted, numbered and checklist items start with "•",
+    "1." or "☐"/"☑" and a tab, with a hanging indent. AppKit's own lists (NSTextList) store their markers differently
+    from macOS 26 on, so plain markers are the only form that reads the same in RTF, plain-text copies and every
+    TextKit version. Clicking a box ticks it; Return continues a list and Return on an empty item ends it. Format >
+    Lists... (AppKit's list panel) was replaced by the note's own list commands.
+35. **Title and headings in Markdown:** the note's first line exports as `# Title`; Heading 1-3 export one level
+    down (`##` to `####`) so a note has one top-level heading. Underline has no Markdown form and exports as
+    `<u>...</u>`; strikethrough as `~~...~~`; checklists as `- [ ]` / `- [x]`. Images are left out.
+36. **Arc's format bar wording isn't copied.** NotArc's bar uses plain names (Body, Heading 1-3, Bold, ...) and SF
+    Symbols. No keyboard shortcuts were added for the new commands (Arc's aren't known); Cmd+B/I/U still work.
+37. **A note is one document:** Open in Split View on a note moves it into the split rather than opening a copy, and
+    pasting or typing a `notarc://note/...` address into a split does the same.
+
+## 2026-11-09: Live Folders, finished (#55)
+
+38. **My Pull Requests reads GitHub's own search pages** (`is:pr is:open archived:false author:@me`, then
+    `review-requested:@me`, newest updated first) with the Space's cookies through a CEF request in that Space's
+    request context, and parses the page: the pull request links in the server-rendered results, or the page data
+    GitHub embeds as JSON when a page is client-rendered. Signed in or not comes from GitHub's `user-login` meta tag.
+    Not signed in shows one "Sign in to GitHub to see your pull requests" entry that opens GitHub's sign-in page in that
+    Space; when that tab lands back on github.com the folder refreshes. Signed in with nothing open shows "No open
+    pull requests". One such folder per Space (asking again shows the existing one). Arc's GitHub SSO prompt, review
+    status subtitles and team pull requests are not copied.
+39. **YouTube channels:** an address with `/channel/UC...` is used as is; `@handle`, `/c/`, `/user/` and video
+    addresses are read once to find the channel id (the page's canonical link, else its channel id fields), and the
+    folder is named after the channel. Videos come from `youtube.com/feeds/videos.xml?channel_id=...` (newest 15, as
+    YouTube serves them).
+40. **Unread:** entries added by a refresh after the folder's first fill come in unread (Arc: showNewItemsAsUnread);
+    the first fill and the sign-in / "No open pull requests" entries never do. The tab shows a small accent-colour dot,
+    the folder row a count; opening the tab clears it. Unread is saved with the sidebar.
+
+## 2026-11-09: Boost editor and colour wheel (#51)
+41. **The Boost tint is a "color" blend now, not a "hue" blend.** The new wheel has saturation toward its centre, and
+   a hue blend ignores the overlay's saturation, so the wheel's radius would do nothing. With a colour blend the page
+   keeps its lightness, the rim gives full colour and the centre greys the page; the Intensity slider sets how much
+   of it shows. Older Boosts (no saturation saved) start at 85% saturation, the old fixed value.
+42. **The editor's slider is Intensity (the overlay's strength),** standing in for Arc's brightness control. Arc's
+   advanced colour controls (secondary hue, invert lightness) are not built.
+43. **The editor is a floating card, not Arc's shelf docked to the window.** It follows the Space's light/dark look and
+   uses NotArc's Arc colours (tile fills from the sidebar rows, Arc blue for the chosen tile). The wheel, tiles and
+   icons are drawn in code or are SF Symbols; nothing comes from Arc's app.
+44. **Font tiles:** Page, System, Georgia, Helvetica, Avenir, Menlo, Times, Futura, Gill Sans and Rounded (Arial
+   Rounded MT Bold, which ships with macOS). Baskerville left the list; a Boost that already uses it keeps it.
+45. **Text case cycles Original, UPPER, lower, Title** (Arc's Boosts had capitalize as well).
+
+## 2026-11-09: Settings panes, app icon choice, Developer Mode (#72, #74, #68)
+
+46. **Settings panes follow Arc's names** (General, Profiles, Links, Max, Advanced), with Arc's separate App Icon pane
+   folded into a new **Appearance** pane next to the default Space appearance. Panes are listed in one place
+   (`-buildPanes` in `app/settings.mm`); the Max pane goes between Links and Advanced and is added by its own PR.
+47. **Default Space appearance:** Settings > Appearance sets Light, Dark or Automatic for every Space that hasn't chosen
+   its own. The Space menu's "Automatic" entry is renamed "Default (Settings)", because it now means "use the
+   Settings choice", which is still "follow macOS" until changed.
+48. **App icons are NotArc's own**, drawn in code (`app/app_icons.mm`): six colourways of one mark, a window with a
+   sidebar. Nothing comes from Arc. The choice is applied with `NSApp.applicationIconImage` at launch and at once
+   when picked. The signed app bundle is never changed, so Finder, and the Dock while NotArc is closed, keep the
+   bundle's icon. Arc kept its icon in the Dock after quitting with a Dock tile plug-in; that is left out because it
+   means shipping a second signed bundle.
+49. **Developer Mode is per site and stored by host** (without "www.", ports ignored), as in Arc's
+   `developerModeEnabledForHosts`. It is on by itself for localhost, *.localhost, 127.x.x.x, ::1 and *.local; a
+   setting in Settings > Advanced turns that off, and each site can still be switched either way. In Developer Mode
+   the sidebar pill shows the address without its scheme (host:port/path?query), so the port stays visible in the
+   narrow pill; the full address is in the pill's tooltip.
+50. **Developer Tools from the pill is a click away, never automatic.** The pitfalls rule (no DevTools sessions on tabs
+   in the background) still holds; the self-test only checks that the button is shown, it never opens DevTools.
+51. **Reset All Settings** resets every preference shown in Settings (including the app icon, Space appearance and
+   Developer Mode sites). Spaces, tabs, profiles, history, site permissions, ad-blocking exceptions and keyboard
+   shortcuts are kept: those are data or have their own reset.
+
+## 2026-11-09: Arc Max on the Mac (#58, #59)
+
+52. **Swift in the build.** Apple's on-device model (FoundationModels) is Swift-only. `app/on_device_ai.swift` is one
+    `@objc` class compiled by a custom `swiftc` step in CMake into an object file and a generated header
+    (`NotArcAI-Swift.h`); FoundationModels is weak-linked and checked with `#available(macOS 26, *)` and
+    `SystemLanguageModel.default.availability`, so NotArc still runs on macOS 13. Command Line Tools have no macro
+    plugins, so `@Generable` is out; replies are plain text, parsed in Objective-C++ with greedy sampling.
+53. **Fallbacks keep every command visible.** Without the model: Ask on Page shows the page's sentences that best match
+    the question (plus "Ask ChatGPT"), summaries pick the page's key sentences, link previews show the page's own
+    description and Tidy Tabs groups by site. Settings > Max turns each feature, or all of Max, off.
+54. **Tidy Tabs asks for one topic per tab, not for folders.** The small on-device model gave muddled folders when asked
+    for "Folder: 1, 4" groups, but clean ones when it labels each tab ("3: Cooking") and NotArc groups equal labels.
+    Only top-level Today tabs are tidied (folders, splits, notes and easels stay put); topics with 2+ tabs become
+    folders at the top of Today; Undo (Edit menu and the toast) dissolves them back into the original order.
+55. **Ask on Page is Cmd+Shift+A** (Arc folded it into Cmd+F; NotArc keeps Find as Find) and answers in a small panel
+    over the page. "Ask ChatGPT" opens `https://chatgpt.com/?q=<question>` (with the page address for page questions)
+    in a new tab of the current Space, so it uses that Space's own ChatGPT sign-in.
+56. **5-second previews:** hold Shift while pointing at a link (or press Shift while on it); Chromium's link-target
+    message tells NotArc which link. The page is fetched with an ephemeral, cookie-less `NSURLSession` (no sign-in,
+    nothing stored), only http(s), and summarised on the Mac; results are cached per window for 50 links.
+57. **Copy Page as Markdown is NotArc's own DOM walker** (no library): headings, paragraphs, emphasis, inline and block
+    code, links and images made absolute, nested lists, quotes and tables; scripts, forms, navigation and hidden
+    elements are skipped. It starts from the page's `<article>`/`<main>` when there is one, and adds the title and a
+    Source line. Page scripts send results back through tagged console lines with a random nonce, in chunks.
+58. **Settings > Max is its own pane** (General, Profiles, Appearance, Links, Max, Advanced), built from one
+    self-contained view (`MaxSettingsSection()`). It was a section of the old single Settings window until the
+    panes (#72) and Max branches were merged together.
+59. **One tidy-title path, model first (#18 + #58).** #18 (merged first) tidies titles with rules on pin and from the
+    tab menu. Max doesn't add a second tidy: when Max and its "Tidy tab titles with Apple's model" switch are on and
+    the model is available, the same entry points (pin, tab menu's Tidy Title, View > Tidy Tab Title) ask the model,
+    and use `TidyTabTitle` when it's off, unavailable or its reply is unusable. Whether pinning tidies at all stays
+    #18's "Tidy tab titles when pinning" setting. A model reply that arrives after the tab was renamed is dropped.
+    Every tidy (rules or model) is undoable from Edit > Undo as "Tidy Tab Title", besides #18's toast and "Use Page
+    Title".
+60. **Self-tests never call the real model.** A self-test run installs an "unavailable" model stub at launch, so every
+    check (including #18's synchronous SELFTEST-TIDY) sees the same state on any Mac; the Max checks swap in an
+    "available" stub with canned replies. The real model's state is only reported (`model=` in SELFTEST-MAX), so the
+    live FoundationModels path is untested by the self-test.
+
+## 2026-11-09: passwords and autofill (#67, #63, #150)
+
+61. **NotArc has its own password manager and autofill.** NotArc pages run in CEF's Alloy style by default, which has
+    no Chromium password manager or autofill (Chrome-style pages, #66, stay off by default). So NotArc keeps its own
+    store and works in the default pages instead of waiting for Chrome-style pages.
+62. **Store: one encrypted file, Chromium's scheme, NotArc's own Keychain item.** Logins, addresses and cards live in
+    `Application Support/NotArc/Passwords.dat`. The whole file, and inside it each password and card number again, is
+    encrypted the way Chromium does it ("v10", AES-128-CBC, key from PBKDF2 over a Keychain password), generalising
+    the Arc cookie reader. The password is a random one in a "NotArc Safe Storage" Keychain item that NotArc makes on
+    first use (so macOS doesn't ask). NotArc doesn't reuse CEF's "Chromium Safe Storage" item: the Chromium browser
+    uses that same name, so the two would share a key and importing from Chromium would mix them up. Self-tests use a
+    throwaway in-memory key and `SelfTestPasswords.dat`, and never touch the Keychain. If the file can't be decrypted
+    it is never overwritten.
+63. **Saving: a small page script reports login submissions; NotArc asks in a toast.** "Save password for <site>?"
+    (Save, Never for This Site) or "Update the saved password for <user> on <site>?" (Update). Nothing is saved without
+    a click. The script reports through a console line tagged with a per-frame secret made by NotArc, so a message
+    only counts for the frame and site it was given to; fills go back only to that frame, and only while it still
+    shows that site. "Offer to save passwords" can be turned off in the Passwords window.
+64. **Filling only on a user action, never on page load.** A click (or Tab) into an empty login, address or card field
+    opens a native menu of the saved entries at the field; Edit > AutoFill > Fill Password (Cmd+\\, chosen by us; Arc
+    had no own shortcut) does the same for the page's login field. Logins saved for a site are offered on its other
+    subdomains too (shown with the site name); an https login is never offered on an http page. Values are set the
+    way typing would (input and change events), so sign-in pages built with React or Vue see them.
+65. **Device authentication** (Touch ID or the Mac's password) before Show Password, Copy Password and filling a card;
+    the Passwords window then trusts itself for 5 minutes. Copied passwords are marked concealed for clipboard
+    managers. Self-tests skip the prompt and count it. Export from the Passwords window is out of scope.
+66. **Import from Arc** is part of File > Import Everything from Arc and the first-launch offer: each Space's Chromium
+    profile `Login Data` (and `Login Data For Account`) and `Web Data` (addresses and cards), read from a private copy
+    with the "Arc Safe Storage" key cookie import already uses. Sites the person told Arc to never save come over as
+    "Never" sites. NotArc's own copy of a login wins over an imported one; importing twice adds nothing twice.
+67. **Import from Chrome, Brave, Edge, Vivaldi and Chromium** with File > Import Passwords..., same reader, each
+    browser's own "<Name> Safe Storage" Keychain item. macOS asks once per browser; that is expected and can't be
+    avoided because the item belongs to the other browser.
+68. **Safari's passwords can't be read**: they live in Apple's Passwords app, which other apps can't read. The import
+    sheet says so and points to Passwords > File > Export All Passwords, and NotArc imports that CSV file (Chrome,
+    Firefox and Apple Passwords CSV formats), with a reminder to delete it. This also covers Firefox passwords.
+69. **Address and card fields are matched** by their autocomplete attribute first, then by common field names
+    (name, email, street, city, state, zip, country, phone, card number, name on card, expiry). The security code is
+    never filled or stored. Addresses, cards and passwords come from imports or Add... in the Passwords window (a card
+    number must pass the Luhn check). NotArc doesn't offer to save an address or card when a form is submitted, as
+    Chromium does; to change one, delete it and add it again.
+70. **Needs Omar's eyes:** the fill menu's position next to the field (it opens at the pointer inside cross-site
+    frames), the save toast, the Add... form, Touch ID before Show/Copy, and an import from a real Chrome profile (macOS's "allow
+    access" prompt). The self-test covers the rest with fixture databases and a local login page.
+
+## 2026-11-09: Chrome extensions, Web Store installs and the picker (#66)
+
+71. **Extensions need Chrome-style pages.** CEF 156's default (Alloy) pages have no extension system; it was removed
+    in Chromium 128. The picker button and Manage Extensions only show with Chrome-style pages on (Settings, still
+    off by default until typing, focus and full screen are checked on screen). Install Extension... works either
+    way: the extension is saved and loads once Chrome-style pages are on. The line stays partial until they're the
+    default.
+72. **NotArc installs from the Web Store itself.** CEF has no API to install, load or turn off an extension while
+    running, and Chromium's own "Add to Chrome" flow isn't wired up in CEF. NotArc downloads the extension's signed
+    package from the Web Store's public download address (clients2.google.com, one request per install or update,
+    no sign-in), checks every signature in it and that it belongs to the ID asked for, refuses Manifest V2, and
+    unpacks it into NotArc's own extensions folder with the manifest "key" set, so it keeps its Web Store ID (and
+    its saved settings). Extensions load at startup with `--load-extension`, like the Arc copies.
+73. **Changes apply on relaunch.** Install, Remove and Turn Off/On take effect the next time NotArc starts, so each
+    one offers "Relaunch Now" (tabs come back). Turned-off extensions are a NotArc list (`disabledExtensions`) that
+    is left out of `--load-extension`.
+74. **An extension's popup opens in a tab.** CEF has no extension toolbar to anchor Chromium's popup bubble to, so
+    "Open" shows the popup page as a new tab. Extensions that act on "the current tab" from their popup may act on
+    that tab instead.
+75. **The picker sits in the address pill** (puzzle piece, next to Boost, Copy URL and Site Settings), as in Arc's
+    URL bar. On a Web Store page it offers "Add This Extension to NotArc". Extensions that Chromium installed into a
+    Space's profile by itself are listed too, with "Manage on Extensions Page" (Chromium owns those).
+76. **Updates are manual** ("Update from Chrome Web Store" in each extension's menu): unpacked extensions don't
+    auto-update, and NotArc doesn't check the Web Store in the background.
+77. **Self-test without the network:** the install path is tested with packages NotArc signs in memory during the
+    test (fresh RSA key, never stored) and a stubbed download. A test run can turn Chrome-style pages on with
+    `NOTARC_CHROME_PAGES=1` (only together with `--selftest`), since the shared runner passes no extra arguments.
+
+## 2026-11-09: ad blocker filter lists (#53)
+
+78. **Filter lists are never bundled.** EasyList and EasyPrivacy are shown as suggestions in Manage Ad Blockers...
+   and downloaded from easylist.to only when the person turns one on. Any other list can be added by its http(s) or
+   file address (abp:subscribe links work too). Downloaded copies live in Application Support/NotArc/Filter Lists.
+79. **Only a common subset of Adblock Plus syntax is used:** "||host^" network rules with $third-party, $domain= and
+   resource-type options ($script, $image, $important, ...), "@@" exceptions (including $document, $elemhide and
+   $generichide for whole pages), and "##selector" / "domain##selector" / "~domain##selector" / "#@#" cosmetic rules.
+   Path and wildcard patterns, $popup, $csp, $redirect, scriptlets (##+js) and procedural selectors (:has-text and
+   friends) are skipped; the dialog's rule count only counts rules NotArc understands. This covers the bulk of
+   EasyList (about 68,000 of its rules) and EasyPrivacy (about 47,000).
+80. **The existing safety rules still win over any list:** the page itself (main frame) and requests to the page's own
+   site are never blocked, so first-party-only rules ($~third-party, $1p) are skipped as they could never apply.
+81. **Cosmetic hiding is a style sheet injected when the page finishes loading**, the same way Boosts are, rather than
+   at document start. Ads can show for a moment before they're hidden; network blocking already stops most of them.
+82. **The built-in host list stays, with its own switch** in the dialog (on by default). The master switch is still
+   Settings > Block ads & trackers (off by default, as Arc's was); lists only download, refresh and apply while it's on.
+83. **Daily refresh** checks hourly for turned-on lists last downloaded over 24 hours ago. Self-tests never download:
+   they subscribe to a local file:// fixture and the refresh timer doesn't start in test runs.
+
+## 2026-11-09: finishing Easels (#49)
+
+84. **Live web clips refresh in a hidden off-screen browser, not from the user's tabs.** A clip stores the page
+    address, the dragged region, the page's size and its scroll position. To refresh, NotArc loads the address in a
+    short-lived windowless (off-screen rendered) browser in the Space's own profile (so signed-in pages show the same
+    content), scrolls to the saved spot, crops the region from the rendered pixels and closes the browser. No DevTools
+    on tabs and nothing tied to tab switching: the work only starts when an easel with clips is opened and a clip is
+    more than a minute old, or from File > Refresh Live Clips, and it runs asynchronously (the page renders in
+    Chromium's own processes, the main thread only copies the cropped pixels, PNG encoding runs on a background
+    queue). This needs CEF's
+    `windowless_rendering_enabled` at startup; tabs stay windowed. Arc's clips were live views of the page; a refreshed
+    picture is the closest local equivalent without keeping a hidden page running per clip.
+85. **Clips render at 100% zoom** with the page size the tab had when clipped. A page zoomed in the tab at clip time
+    can show a slightly different area after a refresh. Pages that need a click or a scroll inside a frame to show the
+    clipped part show their default state.
+86. **Drawing tools follow Arc's set (arrow, rectangle, ellipse, freehand) with eight colours of NotArc's own.**
+    Shapes are outlines, not filled, and are only clickable near their line, so a capture under an arrow can still be
+    picked. Single-letter tool keys (V, T, A, R, O, P) are a guess; Arc's own key bindings weren't recoverable.
+87. **Resizing uses four corner handles; pictures and clips keep their proportions, text boxes and drawings don't.**

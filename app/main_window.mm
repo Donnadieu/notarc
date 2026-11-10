@@ -1,11 +1,14 @@
 #import <QuartzCore/QuartzCore.h>
 #import "app/main_window.h"
+#import "app/autofill.h"
+#import "app/password_store.h"
 #import "app/sidebar_store.h"
 #import "app/archive_store.h"
 #import "app/archive_window.h"
 #import "app/arc_history.h"
 #import "app/chrome_page.h"
 #import "app/arc_extensions.h"
+#import "app/extensions.h"
 #import "app/link_routing.h"
 #import "app/link_routing_editor.h"
 #import "app/bookmark_import.h"
@@ -15,7 +18,10 @@
 #import "app/little_window.h"
 #import "app/settings.h"
 #import "app/boost_store.h"
+#import "app/boost_color_wheel.h"
 #import "app/easel.h"
+#import "app/note_editor.h"
+#import "app/easel_clip.h"
 #import "app/live_folder.h"
 #import "app/favicons.h"
 #import "app/tidy_title.h"
@@ -23,6 +29,11 @@
 #import "app/email_peek.h"
 #import "app/web_notifications.h"
 #import "app/calendar_preview.h"
+#import "app/tab_thumbnails.h"
+#import "app/arc_max.h"
+#import "app/main_window_max.h"
+#import "app/ad_blockers_window.h"
+#include "app/content_blocker.h"
 #include "include/cef_devtools_message_observer.h"
 
 #include <cstdio>
@@ -40,6 +51,7 @@
 #include "include/cef_request_context.h"
 #include "include/cef_request_context_handler.h"
 #include "include/cef_cookie.h"
+#include "include/cef_urlrequest.h"
 
 static NSPasteboardType const kSidebarItemPasteboardType = @"io.github.donnadieu.notarc.sidebar-item";
 
@@ -159,10 +171,11 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
     cell.textField = title;
   }
   static NSDictionary* kinds = @{ @"go" : @"Go", @"tab" : @"Switch to Tab", @"space" : @"Space", @"history" : @"History",
-                                  @"action" : @"Action", @"site" : @"Top Site", @"search" : @"Search" };
+                                  @"action" : @"Action", @"site" : @"Top Site", @"search" : @"Search",
+                                  @"chatgpt" : @"chatgpt.com" };
   static NSDictionary* icons = @{ @"go" : @"magnifyingglass", @"tab" : @"square.on.square", @"space" : @"square.stack",
                                   @"history" : @"clock", @"action" : @"command", @"site" : @"globe",
-                                  @"search" : @"magnifyingglass" };
+                                  @"search" : @"magnifyingglass", @"chatgpt" : @"bubble.left.and.text.bubble.right" };
   BOOL sel = [t.selectedRowIndexes containsIndex:(NSUInteger)row];
   NSColor* primary = sel ? NSColor.whiteColor : [NSColor.labelColor colorWithAlphaComponent:0.80];
   NSColor* secondary = sel ? [NSColor colorWithWhite:1 alpha:0.70] : [NSColor.labelColor colorWithAlphaComponent:0.33];
@@ -189,7 +202,7 @@ static NSColor* CommandSelectedColor() { return [NSColor colorWithSRGBRed:0.161 
 @end
 
 @interface MainWindowController () <NSOutlineViewDataSource, NSOutlineViewDelegate, NSTextFieldDelegate,
-                                    NSMenuDelegate>
+                                    NSMenuDelegate, NoteEditorDelegate>
 @end
 
 // The gap between two split panes; dragging it resizes them.
@@ -803,6 +816,19 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   CAGradientLayer* _themeGradient;
   CALayer* _themeGrain;  // film grain over the theme (#26)
   NSPopover* _hoverCard;
+  BOOL _hoverCardHasThumbnail;
+  NSTimer* _thumbTimer;           // tab thumbnails (#65): copy of the shown tab, due 1 s after it settles
+  NSUInteger _showGeneration;     // bumped on every tab switch; a copy started before a switch is dropped
+  NSDate* _thumbPendingSince;     // a copy is in flight
+  NSPanel* _switcher;             // Ctrl+Tab recent-tab switcher
+  NSArray<ArcItem*>* _switcherItems;
+  NSMutableArray<NSView*>* _switcherTiles;
+  NSInteger _switcherIndex;
+  NSEventModifierFlags _switcherMods;
+  unsigned short _switcherKey;
+  id _switcherMonitor;
+  id _switcherResignObserver;
+  NSTimer* _switcherRevealTimer;
   NSView* _mediaBar;
   NSView* _meetingBar;  // next meeting from Calendar (#56)
   NSTextField* _meetingTitle;
@@ -852,6 +878,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   BOOL _commandOpensIncognito;
   LittleWindowController* _peek;
   NSView* _toast;
+  AutofillController* _autofill;  // passwords and autofill (#67)
   NSView* _toolbar;
   NSMutableArray<NSDictionary*>* _sitePrompts;  // queue; first one is showing
   NSAlert* _siteAlert;
@@ -862,13 +889,12 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSString* _lastClosedPeekURL;
   NSView* _sidebar;
   SidebarPillView* _addressPill;
-  NSScrollView* _noteScroll;  // Notes editor, shown in the page card
-  NSTextView* _noteText;
-  ArcItem* _noteItem;         // note currently in the editor
-  NSTimer* _noteSaveTimer;
+  NSButton* _devToolsButton;  // Developer Mode (#68)
+  NSMutableDictionary<NSString*, NoteEditorView*>* _noteEditors;  // notes on screen (one per pane), by item ID
   EaselView* _easelView;      // Easel canvas, shown in the page card
   NSScrollView* _easelScroll;
   ArcItem* _easelItem;
+  NSMutableSet<NSString*>* _clipsRefreshing;  // live clips being re-rendered (easel folder | link | region)
   CefRefPtr<DevToolsResults> _devtoolsResults;
   std::map<int, CefRefPtr<CefRegistration>> _devtoolsRegs;
   int _devtoolsNextId;
@@ -882,6 +908,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSView* _captureOverlay;
   NSString* _captureDirectory;
   NSButton* _boostButton;   // Arc: Boost indicator in the address pill
+  NSButton* _extensionsButton;  // puzzle piece in the address pill (Chrome-style pages only, #66)
+  NSInteger _relaunchRequests;
   NSString* _boostIndicator; // tests: "on" / "off" / "none"
   NSTextField* _addressPillText;
   NSView* _sidebarNav;
@@ -896,7 +924,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSMutableArray<Boost*>* _boosts;
   NSPanel* _boostPanel;
   Boost* _boostEditing;
-  NSMutableDictionary<NSString*, NSControl*>* _boostControls;
+  NSMutableDictionary<NSString*, NSView*>* _boostControls;
+  BoostColorWheel* _boostWheel;
   int _zapBrowser;
   NSUInteger _cardPops;        // tests
   NSHashTable* _sidebarDirtyFrom;  // windows whose sidebar change other windows haven't picked up yet
@@ -1129,10 +1158,12 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _addressPillText.lineBreakMode = NSLineBreakByTruncatingTail;
   _addressPillText.frame = NSMakeRect(12, 9, _addressPill.bounds.size.width - 12 - 60, 18);
   [_addressPill addSubview:_addressPillText];
-  NSArray* pillButtons = @[ @[ @"paintbrush.pointed", @"editBoost:", @"Boost This Site" ], @[ @"link", @"copyCurrentURL:", @"Copy URL" ],
-                            @[ @"slider.horizontal.3", @"showSiteSettings:", @"Site Settings" ] ];
-  _addressPillText.frame = NSMakeRect(11, 9, _addressPill.bounds.size.width - 11 - 86, 18);
-  CGFloat px = _addressPill.bounds.size.width - 6 - 3 * 26;
+  NSMutableArray* pillButtons = [@[ @[ @"paintbrush.pointed", @"editBoost:", @"Boost This Site" ], @[ @"link", @"copyCurrentURL:", @"Copy URL" ],
+                                    @[ @"slider.horizontal.3", @"showSiteSettings:", @"Site Settings" ] ] mutableCopy];
+  // Arc's extension picker sits in the address pill; extensions only run in Chrome-style pages.
+  if (ChromePagesEnabled()) [pillButtons addObject:@[ @"puzzlepiece.extension", @"showExtensionPicker:", @"Extensions" ]];
+  _addressPillText.frame = NSMakeRect(11, 9, _addressPill.bounds.size.width - 11 - 8 - 26 * (CGFloat)pillButtons.count, 18);
+  CGFloat px = _addressPill.bounds.size.width - 6 - 26 * (CGFloat)pillButtons.count;
   for (NSArray* n in pillButtons) {
     NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:n[0] accessibilityDescription:n[2]]
                                      target:self action:NSSelectorFromString(n[1])];
@@ -1141,9 +1172,19 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
     b.contentTintColor = NSColor.secondaryLabelColor;
     b.frame = NSMakeRect(px, 5, 26, 26);
     if ([n[1] isEqualToString:@"editBoost:"]) _boostButton = b;
+    if ([n[1] isEqualToString:@"showExtensionPicker:"]) _extensionsButton = b;
     [_addressPill addSubview:b];
     px += 26;
   }
+  // Developer Mode sites get a Developer Tools button left of the others (hidden otherwise).
+  _devToolsButton = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"hammer" accessibilityDescription:@"Developer Tools"]
+                                       target:self action:@selector(toggleDevTools:)];
+  _devToolsButton.bordered = NO;
+  _devToolsButton.toolTip = @"Developer Tools (Developer Mode)";
+  _devToolsButton.contentTintColor = NSColor.secondaryLabelColor;
+  _devToolsButton.frame = NSMakeRect(_addressPill.bounds.size.width - 6 - 4 * 26, 5, 26, 26);
+  _devToolsButton.hidden = YES;
+  [_addressPill addSubview:_devToolsButton];
   [sidebar addSubview:_addressPill];
 
   // Bottom bar, as in Arc: archive (Library) at the left, one icon per Space in the middle, "+" menu at the right.
@@ -1745,8 +1786,10 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   });
   _client->set_load_end_callback([weakSelf](int browserId, const std::string& url) {
     [OwnerOf(browserId, weakSelf) applyBoostToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
+    [OwnerOf(browserId, weakSelf) applyAdBlockCosmeticsToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
     [OwnerOf(browserId, weakSelf) installCallHookInBrowser:browserId];
     [OwnerOf(browserId, weakSelf) detectLanguageInBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
+    [OwnerOf(browserId, weakSelf) thumbnailAfterLoadOfBrowser:browserId];
   });
   _client->set_notify_callback([weakSelf](int browserId, const std::string& json, const std::string& pageURL) {
     NSString* j = [NSString stringWithUTF8String:json.c_str()], *u = [NSString stringWithUTF8String:pageURL.c_str()];
@@ -1767,6 +1810,16 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   });
   _client->set_external_callback([weakSelf](int browserId, const std::string& url) {
     [OwnerOf(browserId, weakSelf) browser:browserId externalURL:[NSString stringWithUTF8String:url.c_str()]];
+  });
+  _client->set_status_callback([weakSelf](int browserId, const std::string& text) {
+    [OwnerOf(browserId, weakSelf) maxLinkHovered:[NSString stringWithUTF8String:text.c_str()] ?: @"" browser:browserId];
+  });
+  _client->set_autofill_callback([weakSelf](int browserId, const std::string& nonce, const std::string& origin,
+                                            bool mainFrame, const std::string& json) {
+    MainWindowController* owner = OwnerOf(browserId, weakSelf);
+    [owner.autofill handleMessage:[NSString stringWithUTF8String:json.c_str()] browser:browserId
+                            nonce:[NSString stringWithUTF8String:nonce.c_str()]
+                           origin:[NSString stringWithUTF8String:origin.c_str()] mainFrame:mainFrame];
   });
   _client->set_find_callback([weakSelf](int browserId, int count, int active) {
     [OwnerOf(browserId, weakSelf) findResult:count active:active];
@@ -1889,6 +1942,7 @@ static NSString* const kPiPExitJS =
   if (item.inPictureInPicture && item != _shown) [self pictureInPicture:NO item:item done:nil];
   if (item != _shown && _shown) [self popPageCard];
   _shown.lastActiveAt = [NSDate date];  // the tab we leave was active until now
+  BOOL switched = item != _shown;
   _shown = item;
   ArcSpace* owner = [self spaceOwningItem:item];
   // The Space's last-shown tab (restored at launch) follows the main window only; other windows keep their own.
@@ -1898,11 +1952,23 @@ static NSString* const kPiPExitJS =
   }
   [self updateMediaBar];
   item.lastActiveAt = [NSDate date];
+  if (item.liveUnread) {  // opening a new Live Folder entry marks it read (its dot and the folder's count go)
+    item.liveUnread = NO;
+    [_outline reloadItem:item];
+    [_outline reloadItem:[self parentOfItem:item]];
+    [self scheduleSave];
+  }
   [self ensureBrowserForItem:item];
   [self layoutPanes];
   [self selectSidebarRowFor:item];
   [self updateToolbarAddress];
   if (![self isMainWindowController]) [MainWindowController saveWindowState];
+  if (switched) {  // tab thumbnails (#65): only (re)arms a timer here; the copy itself is never on the switch path
+    CFAbsoluteTime t0 = CFAbsoluteTimeGetCurrent();
+    _showGeneration++;
+    [self scheduleThumbnailOfShown];
+    TabThumbnailNoteSwitch((CFAbsoluteTimeGetCurrent() - t0) * 1000);
+  }
 }
 
 - (void)openTabsForSelfTest:(NSUInteger)count {
@@ -1935,6 +2001,11 @@ static NSString* const kPiPExitJS =
   else if (title.length) [_history updateTitle:title forURL:item.url];
   ArcItem* parent = [self parentOfItem:item];
   [_outline reloadItem:parent.isSplit ? parent : item];
+  // My Pull Requests: once its sign-in tab is back on github.com past the login pages, fill the folder.
+  if (url.length && parent.liveSignInNeeded && LiveFolderIsGitHubSignedInLanding(url)) {
+    parent.liveSignInNeeded = NO;
+    [self refreshLiveFolder:parent done:nil];
+  }
   [self scheduleSave];
 }
 
@@ -1949,6 +2020,7 @@ static NSString* const kPiPExitJS =
 }
 
 - (void)closeAllBrowsers {
+  [self saveNoteNow];  // the last half second of typing in a note
   [MainWindowController prepareForQuit];
   _closing = YES;
   for (MainWindowController* w in [gWindows copy])
@@ -1956,6 +2028,7 @@ static NSString* const kPiPExitJS =
   for (LittleWindowController* lw in [_littleWindows copy]) [lw.window close];
   [_peek.window close];
   if (_client) _client->set_quit_when_empty(true);
+  EaselCloseClipRenderers();
   if (_browsers.empty()) {
     [self.window close];
     return;
@@ -2099,6 +2172,40 @@ static NSString* const kPiPExitJS =
     chev.image = [NSImage imageWithSystemSymbolName:open ? @"chevron.down" : @"chevron.right"
                            accessibilityDescription:open ? @"Collapse" : @"Expand"];
   }
+  // Live Folders (Arc: SidebarItemUnreadBadgeView): a dot on entries that came in since you last looked, and the
+  // folder's row counts them. Opening the tab clears it.
+  NSImageView* dot = [cell viewWithTag:79];
+  if (!dot) {
+    dot = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"circle.fill" accessibilityDescription:@"Unread"]];
+    dot.tag = 79;
+    dot.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:5 weight:NSFontWeightRegular];
+    dot.frame = NSMakeRect(1, 17.5, 6, 6);
+    dot.autoresizingMask = NSViewMaxXMargin | NSViewMaxYMargin;
+    [cell addSubview:dot];
+  }
+  dot.hidden = !a.liveUnread;
+  dot.contentTintColor = NSColor.controlAccentColor;
+  NSTextField* count = [cell viewWithTag:80];
+  if (!count) {
+    count = [NSTextField labelWithString:@""];
+    count.tag = 80;
+    count.font = [NSFont systemFontOfSize:10 weight:NSFontWeightSemibold];
+    count.alignment = NSTextAlignmentCenter;
+    count.textColor = NSColor.whiteColor;
+    count.wantsLayer = YES;
+    count.layer.cornerRadius = 7;
+    count.autoresizingMask = NSViewMinXMargin | NSViewMaxYMargin;
+    [cell addSubview:count];
+  }
+  NSUInteger unread = a.liveKind ? [self liveUnreadCountOf:a] : 0;
+  count.hidden = unread == 0;
+  CGFloat countWidth = 0;
+  if (unread) {
+    count.stringValue = unread > 99 ? @"99+" : [NSString stringWithFormat:@"%lu", (unsigned long)unread];
+    countWidth = MAX(16, ceil(count.attributedStringValue.size.width) + 8);
+    count.frame = NSMakeRect(cell.bounds.size.width - 28 - countWidth, 13.5, countWidth, 14);
+    count.layer.backgroundColor = NSColor.controlAccentColor.CGColor;
+  }
   NSString* title = a.displayTitle;
   if (a.isSplit) {
     NSMutableArray* names = [NSMutableArray array];
@@ -2119,7 +2226,7 @@ static NSString* const kPiPExitJS =
   NSRect lf = cell.textField.frame;
   lf.origin.x = 37;
   lf.origin.y = 11.5;
-  lf.size.width = cell.bounds.size.width - lf.origin.x - 8;
+  lf.size.width = cell.bounds.size.width - lf.origin.x - 8 - (countWidth ? countWidth + 26 : 0);
   cell.textField.frame = lf;
   NSRect icf = cell.imageView.frame;
   icf.origin.y = 12.5;
@@ -2863,7 +2970,15 @@ static NSArray<NSArray*>* SiteSettingRows() {
   if (SettingBool(kSettingBlockAds)) {
     NSButton* ads = [NSButton checkboxWithTitle:@"Block Ads & Trackers" target:self action:@selector(siteAdBlockToggled:)];
     ads.state = [self adBlockingOnForHost:u.host] ? NSControlStateValueOn : NSControlStateValueOff;
-    [views addObject:ads];
+    NSButton* manage = [NSButton buttonWithTitle:@"Manage Ad Blockers..." target:self action:@selector(showManageAdBlockers:)];
+    manage.controlSize = NSControlSizeSmall;
+    [views addObject:[NSStackView stackViewWithViews:@[ ads, manage ]]];
+  }
+  if ([u.scheme isEqualToString:@"http"] || [u.scheme isEqualToString:@"https"]) {
+    NSButton* dev = [NSButton checkboxWithTitle:@"Developer Mode" target:self action:@selector(siteDeveloperModeToggled:)];
+    dev.state = DeveloperModeOnForHost(u.host) ? NSControlStateValueOn : NSControlStateValueOff;
+    dev.toolTip = @"Full address with port in the sidebar, never archived, Developer Tools in the address pill";
+    [views addObject:dev];
   }
   NSButton* clear = [NSButton buttonWithTitle:@"Clear Cookies and Refresh" target:self action:@selector(siteSettingsClearCookies:)];
   NSButton* reset = [NSButton buttonWithTitle:@"Reset Permissions" target:self action:@selector(siteSettingsReset:)];
@@ -2883,6 +2998,48 @@ static NSArray<NSArray*>* SiteSettingRows() {
   NSView* anchor = _toolbar.hidden ? _content : _address;
   NSRect r = _toolbar.hidden ? NSMakeRect(8, NSMaxY(_content.bounds) - 4, 1, 1) : NSMakeRect(8, 0, 20, _address.bounds.size.height);
   [_sitePopover showRelativeToRect:r ofView:anchor preferredEdge:_toolbar.hidden ? NSRectEdgeMinY : NSRectEdgeMaxY];
+}
+
+- (IBAction)showManageAdBlockers:(id)sender {
+  [_sitePopover close];
+  [ManageAdBlockersWindowController.shared showWindow:sender];
+}
+
+// Cosmetic filter-list rules (#53): a style sheet that hides matching elements, injected on page load like Boosts.
+static std::string JSStringLiteral(const std::string& s) {
+  std::string out = "\"";
+  out.reserve(s.size() + 16);
+  for (char c : s) {
+    switch (c) {
+      case '\\': out += "\\\\"; break;
+      case '"': out += "\\\""; break;
+      case '\n': out += "\\n"; break;
+      case '\r': out += "\\r"; break;
+      case '<': out += "\\x3c"; break;
+      default:
+        if ((unsigned char)c < 0x20) out += ' ';
+        else out += c;
+    }
+  }
+  out += "\"";
+  return out;
+}
+
+- (void)applyAdBlockCosmeticsToBrowser:(int)browserId url:(NSString*)url {
+  auto it = _browsers.find(browserId);
+  if (it == _browsers.end()) return;
+  std::string css = content_blocker::CosmeticCSS(url.UTF8String ?: "");
+  static NSMutableSet* styled;  // browsers whose page got a style sheet, so a turned-off list also cleans up
+  if (!styled) styled = [NSMutableSet set];
+  if (css.empty() && ![styled containsObject:@(browserId)]) return;
+  if (css.empty()) [styled removeObject:@(browserId)];
+  else [styled addObject:@(browserId)];
+  std::string js = "(function(){var id='__notarc_adblock__';var s=document.getElementById(id);var css=" +
+                   JSStringLiteral(css) +
+                   ";if(!css){if(s)s.remove();return;}if(!s){s=document.createElement('style');s.id=id;"
+                   "(document.head||document.documentElement).appendChild(s);}s.textContent=css;})();";
+  CefRefPtr<CefFrame> f = it->second->GetMainFrame();
+  f->ExecuteJavaScript(js, f->GetURL(), 0);
 }
 
 static NSString* AdBlockSiteKey(NSString* host) {
@@ -2912,6 +3069,10 @@ static NSString* AdBlockSiteKey(NSString* host) {
   NSString* host = [NSURL URLWithString:_siteSettingsOrigin].host;
   [self setAdBlocking:sender.state == NSControlStateValueOn forHost:host];
   if (auto b = [self currentBrowser]) b->Reload();  // Arc reloaded so the change shows
+}
+
+- (void)siteDeveloperModeToggled:(NSButton*)sender {
+  SetDeveloperMode(sender.state == NSControlStateValueOn, [NSURL URLWithString:_siteSettingsOrigin].host);
 }
 
 - (void)sitePermissionChosen:(NSPopUpButton*)pop {
@@ -3061,6 +3222,7 @@ static NSString* RelativeAgo(NSDate* d) {
 }
 
 - (void)mouseMoved:(NSEvent*)event {
+  [self refreshThumbnailOfShownIfOlderThan:2];  // hover cards may be next: keep the shown tab's picture fresh
   NSPoint p = [_outline convertPoint:event.locationInWindow fromView:nil];
   NSInteger row = [_outline rowAtPoint:p];
   [self setSidebarHoverRow:row];
@@ -3088,6 +3250,7 @@ static NSString* RelativeAgo(NSDate* d) {
 }
 
 - (BOOL)hoverCardShown { return _hoverCard.shown; }
+- (BOOL)hoverCardHasThumbnail { return _hoverCard != nil && _hoverCardHasThumbnail; }
 
 - (void)hideHoverCard {
   [_hoverCard close];
@@ -3116,6 +3279,21 @@ static NSString* RelativeAgo(NSDate* d) {
   stack.alignment = NSLayoutAttributeLeading;
   stack.spacing = 3;
   stack.edgeInsets = NSEdgeInsetsMake(10, 12, 10, 12);
+  // The page as it looked when last on screen (#65); never for the tab you're looking at.
+  _hoverCardHasThumbnail = NO;
+  if (item.thumbnail && item != _shown) {
+    NSImageView* iv = [NSImageView imageViewWithImage:item.thumbnail];
+    iv.imageScaling = NSImageScaleProportionallyUpOrDown;
+    iv.wantsLayer = YES;
+    iv.layer.cornerRadius = 6;
+    iv.layer.masksToBounds = YES;
+    NSSize s = item.thumbnail.size;
+    [iv.widthAnchor constraintEqualToConstant:280].active = YES;
+    [iv.heightAnchor constraintEqualToConstant:s.width > 0 ? 280 * s.height / s.width : 160].active = YES;
+    [stack addArrangedSubview:iv];
+    [stack setCustomSpacing:8 afterView:iv];
+    _hoverCardHasThumbnail = YES;
+  }
   for (NSUInteger i = 0; i < lines.count; ++i) {
     NSTextField* l = [NSTextField wrappingLabelWithString:lines[i]];
     l.preferredMaxLayoutWidth = 280;
@@ -3396,6 +3574,27 @@ static NSString* RelativeAgo(NSDate* d) {
 - (NSString*)lastTranslateOffer { return _lastTranslateOffer; }  // tests
 - (NSSize)lastCopiedImageSize { return _lastCopiedImageSize; }  // tests
 
+// Developer Mode (#68): Arc's "Turn on/off Developer Mode for this site".
+- (IBAction)toggleDeveloperMode:(id)sender {
+  NSURL* u = [NSURL URLWithString:[self currentURL] ?: @""];
+  if (!u.host.length) {
+    NSBeep();
+    return;
+  }
+  SetDeveloperMode(!DeveloperModeOnForHost(u.host), u.host);
+}
+- (IBAction)resetDeveloperModeSites:(id)sender { ResetDeveloperModeHosts(); }
+- (BOOL)devToolsButtonShown { return _devToolsButton && !_devToolsButton.hidden; }
+
++ (MainWindowController*)mainController { return gMainWindow; }
++ (void)settingsDidChange {
+  for (MainWindowController* w in [gWindows copy]) {
+    [w applyColorScheme];
+    [w applySpaceHeader:SettingBool(kSettingShowSpaceHeader)];
+    [w layoutContentArea];  // toolbar on/off, and the pill
+  }
+}
+
 - (IBAction)translatePage:(id)sender {
   NSString* url = [self currentURL];
   if (!url.length || !_shown) return;
@@ -3533,7 +3732,11 @@ static const CGFloat kPaneGap = 6;
     kv.second->GetHost()->WasHidden(!visible);
   }
   [self layoutDividers:panes.count > 1 && !maxi ? frames : @[]];
-  [self layoutNoteEditor];
+  // A maximized pane (#37) fills the card; a note in it gets the whole card too.
+  if (maxi && [panes indexOfObject:maxi] != NSNotFound)
+    [self layoutNoteEditorsForPanes:@[ maxi ] frames:@[ [NSValue valueWithRect:_content.bounds] ]];
+  else
+    [self layoutNoteEditorsForPanes:panes frames:frames];
   [self layoutEasel];
 }
 
@@ -3558,16 +3761,64 @@ static const CGFloat kPaneGap = 6;
         _easelView = [[EaselView alloc] initWithFrame:_easelScroll.bounds];
         _easelView.delegate = (id<EaselViewDelegate>)self;
         _easelScroll.documentView = _easelView;
+        // The tool bar floats over the top of the canvas; content starts below it and scrolls under it.
+        _easelScroll.automaticallyAdjustsContentInsets = NO;
+        _easelScroll.contentInsets = NSEdgeInsetsMake(56, 0, 0, 0);
       }
       [_easelView loadFromDirectory:[[self easelsDirectory] stringByAppendingPathComponent:e.easelID]];
+      // Opening an easel refreshes its live clips (off-screen, asynchronously; only easels that have clips).
+      [self refreshLiveClips:NO];
     }
   }
   _easelScroll.hidden = !e;
+  NSView* bar = _easelView ? _easelView.toolbar : nil;
+  bar.hidden = !e;
   if (e) {
     _easelScroll.frame = _content.bounds;
     [_content addSubview:_easelScroll positioned:NSWindowAbove relativeTo:nil];
+    [_content addSubview:bar positioned:NSWindowAbove relativeTo:_easelScroll];
+    NSRect b = _content.bounds;
+    bar.frameOrigin = NSMakePoint(round(NSMidX(b) - bar.frame.size.width / 2),
+                                  _content.isFlipped ? 12 : NSMaxY(b) - bar.frame.size.height - 12);
+    bar.autoresizingMask = NSViewMinXMargin | NSViewMaxXMargin | (_content.isFlipped ? NSViewMaxYMargin : NSViewMinYMargin);
     [_easelView updateSize];
   }
+}
+
+// Live web clips (#49). A clip keeps its page address, the dragged region, the page size and scroll position. Its
+// picture is re-rendered in a hidden off-screen browser in the Space's profile (so signed-in pages work), never by
+// touching the user's tabs. Opening an easel refreshes clips older than a minute; File > Refresh Live Clips forces it.
+static NSString* ClipKey(NSString* dir, EaselObject* o) {
+  return [NSString stringWithFormat:@"%@|%@|%@", dir, o.link, NSStringFromRect(o.region)];
+}
+- (NSUInteger)refreshLiveClips:(BOOL)force {
+  if (!_easelItem || !_easelView || !_space) return 0;
+  NSString* dir = _easelView.directory;
+  if (!_clipsRefreshing) _clipsRefreshing = [NSMutableSet set];
+  CefRefPtr<CefRequestContext> ctx = [self contextForSpace:_space];
+  CGFloat scale = self.window.backingScaleFactor ?: 2;
+  NSUInteger started = 0;
+  for (EaselObject* o in _easelView.liveClips) {
+    if (!force && o.refreshedAt && -o.refreshedAt.timeIntervalSinceNow < 60) continue;
+    NSString* key = ClipKey(dir, o);
+    if ([_clipsRefreshing containsObject:key]) continue;
+    [_clipsRefreshing addObject:key];
+    started++;
+    __weak MainWindowController* weakSelf = self;
+    EaselRenderClip(ctx, o.link, o.viewport, o.scroll, o.region, scale, ^(NSData* png) {
+      MainWindowController* me = weakSelf;
+      if (!me) return;
+      [me->_clipsRefreshing removeObject:key];
+      me.clipRefreshesFinished++;
+      if (!png || ![me->_easelView.directory isEqualToString:dir]) return;  // failed, or another easel is open now
+      for (EaselObject* cur in me->_easelView.liveClips)
+        if ([ClipKey(dir, cur) isEqualToString:key]) [me->_easelView replaceImageOf:cur png:png];
+    });
+  }
+  return started;
+}
+- (IBAction)refreshLiveClipsFromMenu:(id)sender {
+  if (![self refreshLiveClips:YES] && !_easelView.liveClips.count) NSBeep();
 }
 - (void)easelDidChange:(EaselView*)easel {
   // An easel is named from its first text box, like a note from its first line.
@@ -3626,6 +3877,243 @@ static const CGFloat kPaneGap = 6;
   return ArcCopyExtensions(userData, profiles, destination);
 }
 
+// --- Chrome extensions (#66): picker, Install Extension..., on/off and Remove ---
+static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since launch wait for a relaunch
+
+- (NSString*)extensionsDirectory {
+  return self.extensionsDirectoryOverride ?: NotArcExtensionsDirectory(self.selfTestProfiles);
+}
+
+- (NSMutableArray<NSString*>*)disabledExtensionIDs {
+  id a = SettingObject(kDisabledExtensionsKey);
+  return [a isKindOfClass:NSArray.class] ? [a mutableCopy] : [NSMutableArray array];
+}
+
+// Each Space's Chromium profile folder: extensions installed by Chromium itself (the Web Store's own button) live there.
+- (NSArray<NSString*>*)chromeProfileFolders {
+  if (self.extensionsDirectoryOverride) return @[];
+  NSString* support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
+      stringByAppendingPathComponent:@"NotArc"];
+  NSString* p = _space.profileDirectory;
+  if (!p.length) return @[];
+  return @[ [support stringByAppendingPathComponent:[(self.selfTestProfiles ? @"SelfTest Space " : @"Space ") stringByAppendingString:p]] ];
+}
+
+- (NSArray<NotArcExtension*>*)installedExtensions {
+  return InstalledExtensions([self extensionsDirectory], [self chromeProfileFolders],
+                             [NSSet setWithArray:[self disabledExtensionIDs]]);
+}
+
+- (BOOL)extensionPickerButtonShown { return _extensionsButton && !_extensionsButton.hidden; }
+- (NSInteger)relaunchRequestsForTest { return _relaunchRequests; }
+
+- (NSMenuItem*)pickerItem:(NSString*)title action:(SEL)action object:(id)object {
+  NSMenuItem* mi = [[NSMenuItem alloc] initWithTitle:title action:action keyEquivalent:@""];
+  mi.target = self;
+  mi.representedObject = object;
+  return mi;
+}
+
+- (NSMenu*)extensionPickerMenuForURL:(NSString*)url {
+  NSMenu* menu = [[NSMenu alloc] initWithTitle:@"Extensions"];
+  menu.autoenablesItems = NO;
+  NSString* pageID = ExtensionIDFromInput(url ?: @"");
+  if (pageID) [menu addItem:[self pickerItem:@"Add This Extension to NotArc" action:@selector(installExtensionFromPage:) object:pageID]];
+  if (gExtensionsChanged)
+    [menu addItem:[self pickerItem:@"Relaunch NotArc to Apply Changes" action:@selector(relaunchToApplyExtensions:) object:nil]];
+  if (menu.numberOfItems) [menu addItem:NSMenuItem.separatorItem];
+  NSArray<NotArcExtension*>* list = [self installedExtensions];
+  for (NotArcExtension* x in list) {
+    NSString* title = x.enabled ? x.name : [x.name stringByAppendingString:@" (off)"];
+    NSMenuItem* row = [[NSMenuItem alloc] initWithTitle:title action:nil keyEquivalent:@""];
+    row.representedObject = x;
+    NSImage* icon = x.iconPath ? [[NSImage alloc] initWithContentsOfFile:x.iconPath] : nil;
+    if (!icon) icon = [NSImage imageWithSystemSymbolName:@"puzzlepiece.extension" accessibilityDescription:nil];
+    icon.size = NSMakeSize(16, 16);
+    row.image = icon;
+    NSMenu* sub = [[NSMenu alloc] initWithTitle:x.name];
+    sub.autoenablesItems = NO;
+    if (x.popupPage) [sub addItem:[self pickerItem:@"Open" action:@selector(openExtensionPopup:) object:x]];
+    if (x.optionsPage) [sub addItem:[self pickerItem:@"Options" action:@selector(openExtensionOptions:) object:x]];
+    for (NSMenuItem* mi in sub.itemArray) mi.enabled = x.enabled && ChromePagesEnabled();
+    if (sub.numberOfItems) [sub addItem:NSMenuItem.separatorItem];
+    if (x.managedByNotArc) {
+      [sub addItem:[self pickerItem:x.enabled ? @"Turn Off" : @"Turn On" action:@selector(toggleExtension:) object:x]];
+      [sub addItem:[self pickerItem:@"Update from Chrome Web Store" action:@selector(updateExtension:) object:x]];
+      [sub addItem:[self pickerItem:@"Remove..." action:@selector(removeExtension:) object:x]];
+    } else {  // installed by Chromium itself: on/off and Remove live on its Extensions page
+      NSMenuItem* manage = [self pickerItem:@"Manage on Extensions Page" action:@selector(manageChromeExtension:) object:x];
+      manage.enabled = ChromePagesEnabled();
+      [sub addItem:manage];
+    }
+    row.submenu = sub;
+    [menu addItem:row];
+  }
+  if (!list.count) {
+    NSMenuItem* none = [[NSMenuItem alloc] initWithTitle:@"No extensions yet" action:nil keyEquivalent:@""];
+    none.enabled = NO;
+    [menu addItem:none];
+  }
+  [menu addItem:NSMenuItem.separatorItem];
+  [menu addItem:[self pickerItem:@"Install Extension..." action:@selector(installExtension:) object:nil]];
+  [menu addItem:[self pickerItem:@"Chrome Web Store" action:@selector(openChromeWebStore:) object:nil]];
+  NSMenuItem* manage = [self pickerItem:@"Manage Extensions" action:@selector(manageExtensions:) object:nil];
+  manage.enabled = ChromePagesEnabled();
+  [menu addItem:manage];
+  return menu;
+}
+
+- (IBAction)showExtensionPicker:(id)sender {
+  NSMenu* menu = [self extensionPickerMenuForURL:[self currentURL]];
+  NSView* anchor = _extensionsButton ?: _addressPill;
+  [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, NSHeight(anchor.bounds) + 4) inView:anchor];
+}
+
+- (void)openExtensionPage:(NSString*)page of:(NotArcExtension*)x {
+  if (!page.length || !x.extensionID) return;
+  NSString* rel = [page hasPrefix:@"/"] ? [page substringFromIndex:1] : page;
+  [self openInNewTab:[NSString stringWithFormat:@"chrome-extension://%@/%@", x.extensionID, rel]];
+}
+// CEF has no extension toolbar to hang Chromium's popup bubble on, so the popup page opens as a tab.
+- (IBAction)openExtensionPopup:(NSMenuItem*)sender { [self openExtensionPage:((NotArcExtension*)sender.representedObject).popupPage of:sender.representedObject]; }
+- (IBAction)openExtensionOptions:(NSMenuItem*)sender { [self openExtensionPage:((NotArcExtension*)sender.representedObject).optionsPage of:sender.representedObject]; }
+- (IBAction)manageExtensions:(id)sender { [self openInNewTab:@"chrome://extensions"]; }
+- (IBAction)manageChromeExtension:(NSMenuItem*)sender {
+  [self openInNewTab:[@"chrome://extensions/?id=" stringByAppendingString:((NotArcExtension*)sender.representedObject).extensionID]];
+}
+- (IBAction)openChromeWebStore:(id)sender { [self openInNewTab:@"https://chromewebstore.google.com/"]; }
+
+- (BOOL)setExtension:(NSString*)extensionID enabled:(BOOL)enabled {
+  if (!extensionID.length) return NO;
+  NSMutableArray* off = [self disabledExtensionIDs];
+  [off removeObject:extensionID];
+  if (!enabled) [off addObject:extensionID];
+  SettingSetObject(kDisabledExtensionsKey, off);
+  gExtensionsChanged = YES;
+  return YES;
+}
+- (IBAction)toggleExtension:(NSMenuItem*)sender {
+  NotArcExtension* x = sender.representedObject;
+  [self setExtension:x.extensionID enabled:!x.enabled];
+  [self offerRelaunchForExtensions:[NSString stringWithFormat:x.enabled ? @"%@ turns off when NotArc relaunches." :
+                                                                          @"%@ turns on when NotArc relaunches.", x.name]];
+}
+
+- (BOOL)removeExtensionWithID:(NSString*)extensionID {
+  if (!RemoveExtensionFolder([self extensionsDirectory], extensionID)) return NO;
+  NSMutableArray* off = [self disabledExtensionIDs];
+  [off removeObject:extensionID];
+  SettingSetObject(kDisabledExtensionsKey, off);
+  gExtensionsChanged = YES;
+  return YES;
+}
+- (IBAction)removeExtension:(NSMenuItem*)sender {
+  NotArcExtension* x = sender.representedObject;
+  NSAlert* a = [NSAlert new];
+  a.messageText = [NSString stringWithFormat:@"Remove %@?", x.name];
+  a.informativeText = @"It's deleted from NotArc and stops when NotArc relaunches.";
+  [a addButtonWithTitle:@"Remove"];
+  [a addButtonWithTitle:@"Cancel"];
+  __weak MainWindowController* weakSelf = self;
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r == NSAlertFirstButtonReturn && [weakSelf removeExtensionWithID:x.extensionID])
+      dispatch_async(dispatch_get_main_queue(), ^{
+        [weakSelf offerRelaunchForExtensions:[NSString stringWithFormat:@"%@ is removed.", x.name]];
+      });
+  }];
+}
+
+- (void)installExtensionFromInput:(NSString*)input done:(void (^)(NSString* name, NSError* error))done {
+  NSString* extID = ExtensionIDFromInput(input ?: @"");
+  if (!extID) {
+    done(nil, [NSError errorWithDomain:@"NotArcExtensions" code:2 userInfo:@{
+      NSLocalizedDescriptionKey : @"Paste a link to an extension's Chrome Web Store page, or its 32-letter ID."}]);
+    return;
+  }
+  __weak MainWindowController* weakSelf = self;
+  InstallExtensionFromWebStore(extID, [self extensionsDirectory], ^(NSString* installedID, NSString* name, NSError* error) {
+    if (name) [weakSelf setExtension:installedID enabled:YES];  // a reinstall turns it back on
+    done(name, error);
+  });
+}
+
+- (void)reportExtensionInstall:(NSString*)name error:(NSError*)error {
+  if (!name) {
+    NSAlert* a = [NSAlert new];
+    a.messageText = @"Couldn't install the extension";
+    a.informativeText = error.localizedDescription ?: @"";
+    [a beginSheetModalForWindow:self.window completionHandler:nil];
+    return;
+  }
+  [self offerRelaunchForExtensions:[NSString stringWithFormat:@"%@ is installed.", name]];
+}
+
+- (void)offerRelaunchForExtensions:(NSString*)message {
+  NSAlert* a = [NSAlert new];
+  a.messageText = message;
+  if (!ChromePagesEnabled()) {
+    a.informativeText = @"Extensions run once Chrome-style pages are on (Settings) and NotArc relaunches.";
+    [a beginSheetModalForWindow:self.window completionHandler:nil];
+    return;
+  }
+  a.informativeText = @"Changes to extensions take effect when NotArc relaunches. Your tabs come back where they were.";
+  [a addButtonWithTitle:@"Relaunch Now"];
+  [a addButtonWithTitle:@"Later"];
+  __weak MainWindowController* weakSelf = self;
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r == NSAlertFirstButtonReturn)
+      dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf relaunchToApplyExtensions:nil]; });
+  }];
+}
+
+- (IBAction)relaunchToApplyExtensions:(id)sender {
+  ++_relaunchRequests;
+  if (self.selfTestProfiles) return;  // tests count the request; they never quit or reopen anything
+  NSTask* t = [NSTask new];
+  t.executableURL = [NSURL fileURLWithPath:@"/bin/sh"];
+  t.arguments = @[ @"-c", @"while kill -0 \"$1\" 2>/dev/null; do sleep 0.2; done; open \"$2\"", @"notarc-relaunch",
+                   @(getpid()).stringValue, NSBundle.mainBundle.bundlePath ];
+  if ([t launchAndReturnError:nil]) [NSApp terminate:nil];
+}
+
+- (IBAction)installExtensionFromPage:(NSMenuItem*)sender {
+  __weak MainWindowController* weakSelf = self;
+  [self installExtensionFromInput:sender.representedObject done:^(NSString* name, NSError* error) {
+    [weakSelf reportExtensionInstall:name error:error];
+  }];
+}
+- (IBAction)updateExtension:(NSMenuItem*)sender {  // same as a fresh install: the Web Store's current version
+  __weak MainWindowController* weakSelf = self;
+  [self installExtensionFromInput:((NotArcExtension*)sender.representedObject).extensionID done:^(NSString* name, NSError* error) {
+    [weakSelf reportExtensionInstall:name error:error];
+  }];
+}
+
+- (IBAction)installExtension:(id)sender {
+  NSAlert* a = [NSAlert new];
+  a.messageText = @"Install Extension";
+  a.informativeText = @"Paste a Chrome Web Store link or an extension ID. NotArc downloads the extension from the "
+                      @"Chrome Web Store and checks its signature before installing it.";
+  NSTextField* field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 340, 24)];
+  field.placeholderString = @"https://chromewebstore.google.com/detail/...";
+  NSString* here = [self currentURL];
+  if (ExtensionIDFromInput(here ?: @"")) field.stringValue = here;
+  a.accessoryView = field;
+  [a addButtonWithTitle:@"Install"];
+  [a addButtonWithTitle:@"Cancel"];
+  a.window.initialFirstResponder = field;
+  __weak MainWindowController* weakSelf = self;
+  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r != NSAlertFirstButtonReturn) return;
+    NSString* text = field.stringValue;
+    dispatch_async(dispatch_get_main_queue(), ^{
+      [weakSelf installExtensionFromInput:text done:^(NSString* name, NSError* error) {
+        [weakSelf reportExtensionInstall:name error:error];
+      }];
+    });
+  }];
+}
+
 - (IBAction)importArcExtensionsFromMenu:(id)sender {
   NSArray<ArcExtensionCopy*>* copies =
       [self importArcExtensionsInto:NotArcExtensionsDirectory(NO)
@@ -3639,7 +4127,7 @@ static const CGFloat kPaneGap = 6;
   if (skipped.count)
     [info appendFormat:@"\n\nNot supported by current Chromium: %@ (try uBlock Origin Lite).", [skipped componentsJoinedByString:@", "]];
   [info appendString:ChromePagesEnabled() ? @"\n\nThey load the next time NotArc starts. Password managers need one sign-in."
-                                          : @"\n\nThey load once Chrome-style pages are turned on (coming soon)."];
+                                          : @"\n\nThey load once Chrome-style pages are on (Settings) and NotArc relaunches."];
   a.informativeText = info;
   [a beginSheetModalForWindow:self.window completionHandler:nil];
 }
@@ -3649,7 +4137,9 @@ static const CGFloat kPaneGap = 6;
   NSUInteger copied = 0, skipped = 0;
   for (ArcExtensionCopy* c in [self importArcExtensionsInto:extensionsDir fromArcUserData:userData])
     c.skippedMV2 ? ++skipped : ++copied;
-  return @{@"history" : @(history), @"extensions" : @(copied), @"skipped" : @(skipped)};
+  NSDictionary* pw = [self importArcPasswordsFromUserData:userData];
+  return @{@"history" : @(history), @"extensions" : @(copied), @"skipped" : @(skipped),
+           @"passwords" : pw[@"passwords"] ?: @(-1), @"addresses" : pw[@"addresses"] ?: @0, @"cards" : pw[@"cards"] ?: @0};
 }
 
 - (IBAction)importEverythingFromArcMenu:(id)sender {
@@ -3657,11 +4147,16 @@ static const CGFloat kPaneGap = 6;
                                              userData:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]];
   NSAlert* a = [NSAlert new];
   a.messageText = @"Everything from Arc is here";
+  NSString* passwords = [n[@"passwords"] intValue] < 0
+      ? @"Saved passwords, addresses and cards: macOS didn't give NotArc Arc's Keychain key"
+      : [NSString stringWithFormat:@"Saved passwords: %@ added\nAddresses and cards: %@ and %@ added", n[@"passwords"],
+                                   n[@"addresses"], n[@"cards"]];
   a.informativeText = [NSString stringWithFormat:
       @"Spaces, tabs, pinned tabs and Favorites: imported\nLogins: come over as each Space opens\nHistory: %@ visits added\n"
-      @"Extensions: %@ copied%@\n\nSaved passwords, autofill and cards are coming in a later update.",
+      @"Extensions: %@ copied%@\n%@",
       n[@"history"], n[@"extensions"],
-      [n[@"skipped"] intValue] ? [NSString stringWithFormat:@" (%@ too old for current Chromium)", n[@"skipped"]] : @""];
+      [n[@"skipped"] intValue] ? [NSString stringWithFormat:@" (%@ too old for current Chromium)", n[@"skipped"]] : @"",
+      passwords];
   __weak MainWindowController* weakSelf = self;
   [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
     dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf offerDefaultBrowserIfFirstLaunch]; });
@@ -3695,7 +4190,8 @@ static const CGFloat kPaneGap = 6;
   [d setBool:YES forKey:@"arcImportOffered"];
   NSAlert* a = [NSAlert new];
   a.messageText = @"Bring everything over from Arc?";
-  a.informativeText = @"Your Spaces, tabs and logins are already here. This adds your history and extensions. "
+  a.informativeText = @"Your Spaces, tabs and logins are already here. This adds your history, extensions, saved "
+                      @"passwords, addresses and cards. "
                       @"Arc itself isn't changed. You can do this later from File > Import Everything from Arc.";
   [a addButtonWithTitle:@"Import Everything"];
   [a addButtonWithTitle:@"Not Now"];
@@ -3958,6 +4454,78 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
     if (!me.selfTestProfiles) [me showToast:@"Captured to Easel" action:nil selector:nil];
   }];
 }
+- (EaselObject*)addPNGToRecentEasel:(NSData*)png link:(NSString*)link {
+  if (!png) { NSBeep(); return nil; }
+  ArcItem* easel = [self recentEasel];
+  if (easel) [self showItem:easel]; else [self createEaselWithID:nil];
+  EaselObject* o = [_easelView addImagePNG:png link:link];
+  if (o && !self.selfTestProfiles) [self showToast:@"Captured to Easel" action:nil selector:nil];
+  return o;
+}
+- (BOOL)canCaptureShownPage { return _shown && !_shown.noteID && !_shown.easelID && _shown.browserId && [self webViewForItem:_shown]; }
+
+// Drag a rectangle over the page (the Capture Area overlay), then do something with it.
+- (void)pickAreaThen:(void (^)(NSRect r))then {
+  if (![self canCaptureShownPage]) { NSBeep(); return; }
+  [_captureOverlay removeFromSuperview];
+  CaptureAreaView* o = [[CaptureAreaView alloc] initWithFrame:_content.frame];
+  __weak CaptureAreaView* weakO = o;
+  void (^next)(NSRect) = [then copy];
+  o.finished = ^(NSRect r) {
+    [weakO removeFromSuperview];
+    if (!NSIsEmptyRect(r)) next(r);
+  };
+  [_content.superview addSubview:o positioned:NSWindowAbove relativeTo:nil];
+  _captureOverlay = o;
+  [self.window makeFirstResponder:o];
+}
+// File > Capture Area to Easel / Capture Full Page to Easel: the Capture (#48) pictures, straight into an easel.
+- (IBAction)captureAreaToEasel:(id)sender {
+  __weak MainWindowController* weakSelf = self;
+  [self pickAreaThen:^(NSRect r) { [weakSelf captureToEaselMode:@"area" rect:r done:nil]; }];
+}
+- (IBAction)captureFullPageToEasel:(id)sender { [self captureToEaselMode:@"full" rect:NSZeroRect done:nil]; }
+- (void)captureToEaselMode:(NSString*)mode rect:(NSRect)r done:(void (^)(EaselObject*))done {
+  if (![self canCaptureShownPage]) { NSBeep(); if (done) done(nil); return; }
+  NSString* link = [self itemCurrentURL:_shown];
+  __weak MainWindowController* weakSelf = self;
+  [self capture:mode rect:r done:^(NSData* png) {
+    EaselObject* o = [weakSelf addPNGToRecentEasel:png link:link];
+    if (done) done(o);
+  }];
+}
+// File > Add Live Clip to Easel: drag over part of a page; the clip keeps the address and region and refreshes later.
+- (IBAction)liveClipToEasel:(id)sender {
+  __weak MainWindowController* weakSelf = self;
+  [self pickAreaThen:^(NSRect r) { [weakSelf liveClipArea:r done:nil]; }];
+}
+- (void)liveClipArea:(NSRect)r done:(void (^)(EaselObject*))done {
+  ArcItem* page = _shown;
+  NSString* link = [self itemCurrentURL:page];
+  NSView* web = [self webViewForItem:page];
+  if (![self canCaptureShownPage] || !link.length || !web) { NSBeep(); if (done) done(nil); return; }
+  NSSize viewport = web.bounds.size;
+  NSRect region = NSIntersectionRect(r, NSMakeRect(0, 0, viewport.width, viewport.height));
+  __weak MainWindowController* weakSelf = self;
+  [self capture:@"area" rect:region done:^(NSData* png) {
+    MainWindowController* me = weakSelf;
+    if (!me || !png) { NSBeep(); if (done) done(nil); return; }
+    // Where the page was scrolled to, so a refresh shows the same part of it.
+    [me devtools:page method:@"Page.getLayoutMetrics" params:nil done:^(NSDictionary* m) {
+      MainWindowController* me2 = weakSelf;
+      if (!me2) { if (done) done(nil); return; }
+      NSDictionary* vv = m[@"cssVisualViewport"] ?: m[@"visualViewport"];
+      NSPoint scroll = NSMakePoint(MAX(0, [vv[@"pageX"] doubleValue]), MAX(0, [vv[@"pageY"] doubleValue]));
+      ArcItem* easel = [me2 recentEasel];
+      if (easel) [me2 showItem:easel]; else [me2 createEaselWithID:nil];
+      EaselObject* o = [me2->_easelView addClipPNG:png link:link region:region viewport:viewport scroll:scroll];
+      if (!o) NSBeep();
+      else if (!me2.selfTestProfiles) [me2 showToast:@"Live clip added to Easel" action:nil selector:nil];
+      if (done) done(o);
+    }];
+  }];
+}
+
 // Tests.
 - (EaselView*)easelView { return _easelScroll.hidden ? nil : _easelView; }
 - (void)captureShownPageToEasel:(void (^)(BOOL))done {
@@ -3971,109 +4539,161 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   }];
 }
 
-// MARK: Notes (Arc: NoteDocument). Rich text in the page card, saved as RTF next to the sidebar file.
+// MARK: Notes (Arc: NoteDocument). Rich text in the page card (or a split pane), saved as RTF next to the sidebar file.
 - (NSString*)notesDirectory {
   NSString* support = [NSSearchPathForDirectoriesInDomains(NSApplicationSupportDirectory, NSUserDomainMask, YES).firstObject
       stringByAppendingPathComponent:@"NotArc"];
   return [support stringByAppendingPathComponent:self.selfTestProfiles ? @"SelfTestNotes" : @"Notes"];
 }
 - (NSString*)notePathFor:(ArcItem*)note { return [[self notesDirectory] stringByAppendingPathComponent:[note.noteID stringByAppendingString:@".rtf"]]; }
-- (NSAttributedString*)loadNote:(ArcItem*)note {
-  NSData* d = [NSData dataWithContentsOfFile:[self notePathFor:note]];
-  NSAttributedString* a = d ? [[NSAttributedString alloc] initWithRTF:d documentAttributes:nil] : nil;
-  return a ?: [[NSAttributedString alloc] initWithString:@""];
-}
+- (NSAttributedString*)loadNote:(ArcItem*)note { return NoteLoadRTF([self notePathFor:note]); }
 - (void)saveNoteNow {
-  [_noteSaveTimer invalidate];
-  _noteSaveTimer = nil;
-  if (!_noteItem || !_noteText) return;
-  NSAttributedString* a = _noteText.textStorage;
-  NSData* rtf = [a RTFFromRange:NSMakeRange(0, a.length) documentAttributes:@{NSDocumentTypeDocumentAttribute : NSRTFTextDocumentType}];
-  [[NSFileManager defaultManager] createDirectoryAtPath:[self notesDirectory] withIntermediateDirectories:YES attributes:nil error:nil];
-  [rtf writeToFile:[self notePathFor:_noteItem] atomically:YES];
+  for (NoteEditorView* e in _noteEditors.allValues) [e save];
 }
-- (void)layoutNoteEditor {
-  ArcItem* note = _shown.noteID ? _shown : nil;
-  if (note != _noteItem) {
-    [self saveNoteNow];
-    _noteItem = note;
-    if (note) {
-      if (!_noteScroll) [self buildNoteEditor];
-      [_noteText.textStorage setAttributedString:[self loadNote:note]];
-      _noteText.typingAttributes = [self noteBodyAttributes];
+// The editor of the focused pane when it's a note.
+- (NoteEditorView*)focusedNoteEditor { return _shown.noteID ? _noteEditors[_shown.itemID] : nil; }
+- (NoteEditorView*)noteEditorForItem:(ArcItem*)note {
+  NoteEditorView* e = note.itemID ? _noteEditors[note.itemID] : nil;
+  return e.superview && !e.hidden ? e : nil;
+}
+// Every note among the visible panes gets its own editor in its pane's frame; notes that left the screen are saved.
+- (void)layoutNoteEditorsForPanes:(NSArray<ArcItem*>*)panes frames:(NSArray<NSValue*>*)frames {
+  if (!_noteEditors) _noteEditors = [NSMutableDictionary dictionary];
+  NoteEditorView* focusedBefore = [self focusedNoteEditor];
+  NSMutableSet<NSString*>* onScreen = [NSMutableSet set];
+  for (NSUInteger i = 0; i < panes.count && i < frames.count; ++i) {
+    ArcItem* note = panes[i];
+    if (!note.noteID || !note.itemID) continue;
+    NoteEditorView* e = _noteEditors[note.itemID];
+    if (!e) {
+      e = [[NoteEditorView alloc] initWithFrame:frames[i].rectValue];
+      e.delegate = self;
+      e.item = note;
+      e.path = [self notePathFor:note];
+      [e load];
+      _noteEditors[note.itemID] = e;
     }
+    e.frame = frames[i].rectValue;
+    e.autoresizingMask = panes.count == 1 ? (NSViewWidthSizable | NSViewHeightSizable) : NSViewNotSizable;
+    e.hidden = NO;
+    [_content addSubview:e positioned:NSWindowAbove relativeTo:nil];
+    [onScreen addObject:note.itemID];
   }
-  _noteScroll.hidden = !note;
-  if (note) {
-    _noteScroll.frame = _content.bounds;
-    [_content addSubview:_noteScroll positioned:NSWindowAbove relativeTo:nil];
-    if (!self.selfTestProfiles) [self.window makeFirstResponder:_noteText];
+  for (NSString* key in _noteEditors.allKeys) {
+    if ([onScreen containsObject:key]) continue;
+    NoteEditorView* e = _noteEditors[key];
+    [e save];
+    [e removeFromSuperview];
+    [_noteEditors removeObjectForKey:key];
   }
+  NoteEditorView* focused = [self focusedNoteEditor];
+  if (focused && focused != focusedBefore && !self.selfTestProfiles) [self.window makeFirstResponder:focused.textView];
 }
-- (NSDictionary*)noteBodyAttributes {
-  return @{NSFontAttributeName : [NSFont systemFontOfSize:15], NSForegroundColorAttributeName : NSColor.textColor};
-}
-- (void)buildNoteEditor {
-  _noteScroll = [[NSScrollView alloc] initWithFrame:_content.bounds];
-  _noteScroll.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-  _noteScroll.hasVerticalScroller = YES;
-  _noteScroll.drawsBackground = YES;
-  _noteScroll.backgroundColor = NSColor.textBackgroundColor;
-  _noteText = [[NSTextView alloc] initWithFrame:_noteScroll.bounds];
-  _noteText.autoresizingMask = NSViewWidthSizable;
-  _noteText.richText = YES;
-  _noteText.allowsUndo = YES;
-  _noteText.usesFontPanel = YES;
-  _noteText.usesRuler = NO;
-  _noteText.importsGraphics = YES;
-  _noteText.automaticLinkDetectionEnabled = YES;
-  _noteText.textContainerInset = NSMakeSize(56, 40);  // Arc's notes are a centred page with generous margins
-  _noteText.delegate = (id<NSTextViewDelegate>)self;
-  _noteScroll.documentView = _noteText;
-}
-- (void)textDidChange:(NSNotification*)n {
-  if (n.object != _noteText || !_noteItem) return;
+- (void)noteEditorDidChange:(NoteEditorView*)editor {
+  ArcItem* note = editor.item;
   // The first line is the note's title in the sidebar, as in Arc.
-  NSString* first = [[_noteText.string componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] firstObject];
-  first = [first stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
-  NSString* t = first.length ? (first.length > 80 ? [first substringToIndex:80] : first) : nil;
-  if (![t isEqualToString:_noteItem.liveTitle] && !(t == nil && _noteItem.liveTitle == nil)) {
-    _noteItem.liveTitle = t;
-    [_outline reloadItem:_noteItem];
+  NSString* t = editor.title;
+  if (![t isEqualToString:note.liveTitle] && !(t == nil && note.liveTitle == nil)) {
+    note.liveTitle = t;
+    ArcItem* parent = [self parentOfItem:note];
+    [_outline reloadItem:parent.isSplit ? parent : note];
     [self scheduleSave];
   }
-  [_noteSaveTimer invalidate];
-  __weak MainWindowController* weakSelf = self;
-  _noteSaveTimer = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:NO block:^(NSTimer*) { [weakSelf saveNoteNow]; }];
 }
-- (ArcItem*)createNoteWithID:(NSString*)noteID {
-  if (!_space) return nil;
+// Clicking into a note pane of a split focuses that pane, like clicking into a page.
+- (void)noteEditorDidFocus:(NoteEditorView*)editor {
+  ArcItem* item = editor.item;
+  if (!item || item == _shown || ![_splitItems containsObject:item]) return;
+  _shown.lastActiveAt = [NSDate date];
+  _shown = item;
+  item.lastActiveAt = [NSDate date];
+  [self syncSplitState];
+  [self selectSidebarRowFor:item];
+  [self updateToolbarAddress];
+}
+- (void)noteEditor:(NoteEditorView*)editor openLink:(NSString*)url { [self openInNewTab:url]; }
+
+- (ArcItem*)makeNoteItemWithID:(NSString*)noteID {
   ArcItem* n = [ArcItem new];
   n.itemID = NSUUID.UUID.UUIDString;
   n.noteID = noteID ?: NSUUID.UUID.UUIDString;
   n.url = [@"notarc://note/" stringByAppendingString:n.noteID];
   n.children = [NSMutableArray array];
   n.lastActiveAt = [NSDate date];
-  [_space.unpinned.children insertObject:n atIndex:0];  // Arc puts new notes at the top of Today
-  [_outline reloadItem:_space.unpinned reloadChildren:YES];
-  [self scheduleSave];
   if (noteID) {  // reopened from the archive: title from its first line
     NSString* s = [self loadNote:n].string;
     NSString* first = [[s componentsSeparatedByCharactersInSet:NSCharacterSet.newlineCharacterSet] firstObject];
     if (first.length) n.liveTitle = first;
   }
+  return n;
+}
+- (ArcItem*)createNoteWithID:(NSString*)noteID {
+  if (!_space) return nil;
+  ArcItem* n = [self makeNoteItemWithID:noteID];
+  [_space.unpinned.children insertObject:n atIndex:0];  // Arc puts new notes at the top of Today
+  [_outline reloadItem:_space.unpinned reloadChildren:YES];
+  [self scheduleSave];
   [self showItem:n];
   return n;
 }
 - (IBAction)newNote:(id)sender { [self createNoteWithID:nil]; }
+// Arc: newNoteInSplitView. A new note opens as a pane beside the focused page (or note).
+- (IBAction)newNoteInSplitView:(id)sender {
+  if (!_space) return;
+  if (!_shown) { [self createNoteWithID:nil]; return; }
+  ArcItem* n = [self makeNoteItemWithID:nil];
+  if (![self placeInSplit:n horizontal:NO before:NO]) [self createNoteWithID:nil];
+}
+
+// Markdown export (File > Export Note as Markdown..., Copy Note as Markdown).
+// The note to export: the focused pane if it's a note, else a note beside it in the split.
+- (ArcItem*)noteForExport {
+  if (_shown.noteID) return _shown;
+  for (ArcItem* pane in [self visiblePanes])
+    if (pane.noteID) return pane;
+  return nil;
+}
+- (NSString*)markdownForNote:(ArcItem*)note {
+  NoteEditorView* e = note.itemID ? _noteEditors[note.itemID] : nil;
+  return e ? e.markdown : NoteMarkdown([self loadNote:note]);
+}
+- (BOOL)exportNote:(ArcItem*)note toPath:(NSString*)path {
+  NSString* md = note ? [self markdownForNote:note] : nil;
+  return md && [md writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+}
+- (IBAction)exportNoteAsMarkdown:(id)sender {
+  ArcItem* note = [self noteForExport];
+  if (!note) { NSBeep(); return; }
+  NSSavePanel* panel = [NSSavePanel savePanel];
+  UTType* md = [UTType typeWithFilenameExtension:@"md"];
+  if (md) panel.allowedContentTypes = @[ md ];
+  NSString* name = [[note.displayTitle ?: @"Note" componentsSeparatedByCharactersInSet:
+                        [NSCharacterSet characterSetWithCharactersInString:@"/:\\"]] componentsJoinedByString:@"-"];
+  panel.nameFieldStringValue = [(name.length ? name : @"Note") stringByAppendingPathExtension:@"md"];
+  [panel beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r == NSModalResponseOK && ![self exportNote:note toPath:panel.URL.path]) NSBeep();
+  }];
+}
+- (IBAction)copyNoteAsMarkdown:(id)sender {
+  ArcItem* note = [self noteForExport];
+  if (!note) { NSBeep(); return; }
+  NSString* md = [self markdownForNote:note];
+  NSPasteboard* pb = [self copyPasteboard];
+  [pb clearContents];
+  [pb setString:md forType:NSPasteboardTypeString];
+  [pb setString:md forType:@"net.daringfireball.markdown"];
+}
+
 // Tests.
 - (void)typeInNote:(NSString*)text {
-  if (!_noteText || !_noteItem) return;
-  [_noteText setSelectedRange:NSMakeRange(_noteText.string.length, 0)];
-  [_noteText insertText:text replacementRange:_noteText.selectedRange];
+  NSTextView* tv = [self focusedNoteEditor].textView;
+  if (!tv) return;
+  [tv setSelectedRange:NSMakeRange(tv.string.length, 0)];
+  [tv insertText:text replacementRange:tv.selectedRange];
 }
-- (NSString*)noteEditorText { return _noteScroll.hidden ? nil : _noteText.string; }
+- (NSString*)noteEditorText { return [self focusedNoteEditor].textView.string; }
 - (NSString*)savedNoteText:(ArcItem*)note { [self saveNoteNow]; return [self loadNote:note].string; }
+- (NSAttributedString*)savedNote:(ArcItem*)note { [self saveNoteNow]; return [self loadNote:note]; }
 - (BOOL)noteRangeIsBold:(ArcItem*)note range:(NSRange)r {  // tests: reads the saved file
   NSAttributedString* a = [self loadNote:note];
   if (NSMaxRange(r) > a.length) return NO;
@@ -4081,12 +4701,13 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
   return (f.fontDescriptor.symbolicTraits & NSFontDescriptorTraitBold) != 0;
 }
 - (void)makeNoteRangeBold:(NSRange)r {  // tests: what Format > Bold does to a selection
-  if (NSMaxRange(r) > _noteText.textStorage.length) return;
-  NSFont* f = [_noteText.textStorage attribute:NSFontAttributeName atIndex:r.location effectiveRange:nil] ?: [NSFont systemFontOfSize:15];
+  NSTextView* tv = [self focusedNoteEditor].textView;
+  if (NSMaxRange(r) > tv.textStorage.length) return;
+  NSFont* f = [tv.textStorage attribute:NSFontAttributeName atIndex:r.location effectiveRange:nil] ?: [NSFont systemFontOfSize:15];
   NSFont* b = [[NSFontManager sharedFontManager] convertFont:f toHaveTrait:NSBoldFontMask];
-  [_noteText shouldChangeTextInRange:r replacementString:nil];
-  [_noteText.textStorage addAttribute:NSFontAttributeName value:b range:r];
-  [_noteText didChangeText];
+  [tv shouldChangeTextInRange:r replacementString:nil];
+  [tv.textStorage addAttribute:NSFontAttributeName value:b range:r];
+  [tv didChangeText];
 }
 
 - (NSArray<NSValue*>*)paneFrames {
@@ -4170,27 +4791,48 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 // The new pane is a normal Today tab placed beside the focused pane (after it for right/bottom, before it
 // for left/top). The direction sets the layout of the whole split.
 - (void)openInSplit:(NSString*)input horizontal:(BOOL)horizontal before:(BOOL)before {
-  NSString* url = ResolveCommandBarInput(input);
-  if (!url || !_space || !_shown) return;
-  [self syncSplitState];
-  if (_splitItems.count >= 4) return;
-  ArcItem* group = [self ensureSplitGroupFor:_shown];
-  if (!group) {
-    NSBeep();
+  if ([input hasPrefix:@"notarc://note/"]) {  // a note: the existing one moves into the split, else it's reopened
+    NSString* nid = [input substringFromIndex:@"notarc://note/".length];
+    if (!nid.length || [nid rangeOfString:@"/"].location != NSNotFound) return;
+    ArcItem* note = [self tabWithURLPrefix:input];
+    [self placeInSplit:note ?: [self makeNoteItemWithID:nid] horizontal:horizontal before:before];
     return;
   }
-  group.splitHorizontal = horizontal;
-  group.splitFractions = nil;
+  NSString* url = ResolveCommandBarInput(input);
+  if (!url || !_space || !_shown) return;
   ArcItem* tab = [ArcItem new];
   tab.itemID = NSUUID.UUID.UUIDString;
   tab.url = url;
   tab.children = [NSMutableArray array];
+  [self placeInSplit:tab horizontal:horizontal before:before];
+}
+
+// Puts a pane beside the focused one: a new tab or note, or an existing item that moves out of its old place.
+- (BOOL)placeInSplit:(ArcItem*)item horizontal:(BOOL)horizontal before:(BOOL)before {
+  if (!item || !_space || !_shown || item == _shown) return NO;
+  [self syncSplitState];
+  if ([_splitItems containsObject:item]) {
+    [self showItem:item];
+    return YES;
+  }
+  if (_splitItems.count >= 4) return NO;
+  ArcItem* group = [self ensureSplitGroupFor:_shown];
+  if (!group) {
+    NSBeep();
+    return NO;
+  }
+  ArcItem* old = [self parentOfItem:item];
+  if (old.isSplit) [self detachFromSplit:item keep:NO];
+  else if (old) [old.children removeObject:item];
+  group.splitHorizontal = horizontal;
+  group.splitFractions = nil;
   NSUInteger at = [group.children indexOfObject:_shown] + (before ? 0 : 1);
-  [group.children insertObject:tab atIndex:at];
+  [group.children insertObject:item atIndex:at];
   [_outline reloadData];
   for (ArcItem* section in [self sectionsOfSpace:_space]) [_outline expandItem:section];
   [self scheduleSave];
-  [self showItem:tab];
+  [self showItem:item];
+  return YES;
 }
 
 - (NSUInteger)indexOfShownInSplit { return [_splitItems indexOfObject:_shown]; }
@@ -4746,14 +5388,19 @@ static NSString* SiteOf(NSString* url) {
 
 // Small toast at the bottom centre of the page area with one action button.
 - (void)showToast:(NSString*)text action:(NSString*)action selector:(SEL)selector {
+  [self showToast:text buttons:action.length ? @[ @[ action, NSStringFromSelector(selector) ] ] : @[] target:self duration:6];
+}
+
+- (void)showToast:(NSString*)text buttons:(NSArray<NSArray<NSString*>*>*)buttons target:(id)target
+         duration:(NSTimeInterval)duration {
   [self hideToast];
   NSTextField* label = [NSTextField labelWithString:text];
   label.textColor = NSColor.whiteColor;
   NSMutableArray* views = [NSMutableArray arrayWithObject:label];
-  if (action.length) {
-    NSButton* b = [NSButton buttonWithTitle:action target:self action:selector];
-    b.bezelStyle = NSBezelStyleRounded;
-    [views addObject:b];
+  for (NSArray<NSString*>* b in buttons) {
+    NSButton* button = [NSButton buttonWithTitle:b[0] target:target action:NSSelectorFromString(b[1])];
+    button.bezelStyle = NSBezelStyleRounded;
+    [views addObject:button];
   }
   NSStackView* stack = [NSStackView stackViewWithViews:views];
   stack.edgeInsets = NSEdgeInsetsMake(6, 14, 6, 8);
@@ -4769,8 +5416,9 @@ static NSString* SiteOf(NSString* url) {
   stack.autoresizingMask = NSViewMinXMargin | NSViewMaxXMargin | NSViewMaxYMargin;
   [self.window.contentView addSubview:stack positioned:NSWindowAbove relativeTo:nil];
   _toast = stack;
+  _toastText = [text copy];
   __weak MainWindowController* weakSelf = self;
-  _toastTimer = [NSTimer scheduledTimerWithTimeInterval:6 repeats:NO block:^(NSTimer*) { [weakSelf hideToast]; }];
+  _toastTimer = [NSTimer scheduledTimerWithTimeInterval:duration repeats:NO block:^(NSTimer*) { [weakSelf hideToast]; }];
 }
 
 - (void)hideToast {
@@ -4778,6 +5426,71 @@ static NSString* SiteOf(NSString* url) {
   _toastTimer = nil;
   [_toast removeFromSuperview];
   _toast = nil;
+  _toastText = nil;
+}
+
+#pragma mark Passwords and autofill (#67)
+
+- (AutofillController*)autofill {
+  if (!_autofill) {
+    _autofill = [[AutofillController alloc] initWithHost:self];
+    _autofill.recordMenusOnly = self.selfTestProfiles;  // hidden runs never pop a menu
+  }
+  return _autofill;
+}
+
+- (BOOL)autofillRun:(NSString*)js nonce:(NSString*)nonce {
+  return _client && _client->AutofillRun(nonce.UTF8String, js.UTF8String);
+}
+
+- (void)autofillRunAllFrames:(NSString*)js browser:(int)browserId {
+  if (_client) _client->AutofillRunAllFrames(browserId, js.UTF8String);
+}
+
+- (NSView*)viewForBrowserId:(int)browserId {
+  CefRefPtr<CefBrowser> b = _client ? _client->BrowserById(browserId) : nullptr;
+  return b ? (__bridge NSView*)b->GetHost()->GetWindowHandle() : nil;
+}
+
+- (IBAction)fillPassword:(id)sender {
+  if (_shown.browserId) [self.autofill fillPasswordInBrowser:_shown.browserId];
+}
+
+- (IBAction)showPasswords:(id)sender {
+  PasswordsWindowController* pw = [PasswordsWindowController shared];
+  __weak MainWindowController* weakSelf = self;
+  pw.pasteboardProvider = ^NSPasteboard* { return [weakSelf copyPasteboard] ?: NSPasteboard.generalPasteboard; };
+  if ([sender isKindOfClass:NSMenuItem.class] && [(NSMenuItem*)sender menu] != NSApp.mainMenu &&
+      [(NSMenuItem*)sender action] == @selector(showPasswords:) && [(NSMenuItem*)sender tag] > 0)
+    pw.section = [(NSMenuItem*)sender tag];  // from the fill menu: Addresses or Cards
+  if (self.selfTestProfiles) [pw reload];  // hidden runs never show it
+  else [pw showWindow:nil];
+}
+
+- (IBAction)importPasswordsFromMenu:(id)sender { [self.autofill importPasswordsFromMenu]; }
+
+// Saved passwords, addresses and cards from each Space's Arc profile ("Login Data", "Web Data"), with Arc's own
+// key ("Arc Safe Storage", the item cookie import already reads). nil when the key isn't available.
+- (NSDictionary<NSString*, NSNumber*>*)importArcPasswordsFromUserData:(NSString*)userData {
+  NSData* key = self.arcSafeStorageKeyOverride;
+  if (!key && !self.selfTestProfiles) {  // tests never read the real Keychain
+    NSString* pw = ArcSafeStoragePassword(nil);
+    if (pw) key = ArcCookieKey(pw);
+  }
+  if (!key) return nil;
+  NSUInteger passwords = 0, addresses = 0, cards = 0;
+  NSMutableSet* done = [NSMutableSet set];
+  for (ArcSpace* s in _spaces) {
+    NSString* p = s.profileDirectory.length ? s.profileDirectory : @"Default";
+    if ([done containsObject:p]) continue;
+    [done addObject:p];
+    NSDictionary* n = [[PasswordStore shared] importChromiumProfile:[userData stringByAppendingPathComponent:p] key:key
+                                                             source:[NSString stringWithFormat:@"Arc (%@)", s.title ?: p]];
+    passwords += [n[@"passwords"] unsignedIntegerValue];
+    addresses += [n[@"addresses"] unsignedIntegerValue];
+    cards += [n[@"cards"] unsignedIntegerValue];
+  }
+  return @{@"passwords" : @(passwords), @"addresses" : @(addresses), @"cards" : @(cards)};
 }
 - (BOOL)isPeeking { return _peek != nil; }
 - (void)promotePeekToTab { [_peek openInMainWindow:nil]; }
@@ -4835,13 +5548,23 @@ static ArcItem* NewSection(NSString* title) {
 - (void)clickSpaceBarIcon:(NSUInteger)index {  // tests
   if (index < _spaceIcons.views.count) [(NSButton*)_spaceIcons.views[index] performClick:nil];
 }
+// + menu > New Live Folder: a feed or repository, your own GitHub pull requests, or a YouTube channel.
+- (NSMenuItem*)newLiveFolderMenuItem {
+  NSMenuItem* item = [[NSMenuItem alloc] initWithTitle:@"New Live Folder" action:nil keyEquivalent:@""];
+  NSMenu* sub = [[NSMenu alloc] initWithTitle:@"New Live Folder"];
+  [sub addItemWithTitle:@"GitHub: My Pull Requests" action:@selector(newMyPullRequestsFolder:) keyEquivalent:@""].target = self;
+  [sub addItemWithTitle:@"YouTube Channel..." action:@selector(newYouTubeLiveFolder:) keyEquivalent:@""].target = self;
+  [sub addItemWithTitle:@"Feed or GitHub Repository..." action:@selector(newLiveFolder:) keyEquivalent:@""].target = self;
+  item.submenu = sub;
+  return item;
+}
 - (IBAction)showNewMenu:(NSButton*)sender {
   NSMenu* m = [[NSMenu alloc] initWithTitle:@"New"];
   [m addItemWithTitle:@"New Tab" action:@selector(newTab:) keyEquivalent:@""].target = self;
   [m addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@""].target = self;
   [m addItemWithTitle:@"New Note" action:@selector(newNote:) keyEquivalent:@""].target = self;
   [m addItemWithTitle:@"New Easel" action:@selector(newEasel:) keyEquivalent:@""].target = self;
-  [m addItemWithTitle:@"New Live Folder..." action:@selector(newLiveFolder:) keyEquivalent:@""].target = self;
+  [m addItem:[self newLiveFolderMenuItem]];
   [m addItem:NSMenuItem.separatorItem];
   [m addItemWithTitle:@"New Space..." action:@selector(newSpace:) keyEquivalent:@""].target = self;
   [m popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, sender.bounds.size.height + 4) inView:sender];
@@ -4862,7 +5585,7 @@ static ArcItem* NewSection(NSString* title) {
     if ([e[1] isEqualToString:@"changeSpaceIcon:"]) {
       NSMenuItem* ap = [m addItemWithTitle:@"Appearance" action:nil keyEquivalent:@""];
       ap.submenu = [[NSMenu alloc] initWithTitle:@"Appearance"];
-      for (NSArray* o in @[ @[ @"Automatic", @"auto" ], @[ @"Light", @"light" ], @[ @"Dark", @"dark" ] ]) {
+      for (NSArray* o in @[ @[ @"Default (Settings)", @"auto" ], @[ @"Light", @"light" ], @[ @"Dark", @"dark" ] ]) {
         NSMenuItem* i = [ap.submenu addItemWithTitle:o[0] action:@selector(setSpaceAppearance:) keyEquivalent:@""];
         i.target = self;
         i.representedObject = o[1];
@@ -5039,13 +5762,14 @@ static ArcItem* NewSection(NSString* title) {
 // Arc lets each Space follow the system or force Light/Dark. Every Arc colour in NotArc is resolved from the view's
 // effective appearance, so setting the window's appearance switches the sidebar, rows, pills and command bar together.
 - (void)applyColorScheme {
-  NSString* cs = _space.colorScheme;
+  NSString* cs = _space.colorScheme ?: DefaultSpaceAppearance();  // Settings > Appearance for Spaces that didn't choose
   NSAppearance* ap = [cs isEqualToString:@"light"]  ? [NSAppearance appearanceNamed:NSAppearanceNameAqua]
                      : [cs isEqualToString:@"dark"] ? [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]
                                                     : nil;
   if (self.window.appearance != ap && ![self.window.appearance.name isEqualToString:ap.name]) {
     self.window.appearance = ap;
     _commandBar.appearance = ap;
+    _boostPanel.appearance = ap;
     [_outline enumerateAvailableRowViewsUsingBlock:^(NSTableRowView* rv, NSInteger r) { rv.needsDisplay = YES; }];
     _cardEdge.needsDisplay = YES;
   }
@@ -5157,9 +5881,10 @@ static ArcItem* NewSection(NSString* title) {
 - (IBAction)shuffleBoost:(id)sender {
   Boost* b = _boostEditing ?: [self boostForCurrentSiteCreate:YES];
   if (!b) { NSBeep(); return; }
-  NSArray* fonts = @[ @"Georgia", @"Helvetica Neue", @"Avenir Next", @"Menlo", @"Futura", @"Baskerville", @"Gill Sans" ];
+  NSArray* fonts = @[ @"Georgia", @"Helvetica Neue", @"Avenir Next", @"Menlo", @"Futura", @"Arial Rounded MT Bold", @"Gill Sans" ];
   double old = b.hue;
   do { b.hue = arc4random_uniform(360); } while (fabs(b.hue - old) < 30);
+  b.saturation = 0.6 + arc4random_uniform(41) / 100.0;
   b.colorStrength = 0.5 + arc4random_uniform(40) / 100.0;
   b.font = fonts[arc4random_uniform((uint32_t)fonts.count)];
   b.enabled = YES;
@@ -5223,129 +5948,320 @@ static ArcItem* NewSection(NSString* title) {
   [_boostPanel setFrameTopLeftPoint:NSMakePoint(NSMaxX(wf) - _boostPanel.frame.size.width - 24, NSMaxY(wf) - 60)];
   if (!self.selfTestProfiles) [_boostPanel orderFront:nil];
 }
+// Arc's Boost editor look: a compact rounded card (no title bar) with a header (name, Shuffle, menu, on/off),
+// the colour wheel and Intensity slider on top, then font tiles, then text size, case, Zap and Code tiles.
+// Colours come from NotArc's Arc palette and follow the window's light/dark appearance.
+static NSArray<NSArray<NSString*>*>* BoostFontChoices() {
+  // value ("" = the page's own font), short name
+  return @[ @[ @"", @"Page" ], @[ @"-apple-system", @"System" ], @[ @"Georgia", @"Georgia" ], @[ @"Helvetica Neue", @"Helvetica" ],
+            @[ @"Avenir Next", @"Avenir" ], @[ @"Menlo", @"Menlo" ], @[ @"Times New Roman", @"Times" ], @[ @"Futura", @"Futura" ],
+            @[ @"Gill Sans", @"Gill Sans" ], @[ @"Arial Rounded MT Bold", @"Rounded" ] ];
+}
+static NSArray<NSNumber*>* BoostZoomSteps() { return @[ @0.8, @0.9, @1.0, @1.1, @1.25, @1.5, @1.75 ]; }
 - (void)buildBoostPanel {
+  const CGFloat W = 280, M = 12, H = 462;
   _boostControls = [NSMutableDictionary dictionary];
-  _boostPanel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 300, 470)
+  _boostPanel = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, W, H)
                                            styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                                                     NSWindowStyleMaskUtilityWindow | NSWindowStyleMaskHUDWindow
+                                                     NSWindowStyleMaskFullSizeContentView
                                              backing:NSBackingStoreBuffered defer:YES];
+  _boostPanel.titlebarAppearsTransparent = YES;
+  _boostPanel.titleVisibility = NSWindowTitleHidden;
+  for (NSWindowButton wb : {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton})
+    [_boostPanel standardWindowButton:wb].hidden = YES;
+  _boostPanel.movableByWindowBackground = YES;
+  _boostPanel.backgroundColor = NSColor.clearColor;
+  _boostPanel.opaque = NO;
+  _boostPanel.hasShadow = YES;
   _boostPanel.floatingPanel = YES;
   _boostPanel.releasedWhenClosed = NO;
   _boostPanel.hidesOnDeactivate = YES;
-  NSView* v = _boostPanel.contentView;
-  __block CGFloat y = 438;
-  void (^label)(NSString*) = ^(NSString* t) {
-    NSTextField* l = [NSTextField labelWithString:t];
-    l.font = [NSFont systemFontOfSize:11 weight:NSFontWeightSemibold];
-    l.textColor = NSColor.secondaryLabelColor;
-    l.frame = NSMakeRect(14, y, 272, 16);
-    [v addSubview:l];
-    y -= 26;
+  NSVisualEffectView* card = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0, 0, W, H)];
+  card.material = NSVisualEffectMaterialPopover;
+  card.state = NSVisualEffectStateActive;
+  card.wantsLayer = YES;
+  card.layer.cornerRadius = 14;
+  card.layer.masksToBounds = YES;
+  card.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  [_boostPanel.contentView addSubview:card];
+  NSView* v = card;
+  CGFloat y = H - 10;
+
+  // Header: the site's name, Shuffle, a menu (original colours, delete), the on/off switch and close.
+  y -= 28;
+  NSView* header = [[NSView alloc] initWithFrame:NSMakeRect(M, y, W - 2 * M, 28)];
+  header.identifier = @"header";
+  [v addSubview:header];
+  NSTextField* title = [NSTextField labelWithString:@""];
+  title.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
+  title.textColor = [NSColor.labelColor colorWithAlphaComponent:0.85];
+  title.lineBreakMode = NSLineBreakByTruncatingTail;
+  title.frame = NSMakeRect(2, 5, header.bounds.size.width - 136, 18);
+  [header addSubview:title];
+  _boostControls[@"title"] = title;
+  NSButton* (^corner)(NSString*, NSString*, SEL) = ^NSButton*(NSString* sym, NSString* tip, SEL sel) {
+    NSButton* bt = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:sym accessibilityDescription:tip] target:self action:sel];
+    bt.bordered = NO;
+    bt.toolTip = tip;
+    bt.contentTintColor = NSColor.secondaryLabelColor;
+    return bt;
   };
-  NSButton* on = [NSButton checkboxWithTitle:@"Boost on" target:self action:@selector(boostControlChanged:)];
-  on.frame = NSMakeRect(14, y, 140, 20);
+  NSButton* shuffle = corner(@"shuffle", @"Shuffle", @selector(shuffleBoost:));
+  shuffle.frame = NSMakeRect(header.bounds.size.width - 130, 2, 26, 24);
+  [header addSubview:shuffle];
+  NSButton* more = corner(@"ellipsis.circle", @"More", @selector(showBoostMenu:));
+  more.frame = NSMakeRect(header.bounds.size.width - 102, 2, 26, 24);
+  [header addSubview:more];
+  NSSwitch* on = [[NSSwitch alloc] initWithFrame:NSMakeRect(header.bounds.size.width - 72, 3, 40, 22)];
+  on.controlSize = NSControlSizeSmall;
+  on.target = self;
+  on.action = @selector(boostControlChanged:);
+  on.toolTip = @"Turn this Boost on or off";
+  [header addSubview:on];
   _boostControls[@"enabled"] = on;
-  [v addSubview:on];
-  y -= 32;
-  label(@"COLOR");
-  NSButton* useColor = [NSButton checkboxWithTitle:@"" target:self action:@selector(boostControlChanged:)];
-  useColor.frame = NSMakeRect(14, y, 22, 20);
-  _boostControls[@"useColor"] = useColor;
-  [v addSubview:useColor];
-  NSSlider* hue = [NSSlider sliderWithValue:220 minValue:0 maxValue:359 target:self action:@selector(boostControlChanged:)];
-  hue.frame = NSMakeRect(40, y, 246, 20);
-  hue.continuous = YES;
-  _boostControls[@"hue"] = hue;
-  [v addSubview:hue];
-  y -= 26;
+  NSButton* close = corner(@"xmark.circle.fill", @"Close", @selector(closeBoostPanel:));
+  close.frame = NSMakeRect(header.bounds.size.width - 26, 2, 26, 24);
+  [header addSubview:close];
+
+  // Colour: the wheel (hue around, saturation toward the centre) and the Intensity slider.
+  y -= 8 + 216 + 4 + 22;
+  NSView* color = [[NSView alloc] initWithFrame:NSMakeRect(M, y, W - 2 * M, 216 + 4 + 22)];
+  color.identifier = @"color";
+  [v addSubview:color];
+  BoostColorWheel* wheel = [[BoostColorWheel alloc] initWithFrame:NSMakeRect((color.bounds.size.width - 216) / 2, 26, 216, 216)];
+  __weak MainWindowController* weakSelf = self;
+  wheel.onChange = ^(BoostColorWheel* w, BOOL final) { [weakSelf boostWheelChanged:w final:final]; };
+  [color addSubview:wheel];
+  _boostWheel = wheel;
+  NSButton* reset = corner(@"arrow.counterclockwise", @"Original colours", @selector(resetBoostColor:));
+  reset.frame = NSMakeRect(0, 0, 24, 22);
+  [color addSubview:reset];
+  NSImageView* dim = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"sun.min" accessibilityDescription:nil]];
+  dim.frame = NSMakeRect(30, 2, 18, 18);
+  dim.contentTintColor = NSColor.tertiaryLabelColor;
+  [color addSubview:dim];
   NSSlider* strength = [NSSlider sliderWithValue:0.6 minValue:0.1 maxValue:1 target:self action:@selector(boostControlChanged:)];
-  strength.frame = NSMakeRect(40, y, 246, 20);
+  strength.frame = NSMakeRect(52, 0, color.bounds.size.width - 52 - 26, 22);
   strength.continuous = YES;
+  strength.controlSize = NSControlSizeSmall;
+  strength.toolTip = @"Intensity";
+  [color addSubview:strength];
   _boostControls[@"strength"] = strength;
-  [v addSubview:strength];
-  y -= 34;
-  label(@"FONT");
-  NSPopUpButton* font = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(12, y, 276, 24) pullsDown:NO];
-  [font addItemsWithTitles:@[ @"Page Font", @"System", @"Georgia", @"Helvetica Neue", @"Avenir Next", @"Menlo",
-                              @"Times New Roman", @"Futura", @"Baskerville", @"Gill Sans" ]];
-  font.target = self;
-  font.action = @selector(boostControlChanged:);
-  _boostControls[@"font"] = font;
-  [v addSubview:font];
-  y -= 34;
-  NSSegmentedControl* zoom = [NSSegmentedControl segmentedControlWithLabels:@[ @"90%", @"100%", @"110%", @"125%", @"150%" ]
-                                                               trackingMode:NSSegmentSwitchTrackingSelectOne
-                                                                     target:self action:@selector(boostControlChanged:)];
-  zoom.frame = NSMakeRect(12, y, 276, 24);
-  _boostControls[@"zoom"] = zoom;
-  [v addSubview:zoom];
-  y -= 32;
-  NSSegmentedControl* tcase = [NSSegmentedControl segmentedControlWithLabels:@[ @"Aa", @"AA", @"aa" ]
-                                                                trackingMode:NSSegmentSwitchTrackingSelectOne
-                                                                      target:self action:@selector(boostControlChanged:)];
-  tcase.frame = NSMakeRect(12, y, 140, 24);
-  _boostControls[@"case"] = tcase;
+  NSImageView* bright = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"sun.max.fill" accessibilityDescription:nil]];
+  bright.frame = NSMakeRect(color.bounds.size.width - 20, 2, 18, 18);
+  bright.contentTintColor = NSColor.tertiaryLabelColor;
+  [color addSubview:bright];
+
+  // Fonts: two rows of sample tiles.
+  y -= 12 + 84;
+  NSView* fonts = [[NSView alloc] initWithFrame:NSMakeRect(M, y, W - 2 * M, 84)];
+  fonts.identifier = @"font";
+  [v addSubview:fonts];
+  NSArray* choices = BoostFontChoices();
+  CGFloat tw = (fonts.bounds.size.width - 4 * 4) / 5;
+  for (NSUInteger i = 0; i < choices.count; i++) {
+    NSString* family = choices[i][0];
+    BoostTile* t = [[BoostTile alloc] initWithFrame:NSMakeRect((i % 5) * (tw + 4), i < 5 ? 44 : 0, tw, 40)];
+    t.title = @"Aa";
+    NSFont* f = family.length && ![family hasPrefix:@"-"] ? [NSFont fontWithName:family size:16] : nil;
+    t.titleFont = f ?: [NSFont systemFontOfSize:16 weight:i == 0 ? NSFontWeightRegular : NSFontWeightMedium];
+    t.subtitle = choices[i][1];
+    t.value = family;
+    t.toolTip = i == 0 ? @"The page's own font" : choices[i][0];
+    t.target = self;
+    t.action = @selector(boostFontPicked:);
+    [fonts addSubview:t];
+    _boostControls[[@"font:" stringByAppendingString:choices[i][1]]] = t;
+  }
+
+  // Text size, case, Zap, Code.
+  y -= 8 + 58;
+  CGFloat qw = (W - 2 * M - 3 * 4) / 4;
+  BoostTile* size = [[BoostTile alloc] initWithFrame:NSMakeRect(M, y, qw, 58)];
+  size.identifier = @"size";
+  size.subtitle = @"100%";
+  size.toolTip = @"Change text size";
+  [v addSubview:size];
+  _boostControls[@"zoom"] = size;
+  // A small A and a big A step the text size down and up; the percentage shows underneath.
+  NSButton* smaller = corner(@"textformat.size.smaller", @"Smaller text", @selector(boostZoomStep:));
+  smaller.tag = -1;
+  smaller.frame = NSMakeRect(qw / 2 - 26, 22, 24, 26);
+  [size addSubview:smaller];
+  NSButton* bigger = corner(@"textformat.size.larger", @"Bigger text", @selector(boostZoomStep:));
+  bigger.tag = 1;
+  bigger.frame = NSMakeRect(qw / 2 + 2, 22, 24, 26);
+  [size addSubview:bigger];
+  for (NSButton* bt in @[ smaller, bigger ]) {
+    bt.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:15 weight:NSFontWeightMedium];
+    bt.contentTintColor = [NSColor.labelColor colorWithAlphaComponent:0.8];
+  }
+  BoostTile* tcase = [[BoostTile alloc] initWithFrame:NSMakeRect(M + (qw + 4), y, qw, 58)];
+  tcase.identifier = @"case";
+  tcase.titleFont = [NSFont systemFontOfSize:16 weight:NSFontWeightMedium];
+  tcase.toolTip = @"Change text case";
+  tcase.target = self;
+  tcase.action = @selector(boostCaseCycled:);
   [v addSubview:tcase];
-  y -= 38;
-  label(@"ZAPS");
-  NSButton* zap = [NSButton buttonWithTitle:@"Zap Element" target:self action:@selector(zapElements:)];
-  zap.frame = NSMakeRect(10, y - 2, 130, 28);
+  _boostControls[@"case"] = tcase;
+  BoostTile* zap = [[BoostTile alloc] initWithFrame:NSMakeRect(M + 2 * (qw + 4), y, qw, 58)];
+  zap.identifier = @"zap";
+  zap.symbolName = @"bolt.fill";
+  zap.toolTip = @"Zap: click an element on the page to hide it (Option-click hides all like it)";
+  zap.target = self;
+  zap.action = @selector(boostZapTile:);
   [v addSubview:zap];
-  NSButton* clear = [NSButton buttonWithTitle:@"Clear Zaps" target:self action:@selector(clearZaps:)];
-  clear.frame = NSMakeRect(150, y - 2, 130, 28);
-  _boostControls[@"clearZaps"] = clear;
-  [v addSubview:clear];
-  y -= 40;
-  label(@"CODE");
-  NSButton* code = [NSButton buttonWithTitle:@"Edit CSS…" target:self action:@selector(editBoostCSS:)];
-  code.frame = NSMakeRect(10, y - 2, 130, 28);
+  _boostControls[@"zap"] = zap;
+  BoostTile* code = [[BoostTile alloc] initWithFrame:NSMakeRect(M + 3 * (qw + 4), y, qw, 58)];
+  code.identifier = @"code";
+  code.symbolName = @"chevron.left.forwardslash.chevron.right";
+  code.toolTip = @"Custom CSS and JavaScript for this site";
+  code.target = self;
+  code.action = @selector(boostCodeTile:);
   [v addSubview:code];
-  NSButton* js = [NSButton buttonWithTitle:@"Edit JavaScript…" target:self action:@selector(editBoostJS:)];
-  js.frame = NSMakeRect(150, y - 2, 130, 28);
-  [v addSubview:js];
-  y -= 44;
-  NSButton* shuffle = [NSButton buttonWithTitle:@"Shuffle" target:self action:@selector(shuffleBoost:)];
-  shuffle.frame = NSMakeRect(150, 12, 130, 28);
-  [v addSubview:shuffle];
-  NSButton* del = [NSButton buttonWithTitle:@"Delete Boost" target:self action:@selector(deleteCurrentBoost:)];
-  del.frame = NSMakeRect(10, 12, 130, 28);
-  del.contentTintColor = NSColor.systemRedColor;
-  [v addSubview:del];
+  _boostControls[@"code"] = code;
 }
 - (void)refreshBoostPanel {
   if (!_boostPanel || !_boostEditing) return;
   Boost* b = _boostEditing;
   _boostPanel.title = [NSString stringWithFormat:@"Boost: %@", b.host];
-  ((NSButton*)_boostControls[@"enabled"]).state = b.enabled;
-  ((NSButton*)_boostControls[@"useColor"]).state = b.hue >= 0;
-  if (b.hue >= 0) ((NSSlider*)_boostControls[@"hue"]).doubleValue = b.hue;
+  ((NSTextField*)_boostControls[@"title"]).stringValue = b.host ?: @"";
+  ((NSSwitch*)_boostControls[@"enabled"]).state = b.enabled ? NSControlStateValueOn : NSControlStateValueOff;
+  [_boostWheel setHue:MAX(0, b.hue) saturation:b.saturation];
+  _boostWheel.hasColor = b.hue >= 0;
+  _boostWheel.intensity = b.colorStrength;
   ((NSSlider*)_boostControls[@"strength"]).doubleValue = b.colorStrength;
-  NSPopUpButton* font = (NSPopUpButton*)_boostControls[@"font"];
-  if (b.font.length && [font itemWithTitle:b.font]) [font selectItemWithTitle:b.font]; else [font selectItemAtIndex:0];
-  NSArray* zooms = @[ @0.9, @1.0, @1.1, @1.25, @1.5 ];
-  NSUInteger zi = 1;
-  for (NSUInteger i = 0; i < zooms.count; i++) if (fabs([zooms[i] doubleValue] - b.textZoom) < 0.01) zi = i;
-  ((NSSegmentedControl*)_boostControls[@"zoom"]).selectedSegment = (NSInteger)zi;
-  ((NSSegmentedControl*)_boostControls[@"case"]).selectedSegment =
-      [b.textTransform isEqualToString:@"uppercase"] ? 1 : [b.textTransform isEqualToString:@"lowercase"] ? 2 : 0;
-  ((NSButton*)_boostControls[@"clearZaps"]).title = [NSString stringWithFormat:@"Clear Zaps (%lu)", (unsigned long)b.zaps.count];
+  for (NSArray* c in BoostFontChoices()) {
+    BoostTile* t = (BoostTile*)_boostControls[[@"font:" stringByAppendingString:c[1]]];
+    t.selected = [c[0] length] ? [b.font isEqualToString:c[0]] : b.font.length == 0;
+  }
+  BoostTile* size = (BoostTile*)_boostControls[@"zoom"];
+  size.subtitle = [NSString stringWithFormat:@"%.0f%%", (b.textZoom > 0 ? b.textZoom : 1) * 100];
+  BoostTile* tcase = (BoostTile*)_boostControls[@"case"];
+  NSString* tt = b.textTransform;
+  tcase.title = [tt isEqualToString:@"uppercase"] ? @"AA" : [tt isEqualToString:@"lowercase"] ? @"aa" : [tt isEqualToString:@"capitalize"] ? @"Aa Bb" : @"Aa";
+  tcase.subtitle = [tt isEqualToString:@"uppercase"] ? @"Upper" : [tt isEqualToString:@"lowercase"] ? @"Lower" : [tt isEqualToString:@"capitalize"] ? @"Title" : @"Case";
+  tcase.selected = tt.length > 0;
+  BoostTile* zap = (BoostTile*)_boostControls[@"zap"];
+  zap.subtitle = b.zaps.count ? [NSString stringWithFormat:@"%lu Zapped", (unsigned long)b.zaps.count] : @"Zap";
+  BoostTile* code = (BoostTile*)_boostControls[@"code"];
+  code.subtitle = b.css.length && b.js.length ? @"CSS + JS" : b.css.length ? @"CSS" : b.js.length ? @"JS" : @"Code";
+  code.selected = b.css.length || b.js.length;
 }
 - (void)boostControlChanged:(id)sender {
   Boost* b = _boostEditing;
   if (!b) return;
-  b.enabled = ((NSButton*)_boostControls[@"enabled"]).state == NSControlStateValueOn;
-  if (sender == _boostControls[@"hue"]) ((NSButton*)_boostControls[@"useColor"]).state = NSControlStateValueOn;
-  BOOL useColor = ((NSButton*)_boostControls[@"useColor"]).state == NSControlStateValueOn;
-  b.hue = useColor ? ((NSSlider*)_boostControls[@"hue"]).doubleValue : -1;
+  b.enabled = ((NSSwitch*)_boostControls[@"enabled"]).state == NSControlStateValueOn;
   b.colorStrength = ((NSSlider*)_boostControls[@"strength"]).doubleValue;
-  NSPopUpButton* font = (NSPopUpButton*)_boostControls[@"font"];
-  b.font = font.indexOfSelectedItem <= 0 ? nil : ([font.titleOfSelectedItem isEqualToString:@"System"] ? @"-apple-system" : font.titleOfSelectedItem);
-  NSArray* zooms = @[ @0.9, @1.0, @1.1, @1.25, @1.5 ];
-  NSInteger zi = ((NSSegmentedControl*)_boostControls[@"zoom"]).selectedSegment;
-  b.textZoom = zi >= 0 ? [zooms[(NSUInteger)zi] doubleValue] : 1;
-  NSInteger ci = ((NSSegmentedControl*)_boostControls[@"case"]).selectedSegment;
-  b.textTransform = ci == 1 ? @"uppercase" : ci == 2 ? @"lowercase" : nil;
+  _boostWheel.intensity = b.colorStrength;
+  // While the slider is being dragged, only preview; save when it's let go.
+  if (sender == _boostControls[@"strength"] && NSApp.currentEvent.type == NSEventTypeLeftMouseDragged) [self applyBoostsEverywhere];
+  else [self boostChanged];
+}
+// Dragging the wheel previews live on the page; letting go (or a programmatic pick) saves.
+- (void)boostWheelChanged:(BoostColorWheel*)wheel final:(BOOL)final {
+  Boost* b = _boostEditing;
+  if (!b) return;
+  b.hue = wheel.hue;
+  b.saturation = wheel.saturation;
+  b.enabled = YES;
+  ((NSSwitch*)_boostControls[@"enabled"]).state = NSControlStateValueOn;
+  if (final) [self boostChanged]; else [self applyBoostsEverywhere];
+}
+- (IBAction)resetBoostColor:(id)sender {
+  if (!_boostEditing) return;
+  _boostEditing.hue = -1;
   [self boostChanged];
+  [self refreshBoostPanel];
+}
+- (void)boostFontPicked:(BoostTile*)tile {
+  if (!_boostEditing) return;
+  _boostEditing.font = tile.value.length ? tile.value : nil;
+  _boostEditing.enabled = YES;
+  [self boostChanged];
+  [self refreshBoostPanel];
+}
+- (void)boostZoomStep:(NSButton*)sender {
+  Boost* b = _boostEditing;
+  if (!b) return;
+  NSArray* steps = BoostZoomSteps();
+  NSUInteger i = 0;
+  double best = 1e9;
+  for (NSUInteger k = 0; k < steps.count; k++)
+    if (fabs([steps[k] doubleValue] - b.textZoom) < best) best = fabs([steps[k] doubleValue] - b.textZoom), i = k;
+  NSInteger n = MAX(0, MIN((NSInteger)steps.count - 1, (NSInteger)i + sender.tag));
+  b.textZoom = [steps[(NSUInteger)n] doubleValue];
+  [self boostChanged];
+  [self refreshBoostPanel];
+}
+- (void)boostCaseCycled:(id)sender {
+  Boost* b = _boostEditing;
+  if (!b) return;
+  NSArray* order = @[ @"", @"uppercase", @"lowercase", @"capitalize" ];
+  NSUInteger i = [order indexOfObject:b.textTransform ?: @""];
+  NSString* next = order[(i == NSNotFound ? 0 : i + 1) % order.count];
+  b.textTransform = next.length ? next : nil;
+  [self boostChanged];
+  [self refreshBoostPanel];
+}
+- (void)popUpBoostMenu:(NSMenu*)menu from:(NSView*)view {
+  if (self.selfTestProfiles) return;  // never block a test run on a menu
+  [menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, -4) inView:view];
+}
+- (void)boostZapTile:(BoostTile*)tile {
+  if (!_boostEditing.zaps.count) { [self zapElements:tile]; return; }
+  NSMenu* m = [NSMenu new];
+  [m addItemWithTitle:@"Zap an Element" action:@selector(zapElements:) keyEquivalent:@""].target = self;
+  [m addItemWithTitle:[NSString stringWithFormat:@"Clear Zaps (%lu)", (unsigned long)_boostEditing.zaps.count]
+               action:@selector(clearZaps:) keyEquivalent:@""].target = self;
+  [self popUpBoostMenu:m from:tile];
+}
+- (void)boostCodeTile:(BoostTile*)tile {
+  NSMenu* m = [NSMenu new];
+  [m addItemWithTitle:@"Edit CSS…" action:@selector(editBoostCSS:) keyEquivalent:@""].target = self;
+  [m addItemWithTitle:@"Edit JavaScript…" action:@selector(editBoostJS:) keyEquivalent:@""].target = self;
+  [self popUpBoostMenu:m from:tile];
+}
+- (void)showBoostMenu:(NSButton*)sender {
+  NSMenu* m = [NSMenu new];
+  [m addItemWithTitle:@"Shuffle" action:@selector(shuffleBoost:) keyEquivalent:@""].target = self;
+  [m addItemWithTitle:@"Original Colours" action:@selector(resetBoostColor:) keyEquivalent:@""].target = self;
+  [m addItem:NSMenuItem.separatorItem];
+  [m addItemWithTitle:@"Delete Boost" action:@selector(deleteCurrentBoost:) keyEquivalent:@""].target = self;
+  [self popUpBoostMenu:m from:sender];
+}
+- (IBAction)closeBoostPanel:(id)sender { [_boostPanel orderOut:nil]; }
+// Tests.
+- (BoostColorWheel*)boostColorWheel { return _boostWheel; }
+- (Boost*)boostBeingEdited { return _boostEditing; }
+- (void)setBoostIntensity:(double)value {
+  ((NSSlider*)_boostControls[@"strength"]).doubleValue = value;
+  [self boostControlChanged:_boostControls[@"strength"]];
+}
+- (BOOL)pickBoostFontTile:(NSString*)name {
+  BoostTile* t = (BoostTile*)_boostControls[[@"font:" stringByAppendingString:name]];
+  if (![t isKindOfClass:BoostTile.class]) return NO;
+  [self boostFontPicked:t];
+  return YES;
+}
+// The editor's sections, top to bottom then left to right (identifiers: header, color, font, size, case, zap, code).
+- (NSArray<NSString*>*)boostPanelSections {
+  NSMutableArray<NSView*>* found = [NSMutableArray array];
+  NSMutableArray<NSView*>* stack = [NSMutableArray arrayWithObject:_boostPanel.contentView ?: [NSView new]];
+  while (stack.count) {
+    NSView* x = stack.lastObject;
+    [stack removeLastObject];
+    if (x.identifier.length && ![x.identifier hasPrefix:@"_"] && x != _boostPanel.contentView) [found addObject:x];
+    [stack addObjectsFromArray:x.subviews];
+  }
+  [found sortUsingComparator:^NSComparisonResult(NSView* p, NSView* q) {
+    NSRect a = [p convertRect:p.bounds toView:nil], c = [q convertRect:q.bounds toView:nil];
+    if (fabs(NSMaxY(a) - NSMaxY(c)) > 1) return NSMaxY(a) > NSMaxY(c) ? NSOrderedAscending : NSOrderedDescending;
+    return NSMinX(a) < NSMinX(c) ? NSOrderedAscending : NSOrderedDescending;
+  }];
+  NSMutableArray* ids = [NSMutableArray array];
+  for (NSView* x in found) [ids addObject:x.identifier];
+  return ids;
 }
 - (IBAction)clearZaps:(id)sender {
   [_boostEditing.zaps removeAllObjects];
@@ -5718,10 +6634,17 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (NSRect)sidebarAddressFrame { return [_addressPill convertRect:_addressPill.bounds toView:nil]; }
 
 // Arc shows just the site (host without "www.") in the sidebar pill; the full address is in the command bar.
+// Developer Mode (#68): the full address with its port, and a Developer Tools button in the pill.
 - (void)updateSidebarAddress {
   NSString* url = _shown ? ([self itemCurrentURL:_shown] ?: @"") : @"";
-  NSString* host = [NSURL URLWithString:url].host ?: url;
-  if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
+  NSString* host = SidebarAddressTextForURL(url);
+  BOOL dev = _shown && !_shown.noteID && !_shown.easelID && DeveloperModeOnForURL(url);
+  if (_devToolsButton.hidden == dev) {
+    _devToolsButton.hidden = !dev;
+    NSRect f = _addressPillText.frame;
+    f.size.width = _addressPill.bounds.size.width - 11 - 86 - (dev ? 26 : 0);
+    _addressPillText.frame = f;
+  }
   if (_shown.noteID) host = @"Note";
   if (_shown.easelID) host = @"Easel";
   _addressPillText.stringValue = host ?: @"";
@@ -5792,12 +6715,304 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 }
 
 - (IBAction)switchToRecentTab:(id)sender {
+  // From the keyboard with Ctrl (or the user's own modifier) still held: open the switcher, as in Arc. Releasing
+  // the modifier switches; a quick press-and-release ends up on the same tab as before, without the panel.
+  NSEvent* e = NSApp.currentEvent;
+  NSEventModifierFlags held = e.type == NSEventTypeKeyDown
+                                  ? e.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagCommand | NSEventModifierFlagOption)
+                                  : 0;
+  if (sender && held && (NSEvent.modifierFlags & held) == held) {
+    _switcherKey = e.keyCode;
+    [self openTabSwitcherHolding:held];
+    return;
+  }
   ArcItem* best = nil;
   for (ArcItem* t in _space.allTabs) {
     if (t == _shown || !t.lastActiveAt) continue;
     if (!best || [t.lastActiveAt compare:best.lastActiveAt] == NSOrderedDescending) best = t;
   }
   if (best) [self showItem:best];
+}
+
+#pragma mark Tab thumbnails (#65)
+
+// Items holding a picture, oldest copy first (weak: closed tabs drop out). Main thread only. Keeps memory bounded
+// however many tabs are open: past kTabThumbnailMax pictures, the oldest are thrown away.
+static void RememberThumbnailOf(ArcItem* item) {
+  static NSPointerArray* order = [NSPointerArray weakObjectsPointerArray];
+  for (NSUInteger i = order.count; i-- > 0;)
+    if ([order pointerAtIndex:i] == (__bridge void*)item || ![order pointerAtIndex:i]) [order removePointerAtIndex:i];
+  [order addPointer:(__bridge void*)item];
+  while (order.count > kTabThumbnailMax) {
+    ArcItem* oldest = (__bridge ArcItem*)[order pointerAtIndex:0];
+    oldest.thumbnail = nil;
+    [order removePointerAtIndex:0];
+  }
+}
+
+// The picture is copied from NotArc's own window by ScreenCaptureKit, asynchronously (tab_thumbnails.mm): the main
+// thread only starts the copy. Copies happen 1 s after a tab comes on screen or finishes loading (each switch or load
+// restarts the wait, so flipping through tabs copies nothing), when the pointer moves over the sidebar (a hover card
+// may follow) and when the Ctrl+Tab switcher opens, at most once every 2 s for the same tab.
+- (void)scheduleThumbnailOfShown {
+  if (!TabThumbnailsAvailable()) return;
+  [_thumbTimer invalidate];
+  __weak MainWindowController* weakSelf = self;
+  _thumbTimer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:NO block:^(NSTimer*) {
+    MainWindowController* me = weakSelf;
+    if (!me) return;
+    me->_thumbTimer = nil;
+    [me takeThumbnailOf:me->_shown];
+  }];
+}
+
+- (void)thumbnailAfterLoadOfBrowser:(int)browserId {
+  if (_shown && _shown.browserId == browserId) [self scheduleThumbnailOfShown];
+}
+
+- (void)refreshThumbnailOfShownIfOlderThan:(NSTimeInterval)age {
+  if (!_shown || _thumbTimer) return;  // a copy is already due
+  if (_shown.thumbnailTaken && -_shown.thumbnailTaken.timeIntervalSinceNow < age) return;
+  [self takeThumbnailOf:_shown];
+}
+
+- (void)takeThumbnailOf:(ArcItem*)item {
+  if (!TabThumbnailsAvailable() || !item || item != _shown) return;
+  if (_thumbPendingSince && -_thumbPendingSince.timeIntervalSinceNow < 5) return;  // one copy at a time
+  if (!item.browserId || item.noteID || item.easelID || item.crashed) return;
+  NSView* web = [self webViewForItem:item];
+  NSWindow* win = web.window;
+  if (!win || win != self.window || web.isHiddenOrHasHiddenAncestor || !win.isVisible || win.isMiniaturized || NSApp.isHidden ||
+      !(win.occlusionState & NSWindowOcclusionStateVisible))
+    return;
+  if (web.bounds.size.width < 50 || web.bounds.size.height < 50) return;
+  // The top of the page, 4:3, 480 pixels wide (sharp enough for a 280 pt card; about 20-40 KB as JPEG).
+  NSRect inWin = [web convertRect:web.bounds toView:nil];
+  CGFloat h = MIN(inWin.size.height, inWin.size.width * 0.75);
+  NSRect top = NSMakeRect(inWin.origin.x, NSMaxY(inWin) - h, inWin.size.width, h);
+  NSUInteger gen = _showGeneration;
+  _thumbPendingSince = [NSDate date];
+  item.thumbnailTaken = _thumbPendingSince;
+  __weak MainWindowController* weakSelf = self;
+  __weak ArcItem* weakItem = item;
+  TabThumbnailCapture(win, top, 480, ^(NSImage* image) {
+    MainWindowController* me = weakSelf;
+    if (!me) return;
+    me->_thumbPendingSince = nil;
+    ArcItem* it = weakItem;
+    // A tab switch while the copy was being made may have put another page in the picture: drop it.
+    if (!image || !it || me->_showGeneration != gen) return;
+    it.thumbnail = image;
+    RememberThumbnailOf(it);
+    [me updateTabSwitcherTileFor:it];
+  });
+}
+
+#pragma mark Recent-tab switcher (Ctrl+Tab)
+
+static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap = 10, kSwitcherPad = 14;
+
+// Tabs of this Space, the shown one first, then most recently used first.
+- (NSArray<ArcItem*>*)recentTabsForSwitcherMax:(NSUInteger)max {
+  ArcItem* shown = _shown;
+  NSMutableArray<ArcItem*>* tabs = [NSMutableArray array];
+  for (ArcItem* t in _space.allTabs)
+    if (t.url.length && (t == shown || t.lastActiveAt)) [tabs addObject:t];
+  [tabs sortUsingComparator:^NSComparisonResult(ArcItem* a, ArcItem* b) {
+    if (a == shown) return NSOrderedAscending;
+    if (b == shown) return NSOrderedDescending;
+    return [b.lastActiveAt compare:a.lastActiveAt];
+  }];
+  if (tabs.count > max) [tabs removeObjectsInRange:NSMakeRange(max, tabs.count - max)];
+  return tabs;
+}
+
+- (void)fillSwitcherTile:(NSView*)tile item:(ArcItem*)item {
+  NSImageView* iv = (NSImageView*)[tile viewWithTag:1];
+  if (item.thumbnail) {
+    iv.image = item.thumbnail;
+    iv.imageScaling = NSImageScaleProportionallyUpOrDown;
+    iv.identifier = @"thumbnail";
+  } else {  // no picture yet (never shown since launch): the site's icon
+    iv.image = [self iconImageForItem:item];
+    iv.imageScaling = NSImageScaleNone;
+    iv.identifier = @"icon";
+  }
+}
+
+- (void)openTabSwitcherHolding:(NSEventModifierFlags)mods {
+  if (_switcher) {
+    [self stepTabSwitcher:1];
+    return;
+  }
+  CGFloat avail = _content.bounds.size.width - 2 * kSwitcherPad;
+  NSUInteger fit = (NSUInteger)MAX(2.0, floor((avail + kSwitcherGap) / (kSwitcherTileW + kSwitcherGap)));
+  NSArray<ArcItem*>* items = [self recentTabsForSwitcherMax:MIN((NSUInteger)8, fit)];
+  if (items.count < 2) return;  // nothing to switch to
+  [self hideHoverCard];
+  [self refreshThumbnailOfShownIfOlderThan:1];  // the panel is its own window, so it never shows up in the copy
+  _switcherItems = items;
+  _switcherMods = mods;
+  CGFloat w = items.count * kSwitcherTileW + (items.count - 1) * kSwitcherGap + 2 * kSwitcherPad;
+  CGFloat h = kSwitcherThumbH + 30 + 2 * kSwitcherPad;
+  _switcher = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, w, h)
+                                         styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                                           backing:NSBackingStoreBuffered
+                                             defer:NO];
+  _switcher.backgroundColor = NSColor.clearColor;
+  _switcher.opaque = NO;
+  _switcher.hasShadow = YES;
+  if (self.selfTestProfiles) {  // hidden test runs: never on screen, never clickable
+    _switcher.alphaValue = 0.01;
+    _switcher.ignoresMouseEvents = YES;
+  }
+  NSVisualEffectView* card = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0, 0, w, h)];
+  card.material = NSVisualEffectMaterialHUDWindow;
+  card.state = NSVisualEffectStateActive;
+  card.wantsLayer = YES;
+  card.layer.cornerRadius = 14;
+  card.layer.masksToBounds = YES;
+  _switcher.contentView = card;
+  _switcherTiles = [NSMutableArray array];
+  for (NSUInteger i = 0; i < items.count; ++i) {
+    NSView* tile = [[NSView alloc] initWithFrame:NSMakeRect(kSwitcherPad + i * (kSwitcherTileW + kSwitcherGap), kSwitcherPad - 4,
+                                                            kSwitcherTileW, kSwitcherThumbH + 34)];
+    tile.wantsLayer = YES;
+    tile.layer.cornerRadius = 10;
+    NSImageView* iv = [[NSImageView alloc] initWithFrame:NSMakeRect(6, 30, kSwitcherTileW - 12, kSwitcherThumbH - 2)];
+    iv.tag = 1;
+    iv.wantsLayer = YES;
+    iv.layer.cornerRadius = 6;
+    iv.layer.masksToBounds = YES;
+    iv.layer.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.06].CGColor;
+    [tile addSubview:iv];
+    NSTextField* title = [NSTextField labelWithString:items[i].displayTitle ?: items[i].url];
+    title.frame = NSMakeRect(6, 6, kSwitcherTileW - 12, 18);
+    title.font = [NSFont systemFontOfSize:11];
+    title.lineBreakMode = NSLineBreakByTruncatingTail;
+    title.alignment = NSTextAlignmentCenter;
+    [tile addSubview:title];
+    [self fillSwitcherTile:tile item:items[i]];
+    NSClickGestureRecognizer* click = [[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(switcherTileClicked:)];
+    [tile addGestureRecognizer:click];
+    [card addSubview:tile];
+    [_switcherTiles addObject:tile];
+  }
+  _switcherIndex = 1;
+  [self updateSwitcherSelection];
+  NSRect c = [self.window convertRectToScreen:[_content convertRect:_content.bounds toView:nil]];
+  [_switcher setFrameOrigin:NSMakePoint(round(NSMidX(c) - w / 2), round(NSMidY(c) - h / 2))];
+  if (!mods) {
+    [self revealTabSwitcher];
+    return;
+  }
+  __weak MainWindowController* weakSelf = self;
+  _switcherMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskKeyDown | NSEventMaskFlagsChanged | NSEventMaskLeftMouseDown
+                                                            handler:^NSEvent*(NSEvent* ev) {
+    MainWindowController* me = weakSelf;
+    if (!me || !me->_switcher) return ev;
+    if (ev.type == NSEventTypeFlagsChanged) {
+      if ((ev.modifierFlags & me->_switcherMods) != me->_switcherMods) [me commitTabSwitcher];  // let go: switch
+      return ev;
+    }
+    if (ev.type == NSEventTypeLeftMouseDown) {
+      if (ev.window != me->_switcher) [me cancelTabSwitcher];
+      return ev;
+    }
+    BOOL back = (ev.modifierFlags & NSEventModifierFlagShift) != 0;
+    switch (ev.keyCode) {
+      case 53: [me cancelTabSwitcher]; break;                               // Esc
+      case 36: case 76: [me commitTabSwitcher]; break;                      // Return, Enter
+      case 123: case 126: [me stepTabSwitcher:-1]; break;                   // Left, Up
+      case 124: case 125: [me stepTabSwitcher:1]; break;                    // Right, Down
+      default:
+        if (ev.keyCode == 48 || ev.keyCode == me->_switcherKey) [me stepTabSwitcher:back ? -1 : 1];  // Tab again
+        break;
+    }
+    return nil;  // keys never reach the page while the switcher is up
+  }];
+  _switcherResignObserver = [NSNotificationCenter.defaultCenter addObserverForName:NSApplicationDidResignActiveNotification
+                                                                            object:nil
+                                                                             queue:NSOperationQueue.mainQueue
+                                                                        usingBlock:^(NSNotification*) { [weakSelf cancelTabSwitcher]; }];
+  // A quick press-and-release switches without the panel ever flashing up.
+  _switcherRevealTimer = [NSTimer scheduledTimerWithTimeInterval:0.12 repeats:NO block:^(NSTimer*) {
+    MainWindowController* me = weakSelf;
+    if (!me || !me->_switcher) return;
+    me->_switcherRevealTimer = nil;
+    if ((NSEvent.modifierFlags & me->_switcherMods) != me->_switcherMods) [me commitTabSwitcher];  // release we missed
+    else [me revealTabSwitcher];
+  }];
+}
+
+- (void)revealTabSwitcher {
+  if (!_switcher || _switcher.parentWindow) return;
+  [self.window addChildWindow:_switcher ordered:NSWindowAbove];
+  [_switcher orderFront:nil];
+}
+
+- (void)updateSwitcherSelection {
+  for (NSUInteger i = 0; i < _switcherTiles.count; ++i) {
+    CALayer* l = _switcherTiles[i].layer;
+    BOOL on = (NSInteger)i == _switcherIndex;
+    l.backgroundColor = on ? [NSColor.controlAccentColor colorWithAlphaComponent:0.25].CGColor : NSColor.clearColor.CGColor;
+    l.borderWidth = on ? 2 : 0;
+    l.borderColor = NSColor.controlAccentColor.CGColor;
+  }
+}
+
+- (void)updateTabSwitcherTileFor:(ArcItem*)item {
+  NSUInteger i = [_switcherItems indexOfObjectIdenticalTo:item];
+  if (_switcher && i != NSNotFound) [self fillSwitcherTile:_switcherTiles[i] item:item];
+}
+
+- (void)stepTabSwitcher:(NSInteger)delta {
+  if (!_switcher) return;
+  NSInteger n = (NSInteger)_switcherItems.count;
+  _switcherIndex = ((_switcherIndex + delta) % n + n) % n;
+  [self updateSwitcherSelection];
+}
+
+- (void)switcherTileClicked:(NSClickGestureRecognizer*)g {
+  NSUInteger i = [_switcherTiles indexOfObjectIdenticalTo:g.view];
+  if (i == NSNotFound) return;
+  _switcherIndex = (NSInteger)i;
+  [self commitTabSwitcher];
+}
+
+- (void)closeTabSwitcher {
+  if (_switcherMonitor) [NSEvent removeMonitor:_switcherMonitor];
+  _switcherMonitor = nil;
+  if (_switcherResignObserver) [NSNotificationCenter.defaultCenter removeObserver:_switcherResignObserver];
+  _switcherResignObserver = nil;
+  [_switcherRevealTimer invalidate];
+  _switcherRevealTimer = nil;
+  if (_switcher.parentWindow) [self.window removeChildWindow:_switcher];
+  [_switcher orderOut:nil];
+  _switcher = nil;
+  _switcherItems = nil;
+  _switcherTiles = nil;
+}
+
+- (void)commitTabSwitcher {
+  if (!_switcher) return;
+  ArcItem* pick = _switcherIndex >= 0 && _switcherIndex < (NSInteger)_switcherItems.count ? _switcherItems[_switcherIndex] : nil;
+  [self closeTabSwitcher];
+  if (pick && pick != _shown && [_space.allTabs containsObject:pick]) [self showItem:pick];
+}
+
+- (void)cancelTabSwitcher { [self closeTabSwitcher]; }
+
+- (BOOL)tabSwitcherShown { return _switcher != nil && _switcher.isVisible; }
+- (NSArray<ArcItem*>*)tabSwitcherItems { return _switcherItems; }
+- (ArcItem*)tabSwitcherSelection {
+  return _switcher && _switcherIndex < (NSInteger)_switcherItems.count ? _switcherItems[_switcherIndex] : nil;
+}
+- (BOOL)tabSwitcherShowsThumbnailFor:(ArcItem*)item {
+  NSUInteger i = [_switcherItems indexOfObjectIdenticalTo:item];
+  if (!_switcher || i == NSNotFound) return NO;
+  NSImageView* iv = (NSImageView*)[_switcherTiles[i] viewWithTag:1];
+  return [iv.identifier isEqualToString:@"thumbnail"] && iv.image == item.thumbnail;
 }
 
 - (IBAction)pasteAndGo:(id)sender {
@@ -6204,7 +7419,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   if (isTab || item.isFolder) [m addItem:[self menuItem:@"Rename..." action:@selector(menuRename:) item:item]];
   if (isTab && item.renamed && item.liveTitle.length)
     [m addItem:[self menuItem:@"Use Page Title" action:@selector(menuUsePageTitle:) item:item]];
-  else if (isTab && ![TidyTabTitle(item.displayTitle, [NSURL URLWithString:item.url ?: @""].host) isEqualToString:item.displayTitle])
+  else if (isTab && (MaxTidyTitlesUseModel() || ![[self ruleTidyTitleOfItem:item] isEqualToString:item.displayTitle]))
     [m addItem:[self menuItem:@"Tidy Title" action:@selector(menuTidyTitle:) item:item]];
   if (isTab && section == _space.favorites) {
     [m addItem:[self menuItem:@"Remove from Favorites" action:@selector(menuRemoveFromFavorites:) item:item]];
@@ -6271,7 +7486,8 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (void)menuOpenInSplit:(NSMenuItem*)sender {
   ArcItem* item = sender.representedObject;
   if (!_shown || item == _shown) return;
-  [self openInSplit:item.url horizontal:NO before:NO];
+  if (item.noteID) [self placeInSplit:item horizontal:NO before:NO];  // a note is one document: it moves
+  else [self openInSplit:item.url horizontal:NO before:NO];
 }
 - (void)menuOpenLittle:(NSMenuItem*)sender { [self openLittleWindow:((ArcItem*)sender.representedObject).url]; }
 - (void)menuCopyURL:(NSMenuItem*)sender {
@@ -6723,6 +7939,9 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     if (out.count >= kMaxSuggestions) break;
     [out addObject:d];
   }
+  // Max (#58): "Ask ChatGPT" for typed questions, last so it never pushes tabs or history down.
+  if (!urlOnly)
+    if (NSDictionary* ask = [self maxChatGPTSuggestionFor:text]) [out addObject:ask];
   return out;
 }
 
@@ -6751,6 +7970,8 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     [self showItem:s[@"item"]];
   } else if ([kind isEqualToString:@"space"]) {
     [self switchToSpace:s[@"space"]];
+  } else if ([kind isEqualToString:@"chatgpt"]) {
+    [self openInNewTab:s[@"url"]];  // always a new tab, in this Space's own chatgpt.com sign-in
   } else if ([kind isEqualToString:@"action"]) {
     NSMenuItem* mi = s[@"item"];
     [NSApp sendAction:mi.action to:mi.target from:mi];
@@ -7086,6 +8307,7 @@ static BOOL Contains(ArcItem* root, ArcItem* target) {
 
 static const NSUInteger kLiveFolderMaxItems = 25;
 static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
+static NSString* const kSpaceStartingError = @"The Space is still starting";
 
 - (ArcItem*)createLiveFolderKind:(NSString*)kind source:(NSString*)source title:(NSString*)title {
   if (!_space || !kind.length || !source.length) return nil;
@@ -7097,27 +8319,89 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   [self refreshLiveFolder:f done:nil];
   return f;
 }
-- (IBAction)newLiveFolder:(id)sender {
+- (NSString*)askLiveFolderSource:(NSString*)message info:(NSString*)info placeholder:(NSString*)placeholder value:(NSString*)value {
   NSAlert* alert = [NSAlert new];
-  alert.messageText = @"New Live Folder";
-  alert.informativeText = @"Enter a feed address (RSS or Atom), or a GitHub repository like github.com/owner/repo for its open "
-                          "pull requests. Add /issues for its issues instead. The folder keeps itself up to date.";
+  alert.messageText = message;
+  alert.informativeText = info;
   [alert addButtonWithTitle:@"Create"];
   [alert addButtonWithTitle:@"Cancel"];
   NSTextField* field = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 300, 24)];
-  field.placeholderString = @"github.com/owner/repo or https://example.com/feed.xml";
-  NSString* cur = _shown && !_shown.noteID && !_shown.easelID ? [self itemCurrentURL:_shown] : nil;
-  if ([cur hasPrefix:@"https://github.com/"]) field.stringValue = cur;
+  field.placeholderString = placeholder;
+  if (value.length) field.stringValue = value;
   alert.accessoryView = field;
   alert.window.initialFirstResponder = field;
-  if ([alert runModal] != NSAlertFirstButtonReturn) return;
-  NSDictionary* src = LiveFolderSourceFromInput(field.stringValue, NO);
-  if (!src) { NSBeep(); return; }
+  return [alert runModal] == NSAlertFirstButtonReturn ? field.stringValue : nil;
+}
+- (IBAction)newLiveFolder:(id)sender {
+  NSString* cur = _shown && !_shown.noteID && !_shown.easelID ? [self itemCurrentURL:_shown] : nil;
+  NSString* input = [self askLiveFolderSource:@"New Live Folder"
+                                         info:@"Enter a feed address (RSS or Atom), a GitHub repository like github.com/owner/repo for "
+                                               "its open pull requests (add /issues for its issues instead), or a YouTube channel. "
+                                               "The folder keeps itself up to date."
+                                  placeholder:@"github.com/owner/repo or https://example.com/feed.xml"
+                                        value:[cur hasPrefix:@"https://github.com/"] ? cur : nil];
+  if (input) [self createLiveFolderFromInput:input done:nil];
+}
+- (IBAction)newYouTubeLiveFolder:(id)sender {
+  NSString* cur = _shown && !_shown.noteID && !_shown.easelID ? [self itemCurrentURL:_shown] : nil;
+  NSString* input = [self askLiveFolderSource:@"New YouTube Live Folder"
+                                         info:@"Enter a YouTube channel's address or @handle. Its newest videos show up in the "
+                                               "folder (from YouTube's public channel feed)."
+                                  placeholder:@"youtube.com/@channel"
+                                        value:[[NSURL URLWithString:cur ?: @""].host.lowercaseString hasSuffix:@"youtube.com"] ? cur : nil];
+  if (input) [self createLiveFolderFromInput:input done:nil];
+}
+- (IBAction)newMyPullRequestsFolder:(id)sender { [self createMyPullRequestsFolder]; }
+// Your open pull requests and the ones waiting for your review, read from github.com with this Space's own sign-in.
+// One per Space: asking again shows the existing folder and refreshes it.
+- (ArcItem*)createMyPullRequestsFolder {
+  if (!_space) return nil;
+  NSMutableArray<ArcItem*>* mine = [NSMutableArray array];
+  [self collectLiveFolders:_space.pinned into:mine];
+  [self collectLiveFolders:_space.unpinned into:mine];
+  for (ArcItem* f in mine)
+    if ([f.liveKind isEqualToString:@"github-mine"]) {
+      [_outline expandItem:f];
+      [self refreshLiveFolder:f done:nil];
+      return f;
+    }
+  return [self createLiveFolderKind:@"github-mine" source:@"@me" title:@"My Pull Requests"];
+}
+// Creates a Live Folder from what the user typed. YouTube addresses are read once to find the channel id.
+- (void)createLiveFolderFromInput:(NSString*)input done:(void (^)(ArcItem* folder))done {
+  NSDictionary* src = LiveFolderSourceFromInput(input, NO);
+  if (!src) {
+    if (!self.selfTestProfiles) NSBeep();
+    if (done) done(nil);
+    return;
+  }
   NSString* kind = src[@"kind"], *source = src[@"source"];
+  if ([kind isEqualToString:@"youtube"]) {
+    NSString* page = src[@"resolve"] ?: [@"https://www.youtube.com/channel/" stringByAppendingString:source];
+    __weak MainWindowController* weakSelf = self;
+    LiveFolderResolveYouTube(page, ^(NSString* channelID, NSString* name, NSString* error) {
+      MainWindowController* me = weakSelf;
+      NSString* cid = channelID ?: source;  // a /channel/ address still works if its page couldn't be read
+      if (!me || !cid) {
+        if (me && !me.selfTestProfiles) {
+          NSAlert* a = [NSAlert new];
+          a.messageText = @"Couldn't find that YouTube channel";
+          a.informativeText = error ?: @"";
+          [a runModal];
+        }
+        if (done) done(nil);
+        return;
+      }
+      ArcItem* f = [me createLiveFolderKind:@"youtube" source:cid title:name.length ? name : @"YouTube"];
+      if (done) done(f);
+    });
+    return;
+  }
   NSString* title = [kind isEqualToString:@"feed"] ? ([NSURL URLWithString:source].host ?: source)
                     : [NSString stringWithFormat:@"%@ %@", source.lastPathComponent,
                                                  [kind isEqualToString:@"github-prs"] ? @"Pull Requests" : @"Issues"];
-  [self createLiveFolderKind:kind source:source title:title];
+  ArcItem* f = [self createLiveFolderKind:kind source:source title:title];
+  if (done) done(f);
 }
 - (void)menuRefreshLive:(NSMenuItem*)mi { [self refreshLiveFolder:mi.representedObject done:nil]; }
 - (void)menuDismissLive:(NSMenuItem*)mi {
@@ -7158,6 +8442,9 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
       c.url = e.url;
       c.pinnedURL = e.url;  // like a pinned tab: closing it returns it to the feed's address
       c.children = [NSMutableArray array];
+      // Arc: new entries come in unread once the folder has been filled (not the first fill, not status entries).
+      c.liveUnread = f.liveFilled && ![e.url isEqualToString:kLiveFolderGitHubSignInURL] &&
+                     ![e.url isEqualToString:kLiveFolderGitHubNoneURL];
     }
     c.title = e.title;
     [next addObject:c];
@@ -7179,18 +8466,124 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   if (!f.liveKind) { if (done) done(NO); return; }
   __weak MainWindowController* weakSelf = self;
   f.liveRefreshedAt = [NSDate date];  // also throttles retries after an error
-  LiveFolderFetch(f.liveKind, f.liveSource, kLiveFolderMaxItems, ^(NSArray<LiveFolderEntry*>* entries, NSString* error) {
+  void (^finish)(NSArray<LiveFolderEntry*>*, NSString*) = ^(NSArray<LiveFolderEntry*>* entries, NSString* error) {
     MainWindowController* me = weakSelf;
     if (!me) return;
     f.liveError = error;
     if (entries) [me applyLiveEntries:entries toFolder:f];
+    if (entries && !f.liveSignInNeeded) f.liveFilled = YES;
     if ([me spaceOwningItem:f] == me->_space) {
       [me->_outline reloadItem:f reloadChildren:YES];
       if (me->_shown) [me selectSidebarRowFor:me->_shown];
     }
     [me scheduleSave];
     if (done) done(entries != nil);
-  });
+  };
+  if ([f.liveKind isEqualToString:@"github-mine"]) {
+    [self fetchMyPullRequestsForFolder:f done:^(NSArray<LiveFolderEntry*>* entries, BOOL signedIn, NSString* error) {
+      // Empty states: a sign-in entry while the Space isn't signed in to GitHub, else "No open pull requests".
+      NSArray<LiveFolderEntry*>* shown = entries;
+      if (entries && (!signedIn || !entries.count)) {
+        LiveFolderEntry* e = [LiveFolderEntry new];
+        e.url = signedIn ? kLiveFolderGitHubNoneURL : kLiveFolderGitHubSignInURL;
+        e.title = signedIn ? @"No open pull requests" : @"Sign in to GitHub to see your pull requests";
+        shown = @[ e ];
+      }
+      f.liveSignInNeeded = entries && !signedIn;
+      if (!entries && [error isEqualToString:kSpaceStartingError]) f.liveRefreshedAt = nil;  // retry on the next tick
+      finish(shown, error ?: (f.liveSignInNeeded ? @"Not signed in to GitHub" : nil));
+    }];
+    return;
+  }
+  LiveFolderFetch(f.liveKind, f.liveSource, kLiveFolderMaxItems, finish);
+}
+// Reads a page with a Space's own cookies (its sign-ins), like a tab in that Space would. Main queue callback.
+- (void)fetchPage:(NSString*)url withCookiesOfSpace:(ArcSpace*)space
+             done:(void (^)(NSString* html, NSString* error))done {
+  if (LiveFolderTestPagesActive() || self.selfTestProfiles) {  // self-tests: local files only, never the network
+    NSData* data = LiveFolderTestPage(url);
+    NSString* html = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+    dispatch_async(dispatch_get_main_queue(), ^{ done(html, html ? nil : @"No network in self-tests"); });
+    return;
+  }
+  CefRefPtr<CefRequestContext> ctx = space ? [self contextForSpace:space] : nullptr;
+  if (!ctx || ![self contextIsReady:space.profileDirectory]) {
+    dispatch_async(dispatch_get_main_queue(), ^{ done(nil, kSpaceStartingError); });
+    return;
+  }
+  class PageFetch : public CefURLRequestClient {
+   public:
+    explicit PageFetch(void (^b)(NSString*, NSString*)) : b_([b copy]), data_([NSMutableData data]) {}
+    void OnRequestComplete(CefRefPtr<CefURLRequest> request) override {
+      CefRefPtr<CefResponse> resp = request->GetResponse();
+      int status = resp ? resp->GetStatus() : 0;
+      BOOL ok = request->GetRequestStatus() == UR_SUCCESS && status > 0 && status < 400;
+      NSString* html = ok ? [[NSString alloc] initWithData:data_ encoding:NSUTF8StringEncoding] : nil;
+      NSString* err = ok ? nil
+                         : (status >= 400 ? [NSString stringWithFormat:@"GitHub answered %d", status]
+                                          : @"Couldn't reach GitHub");
+      void (^b)(NSString*, NSString*) = b_;
+      dispatch_async(dispatch_get_main_queue(), ^{ b(html, err); });
+    }
+    void OnUploadProgress(CefRefPtr<CefURLRequest>, int64_t, int64_t) override {}
+    void OnDownloadProgress(CefRefPtr<CefURLRequest>, int64_t, int64_t) override {}
+    void OnDownloadData(CefRefPtr<CefURLRequest>, const void* data, size_t len) override {
+      if (data_.length < 16 * 1024 * 1024) [data_ appendBytes:data length:len];
+    }
+    bool GetAuthCredentials(bool, const CefString&, int, const CefString&, const CefString&,
+                            CefRefPtr<CefAuthCallback>) override { return false; }
+   private:
+    void (^b_)(NSString*, NSString*);
+    NSMutableData* data_;
+    IMPLEMENT_REFCOUNTING(PageFetch);
+  };
+  CefRefPtr<CefRequest> req = CefRequest::Create();
+  req->SetURL(url.UTF8String);
+  req->SetMethod("GET");
+  req->SetFlags(UR_FLAG_ALLOW_STORED_CREDENTIALS | UR_FLAG_SKIP_CACHE);
+  req->SetFirstPartyForCookies(url.UTF8String);  // a top-level visit, so the site's own (SameSite) cookies go along
+  CefRequest::HeaderMap headers;
+  headers.insert(std::make_pair("Accept", "text/html,application/xhtml+xml"));
+  req->SetHeaderMap(headers);
+  CefURLRequest::Create(req, new PageFetch(done), ctx);
+}
+// "github-mine": GitHub's search pages for your open pull requests, then the ones waiting for your review.
+- (void)fetchMyPullRequestsForFolder:(ArcItem*)f
+                                done:(void (^)(NSArray<LiveFolderEntry*>* entries, BOOL signedIn, NSString* error))done {
+  ArcSpace* space = [self spaceOwningItem:f] ?: _space;
+  NSArray<NSString*>* urls = LiveFolderGitHubMineURLs();
+  __weak MainWindowController* weakSelf = self;
+  [self fetchPage:urls[0] withCookiesOfSpace:space done:^(NSString* html, NSString* error) {
+    BOOL signedIn = NO;
+    NSArray<LiveFolderEntry*>* mine = LiveFolderParseGitHubHTML(html, kLiveFolderMaxItems, NO, &signedIn);
+    if (!mine) { done(nil, NO, error ?: @"Couldn't read GitHub's page"); return; }
+    if (!signedIn || !weakSelf) { done(@[], signedIn, nil); return; }
+    [weakSelf fetchPage:urls[1] withCookiesOfSpace:space done:^(NSString* html2, NSString* error2) {
+      BOOL signedIn2 = NO;
+      NSArray<LiveFolderEntry*>* review = LiveFolderParseGitHubHTML(html2, kLiveFolderMaxItems, YES, &signedIn2) ?: @[];
+      NSMutableArray<LiveFolderEntry*>* all = [mine mutableCopy];
+      NSMutableSet* seen = [NSMutableSet set];
+      for (LiveFolderEntry* e in mine) [seen addObject:e.url];
+      for (LiveFolderEntry* e in review)
+        if (![seen containsObject:e.url] && all.count < kLiveFolderMaxItems) { [seen addObject:e.url]; [all addObject:e]; }
+      done(all, YES, nil);
+    }];
+  }];
+}
+// Tests: "dot" on an unread Live Folder tab, the unread count on a Live Folder's row, else "".
+- (NSString*)liveBadgeForItem:(ArcItem*)item {
+  NSInteger row = [_outline rowForItem:item];
+  NSTableCellView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
+  NSImageView* dot = [cell viewWithTag:79];
+  NSTextField* count = [cell viewWithTag:80];
+  if (dot && !dot.hidden) return @"dot";
+  if (count && !count.hidden) return count.stringValue;
+  return @"";
+}
+- (NSUInteger)liveUnreadCountOf:(ArcItem*)folder {
+  NSUInteger n = 0;
+  for (ArcItem* c in folder.children) n += c.liveUnread ? 1 : 0;
+  return n;
 }
 // Tests: write a cookie into the current Space's profile and flush it to disk; read cookie names for a URL.
 - (void)setTestCookie:(NSString*)name value:(NSString*)value url:(NSString*)url session:(BOOL)session done:(void (^)(BOOL))done {
@@ -7312,7 +8705,7 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   ArcItem* section = [self sectionContaining:item];
   if (section == _space.unpinned) {
     [self moveItem:item toParent:_space.pinned index:_space.pinned.children.count];
-    [self markPinnedURLs:item];
+    [self markPinnedURLs:item];  // also tidies the title (#18; with Max's on-device model when it's on, #58)
   } else if (section == _space.pinned) {
     [self moveItem:item toParent:_space.unpinned index:0];
     [self clearPinnedURLs:item];
@@ -7355,17 +8748,36 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 }
 
 // Tidy tab titles (#18): pinning renames a tab to the short name TidyTabTitle finds; the toast and the tab menu's
-// "Use Page Title" undo it. Returns YES if the name changed.
+// "Use Page Title" undo it. With Max's on-device model on (#58) the model names the tab instead (a moment later) and
+// TidyTabTitle is the fallback when it gives nothing usable. Returns YES if the name changed (or the model was asked).
 - (BOOL)tidyTitleOfItem:(ArcItem*)item announce:(BOOL)announce {
+  if (MaxTidyTitlesUseModel()) {
+    [self tidyTitleOfItem:item announce:announce done:nil];
+    return YES;
+  }
+  return [self applyTidyTitle:[self ruleTidyTitleOfItem:item] toItem:item announce:announce];
+}
+- (NSString*)ruleTidyTitleOfItem:(ArcItem*)item {
+  return TidyTabTitle(item.displayTitle, [NSURL URLWithString:[self itemCurrentURL:item] ?: item.url ?: @""].host);
+}
+- (BOOL)applyTidyTitle:(NSString*)tidy toItem:(ArcItem*)item announce:(BOOL)announce {
   NSString* current = item.displayTitle;
-  NSString* host = [NSURL URLWithString:[self itemCurrentURL:item] ?: @""].host;
-  NSString* tidy = TidyTabTitle(current, host);
-  if (!tidy.length || [tidy isEqualToString:current]) return NO;
+  if (!item || !tidy.length || [tidy isEqualToString:current]) return NO;
+  NSString* oldTitle = item.title;
+  BOOL oldRenamed = item.renamed;
   item.title = tidy;
   item.renamed = YES;
   [_outline reloadItem:item];
   [self scheduleSave];
   _lastTidied = item;
+  __weak MainWindowController* weakSelf = self;
+  [[self sidebarUndoManager] registerUndoWithTarget:self handler:^(id target) {
+    item.title = oldTitle;
+    item.renamed = oldRenamed;
+    [weakSelf reloadSidebar];
+    [weakSelf scheduleSave];
+  }];
+  [[self sidebarUndoManager] setActionName:@"Tidy Tab Title"];
   if (announce && !self.selfTestProfiles)
     [self showToast:[NSString stringWithFormat:@"Renamed to \u201C%@\u201D", tidy] action:@"Undo" selector:@selector(undoLastTidy:)];
   return YES;
@@ -7432,17 +8844,38 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 - (IBAction)resetAllPinnedTabs:(id)sender { [self resetPinnedTabsInSpace]; }
 
 - (BOOL)validateMenuItem:(NSMenuItem*)mi {
+  BOOL maxHandled = NO;
+  BOOL maxOK = [self maxValidateMenuItem:mi handled:&maxHandled];  // Arc Max items (#58, #59)
+  if (maxHandled) return maxOK;
+  // chrome:// and chrome-extension:// pages only open in Chrome-style pages.
+  if (mi.action == @selector(manageExtensions:) || mi.action == @selector(openExtensionPopup:) ||
+      mi.action == @selector(openExtensionOptions:) || mi.action == @selector(manageChromeExtension:))
+    return ChromePagesEnabled();
   if (mi.action == @selector(translatePage:)) {
     NSString* url = [self currentURL];
     BOOL translated = url && OriginalURLForTranslated(url);
     mi.title = translated ? @"Show Original" : @"Translate Page";
     return translated || (url && TranslateURLFor(url, @"en"));
   }
+  if (mi.action == @selector(toggleDeveloperMode:)) {
+    NSString* url = [self currentURL];
+    mi.title = DeveloperModeOnForURL(url) ? @"Turn Off Developer Mode for This Site" : @"Turn On Developer Mode for This Site";
+    NSURL* u = url.length ? [NSURL URLWithString:url] : nil;
+    return u.host.length && ([u.scheme isEqualToString:@"http"] || [u.scheme isEqualToString:@"https"]);
+  }
   if (mi.action == @selector(toggleToolbar:)) mi.title = SettingBool(kSettingShowToolbar) ? @"Hide Toolbar" : @"Show Toolbar";
   if (mi.action == @selector(toggleSpaceHeader:))
     mi.title = SettingBool(kSettingShowSpaceHeader) ? @"Hide Space Header" : @"Show Space Header";
   if (mi.action == @selector(resetPinnedTab:) || mi.action == @selector(replacePinnedURL:))
     return _shown && [self isPinnedItem:_shown] && _shown.pinnedURL.length;
+  if (mi.action == @selector(exportNoteAsMarkdown:) || mi.action == @selector(copyNoteAsMarkdown:))
+    return [self noteForExport] != nil;
+  if (mi.action == @selector(newNoteInSplitView:)) return _space != nil && _splitItems.count < 4;
+  if (mi.action == @selector(fillPassword:)) return _shown.browserId != 0 && [_shown.url hasPrefix:@"http"];
+  if (mi.action == @selector(captureAreaToEasel:) || mi.action == @selector(captureFullPageToEasel:) ||
+      mi.action == @selector(liveClipToEasel:))
+    return [self canCaptureShownPage];
+  if (mi.action == @selector(refreshLiveClipsFromMenu:)) return _easelItem && _easelView.liveClips.count > 0;
   return YES;
 }
 
@@ -7536,6 +8969,7 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   for (ArcSpace* space in _spaces) {
     for (ArcItem* item in [space.unpinned.children copy]) {
       if (item == _shown || [_splitItems containsObject:item] || item.isFolder || !item.url.length) continue;
+      if ([self itemKeptFromAutoArchive:item]) continue;
       if (!item.lastActiveAt) item.lastActiveAt = now;  // unknown age: start the clock now
       if ([now timeIntervalSinceDate:item.lastActiveAt] < threshold) continue;
       [self archiveItem:item space:space reason:@"auto"];
@@ -7551,6 +8985,9 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
   }
   return archived;
 }
+
+// Developer Mode sites (#68) stay put, like Pinned tabs.
+- (BOOL)itemKeptFromAutoArchive:(ArcItem*)item { return DeveloperModeOnForURL([self itemCurrentURL:item]); }
 
 - (void)startAutoArchiveTimer {
   __weak MainWindowController* weakSelf = self;
@@ -8025,6 +9462,9 @@ static const NSTimeInterval kLiveFolderRefreshInterval = 15 * 60;
 // view on window close is what actually tears the browsers down (DoClose returns false).
 - (void)windowWillClose:(NSNotification*)notification {
   if (notification.object != self.window) return;  // the Archive window closing is not a quit
+  [self closeTabSwitcher];
+  [_thumbTimer invalidate];
+  _thumbTimer = nil;
   if (gMainWindow && gMainWindow != self) {
     [self closeSecondaryWindow];
     return;

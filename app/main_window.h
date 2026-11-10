@@ -11,7 +11,11 @@
 NSString* CleanLinkURL(NSString* url);
 
 @class Boost;
+@class BoostColorWheel;
+@class AutofillController;
 @class EaselView;
+@class NoteEditorView;
+@class EaselObject;
 NSInteger UnreadCountFromTitle(NSString* title);
 NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL began);  // -1 back, 1 forward, 0 none  // "Inbox (12)" -> 12
 
@@ -41,7 +45,9 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 
 // Sidebar organisation (Arc: drag and drop, Cmd+D pin/unpin, New Folder).
 - (IBAction)togglePin:(id)sender;
-- (BOOL)tidyTitleOfItem:(ArcItem*)item announce:(BOOL)announce;  // #18
+- (BOOL)tidyTitleOfItem:(ArcItem*)item announce:(BOOL)announce;  // #18 (on-device model first when on, #58)
+- (NSString*)ruleTidyTitleOfItem:(ArcItem*)item;                  // TidyTabTitle for the item's title and host
+- (BOOL)applyTidyTitle:(NSString*)tidy toItem:(ArcItem*)item announce:(BOOL)announce;  // undoable; NO if unchanged
 - (void)usePageTitleOfItem:(ArcItem*)item;
 - (void)setThemeGrain:(double)grain forSpace:(ArcSpace*)space;  // #26
 - (float)themeGrainOpacity;
@@ -112,6 +118,8 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (IBAction)shareSplitView:(id)sender;
 - (IBAction)translatePage:(id)sender;
 - (BOOL)adBlockingOnForHost:(NSString*)host;          // #53
+- (IBAction)showManageAdBlockers:(id)sender;          // #53: from Site Settings
+- (void)applyAdBlockCosmeticsToBrowser:(int)browserId url:(NSString*)url;  // cosmetic filter rules on page load
 - (void)setAdBlocking:(BOOL)on forHost:(NSString*)host;       // View > Translate Page / Show Original (#52)      // copies every pane's address
 - (NSString*)splitViewShareText;            // tests
 - (NSArray<ArcItem*>*)visiblePanesForTest;  // tests
@@ -187,7 +195,7 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (IBAction)toggleSidebar:(id)sender;
 - (IBAction)selectTabFromMenu:(NSMenuItem*)sender;  // tag = index
 - (IBAction)nextTab:(id)sender;
-- (IBAction)switchToRecentTab:(id)sender;  // Ctrl+Tab: the most recently used other tab in this Space
+- (IBAction)switchToRecentTab:(id)sender;  // Ctrl+Tab: the most recently used other tab in this Space (held: switcher)
 - (IBAction)pasteAndGo:(id)sender;          // clipboard URL or search text -> new Today tab
 - (IBAction)printPage:(id)sender;
 // Focus mode: hides the sidebar and the window's title-bar buttons so only the page shows. The
@@ -222,6 +230,20 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (IBAction)moveShownToMainWindow:(id)sender;  // Today header button in other windows
 - (BOOL)moveToMainButtonShown;              // tests
 - (BOOL)chromePageOfItem:(ArcItem*)item isInWindow:(NSWindow*)win;  // tests
+// Chrome extensions (#66). The puzzle-piece button in the address pill (Chrome-style pages on) opens the picker:
+// each extension with Open (its popup page, in a tab), Options, Turn Off/On and Remove, plus Install Extension...
+// (Chrome Web Store link or ID), Chrome Web Store and Manage Extensions (chrome://extensions). Installs, removals
+// and on/off take effect when NotArc relaunches (CEF can only load extensions at startup).
+@property(nonatomic, copy) NSString* extensionsDirectoryOverride;  // tests: picker and installs use this folder
+- (IBAction)showExtensionPicker:(id)sender;
+- (IBAction)installExtension:(id)sender;
+- (IBAction)manageExtensions:(id)sender;
+- (NSMenu*)extensionPickerMenuForURL:(NSString*)url;  // what the picker shows when the shown tab is at `url`
+- (void)installExtensionFromInput:(NSString*)input done:(void (^)(NSString* name, NSError* error))done;
+- (BOOL)setExtension:(NSString*)extensionID enabled:(BOOL)enabled;
+- (BOOL)removeExtensionWithID:(NSString*)extensionID;
+- (BOOL)extensionPickerButtonShown;  // tests
+- (NSInteger)relaunchRequestsForTest;
 // AppleScript (#76): "select", "back", "forward", "reload", "stop", "close", or "loading" (returns it) for a tab.
 - (BOOL)scriptItem:(ArcItem*)item command:(NSString*)command;
 // Call controls (#47): the tab using the camera/mic, and the sidebar's mute / camera-off toggles.
@@ -269,6 +291,24 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (ArcItem*)newNestedFolderIn:(ArcItem*)folder;
 // Closing a Peek without opening it as a tab offers "Undo" (toast for 6 s, and Edit > Undo / Cmd+Z).
 - (IBAction)reopenClosedPeek:(id)sender;
+// Toast with any number of buttons (title, selector name on target); stays `duration` seconds.
+- (void)showToast:(NSString*)text buttons:(NSArray<NSArray<NSString*>*>*)buttons target:(id)target
+         duration:(NSTimeInterval)duration;
+- (void)hideToast;
+@property(nonatomic, readonly) NSString* toastText;  // tests: the toast showing, or nil
+// Passwords and autofill (#67, see autofill.h). Edit > AutoFill > Fill Password, NotArc > Passwords...,
+// File > Import Passwords...
+@property(nonatomic, readonly) AutofillController* autofill;
+- (BOOL)autofillRun:(NSString*)js nonce:(NSString*)nonce;
+- (void)autofillRunAllFrames:(NSString*)js browser:(int)browserId;
+- (NSView*)viewForBrowserId:(int)browserId;
+- (IBAction)fillPassword:(id)sender;
+- (IBAction)showPasswords:(id)sender;
+- (IBAction)importPasswordsFromMenu:(id)sender;
+- (NSPasteboard*)copyPasteboard;  // private pasteboard in self-tests
+// Arc's saved passwords, addresses and cards (part of Import Everything from Arc, #150). Tests set the key.
+@property(nonatomic, copy) NSData* arcSafeStorageKeyOverride;
+- (NSDictionary<NSString*, NSNumber*>*)importArcPasswordsFromUserData:(NSString*)userData;
 // View > Show Toolbar: back/forward/reload and the full address above the page (Enter goes to what you type).
 // View > Hide Space Header: hides the Space picker at the top of the sidebar. Both are remembered.
 - (IBAction)toggleToolbar:(id)sender;
@@ -308,6 +348,18 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (void)answerHungSheet:(BOOL)exitPage;  // page the Wait/Exit sheet is about, nil if none
 - (void)hideHoverCard;
 @property(nonatomic, readonly) BOOL hoverCardShown;
+@property(nonatomic, readonly) BOOL hoverCardHasThumbnail;  // #65
+// Tab thumbnails (#65): copy the shown tab 1 s from now (each switch or load restarts the wait).
+- (void)scheduleThumbnailOfShown;
+// Recent-tab switcher (Ctrl+Tab held, #32/#65). Tests open it with mods = 0 (no key monitoring) and drive it.
+- (void)openTabSwitcherHolding:(NSEventModifierFlags)mods;
+- (void)stepTabSwitcher:(NSInteger)delta;
+- (void)commitTabSwitcher;
+- (void)cancelTabSwitcher;
+@property(nonatomic, readonly) BOOL tabSwitcherShown;
+@property(nonatomic, readonly) NSArray<ArcItem*>* tabSwitcherItems;
+@property(nonatomic, readonly) ArcItem* tabSwitcherSelection;
+- (BOOL)tabSwitcherShowsThumbnailFor:(ArcItem*)item;
 - (IBAction)changeSpaceIcon:(id)sender;
 @property(nonatomic, readonly) NSView* themeView;  // the tint layer over the sidebar (for tests)
 // Clear Browsing Data: history and cookies from `since` on (nil = all time) in every Space's profile;
@@ -339,6 +391,13 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (CGFloat)pageCardRadius;
 - (NSString*)pageCardEdgeStyle;  // tests: border alpha and shadow opacity of the page card (#122)
 - (NSString*)sidebarAddressText;   // tests: the site shown in the sidebar address pill
+// Developer Mode (#68, per site): View > Turn On/Off Developer Mode for This Site, Site Settings, and the reset.
+- (IBAction)toggleDeveloperMode:(id)sender;
+- (IBAction)resetDeveloperModeSites:(id)sender;
+- (BOOL)devToolsButtonShown;                        // tests: the pill's Developer Tools button
+- (BOOL)itemKeptFromAutoArchive:(ArcItem*)item;     // Developer Mode tabs are never auto-archived
++ (MainWindowController*)mainController;            // the first browser window (Settings reads profiles from it)
++ (void)settingsDidChange;                          // every window re-reads appearance, toolbar, header, pill
 - (NSRect)sidebarAddressFrame;
 - (NSString*)sidebarRowStyleForItem:(ArcItem*)item;  // tests: "h=36 r=8 sel=1 hover=0 alpha=0.20"
 - (void)hoverSidebarItem:(ArcItem*)item;
@@ -360,11 +419,23 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (void)handleZapSelector:(NSString*)selector browser:(int)browserId;               // tests
 - (NSUInteger)savedBoostCount;                                                      // tests
 - (IBAction)shuffleBoost:(id)sender;
+- (BoostColorWheel*)boostColorWheel;            // tests: the editor's colour wheel (after editBoost:)
+- (Boost*)boostBeingEdited;                     // tests
+- (void)setBoostIntensity:(double)value;        // tests: as if the Intensity slider moved
+- (BOOL)pickBoostFontTile:(NSString*)name;      // tests: as if a font tile (e.g. "Georgia") was clicked
+- (NSArray<NSString*>*)boostPanelSections;      // tests: header, color, font, size, case, zap, code
 // Live Folders
 - (IBAction)newLiveFolder:(id)sender;
 - (ArcItem*)createLiveFolderKind:(NSString*)kind source:(NSString*)source title:(NSString*)title;
 - (void)refreshLiveFolder:(ArcItem*)folder done:(void (^)(BOOL ok))done;
 - (BOOL)dismissLiveFolderTab:(ArcItem*)item;
+- (IBAction)newMyPullRequestsFolder:(id)sender;
+- (IBAction)newYouTubeLiveFolder:(id)sender;
+- (NSMenuItem*)newLiveFolderMenuItem;                           // the + menu's New Live Folder submenu
+- (ArcItem*)createMyPullRequestsFolder;                          // GitHub: My Pull Requests (one per Space)
+- (void)createLiveFolderFromInput:(NSString*)input done:(void (^)(ArcItem* folder))done;
+- (NSString*)liveBadgeForItem:(ArcItem*)item;                    // tests: "dot", a folder's unread count, or ""
+- (NSUInteger)liveUnreadCountOf:(ArcItem*)folder;
 - (void)deleteSidebarItem:(ArcItem*)item;  // tests
 - (BOOL)writeSidebarSnapshot:(NSString*)path;  // design checks
 - (void)setTestCookie:(NSString*)name value:(NSString*)value url:(NSString*)url session:(BOOL)session done:(void (^)(BOOL ok))done;  // tests
@@ -386,6 +457,15 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (ArcItem*)createEaselWithID:(NSString*)easelID;
 - (EaselView*)easelView;                                  // tests: nil when hidden
 - (void)captureShownPageToEasel:(void (^)(BOOL ok))done;  // tests
+// Easel captures and live web clips (#49).
+- (IBAction)captureAreaToEasel:(id)sender;
+- (IBAction)captureFullPageToEasel:(id)sender;
+- (IBAction)liveClipToEasel:(id)sender;
+- (IBAction)refreshLiveClipsFromMenu:(id)sender;
+- (void)captureToEaselMode:(NSString*)mode rect:(NSRect)r done:(void (^)(EaselObject* o))done;  // "area" or "full"
+- (void)liveClipArea:(NSRect)r done:(void (^)(EaselObject* clip))done;  // r in page points, top-left origin
+- (NSUInteger)refreshLiveClips:(BOOL)force;  // returns how many clips started refreshing
+@property(nonatomic) NSInteger clipRefreshesFinished;  // tests
 // Notes
 - (IBAction)newNote:(id)sender;
 - (ArcItem*)createNoteWithID:(NSString*)noteID;
@@ -394,6 +474,15 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (NSString*)savedNoteText:(ArcItem*)note;            // tests
 - (void)makeNoteRangeBold:(NSRange)r;                 // tests
 - (BOOL)noteRangeIsBold:(ArcItem*)note range:(NSRange)r;  // tests
+- (IBAction)newNoteInSplitView:(id)sender;           // Arc: newNoteInSplitView
+- (IBAction)exportNoteAsMarkdown:(id)sender;         // File > Export Note as Markdown... (save panel)
+- (IBAction)copyNoteAsMarkdown:(id)sender;
+- (BOOL)exportNote:(ArcItem*)note toPath:(NSString*)path;  // what the save panel's OK does (tests call it directly)
+- (NSString*)markdownForNote:(ArcItem*)note;
+- (BOOL)placeInSplit:(ArcItem*)item horizontal:(BOOL)horizontal before:(BOOL)before;
+- (NoteEditorView*)noteEditorForItem:(ArcItem*)note;  // tests: nil unless on screen
+- (NSAttributedString*)savedNote:(ArcItem*)note;      // tests
+- (NSPasteboard*)copyPasteboard;
 - (NSString*)boostIndicatorState;                                                   // tests: on/off/none
 - (void)setColorScheme:(NSString*)scheme forSpace:(ArcSpace*)space;  // nil/"auto", "light", "dark"
 - (BOOL)sidebarIsDark;                       // tests

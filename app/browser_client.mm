@@ -1,13 +1,19 @@
 #include "app/browser_client.h"
 #import "app/downloads.h"
+#import "app/arc_max.h"
 #include "app/content_blocker.h"
+#import "app/autofill.h"
 
 #include <cstdio>
+#include <cstdlib>
+#include <iterator>
+#include <mutex>
 
 #include "include/cef_app.h"
 #include "include/wrapper/cef_closure_task.h"
 #include "include/base/cef_callback.h"
 #include "include/wrapper/cef_helpers.h"
+#include "include/wrapper/cef_stream_resource_handler.h"
 
 BrowserClient::BrowserClient(TitleCallback on_title, UrlCallback on_url)
     : on_title_(std::move(on_title)), on_url_(std::move(on_url)) {}
@@ -32,10 +38,18 @@ void BrowserClient::OnAddressChange(CefRefPtr<CefBrowser> browser,
 void BrowserClient::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
   ++open_browsers_;
+  browsers_[browser->GetIdentifier()] = browser;
 }
 
 void BrowserClient::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
   CEF_REQUIRE_UI_THREAD();
+  int id = browser->GetIdentifier();
+  browsers_.erase(id);
+  for (auto it = autofill_frames_.begin(); it != autofill_frames_.end();)
+    it = it->second.browser_id == id ? autofill_frames_.erase(it) : std::next(it);
+  std::string prefix = std::to_string(id) + "/";
+  for (auto it = autofill_nonces_.begin(); it != autofill_nonces_.end();)
+    it = it->first.compare(0, prefix.size(), prefix) == 0 ? autofill_nonces_.erase(it) : std::next(it);
   if (--open_browsers_ == 0 && quit_when_empty_) CefQuitMessageLoop();
 }
 
@@ -47,7 +61,47 @@ CefResourceRequestHandler::ReturnValue BrowserClient::OnBeforeResourceLoad(CefRe
   bool main_frame = request->GetResourceType() == RT_MAIN_FRAME;
   std::string page = request->GetFirstPartyForCookies().ToString();
   if (page.empty() && frame) page = frame->GetURL().ToString();
-  return content_blocker::ShouldBlock(request->GetURL().ToString(), page, main_frame) ? RV_CANCEL : RV_CONTINUE;
+  const char* type = "other";  // filter-list resource types ($script, $image, ...)
+  switch (request->GetResourceType()) {
+    case RT_SCRIPT: case RT_WORKER: case RT_SHARED_WORKER: case RT_SERVICE_WORKER: type = "script"; break;
+    case RT_IMAGE: case RT_FAVICON: type = "image"; break;
+    case RT_STYLESHEET: type = "stylesheet"; break;
+    case RT_SUB_FRAME: type = "subdocument"; break;
+    case RT_FONT_RESOURCE: type = "font"; break;
+    case RT_MEDIA: type = "media"; break;
+    case RT_XHR: type = "xmlhttprequest"; break;
+    case RT_PING: case RT_CSP_REPORT: type = "ping"; break;
+    case RT_OBJECT: case RT_PLUGIN_RESOURCE: type = "object"; break;
+    default: break;
+  }
+  return content_blocker::ShouldBlock(request->GetURL().ToString(), page, main_frame, type) ? RV_CANCEL : RV_CONTINUE;
+}
+
+namespace {
+std::mutex g_test_responses_lock;
+std::map<std::string, std::string>* g_test_responses = nullptr;  // url prefix -> html (self-tests only)
+}  // namespace
+
+void BrowserClient::SetTestResponse(const std::string& url_prefix, const std::string& html) {
+  std::lock_guard<std::mutex> lock(g_test_responses_lock);
+  if (!g_test_responses) g_test_responses = new std::map<std::string, std::string>();
+  if (html.empty()) g_test_responses->erase(url_prefix);
+  else (*g_test_responses)[url_prefix] = html;
+}
+
+CefRefPtr<CefResourceHandler> BrowserClient::GetResourceHandler(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+                                                                CefRefPtr<CefRequest> request) {
+  std::string body;
+  {
+    std::lock_guard<std::mutex> lock(g_test_responses_lock);
+    if (!g_test_responses || g_test_responses->empty()) return nullptr;
+    std::string url = request->GetURL().ToString();
+    for (auto& [prefix, html] : *g_test_responses)
+      if (url.rfind(prefix, 0) == 0) body = html;
+  }
+  if (body.empty()) return nullptr;
+  CefRefPtr<CefStreamReader> stream = CefStreamReader::CreateForData(body.data(), body.size());  // copies
+  return new CefStreamResourceHandler("text/html", stream);
 }
 
 bool BrowserClient::DoClose(CefRefPtr<CefBrowser> browser) {
@@ -205,12 +259,89 @@ const char* BrowserClient::NotificationShimJS() {
 }
 
 void BrowserClient::OnLoadStart(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, TransitionType) {
+  CEF_REQUIRE_UI_THREAD();
   std::string url = frame->GetURL().ToString();
   if (url.rfind("http://", 0) == 0 || url.rfind("https://", 0) == 0) frame->ExecuteJavaScript(NotificationShimJS(), url, 0);
+  InjectAutofillShim(browser, frame);
 }
 
 void BrowserClient::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int) {
   if (frame->IsMain() && on_load_end_) on_load_end_(browser->GetIdentifier(), frame->GetURL().ToString());
+  InjectAutofillShim(browser, frame);  // no-op if OnLoadStart's copy is already running in this document
+}
+
+static bool g_autofill_allow_file = false;
+void BrowserClient::SetAutofillAllowFileURLs(bool allow) { g_autofill_allow_file = allow; }
+
+// "https://Example.com:8443/path" -> "https://example.com:8443"; "" for anything that isn't a web page.
+static std::string AutofillOrigin(const std::string& url) {
+  size_t colon = url.find("://");
+  if (colon == std::string::npos) return "";
+  std::string scheme = url.substr(0, colon);
+  for (auto& c : scheme) c = static_cast<char>(tolower(c));
+  if (scheme == "file") return g_autofill_allow_file ? "file://" : "";
+  if (scheme != "http" && scheme != "https") return "";
+  size_t start = colon + 3, end = url.find_first_of("/?#", start);
+  std::string host = url.substr(start, end == std::string::npos ? std::string::npos : end - start);
+  size_t at = host.rfind('@');
+  if (at != std::string::npos) host = host.substr(at + 1);
+  for (auto& c : host) c = static_cast<char>(tolower(c));
+  if ((scheme == "https" && host.size() > 4 && host.compare(host.size() - 4, 4, ":443") == 0) ||
+      (scheme == "http" && host.size() > 3 && host.compare(host.size() - 3, 3, ":80") == 0))
+    host = host.substr(0, host.rfind(':'));
+  return host.empty() ? "" : scheme + "://" + host;
+}
+
+void BrowserClient::InjectAutofillShim(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame) {
+  if (!browser || !frame || !frame->IsValid()) return;
+  std::string url = frame->GetURL().ToString();
+  std::string origin = AutofillOrigin(url);
+  if (origin.empty()) return;
+  int id = browser->GetIdentifier();
+  std::string frame_id = frame->GetIdentifier().ToString();
+  std::string key = std::to_string(id) + "/" + frame_id + "/" + origin;
+  std::string nonce;
+  auto found = autofill_nonces_.find(key);
+  if (found != autofill_nonces_.end()) {
+    nonce = found->second;
+  } else {
+    if (autofill_frames_.size() > 20000) {  // frames of long-lived tabs; start over rather than grow forever
+      autofill_frames_.clear();
+      autofill_nonces_.clear();
+    }
+    char buf[33];
+    std::snprintf(buf, sizeof(buf), "%08x%08x%08x%08x", arc4random(), arc4random(), arc4random(), arc4random());
+    nonce = buf;
+    autofill_nonces_[key] = nonce;
+    autofill_frames_[nonce] = AutofillFrame{id, frame_id, origin, frame->IsMain()};
+  }
+  frame->ExecuteJavaScript(AutofillShimScript(nonce), url, 0);
+}
+
+bool BrowserClient::AutofillRun(const std::string& nonce, const std::string& js) {
+  auto it = autofill_frames_.find(nonce);
+  if (it == autofill_frames_.end()) return false;
+  CefRefPtr<CefBrowser> browser = BrowserById(it->second.browser_id);
+  CefRefPtr<CefFrame> frame = browser ? browser->GetFrameByIdentifier(it->second.frame_id) : nullptr;
+  if (!frame || !frame->IsValid() || AutofillOrigin(frame->GetURL().ToString()) != it->second.origin) return false;
+  frame->ExecuteJavaScript(js, frame->GetURL(), 0);
+  return true;
+}
+
+void BrowserClient::AutofillRunAllFrames(int browser_id, const std::string& js) {
+  CefRefPtr<CefBrowser> browser = BrowserById(browser_id);
+  if (!browser) return;
+  std::vector<CefString> ids;
+  browser->GetFrameIdentifiers(ids);
+  for (const CefString& fid : ids) {
+    CefRefPtr<CefFrame> f = browser->GetFrameByIdentifier(fid);
+    if (f && f->IsValid() && !AutofillOrigin(f->GetURL().ToString()).empty()) f->ExecuteJavaScript(js, f->GetURL(), 0);
+  }
+}
+
+CefRefPtr<CefBrowser> BrowserClient::BrowserById(int browser_id) {
+  auto it = browsers_.find(browser_id);
+  return it == browsers_.end() ? nullptr : it->second;
 }
 
 bool BrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_severity_t, const CefString& message,
@@ -219,13 +350,28 @@ bool BrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
   static const std::string kNotify = "__notarc_notify__:";
   static const std::string kZap = "__notarc_zap__:";
   static const std::string kLang = "__notarc_lang__:";
+  static const std::string kAutofill = "__notarc_af__:";
   std::string m = message.ToString();
+  if (m.compare(0, kAutofill.size(), kAutofill) == 0) {  // never logged: may carry a password being saved
+    size_t sep = m.find(':', kAutofill.size());
+    if (sep == std::string::npos) return true;
+    std::string nonce = m.substr(kAutofill.size(), sep - kAutofill.size());
+    auto it = autofill_frames_.find(nonce);
+    if (it != autofill_frames_.end() && it->second.browser_id == browser->GetIdentifier() && on_autofill_)
+      on_autofill_(browser->GetIdentifier(), nonce, it->second.origin, it->second.main_frame, m.substr(sep + 1));
+    return true;
+  }
   if (m.compare(0, kNotify.size(), kNotify) == 0) {
     if (on_notify_) on_notify_(browser->GetIdentifier(), m.substr(kNotify.size()), source.ToString());
     return true;
   }
   if (m.compare(0, kLang.size(), kLang) == 0) {
     if (on_lang_) on_lang_(browser->GetIdentifier(), m.substr(kLang.size()));
+    return true;
+  }
+  // Max page scripts (#58, #59) reply as "__notarc_max__:<nonce>:..." lines.
+  if (m.compare(0, 15, "__notarc_max__:") == 0) {
+    if (NSString* line = [NSString stringWithUTF8String:m.c_str()]) MaxHandleConsoleMessage(line);
     return true;
   }
   if (m.compare(0, kZap.size(), kZap) == 0) {
