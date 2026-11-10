@@ -30,6 +30,9 @@ NSString* UpdaterCurrentVersion(void);
 // Same swap without relaunching or quitting the app; returns once the swap script is running.
 // Used by --self-update-test, which runs it from a throwaway copy of NotArc.
 - (void)swapInStagedApp:(NSString*)stagedApp relaunch:(BOOL)relaunch;
+// Quits NotArc and opens this same copy again once it has quit (extension changes, #66). Session restore brings the
+// tabs back. Callers ask about in-progress downloads first: quitting cancels them.
+- (void)relaunch;
 // --self-update-test: pretend to be this version so the published release counts as newer.
 + (void)setVersionOverride:(NSString*)version;
 // Menu / timer entry points. interactive = say "you're up to date" and show errors.

@@ -93,6 +93,8 @@ set(APP_SRCS
   app/extensions.mm
   app/chrome_page.h
   app/chrome_page.mm
+  app/extension_popup.h
+  app/extension_popup.mm
   app/arc_history.h
   app/arc_history.mm
   app/favicons.h

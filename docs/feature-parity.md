@@ -111,7 +111,7 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 
 ## Browser basics
 
-- [ ] Chrome extensions (Web Store), extension picker (partial: with Chrome-style pages on (Settings, off by default): Install Extension... from a Web Store link or ID (signature checked), a puzzle-piece picker in the address pill (Open, Options, Turn Off/On, Update, Remove, Manage Extensions), File > Import Extensions from Arc. Missing: extensions in the default page mode (CEF's Alloy pages can't run them), popups as bubbles (they open in a tab), and changes without a relaunch) (#66)
+- [x] Chrome extensions (Web Store), extension picker (in Chrome-style pages, which installing or importing an extension turns on: Install Extension... from a Web Store link or ID (signature checked), File > Import Extensions from Arc, and a puzzle-piece picker in the address pill: each extension's popup opens in a bubble under it, sized to the popup, plus Options, Turn Off/On, Update, Remove and Manage Extensions. Changes apply after Relaunch Now in a toast, since CEF loads extensions only at startup) (#66)
 - [x] Password saving/autofill, address/card autofill (#67)
 - [x] DevTools (show/hide), developer mode (per-site Developer Mode: on by itself for localhost, 127.0.0.1 and .local; full address with port in the sidebar pill, never auto-archived, Developer Tools in the pill; View menu, Site Settings and Settings > Advanced, with a reset) (#68)
 - [x] Set as default browser, open links from other apps (#69)
