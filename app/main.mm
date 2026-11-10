@@ -1021,7 +1021,12 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                 for (NSMenuItem* top in NSApp.mainMenu.itemArray)
                   for (NSMenuItem* mi in top.submenu.itemArray)
                     if (mi.action == @selector(tidyTabTitle:)) tidyItem = mi;
+                // The menu follows the shown tab: show this one just for the check, then put the other back at once
+                // (other timed checks switch tabs concurrently).
+                ArcItem* shownBefore = w.shownItem;
+                if (shownBefore != t) [w showItem:t];
                 BOOL tidyEnabled = tidyItem && [(id<NSMenuItemValidation>)w validateMenuItem:tidyItem] && !tidyItem.hidden;
+                if (shownBefore && shownBefore != t) [w showItem:shownBefore];
                 [w tidyTitleOfItem:t announce:NO done:^(NSString* title0, BOOL ai0) {
                   NSUndoManager* undo2 = [w sidebarUndoManager];
                   BOOL titleFallback = tidyEnabled && !ai0 && [title0 isEqualToString:@"Max Test Page"] && t.renamed &&
@@ -3542,6 +3547,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
             NSInteger done0 = w.clipRefreshesFinished;
             [w refreshLiveClipsFromMenu:nil];
             WaitUntil(^{ return (BOOL)(w.clipRefreshesFinished > done0); }, 30, ^{
+              if (w.shownItem != clipEasel) [w showItem:clipEasel];  // other timed checks switch tabs concurrently
               EaselView* cv2 = [w easelView];
               EaselObject* c = cv2.liveClips.firstObject;
               NSData* png = [NSData dataWithContentsOfFile:[cv2.directory stringByAppendingPathComponent:c.image ?: @"-"]];
