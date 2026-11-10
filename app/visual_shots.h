@@ -9,8 +9,11 @@
 //   appearance dark|light|auto
 //   space <n>                    switch to the n-th Space (0-based)
 //   theme <n> <#hex> [#hex] <intensity>
-//   open <url>                   new Today tab in the current Space
+//   newtab <url>                 new Today tab in the current Space
 //   show <text>                  show the first tab whose address or title contains <text>
+//   hover <text>                 hover the sidebar row of that tab (empty: none)
+//   js <script>                  run a script in the shown tab
+//   poll-media                   ask every tab what it's playing now
 //   load <n>                     load the first n tabs of every Space (real icons and titles)
 //   do <selector>                send an action (e.g. showArchive:) to the window controller
 //   setting <key> <0|1>          memory-only setting

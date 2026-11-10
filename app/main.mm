@@ -1676,6 +1676,43 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       NSString* offStyle = otherTab ? [w sidebarRowStyleForItem:otherTab] : @"";
       BOOL rowsOK = [selStyle hasPrefix:@"h=36 r=8 sel=1"] && [hovStyle containsString:@"hover=1"] &&
                     [offStyle hasSuffix:@"alpha=0.00"];
+      {  // Visual parity V2: close button on the selected and hovered rows only, long titles fade (no "...").
+        NSString* selAcc = shownTab ? [w tabRowAccessoriesForItem:shownTab] : @"";
+        [w hoverSidebarItem:otherTab];
+        NSString* hovAcc = otherTab ? [w tabRowAccessoriesForItem:otherTab] : @"";
+        [w hoverSidebarItem:nil];
+        NSString* offAcc = otherTab ? [w tabRowAccessoriesForItem:otherTab] : @"";
+        BOOL closeShown = [selAcc hasPrefix:@"close=1"] && [hovAcc hasPrefix:@"close=1"] && [offAcc hasPrefix:@"close=0"];
+        BOOL room = [selAcc hasSuffix:@"room=1"] && [hovAcc hasSuffix:@"room=1"];
+        ArcItem* longTab = nil;
+        for (ArcItem* t in w.currentSpace.unpinned.children)
+          if (t != shownTab && t.url.length && !t.isSplit) { longTab = t; break; }
+        NSString* savedTitle = longTab.title;
+        BOOL savedRenamed = longTab.renamed;
+        longTab.title = @"A very long tab title that keeps going well past the right edge of the sidebar row";
+        longTab.renamed = YES;
+        [w reloadSidebarItemForTest:longTab];
+        NSString* longAcc = longTab ? [w tabRowAccessoriesForItem:longTab] : @"";
+        BOOL fade = [longAcc containsString:@"fade=1 clip=1"];
+        longTab.title = savedTitle;
+        longTab.renamed = savedRenamed;
+        [w reloadSidebarItemForTest:longTab];
+        BOOL shortNoFade = [[w tabRowAccessoriesForItem:longTab] containsString:@"fade=0"] || longTab.displayTitle.length > 30;
+        // The close button on a row that isn't shown closes that tab (archived) and leaves the shown tab alone.
+        NSUInteger todayBefore = w.currentSpace.unpinned.children.count;
+        [w openInNewTab:@"https://closebutton.example/" background:YES];
+        ArcItem* extra = nil;
+        for (ArcItem* t in w.currentSpace.unpinned.children)
+          if ([t.url hasPrefix:@"https://closebutton.example/"]) extra = t;
+        BOOL pressed = extra && [w pressCloseButtonOfItem:extra];
+        BOOL closeOther = pressed && w.shownItem == shownTab && w.currentSpace.unpinned.children.count == todayBefore &&
+                          ![w.currentSpace.unpinned.children containsObject:extra];
+        std::printf("SELFTEST-TABROWS closeShown=%d room=%d fade=%d shortNoFade=%d closeOther=%d\n", closeShown, room, fade,
+                    shortNoFade, closeOther);
+        if (!closeShown || !room || !fade)
+          std::printf("SELFTEST-TABROWS-DEBUG sel=[%s] hov=[%s] off=[%s] long=[%s]\n", selAcc.UTF8String, hovAcc.UTF8String,
+                      offAcc.UTF8String, longAcc.UTF8String);
+      }
       // Arc sidebar: Favorites as tiles 90 pt below the top (8 pt in); Space title right under them.
       NSRect gf = w.favoritesGridFrame, hf = w.spaceHeaderFrame;
       BOOL gridOK = w.currentSpace.favorites.children.count == 0 ||
@@ -2109,7 +2146,10 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                   "v.setUint16(34,16,true);s(36,'data');v.setUint32(40,n*2,true);"
                   "for(var i=0;i<n;i++)v.setInt16(44+i*2,Math.sin(i*2*Math.PI*440/r)*200,true);"
                   "var a=document.createElement('audio');a.src=URL.createObjectURL(new Blob([b],{type:'audio/wav'}));"
-                  "document.body.appendChild(a);a.play();})()" inItem:m];
+                  "document.body.appendChild(a);"
+                  "if(navigator.mediaSession){navigator.mediaSession.metadata=new MediaMetadata({title:'Test Track',artist:'Test Artist'});"
+                  "navigator.mediaSession.setActionHandler('nexttrack',function(){document.title='next:on';});}"
+                  "a.play();})()" inItem:m];
         __block int waits = 0;
         __block void (^check)(void);
 #pragma clang diagnostic push
@@ -2128,6 +2168,24 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
             BOOL barHiddenWhileShown = w.mediaBarItem == nil;
             [w openInNewTab:@"https://example.com/media-other"];
             BOOL bar = w.mediaBarItem == m;
+            {  // Visual parity V3: Arc's mini player card (what's playing, the site, back/play/forward, mute on hover).
+              [w pollMediaNow];
+              NSString* card = w.mediaCardDescription;
+              BOOL meta = [card containsString:@"title=Test Track subtitle=Test Artist"];
+              BOOL buttons = [card containsString:@"prev=0 play=1 next=1"];
+              BOOL muteHidden = [card containsString:@"mute=0"];
+              [w setMediaCardHoveredForTest:YES];
+              BOOL muteOnHover = [w.mediaCardDescription containsString:@"mute=1"];
+              [w setMediaCardHoveredForTest:NO];
+              BOOL size = [card hasPrefix:@"h=48"] && [card hasSuffix:@"art=1"];
+              BOOL clock = [MediaBarTitle(@"brain.fm (2:52)") isEqualToString:@"brain.fm"] &&
+                           [MediaBarTitle(@"\u25B6 Song - Artist 1:02 / 3:40") isEqualToString:@"Song - Artist"] &&
+                           [MediaBarTitle(@"Lisbon - Wikipedia") isEqualToString:@"Lisbon - Wikipedia"];
+              [w mediaBarNext:nil];
+              std::printf("SELFTEST-MINIPLAYER meta=%d buttons=%d muteHidden=%d muteOnHover=%d size=%d clock=%d\n", meta, buttons,
+                          muteHidden, muteOnHover, size, clock);
+              if (!meta || !buttons || !size) std::printf("SELFTEST-MINIPLAYER-DEBUG %s\n", card.UTF8String);
+            }
             [w toggleMuteItem:m];
             BOOL muted = m.audioMuted;
             [w toggleMuteItem:m];

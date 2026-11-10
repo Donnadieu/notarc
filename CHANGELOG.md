@@ -7,6 +7,11 @@ or later. From 0.5.0 on, NotArc updates itself.
 - The sidebar never shows a scrollbar track, even with a mouse plugged in or "Show scroll bars: Always" set in macOS;
   a thin scroller appears only while you scroll a long list, as in Arc. Tab rows now reach their full width, so the
   selected row's right corners are rounded.
+- Tab rows look like Arc's: a long title fades out at the right edge instead of ending in "...", and a close button
+  shows on the hovered row and on the selected one. Closing a row that isn't shown leaves the shown tab alone.
+- The mini player is now Arc's card: the artwork (or the site's icon), what's playing and the artist or site on two
+  lines, and back, play/pause and forward when the site supports them; mute shows while the pointer is over it.
+  Running clocks in page titles, like "brain.fm (2:52)", are left out.
 
 ## 0.26.1
 - The Dock shows NotArc's own icon (the gold "¬" on indigo, the same one Finder shows) instead of a colourway from

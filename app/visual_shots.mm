@@ -151,12 +151,19 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
       NSUInteger i = (NSUInteger)args[0].integerValue;
       NSArray* colors = [args subarrayWithRange:NSMakeRange(1, args.count - 2)];
       if (i < c.spaces.count) [c setTheme:colors intensity:args.lastObject.doubleValue forSpace:c.spaces[i]];
-    } else if ([cmd isEqual:@"open"]) {
+    } else if ([cmd isEqual:@"newtab"] || [cmd isEqual:@"open"]) {
       [c openInNewTab:arg];
     } else if ([cmd isEqual:@"show"]) {
       ArcItem* t = FindTab(c.currentSpace, arg);
       if (t) [c showItem:t];
       std::printf("VISUAL show %s\n", t ? t.url.UTF8String : "not found");
+    } else if ([cmd isEqual:@"hover"]) {
+      ArcItem* t = arg.length ? FindTab(c.currentSpace, arg) : nil;
+      [c hoverSidebarItem:t];
+    } else if ([cmd isEqual:@"js"]) {  // run a script in the shown tab
+      if (c.shownItem) [c runJS:arg inItem:c.shownItem];
+    } else if ([cmd isEqual:@"poll-media"]) {
+      [c pollMediaNow];
     } else if ([cmd isEqual:@"load"]) {
       [c openTabsForSelfTest:(NSUInteger)arg.integerValue];
     } else if ([cmd isEqual:@"do"]) {

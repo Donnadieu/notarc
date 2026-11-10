@@ -436,3 +436,11 @@ trackpad; everything else is checked by the hidden self-test.
     in the app (not a local patch) because every visual item needs it, before and after.
 103. **The sidebar scroller is always the overlay kind (V1).** macOS switches scroll views to the always-visible style
     when a mouse is attached; Arc's sidebar never shows a track, so the sidebar's scroll view refuses that switch.
+104. **Tab rows fade long titles and show a close button on hover and selection (V2).** The cross is a plain "x"
+    with Arc's hover fill. On a Today tab it archives the tab (like Cmd+W); on a pinned tab or Favorite it unloads
+    it and keeps the row. Closing a row that isn't shown keeps the shown tab.
+105. **The mini player reads what's playing from the page (V3).** Title, artist and artwork come from the page's
+    media session; without one, the page title is used with running clocks taken out. Back and forward show only
+    when the page handles previous / next track, because a button that does nothing is worse than none. Mute shows
+    only while the pointer is over the card (or while muted), to leave room for the title. Artwork is fetched once
+    per address and never in test runs.
