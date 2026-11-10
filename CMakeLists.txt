@@ -34,6 +34,8 @@ set(APP_SRCS
   app/easel.mm
   app/note_editor.h
   app/note_editor.mm
+  app/easel_clip.h
+  app/easel_clip.mm
   app/live_folder.h
   app/live_folder.mm
   app/archive_store.mm

@@ -71,6 +71,11 @@ or later. From 0.5.0 on, NotArc updates itself.
   EasyList and EasyPrivacy (downloaded only when you turn them on, refreshed daily or with Update Now) or any list by
   address. Lists block ad and tracker requests and hide ad elements on pages. The built-in list can be turned off, and
   the sites where blocking is off are listed with a Remove button.
+- Easels: draw arrows, rectangles, ellipses and freehand pen strokes in eight colours (tool bar over the canvas, or
+  V/T/A/R/O/P; Esc goes back to Select); drag the corner handles to resize anything (captures keep their shape).
+  File > Capture Area to Easel and Capture Full Page to Easel. File > Add Live Clip to Easel: drag over part of a page
+  and the clip keeps the address and that area; it refreshes when you open the easel (if older than a minute) and from
+  File > Refresh Live Clips.
 - The parity checklist is up to date with 0.23.0, with an Out of scope section and docs/decisions.md for every
   scope call.
 

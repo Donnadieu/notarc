@@ -21,6 +21,7 @@
 #import "app/boost_color_wheel.h"
 #import "app/easel.h"
 #import "app/note_editor.h"
+#import "app/easel_clip.h"
 #import "app/live_folder.h"
 #import "app/favicons.h"
 #import "app/tidy_title.h"
@@ -893,6 +894,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   EaselView* _easelView;      // Easel canvas, shown in the page card
   NSScrollView* _easelScroll;
   ArcItem* _easelItem;
+  NSMutableSet<NSString*>* _clipsRefreshing;  // live clips being re-rendered (easel folder | link | region)
   CefRefPtr<DevToolsResults> _devtoolsResults;
   std::map<int, CefRefPtr<CefRegistration>> _devtoolsRegs;
   int _devtoolsNextId;
@@ -2026,6 +2028,7 @@ static NSString* const kPiPExitJS =
   for (LittleWindowController* lw in [_littleWindows copy]) [lw.window close];
   [_peek.window close];
   if (_client) _client->set_quit_when_empty(true);
+  EaselCloseClipRenderers();
   if (_browsers.empty()) {
     [self.window close];
     return;
@@ -3758,16 +3761,64 @@ static const CGFloat kPaneGap = 6;
         _easelView = [[EaselView alloc] initWithFrame:_easelScroll.bounds];
         _easelView.delegate = (id<EaselViewDelegate>)self;
         _easelScroll.documentView = _easelView;
+        // The tool bar floats over the top of the canvas; content starts below it and scrolls under it.
+        _easelScroll.automaticallyAdjustsContentInsets = NO;
+        _easelScroll.contentInsets = NSEdgeInsetsMake(56, 0, 0, 0);
       }
       [_easelView loadFromDirectory:[[self easelsDirectory] stringByAppendingPathComponent:e.easelID]];
+      // Opening an easel refreshes its live clips (off-screen, asynchronously; only easels that have clips).
+      [self refreshLiveClips:NO];
     }
   }
   _easelScroll.hidden = !e;
+  NSView* bar = _easelView ? _easelView.toolbar : nil;
+  bar.hidden = !e;
   if (e) {
     _easelScroll.frame = _content.bounds;
     [_content addSubview:_easelScroll positioned:NSWindowAbove relativeTo:nil];
+    [_content addSubview:bar positioned:NSWindowAbove relativeTo:_easelScroll];
+    NSRect b = _content.bounds;
+    bar.frameOrigin = NSMakePoint(round(NSMidX(b) - bar.frame.size.width / 2),
+                                  _content.isFlipped ? 12 : NSMaxY(b) - bar.frame.size.height - 12);
+    bar.autoresizingMask = NSViewMinXMargin | NSViewMaxXMargin | (_content.isFlipped ? NSViewMaxYMargin : NSViewMinYMargin);
     [_easelView updateSize];
   }
+}
+
+// Live web clips (#49). A clip keeps its page address, the dragged region, the page size and scroll position. Its
+// picture is re-rendered in a hidden off-screen browser in the Space's profile (so signed-in pages work), never by
+// touching the user's tabs. Opening an easel refreshes clips older than a minute; File > Refresh Live Clips forces it.
+static NSString* ClipKey(NSString* dir, EaselObject* o) {
+  return [NSString stringWithFormat:@"%@|%@|%@", dir, o.link, NSStringFromRect(o.region)];
+}
+- (NSUInteger)refreshLiveClips:(BOOL)force {
+  if (!_easelItem || !_easelView || !_space) return 0;
+  NSString* dir = _easelView.directory;
+  if (!_clipsRefreshing) _clipsRefreshing = [NSMutableSet set];
+  CefRefPtr<CefRequestContext> ctx = [self contextForSpace:_space];
+  CGFloat scale = self.window.backingScaleFactor ?: 2;
+  NSUInteger started = 0;
+  for (EaselObject* o in _easelView.liveClips) {
+    if (!force && o.refreshedAt && -o.refreshedAt.timeIntervalSinceNow < 60) continue;
+    NSString* key = ClipKey(dir, o);
+    if ([_clipsRefreshing containsObject:key]) continue;
+    [_clipsRefreshing addObject:key];
+    started++;
+    __weak MainWindowController* weakSelf = self;
+    EaselRenderClip(ctx, o.link, o.viewport, o.scroll, o.region, scale, ^(NSData* png) {
+      MainWindowController* me = weakSelf;
+      if (!me) return;
+      [me->_clipsRefreshing removeObject:key];
+      me.clipRefreshesFinished++;
+      if (!png || ![me->_easelView.directory isEqualToString:dir]) return;  // failed, or another easel is open now
+      for (EaselObject* cur in me->_easelView.liveClips)
+        if ([ClipKey(dir, cur) isEqualToString:key]) [me->_easelView replaceImageOf:cur png:png];
+    });
+  }
+  return started;
+}
+- (IBAction)refreshLiveClipsFromMenu:(id)sender {
+  if (![self refreshLiveClips:YES] && !_easelView.liveClips.count) NSBeep();
 }
 - (void)easelDidChange:(EaselView*)easel {
   // An easel is named from its first text box, like a note from its first line.
@@ -4403,6 +4454,78 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
     if (!me.selfTestProfiles) [me showToast:@"Captured to Easel" action:nil selector:nil];
   }];
 }
+- (EaselObject*)addPNGToRecentEasel:(NSData*)png link:(NSString*)link {
+  if (!png) { NSBeep(); return nil; }
+  ArcItem* easel = [self recentEasel];
+  if (easel) [self showItem:easel]; else [self createEaselWithID:nil];
+  EaselObject* o = [_easelView addImagePNG:png link:link];
+  if (o && !self.selfTestProfiles) [self showToast:@"Captured to Easel" action:nil selector:nil];
+  return o;
+}
+- (BOOL)canCaptureShownPage { return _shown && !_shown.noteID && !_shown.easelID && _shown.browserId && [self webViewForItem:_shown]; }
+
+// Drag a rectangle over the page (the Capture Area overlay), then do something with it.
+- (void)pickAreaThen:(void (^)(NSRect r))then {
+  if (![self canCaptureShownPage]) { NSBeep(); return; }
+  [_captureOverlay removeFromSuperview];
+  CaptureAreaView* o = [[CaptureAreaView alloc] initWithFrame:_content.frame];
+  __weak CaptureAreaView* weakO = o;
+  void (^next)(NSRect) = [then copy];
+  o.finished = ^(NSRect r) {
+    [weakO removeFromSuperview];
+    if (!NSIsEmptyRect(r)) next(r);
+  };
+  [_content.superview addSubview:o positioned:NSWindowAbove relativeTo:nil];
+  _captureOverlay = o;
+  [self.window makeFirstResponder:o];
+}
+// File > Capture Area to Easel / Capture Full Page to Easel: the Capture (#48) pictures, straight into an easel.
+- (IBAction)captureAreaToEasel:(id)sender {
+  __weak MainWindowController* weakSelf = self;
+  [self pickAreaThen:^(NSRect r) { [weakSelf captureToEaselMode:@"area" rect:r done:nil]; }];
+}
+- (IBAction)captureFullPageToEasel:(id)sender { [self captureToEaselMode:@"full" rect:NSZeroRect done:nil]; }
+- (void)captureToEaselMode:(NSString*)mode rect:(NSRect)r done:(void (^)(EaselObject*))done {
+  if (![self canCaptureShownPage]) { NSBeep(); if (done) done(nil); return; }
+  NSString* link = [self itemCurrentURL:_shown];
+  __weak MainWindowController* weakSelf = self;
+  [self capture:mode rect:r done:^(NSData* png) {
+    EaselObject* o = [weakSelf addPNGToRecentEasel:png link:link];
+    if (done) done(o);
+  }];
+}
+// File > Add Live Clip to Easel: drag over part of a page; the clip keeps the address and region and refreshes later.
+- (IBAction)liveClipToEasel:(id)sender {
+  __weak MainWindowController* weakSelf = self;
+  [self pickAreaThen:^(NSRect r) { [weakSelf liveClipArea:r done:nil]; }];
+}
+- (void)liveClipArea:(NSRect)r done:(void (^)(EaselObject*))done {
+  ArcItem* page = _shown;
+  NSString* link = [self itemCurrentURL:page];
+  NSView* web = [self webViewForItem:page];
+  if (![self canCaptureShownPage] || !link.length || !web) { NSBeep(); if (done) done(nil); return; }
+  NSSize viewport = web.bounds.size;
+  NSRect region = NSIntersectionRect(r, NSMakeRect(0, 0, viewport.width, viewport.height));
+  __weak MainWindowController* weakSelf = self;
+  [self capture:@"area" rect:region done:^(NSData* png) {
+    MainWindowController* me = weakSelf;
+    if (!me || !png) { NSBeep(); if (done) done(nil); return; }
+    // Where the page was scrolled to, so a refresh shows the same part of it.
+    [me devtools:page method:@"Page.getLayoutMetrics" params:nil done:^(NSDictionary* m) {
+      MainWindowController* me2 = weakSelf;
+      if (!me2) { if (done) done(nil); return; }
+      NSDictionary* vv = m[@"cssVisualViewport"] ?: m[@"visualViewport"];
+      NSPoint scroll = NSMakePoint(MAX(0, [vv[@"pageX"] doubleValue]), MAX(0, [vv[@"pageY"] doubleValue]));
+      ArcItem* easel = [me2 recentEasel];
+      if (easel) [me2 showItem:easel]; else [me2 createEaselWithID:nil];
+      EaselObject* o = [me2->_easelView addClipPNG:png link:link region:region viewport:viewport scroll:scroll];
+      if (!o) NSBeep();
+      else if (!me2.selfTestProfiles) [me2 showToast:@"Live clip added to Easel" action:nil selector:nil];
+      if (done) done(o);
+    }];
+  }];
+}
+
 // Tests.
 - (EaselView*)easelView { return _easelScroll.hidden ? nil : _easelView; }
 - (void)captureShownPageToEasel:(void (^)(BOOL))done {
@@ -8749,6 +8872,10 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
     return [self noteForExport] != nil;
   if (mi.action == @selector(newNoteInSplitView:)) return _space != nil && _splitItems.count < 4;
   if (mi.action == @selector(fillPassword:)) return _shown.browserId != 0 && [_shown.url hasPrefix:@"http"];
+  if (mi.action == @selector(captureAreaToEasel:) || mi.action == @selector(captureFullPageToEasel:) ||
+      mi.action == @selector(liveClipToEasel:))
+    return [self canCaptureShownPage];
+  if (mi.action == @selector(refreshLiveClipsFromMenu:)) return _easelItem && _easelView.liveClips.count > 0;
   return YES;
 }
 

@@ -330,3 +330,23 @@ trackpad; everything else is checked by the hidden self-test.
    Settings > Block ads & trackers (off by default, as Arc's was); lists only download, refresh and apply while it's on.
 6. **Daily refresh** checks hourly for turned-on lists last downloaded over 24 hours ago. Self-tests never download:
    they subscribe to a local file:// fixture and the refresh timer doesn't start in test runs.
+
+## 2026-11-09: finishing Easels (#49)
+
+31. **Live web clips refresh in a hidden off-screen browser, not from the user's tabs.** A clip stores the page
+    address, the dragged region, the page's size and its scroll position. To refresh, NotArc loads the address in a
+    short-lived windowless (off-screen rendered) browser in the Space's own profile (so signed-in pages show the same
+    content), scrolls to the saved spot, crops the region from the rendered pixels and closes the browser. No DevTools
+    on tabs and nothing tied to tab switching: the work only starts when an easel with clips is opened and a clip is
+    more than a minute old, or from File > Refresh Live Clips, and it runs asynchronously (the page renders in
+    Chromium's own processes, the main thread only copies the cropped pixels, PNG encoding runs on a background
+    queue). This needs CEF's
+    `windowless_rendering_enabled` at startup; tabs stay windowed. Arc's clips were live views of the page; a refreshed
+    picture is the closest local equivalent without keeping a hidden page running per clip.
+32. **Clips render at 100% zoom** with the page size the tab had when clipped. A page zoomed in the tab at clip time
+    can show a slightly different area after a refresh. Pages that need a click or a scroll inside a frame to show the
+    clipped part show their default state.
+33. **Drawing tools follow Arc's set (arrow, rectangle, ellipse, freehand) with eight colours of NotArc's own.**
+    Shapes are outlines, not filled, and are only clickable near their line, so a capture under an arrow can still be
+    picked. Single-letter tool keys (V, T, A, R, O, P) are a guess; Arc's own key bindings weren't recoverable.
+34. **Resizing uses four corner handles; pictures and clips keep their proportions, text boxes and drawings don't.**

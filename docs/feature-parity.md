@@ -79,7 +79,7 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 ## Content tools
 
 - [x] Capture: area, full page, portrait mode; save/copy screenshot (#48)
-- [ ] Easel (canvas of captures, text, live web clips) (partial: File > New Easel and the + menu add an easel to Today; File > Capture to Easel (Cmd+Shift+2) adds a capture of the visible page, linked to its source; text boxes; drag to move, Delete to remove; saved locally, archived and reopened like tabs. Missing: live web clips, region and full-page capture, drawing (arrows, shapes, freehand), resizing) (#49)
+- [x] Easel (canvas of captures, text, live web clips) (#49)
 - [x] Notes (rich-text documents in the sidebar): Arc-style title, reading column and format bar following the Space's light/dark look; notes as split view panes; Export/Copy Note as Markdown (#50)
 - [x] Boosts: custom CSS/JS per site, zap elements, boost editor (per-site Boosts saved locally and applied on every page load, including subdomains; Arc-style editor card with a colour wheel and Intensity slider, font tiles, text size, case, Zap and Code; Shuffle; Boost indicator in the address pill; on/off) (#51)
 - [x] Translate page: View > Translate Page opens the page through Google's web translator into your macOS language, Show Original goes back, and a page in another language offers a one-tap Translate (#52)

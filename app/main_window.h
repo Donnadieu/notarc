@@ -15,6 +15,7 @@ NSString* CleanLinkURL(NSString* url);
 @class AutofillController;
 @class EaselView;
 @class NoteEditorView;
+@class EaselObject;
 NSInteger UnreadCountFromTitle(NSString* title);
 NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL began);  // -1 back, 1 forward, 0 none  // "Inbox (12)" -> 12
 
@@ -456,6 +457,15 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (ArcItem*)createEaselWithID:(NSString*)easelID;
 - (EaselView*)easelView;                                  // tests: nil when hidden
 - (void)captureShownPageToEasel:(void (^)(BOOL ok))done;  // tests
+// Easel captures and live web clips (#49).
+- (IBAction)captureAreaToEasel:(id)sender;
+- (IBAction)captureFullPageToEasel:(id)sender;
+- (IBAction)liveClipToEasel:(id)sender;
+- (IBAction)refreshLiveClipsFromMenu:(id)sender;
+- (void)captureToEaselMode:(NSString*)mode rect:(NSRect)r done:(void (^)(EaselObject* o))done;  // "area" or "full"
+- (void)liveClipArea:(NSRect)r done:(void (^)(EaselObject* clip))done;  // r in page points, top-left origin
+- (NSUInteger)refreshLiveClips:(BOOL)force;  // returns how many clips started refreshing
+@property(nonatomic) NSInteger clipRefreshesFinished;  // tests
 // Notes
 - (IBAction)newNote:(id)sender;
 - (ArcItem*)createNoteWithID:(NSString*)noteID;
