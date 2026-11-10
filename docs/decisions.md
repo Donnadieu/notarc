@@ -129,3 +129,17 @@ trackpad; everything else is checked by the hidden self-test.
     panel only appears after 0.12 s, so a quick Ctrl+Tab still flips straight to the previous tab. Choosing the menu
     item with the mouse switches directly. Ctrl+Shift+Tab to open it backwards wasn't added (no free shortcut was
     asked for); Shift+Tab works once it is open.
+
+## 2026-11-09: Notes look, split panes and Markdown export (#50)
+15. **Note lists are text markers, not AppKit text lists.** Bulleted, numbered and checklist items start with "•",
+    "1." or "☐"/"☑" and a tab, with a hanging indent. AppKit's own lists (NSTextList) store their markers differently
+    from macOS 26 on, so plain markers are the only form that reads the same in RTF, plain-text copies and every
+    TextKit version. Clicking a box ticks it; Return continues a list and Return on an empty item ends it. Format >
+    Lists... (AppKit's list panel) was replaced by the note's own list commands.
+16. **Title and headings in Markdown:** the note's first line exports as `# Title`; Heading 1-3 export one level
+    down (`##` to `####`) so a note has one top-level heading. Underline has no Markdown form and exports as
+    `<u>...</u>`; strikethrough as `~~...~~`; checklists as `- [ ]` / `- [x]`. Images are left out.
+17. **Arc's format bar wording isn't copied.** NotArc's bar uses plain names (Body, Heading 1-3, Bold, ...) and SF
+    Symbols. No keyboard shortcuts were added for the new commands (Arc's aren't known); Cmd+B/I/U still work.
+18. **A note is one document:** Open in Split View on a note moves it into the split rather than opening a copy, and
+    pasting or typing a `notarc://note/...` address into a split does the same.

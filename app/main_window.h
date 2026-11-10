@@ -12,6 +12,7 @@ NSString* CleanLinkURL(NSString* url);
 
 @class Boost;
 @class EaselView;
+@class NoteEditorView;
 NSInteger UnreadCountFromTitle(NSString* title);
 NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL began);  // -1 back, 1 forward, 0 none  // "Inbox (12)" -> 12
 
@@ -406,6 +407,15 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (NSString*)savedNoteText:(ArcItem*)note;            // tests
 - (void)makeNoteRangeBold:(NSRange)r;                 // tests
 - (BOOL)noteRangeIsBold:(ArcItem*)note range:(NSRange)r;  // tests
+- (IBAction)newNoteInSplitView:(id)sender;           // Arc: newNoteInSplitView
+- (IBAction)exportNoteAsMarkdown:(id)sender;         // File > Export Note as Markdown... (save panel)
+- (IBAction)copyNoteAsMarkdown:(id)sender;
+- (BOOL)exportNote:(ArcItem*)note toPath:(NSString*)path;  // what the save panel's OK does (tests call it directly)
+- (NSString*)markdownForNote:(ArcItem*)note;
+- (BOOL)placeInSplit:(ArcItem*)item horizontal:(BOOL)horizontal before:(BOOL)before;
+- (NoteEditorView*)noteEditorForItem:(ArcItem*)note;  // tests: nil unless on screen
+- (NSAttributedString*)savedNote:(ArcItem*)note;      // tests
+- (NSPasteboard*)copyPasteboard;
 - (NSString*)boostIndicatorState;                                                   // tests: on/off/none
 - (void)setColorScheme:(NSString*)scheme forSpace:(ArcSpace*)space;  // nil/"auto", "light", "dark"
 - (BOOL)sidebarIsDark;                       // tests
