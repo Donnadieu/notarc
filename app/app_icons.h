@@ -5,11 +5,14 @@
 
 #import <Cocoa/Cocoa.h>
 
-extern NSString* const kSettingAppIcon;  // NSString, one of AppIconNames(); default "classic"
+extern NSString* const kSettingAppIcon;  // NSString, one of AppIconNames(); default kAppIconBundle
+extern NSString* const kAppIconBundle;   // "notarc": the app bundle's own icon (NotArc.icns)
 
 NSArray<NSString*>* AppIconNames(void);           // in picker order
 NSString* AppIconTitle(NSString* name);           // "Classic", "Sunset", ...
 NSImage* AppIconImage(NSString* name);            // cached, resolution independent; nil for unknown names
-NSString* CurrentAppIconName(void);               // the setting, or "classic" if unset or unknown
-void ApplyAppIcon(void);                          // sets NSApp.applicationIconImage from the setting
+NSString* CurrentAppIconName(void);               // the setting, or kAppIconBundle if unset or unknown
+void MigrateAppIconOnce(void);                    // launch, before ApplyAppIcon: drops a pre-0.26.1 choice once
+BOOL AppIconMigrationDue(NSDictionary* prefs);    // tests: the pure rule behind it
+void ApplyAppIcon(void);                          // sets NSApp.applicationIconImage (nil = the bundle icon)
 CGFloat AppIconDifference(NSImage* a, NSImage* b);  // tests: mean per-channel difference (0-255) at 8x8 pixels

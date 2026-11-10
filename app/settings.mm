@@ -42,7 +42,7 @@ void SettingsRegisterDefaults(void) {
     kSettingShowSpaceHeader : @YES,
     kSettingSpaceAppearance : @"auto",
     kSettingDeveloperModeLocal : @YES,
-    kSettingAppIcon : @"classic",
+    kSettingAppIcon : @"notarc",  // kAppIconBundle
   }];
   [NSUserDefaults.standardUserDefaults registerDefaults:MaxDefaultSettings()];  // Settings > Max (#58, #59)
 }
@@ -696,6 +696,10 @@ static MainWindowController* Browser() { return [MainWindowController mainContro
     scroll,
     [self row:@[ [NSButton buttonWithTitle:@"New Profile..." target:self action:@selector(newProfile:)],
                  [NSButton buttonWithTitle:@"Rename..." target:self action:@selector(renameProfile:)] ]],
+    [self heading:@"Import from Arc"],
+    [NSButton buttonWithTitle:@"Import Everything from Arc..." target:nil action:@selector(importEverythingFromArcMenu:)],
+    [self note:@"Copies Arc's logins (so you stay signed in), history, extensions, saved passwords, addresses and cards "
+               @"into the matching profiles. Safe to run again: it brings Arc's latest logins and adds nothing twice."],
   ]];
 }
 
@@ -829,7 +833,7 @@ static MainWindowController* Browser() { return [MainWindowController mainContro
     [self note:@"For every Space that uses the default. A Space can pick its own in its menu (Space name > Appearance)."],
     [self heading:@"App Icon"],
     icons,
-    [self note:@"Shown in the Dock while NotArc is open. Finder keeps the standard icon."],
+    [self note:@"Shown in the Dock while NotArc is open. Finder, and the Dock when NotArc is closed, show the NotArc icon."],
   ]];
 }
 

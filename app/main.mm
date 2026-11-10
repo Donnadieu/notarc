@@ -25,6 +25,7 @@
 #import "app/shortcuts.h"
 #import "app/chrome_page.h"
 #include <sqlite3.h>
+#import <CommonCrypto/CommonCrypto.h>
 #import "app/boost_store.h"
 #import "app/boost_color_wheel.h"
 #import "app/easel.h"
@@ -150,6 +151,40 @@ static void SelfTestMakeLoginData(NSString* path, NSData* key, NSArray<NSArray*>
                                                                           : ChromiumEncryptValue([r[2] dataUsingEncoding:NSUTF8StringEncoding], key);
     SelfTestExec(db, @"INSERT INTO logins VALUES(?,?,?,?,?,?,?,?,?)",
                  @[ [r[0] stringByAppendingString:@"login"], r[0], @"u", r[1], @"p", pw, r[0], @13300000000000000, @(never) ]);
+  }
+  sqlite3_close(db);
+}
+
+// Arc-format (Chromium DB version 24) "Cookies": each row is [host_key, name, value, path, secure, httponly, samesite,
+// expires (seconds from now, 0 = session), key (nil = stored unencrypted)]. v24 values carry SHA-256(host) first.
+static void SelfTestMakeCookies(NSString* path, NSArray<NSArray*>* rows) {
+  [NSFileManager.defaultManager removeItemAtPath:path error:nil];
+  sqlite3* db = NULL;
+  sqlite3_open(path.UTF8String, &db);
+  sqlite3_exec(db, "CREATE TABLE meta(key LONGVARCHAR NOT NULL UNIQUE PRIMARY KEY, value LONGVARCHAR);"
+                   "INSERT INTO meta VALUES('version','24');"
+                   "CREATE TABLE cookies(creation_utc INTEGER NOT NULL, host_key TEXT NOT NULL, top_frame_site_key TEXT NOT NULL,"
+                   " name TEXT NOT NULL, value TEXT NOT NULL, encrypted_value BLOB NOT NULL, path TEXT NOT NULL,"
+                   " expires_utc INTEGER NOT NULL, is_secure INTEGER NOT NULL, is_httponly INTEGER NOT NULL,"
+                   " last_access_utc INTEGER NOT NULL, has_expires INTEGER NOT NULL, is_persistent INTEGER NOT NULL,"
+                   " priority INTEGER NOT NULL, samesite INTEGER NOT NULL, source_scheme INTEGER NOT NULL,"
+                   " source_port INTEGER NOT NULL, last_update_utc INTEGER NOT NULL, source_type INTEGER NOT NULL,"
+                   " has_cross_site_ancestor INTEGER NOT NULL)", NULL, NULL, NULL);
+  int64_t now = (int64_t)(([[NSDate date] timeIntervalSince1970] + 11644473600.0) * 1e6);
+  for (NSArray* r in rows) {
+    NSString* host = r[0];
+    NSData* key = [r[8] isKindOfClass:NSData.class] ? r[8] : nil;
+    NSMutableData* plain = [NSMutableData dataWithLength:CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256(host.UTF8String, (CC_LONG)strlen(host.UTF8String), (uint8_t*)plain.mutableBytes);
+    [plain appendData:[r[2] dataUsingEncoding:NSUTF8StringEncoding]];
+    int64_t expires = [r[7] longLongValue] ? now + [r[7] longLongValue] * 1000000LL : 0;
+    // An empty NSData binds as NULL, which encrypted_value refuses, so unencrypted rows use a literal X''.
+    NSString* enc = key ? @"?" : @"X''";
+    NSMutableArray* binds = [@[ @(now - 86400000000LL), host, r[1], key ? @"" : r[2] ] mutableCopy];
+    if (key) [binds addObject:ChromiumEncryptValue(plain, key)];
+    [binds addObjectsFromArray:@[ r[3], @(expires), r[4], r[5], @(now), @(expires != 0), @(expires != 0), r[6], @(now) ]];
+    SelfTestExec(db, [NSString stringWithFormat:@"INSERT INTO cookies VALUES(?,?,'',?,?,%@,?,?,?,?,?,?,?,1,?,2,443,?,0,0)", enc],
+                 binds);
   }
   sqlite3_close(db);
 }
@@ -474,6 +509,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
 
 - (void)start {
   [self buildMenu];
+  MigrateAppIconOnce();
   ApplyAppIcon();  // the chosen NotArc icon (#74) in the Dock; the app bundle is never changed
   NSString* arcDir = ArcDataDirectory();
   NSString* storePath = SidebarStorePath(self.selfTest);
@@ -3703,6 +3739,97 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       });
      });
     });
+    // Import Everything from Arc (#150, Nov 10 fixes): Arc's logins (cookies) are copied into each Space's CEF profile
+    // with every field kept, a second import brings Arc's newer values, errors come back in plain words, and the
+    // launch offer shows whenever Arc data exists and nothing was imported yet. Fake Arc files and a throwaway key only.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 105 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSFileManager* fm = NSFileManager.defaultManager;
+      NSData* tk = ArcCookieKey(@"selftest-arc-safe-storage");
+      NSString* fake = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-arc-cookies"];
+      NSString* prof = w.currentSpace.profileDirectory.length ? w.currentSpace.profileDirectory : @"Default";
+      [fm removeItemAtPath:fake error:nil];
+      [fm createDirectoryAtPath:[fake stringByAppendingPathComponent:prof] withIntermediateDirectories:YES attributes:nil error:nil];
+      NSString* db = ArcCookieDBPathIn(fake, prof);
+      NSData* other = ArcCookieKey(@"someone-else");
+      // [host, name, value, path, secure, httponly, samesite (DB), expires in s (0 = session), key]
+      NSArray* (^rows)(NSString*) = ^NSArray*(NSString* v) {
+        return @[ @[ @".cookies.example", @"sid", v, @"/", @1, @1, @1, @86400, tk ],
+                  @[ @"www.cookies.example", @"pref", @"dark", @"/", @1, @0, @2, @0, tk ],
+                  @[ @"www.cookies.example", @"plain", @"old-row", @"/", @0, @0, @-1, @86400, NSNull.null ],
+                  @[ @".cookies.example", @"gone", @"x", @"/", @1, @0, @1, @-3600, tk ],
+                  @[ @".cookies.example", @"locked", @"y", @"/", @1, @0, @1, @86400, other ] ];
+      };
+      SelfTestMakeCookies(db, rows(@"session-1"));
+      ArcCookieStats st;
+      NSError* err = nil;
+      NSArray<ArcCookie*>* read = ArcReadCookies(db, tk, &st, &err);
+      BOOL reader = read.count == 3 && st.total == 5 && st.expired == 1 && st.undecryptable == 1;
+      NSError* wrongErr = nil;
+      NSArray* wrong = ArcReadCookies(db, ArcCookieKey(@"wrong"), &st, &wrongErr);
+      NSError* missingErr = nil;
+      ArcReadCookies([fake stringByAppendingPathComponent:@"Nope/Cookies"], tk, &st, &missingErr);
+      BOOL plainErrors = wrong.count == 1 /* the unencrypted row */ && [missingErr.localizedDescription containsString:@"no cookie file"];
+      NSString* lockedOnly = [fake stringByAppendingPathComponent:@"locked-only"];
+      [fm createDirectoryAtPath:lockedOnly withIntermediateDirectories:YES attributes:nil error:nil];
+      SelfTestMakeCookies([lockedOnly stringByAppendingPathComponent:@"Cookies"], @[ @[ @".x.example", @"a", @"b", @"/", @1, @0, @1, @86400, other ] ]);
+      NSError* lockedErr = nil;
+      ArcReadCookies([lockedOnly stringByAppendingPathComponent:@"Cookies"], tk, &st, &lockedErr);
+      plainErrors = plainErrors && [lockedErr.localizedDescription containsString:@"didn't unlock"];
+      // Launch offer and the summary words (pure).
+      BOOL offer = ArcImportOfferDue(@{}, YES) && ArcImportOfferDue(@{@"arcImportOffered" : @YES}, YES) &&
+                   !ArcImportOfferDue(@{kArcImportCompletedKey : [NSDate date]}, YES) &&
+                   !ArcImportOfferDue(@{kArcImportDeclinedKey : @YES}, YES) && !ArcImportOfferDue(@{}, NO) &&
+                   ArcImportOfferDue(@{kArcImportDeclinedKey : @NO}, YES);
+      NSString* summary = ArcImportSummary(@{@"history" : @2, @"extensions" : @1, @"skipped" : @0,
+                                             @"passwordError" : @"macOS didn't give NotArc Arc's key (denied)."},
+                                           @{@"set" : @2, @"profiles" : @1, @"errors" : @[ @"Work: Arc has no cookie file for this profile" ]});
+      BOOL words = [summary containsString:@"Logins (cookies): 2 copied into 1 profile"] &&
+                   [summary containsString:@"not copied. macOS didn't give NotArc Arc's key"] &&
+                   [summary containsString:@"Work: Arc has no cookie file"] && [summary containsString:@"may still ask you to sign in"];
+      BOOL iconMigration = AppIconMigrationDue(@{kSettingAppIcon : @"forest"}) &&
+                           !AppIconMigrationDue(@{kSettingAppIcon : @"forest", @"appIconBundleDefault" : @YES}) &&
+                           !AppIconMigrationDue(@{});
+      NSString* url = @"https://www.cookies.example/";
+      [w importArcCookiesFromUserData:fake key:nil done:^(NSDictionary* noKey) {
+        BOOL keyError = [noKey[@"set"] intValue] == 0 && [[noKey[@"errors"] firstObject] containsString:@"macOS didn't give"];
+        [w importArcCookiesFromUserData:fake key:tk done:^(NSDictionary* first) {
+          [w testCookieDetailsForURL:url done:^(NSArray<NSDictionary*>* c1) {
+            NSDictionary *sid = nil, *pref = nil, *plain = nil;
+            for (NSDictionary* c in c1) {
+              if ([c[@"name"] isEqual:@"sid"]) sid = c;
+              if ([c[@"name"] isEqual:@"pref"]) pref = c;
+              if ([c[@"name"] isEqual:@"plain"]) plain = c;
+            }
+            int64_t nowCef = (int64_t)(([[NSDate date] timeIntervalSince1970] + 11644473600.0) * 1e6);
+            BOOL copied = [first[@"set"] intValue] >= 3 && c1.count == 3;
+            BOOL fields = [sid[@"value"] isEqual:@"session-1"] && [sid[@"domain"] isEqual:@".cookies.example"] &&
+                          [sid[@"secure"] boolValue] && [sid[@"httponly"] boolValue] &&
+                          [sid[@"samesite"] intValue] == CEF_COOKIE_SAME_SITE_LAX_MODE && [sid[@"hasExpires"] boolValue] &&
+                          llabs([sid[@"expires"] longLongValue] - (nowCef + 86400000000LL)) < 600000000LL &&
+                          [pref[@"samesite"] intValue] == CEF_COOKIE_SAME_SITE_STRICT_MODE && ![pref[@"httponly"] boolValue] &&
+                          ![pref[@"hasExpires"] boolValue] && [pref[@"domain"] isEqual:@"www.cookies.example"] &&
+                          [plain[@"value"] isEqual:@"old-row"];
+            BOOL reported = [first[@"expired"] intValue] >= 1 && [first[@"locked"] intValue] >= 1;
+            SelfTestMakeCookies(db, rows(@"session-2"));  // Arc renewed the session since
+            [w importArcCookiesFromUserData:fake key:tk done:^(NSDictionary* second) {
+              [w testCookieDetailsForURL:url done:^(NSArray<NSDictionary*>* c2) {
+                BOOL renewed = NO;
+                for (NSDictionary* c in c2)
+                  if ([c[@"name"] isEqual:@"sid"]) renewed = [c[@"value"] isEqual:@"session-2"];
+                renewed = renewed && c2.count == 3;
+                [w testDeleteCookiesForURL:url done:^{
+                  [fm removeItemAtPath:fake error:nil];
+                  std::printf("SELFTEST-ARCCOOKIES reader=%d plainErrors=%d keyError=%d copied=%d fields=%d reported=%d "
+                              "renewed=%d offer=%d words=%d iconMigration=%d\n", reader, plainErrors, keyError, copied,
+                              fields, reported, renewed, offer, words, iconMigration);
+                }];
+              }];
+            }];
+          }];
+        }];
+      }];
+    });
     // Notes: a new note shows the editor (no web view), typing names it from its first line and saves rich text,
     // switching away and back reloads it, closing archives it and reopening from the archive brings the text back.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 110 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -4053,7 +4180,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 27 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
       // App icon at launch (#74): the default NotArc icon is already in place before anything below changes it.
-      CGFloat launchDiff = AppIconDifference(NSApp.applicationIconImage, AppIconImage(@"classic"));
+      CGFloat launchDiff = AppIconDifference(NSApp.applicationIconImage, AppIconImage(kAppIconBundle));
       SettingsWindowController* sw = [SettingsWindowController shared];
       NSDictionary* savedSettings = SettingsMemorySnapshotForTest();
       __block NSButton* (^findButton)(NSView*, NSString*) = nil;
@@ -4084,6 +4211,8 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         BOOL select = [sw.selectedPane isEqualToString:@"advanced"];
         [sw selectPane:@"general"];
         BOOL kept = [find([sw viewOfPane:@"links"], @"Air Traffic Control...") action] == @selector(showAirTrafficControl:);
+        kept = kept && [find([sw viewOfPane:@"profiles"], @"Import Everything from Arc...") action] ==
+                           @selector(importEverythingFromArcMenu:);
         for (NSString* k in @[ kSettingSearchSuggestions, kSettingBlockAds, kSettingAutoPiP, kSettingSoundEffects,
                                kSettingReorderHaptics, kSettingPeekPinnedLinks, kSettingPeekShiftClick ])
           kept = kept && [sw checkboxForSetting:k] != nil;
@@ -4128,7 +4257,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         [sw chooseSpaceAppearance:@"dark"];
         SetDeveloperMode(YES, @"reset.example");
         ResetAllSettings();
-        BOOL reset = SettingBool(kSettingSoundEffects) && [CurrentAppIconName() isEqualToString:@"classic"] &&
+        BOOL reset = SettingBool(kSettingSoundEffects) && [CurrentAppIconName() isEqualToString:kAppIconBundle] &&
                      [DefaultSpaceAppearance() isEqualToString:@"auto"] && !DeveloperModeOnForHost(@"reset.example") &&
                      SettingDouble(kSettingAutoArchiveHours) == 12;
         SettingsMemoryRestoreForTest(savedSettings);
@@ -4142,7 +4271,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       }
       {  // #74: 4-6 NotArc icons, picked in Appearance, applied at once and at launch, saved; the bundle isn't touched.
         NSArray* names = AppIconNames();
-        BOOL distinct = names.count >= 4 && names.count <= 6;
+        BOOL distinct = names.count >= 4 && names.count <= 7;
         for (NSUInteger i = 0; i < names.count; ++i)
           for (NSUInteger j = i + 1; j < names.count; ++j)
             distinct = distinct && AppIconDifference(AppIconImage(names[i]), AppIconImage(names[j])) > 8;
@@ -4152,7 +4281,14 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
             if (![o isEqualToString:n] && AppIconDifference(NSApp.applicationIconImage, AppIconImage(o)) <= d) return NO;
           return d < 12;  // a bitmap copy of the same icon differs by ~6; other icons by 20+
         };
-        BOOL atLaunch = launchDiff < 12 && shows(@"classic");
+        BOOL atLaunch = launchDiff < 12 && shows(kAppIconBundle);
+        // The default is the bundle's own icon (Icon A), first in the picker, with every size from 16 to 1024 px.
+        NSMutableSet* sizes = [NSMutableSet set];
+        for (NSImageRep* r in AppIconImage(kAppIconBundle).representations) [sizes addObject:@(r.pixelsWide)];
+        BOOL bundleIcon = [names.firstObject isEqualToString:kAppIconBundle] &&
+                          [[NSSet setWithArray:@[ @16, @32, @64, @128, @256, @512, @1024 ]] isSubsetOfSet:sizes] &&
+                          [[NSUserDefaults.standardUserDefaults volatileDomainForName:NSRegistrationDomain][kSettingAppIcon]
+                              isEqual:kAppIconBundle];
         NSString* plist = [NSBundle.mainBundle.bundlePath stringByAppendingPathComponent:@"Contents/Info.plist"];
         NSDate* plistDate = [[NSFileManager.defaultManager attributesOfItemAtPath:plist error:nil] fileModificationDate];
         [sw chooseAppIcon:@"sunset"];
@@ -4163,13 +4299,13 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         SettingSetObject(kSettingAppIcon, @"midnight");  // as if saved last time: launch applies it
         ApplyAppIcon();
         BOOL relaunch = shows(@"midnight");
-        [sw chooseAppIcon:@"classic"];
-        BOOL restored = shows(@"classic") && [sw.appIconShownAsChosen isEqualToString:@"classic"];
+        [sw chooseAppIcon:kAppIconBundle];
+        BOOL restored = shows(kAppIconBundle) && [sw.appIconShownAsChosen isEqualToString:kAppIconBundle];
         BOOL bundle = [[[NSFileManager.defaultManager attributesOfItemAtPath:plist error:nil] fileModificationDate]
                           isEqualToDate:plistDate];
         std::printf("SELFTEST-APPICON variants=%d distinct=%d atLaunch=%d applied=%d saved=%d unknownIgnored=%d "
-                    "relaunch=%d restored=%d bundleUntouched=%d\n", names.count >= 4, distinct, atLaunch, applied, saved,
-                    unknownIgnored, relaunch, restored, bundle);
+                    "relaunch=%d restored=%d bundleUntouched=%d bundleIcon=%d\n", names.count >= 4, distinct, atLaunch, applied,
+                    saved, unknownIgnored, relaunch, restored, bundle, bundleIcon);
       }
       {  // #68 pure rules: local sites on by default; the pill shows host:port/path in Developer Mode.
         BOOL local = DeveloperModeOnForURL(@"http://localhost:3000/") && DeveloperModeOnForURL(@"http://127.0.0.1:8080/x") &&
@@ -4342,6 +4478,8 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
 - (IBAction)checkForUpdates:(id)sender { [[Updater shared] checkInteractive:YES]; }
 
 - (IBAction)showAirTrafficControl:(id)sender { [self.window showAirTrafficControl:sender]; }
+// Settings > Profiles has the button; the Settings window isn't the browser's, so it lands here.
+- (IBAction)importEverythingFromArcMenu:(id)sender { [self.window importEverythingFromArcMenu:sender]; }
 
 - (IBAction)showKeyboardShortcuts:(id)sender {
   [[ShortcutsWindowController shared] showWindow:nil];

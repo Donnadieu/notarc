@@ -91,6 +91,24 @@ class CookieImportCallback : public CefSetCookieCallback {
   IMPLEMENT_REFCOUNTING(CookieImportCallback);
 };
 
+// Arc imports read SQLite copies and the Keychain off the main thread, one at a time.
+dispatch_queue_t ArcImportQueue() {
+  static dispatch_queue_t queue = dispatch_queue_create("notarc.arc-import", DISPATCH_QUEUE_SERIAL);
+  return queue;
+}
+
+// Arc's "Arc Safe Storage" key, read once per launch when it works (macOS may ask the first time). A failure isn't
+// kept, so the next import can ask again. Only call it on ArcImportQueue() (serial, so no lock is needed).
+NSData* ArcImportKey(NSError** error) {
+  static NSData* key = nil;
+  if (key) return key;
+  NSString* pw = ArcSafeStoragePassword(error);
+  if (pw.length) key = ArcCookieKey(pw);
+  else if (error && !*error)
+    *error = [NSError errorWithDomain:@"ArcCookies" code:2 userInfo:@{NSLocalizedDescriptionKey : @"Arc's key is empty"}];
+  return key;
+}
+
 cef_cookie_same_site_t SameSiteFromChromiumDB(int v) {
   switch (v) {
     case 0: return CEF_COOKIE_SAME_SITE_NO_RESTRICTION;
@@ -799,6 +817,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSMutableDictionary<NSNumber*, ChromePageHost*>* _chromePages;  // browser id -> Chrome-style page (#66)
   std::map<std::string, CefRefPtr<CefRequestContext>> _contexts;  // profile dir -> context
   std::set<std::string> _readyContexts;
+  BOOL _importingFromArc;  // Import Everything from Arc is running
+  BOOL _arcKeyFailed;      // ... and macOS didn't give Arc's key this time (don't ask twice)
   NSMutableDictionary<NSString*, NSMutableArray<ArcItem*>*>* _pendingTabs;  // waiting for their context
   ArcItem* _shown;
   BOOL _closing;
@@ -1518,30 +1538,30 @@ NSString* CleanLinkURL(NSString* url) {
                               done:(void (^)(NSUInteger read, int ok))done {
   // The Keychain read can block for many seconds (securityd / access prompt). Do it and the
   // SQLite decrypt on a background queue; only the CEF calls happen back on the main thread.
-  static dispatch_queue_t queue = dispatch_queue_create("notarc.cookie-import", DISPATCH_QUEUE_SERIAL);
-  static NSString* cachedPassword = nil;
   __weak MainWindowController* weakSelf = self;
-  dispatch_async(queue, ^{
+  NSString* userData = [ArcDataDirectory() stringByAppendingPathComponent:@"User Data"];
+  dispatch_async(ArcImportQueue(), ^{
     NSError* error = nil;
-    if (!cachedPassword) cachedPassword = ArcSafeStoragePassword(&error);
+    NSData* key = ArcImportKey(&error);
     NSArray<ArcCookie*>* cookies =
-        cachedPassword ? ArcReadCookies(ArcCookieDBPath(profile), ArcCookieKey(cachedPassword), nullptr, &error) : nil;
+        key ? ArcReadCookies(ArcCookieDBPathIn(userData, profile), key, nullptr, &error) : nil;
     dispatch_async(dispatch_get_main_queue(), ^{
-      [weakSelf setArcCookies:cookies error:error forProfile:profile context:ctx done:done];
+      if (!cookies.count && error)
+        std::fprintf(stderr, "Arc cookie import skipped for %s: %s\n", profile.UTF8String,
+                     error.localizedDescription.UTF8String);
+      [weakSelf setArcCookies:cookies context:ctx done:done];
     });
   });
 }
 
+// Sets each cookie through the Space's own CEF cookie manager, which stores it encrypted with NotArc's own key.
+// A cookie that's already there (same name, domain and path) is replaced by Arc's newer copy.
 - (void)setArcCookies:(NSArray<ArcCookie*>*)cookies
-                error:(NSError*)error
-           forProfile:(NSString*)profile
               context:(CefRefPtr<CefRequestContext>)ctx
                  done:(void (^)(NSUInteger read, int ok))done {
-  CefRefPtr<CefCookieManager> manager = ctx->GetCookieManager(nullptr);
+  CefRefPtr<CefCookieManager> manager = ctx ? ctx->GetCookieManager(nullptr) : nullptr;
   if (!cookies.count || !manager) {
-    if (error) std::fprintf(stderr, "Arc cookie import skipped for %s: %s\n", profile.UTF8String,
-                            error.localizedDescription.UTF8String);
-    done(0, 0);
+    done(cookies.count, 0);
     return;
   }
   NSUInteger count = cookies.count;
@@ -1552,12 +1572,12 @@ NSString* CleanLinkURL(NSString* url) {
   });
   for (ArcCookie* c in cookies) {
     NSString* host = [c.host hasPrefix:@"."] ? [c.host substringFromIndex:1] : c.host;
-    NSString* url = [NSString stringWithFormat:@"%@://%@%@", c.secure ? @"https" : @"http", host, c.path ?: @"/"];
+    NSString* url = [NSString stringWithFormat:@"%@://%@%@", c.secure ? @"https" : @"http", host, c.path.length ? c.path : @"/"];
     CefCookie cookie;
     CefString(&cookie.name) = c.name.UTF8String;
     CefString(&cookie.value) = c.value.UTF8String;
     if ([c.host hasPrefix:@"."]) CefString(&cookie.domain) = c.host.UTF8String;  // else host-only
-    CefString(&cookie.path) = (c.path ?: @"/").UTF8String;
+    CefString(&cookie.path) = (c.path.length ? c.path : @"/").UTF8String;
     cookie.secure = c.secure;
     cookie.httponly = c.httpOnly;
     cookie.has_expires = c.hasExpires;
@@ -1569,6 +1589,92 @@ NSString* CleanLinkURL(NSString* url) {
                                       : (c.priority == 2 ? CEF_COOKIE_PRIORITY_HIGH : CEF_COOKIE_PRIORITY_MEDIUM);
     if (!manager->SetCookie(url.UTF8String, cookie, cb)) cb->OnComplete(false);
   }
+}
+
+// Import Everything from Arc: every Space profile's Arc cookies (its logins), copied again even if they came over
+// before, so sessions Arc renewed since then work here too. Waits for each Space's profile to start. Reports, per
+// profile, what was copied and, in plain words, anything that went wrong.
+- (void)importArcCookiesFromUserData:(NSString*)userData key:(NSData*)key done:(void (^)(NSDictionary* report))done {
+  void (^finish)(NSDictionary*) = [done copy];
+  NSMutableArray<ArcSpace*>* spaces = [NSMutableArray array];
+  NSMutableSet* seen = [NSMutableSet set];
+  for (ArcSpace* s in _spaces) {
+    NSString* p = s.profileDirectory.length ? s.profileDirectory : @"Default";
+    if ([seen containsObject:p]) continue;
+    [seen addObject:p];
+    [spaces addObject:s];
+  }
+  NSMutableDictionary* report =
+      [@{@"read" : @0, @"set" : @0, @"profiles" : @0, @"expired" : @0, @"locked" : @0, @"errors" : [NSMutableArray array]} mutableCopy];
+  if (!key) {
+    [report[@"errors"] addObject:@"macOS didn't give NotArc Arc's key, so no logins could be copied"];
+    finish(report);
+    return;
+  }
+  __weak MainWindowController* weakSelf = self;
+  __block void (^step)(NSUInteger);
+  void (^next)(NSUInteger) = ^(NSUInteger i) {
+    MainWindowController* me = weakSelf;
+    if (!me || i >= spaces.count) {
+      // Break the step -> block -> step cycle later: clearing it now would free this block (and what it holds)
+      // while it is still running.
+      dispatch_async(dispatch_get_main_queue(), ^{ step = nil; });
+      finish(report);
+      return;
+    }
+    ArcSpace* space = spaces[i];
+    NSString* profile = space.profileDirectory.length ? space.profileDirectory : @"Default";
+    NSString* label = space.title.length ? space.title : profile;
+    CefRefPtr<CefRequestContext> ctx = [me contextForSpace:space];
+    __block int waited = 0;
+    __block void (^whenReady)(void);
+    void (^ready)(void) = ^{
+      MainWindowController* me2 = weakSelf;
+      if (!me2) return;
+      if (![me2 contextIsReady:profile] && waited++ < 120) {  // up to 30 s for the profile to start
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 4), dispatch_get_main_queue(), whenReady);
+        return;
+      }
+      dispatch_async(dispatch_get_main_queue(), ^{ whenReady = nil; });  // same: not while this block runs
+      dispatch_async(ArcImportQueue(), ^{
+        NSError* error = nil;
+        ArcCookieStats st = {0, 0, 0};
+        NSArray<ArcCookie*>* cookies = ArcReadCookies(ArcCookieDBPathIn(userData, profile), key, &st, &error);
+        dispatch_async(dispatch_get_main_queue(), ^{
+          report[@"profiles"] = @([report[@"profiles"] intValue] + 1);
+          report[@"expired"] = @([report[@"expired"] unsignedIntegerValue] + st.expired);
+          report[@"locked"] = @([report[@"locked"] unsignedIntegerValue] + st.undecryptable);
+          if (!cookies.count) {
+            if (error) [report[@"errors"] addObject:[NSString stringWithFormat:@"%@: %@", label, error.localizedDescription]];
+            if (step) step(i + 1);
+            return;
+          }
+          [weakSelf setArcCookies:cookies context:ctx done:^(NSUInteger read, int ok) {
+            report[@"read"] = @([report[@"read"] unsignedIntegerValue] + read);
+            report[@"set"] = @([report[@"set"] unsignedIntegerValue] + (NSUInteger)ok);
+            if ((NSUInteger)ok < read)
+              [report[@"errors"] addObject:[NSString stringWithFormat:@"%@: %lu of %lu logins weren't accepted by NotArc's "
+                                                                     @"cookie store", label, (unsigned long)(read - ok),
+                                                                     (unsigned long)read]];
+            NSString* marker = [[NSString stringWithUTF8String:ctx->GetCachePath().ToString().c_str()]
+                stringByAppendingPathComponent:@"ArcCookiesImported"];
+            [[NSString stringWithFormat:@"%d of %lu\n", ok, (unsigned long)read] writeToFile:marker atomically:YES
+                                                                                    encoding:NSUTF8StringEncoding error:nil];
+            if (step) step(i + 1);
+          }];
+        });
+      });
+    };
+    whenReady = ready;
+    if (!ctx) {
+      [report[@"errors"] addObject:[NSString stringWithFormat:@"%@: its profile couldn't start", label]];
+      step(i + 1);
+      return;
+    }
+    ready();
+  };
+  step = next;
+  next(0);
 }
 
 - (void)openPendingTabsForProfile:(NSString*)profile {
@@ -4234,29 +4340,78 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   for (ArcExtensionCopy* c in [self importArcExtensionsInto:extensionsDir fromArcUserData:userData])
     c.skippedMV2 ? ++skipped : ++copied;
   NSDictionary* pw = [self importArcPasswordsFromUserData:userData];
-  return @{@"history" : @(history), @"extensions" : @(copied), @"skipped" : @(skipped),
-           @"passwords" : pw[@"passwords"] ?: @(-1), @"addresses" : pw[@"addresses"] ?: @0, @"cards" : pw[@"cards"] ?: @0};
+  NSMutableDictionary* out = [@{@"history" : @(history), @"extensions" : @(copied), @"skipped" : @(skipped),
+                                @"passwords" : pw[@"passwords"] ?: @(-1), @"addresses" : pw[@"addresses"] ?: @0,
+                                @"cards" : pw[@"cards"] ?: @0, @"existing" : pw[@"existing"] ?: @0,
+                                @"locked" : pw[@"undecryptable"] ?: @0} mutableCopy];
+  if (pw[@"error"]) out[@"passwordError"] = pw[@"error"];
+  return out;
+}
+
+NSString* const kArcImportCompletedKey = @"arcImportCompleted";
+NSString* const kArcImportDeclinedKey = @"arcImportNotNow";
+
+// The words shown after Import Everything from Arc (tests read them too).
+NSString* ArcImportSummary(NSDictionary* n, NSDictionary* cookies) {
+  NSMutableArray* lines = [NSMutableArray arrayWithObject:@"Spaces, tabs, pinned tabs and Favorites: imported"];
+  NSUInteger set = [cookies[@"set"] unsignedIntegerValue];
+  if (cookies) {
+    [lines addObject:set ? [NSString stringWithFormat:@"Logins (cookies): %lu copied into %@ %@", (unsigned long)set,
+                                                     cookies[@"profiles"],
+                                                     [cookies[@"profiles"] intValue] == 1 ? @"profile" : @"profiles"]
+                         : @"Logins (cookies): none copied"];
+  }
+  [lines addObject:[NSString stringWithFormat:@"History: %@ visits added", n[@"history"]]];
+  [lines addObject:[NSString stringWithFormat:@"Extensions: %@ copied%@", n[@"extensions"],
+                                              [n[@"skipped"] intValue] ? [NSString stringWithFormat:@" (%@ too old for current Chromium)", n[@"skipped"]] : @""]];
+  if (n[@"passwordError"]) {
+    [lines addObject:[NSString stringWithFormat:@"Saved passwords, addresses and cards: not copied. %@", n[@"passwordError"]]];
+  } else {
+    NSString* already = [n[@"existing"] intValue] ? [NSString stringWithFormat:@" (%@ already here)", n[@"existing"]] : @"";
+    [lines addObject:[NSString stringWithFormat:@"Saved passwords: %@ added%@", n[@"passwords"], already]];
+    [lines addObject:[NSString stringWithFormat:@"Addresses and cards: %@ and %@ added", n[@"addresses"], n[@"cards"]]];
+    if ([n[@"locked"] intValue])
+      [lines addObject:[NSString stringWithFormat:@"%@ saved passwords or cards couldn't be unlocked with Arc's key", n[@"locked"]]];
+  }
+  for (NSString* e in cookies[@"errors"]) [lines addObject:e];
+  if (set) [lines addObject:@"\nA few sites may still ask you to sign in again: some tie a sign-in to the browser it was made in."];
+  return [lines componentsJoinedByString:@"\n"];
 }
 
 - (IBAction)importEverythingFromArcMenu:(id)sender {
-  NSDictionary* n = [self importEverythingFromArcInto:NotArcExtensionsDirectory(NO)
-                                             userData:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]];
-  NSAlert* a = [NSAlert new];
-  a.messageText = @"Everything from Arc is here";
-  NSString* passwords = [n[@"passwords"] intValue] < 0
-      ? @"Saved passwords, addresses and cards: macOS didn't give NotArc Arc's Keychain key"
-      : [NSString stringWithFormat:@"Saved passwords: %@ added\nAddresses and cards: %@ and %@ added", n[@"passwords"],
-                                   n[@"addresses"], n[@"cards"]];
-  a.informativeText = [NSString stringWithFormat:
-      @"Spaces, tabs, pinned tabs and Favorites: imported\nLogins: come over as each Space opens\nHistory: %@ visits added\n"
-      @"Extensions: %@ copied%@\n%@",
-      n[@"history"], n[@"extensions"],
-      [n[@"skipped"] intValue] ? [NSString stringWithFormat:@" (%@ too old for current Chromium)", n[@"skipped"]] : @"",
-      passwords];
+  if (_importingFromArc) return;
+  _importingFromArc = YES;
+  NSString* userData = [ArcDataDirectory() stringByAppendingPathComponent:@"User Data"];
   __weak MainWindowController* weakSelf = self;
-  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
-    dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf offerDefaultBrowserIfFirstLaunch]; });
-  }];
+  // One Keychain read for passwords and cookies, off the main thread (macOS may ask once).
+  dispatch_async(ArcImportQueue(), ^{
+    NSError* keyError = nil;
+    NSData* key = ArcImportKey(&keyError);
+    dispatch_async(dispatch_get_main_queue(), ^{
+      MainWindowController* me = weakSelf;
+      if (!me) return;
+      me.arcSafeStorageKeyOverride = key;
+      me->_arcKeyFailed = key == nil;
+      NSMutableDictionary* n = [[me importEverythingFromArcInto:NotArcExtensionsDirectory(NO) userData:userData] mutableCopy];
+      me.arcSafeStorageKeyOverride = nil;
+      me->_arcKeyFailed = NO;
+      if (!key)
+        n[@"passwordError"] = [NSString stringWithFormat:@"macOS didn't give NotArc Arc's key (%@).",
+                                                         keyError.localizedDescription ?: @"no answer"];
+      [me importArcCookiesFromUserData:userData key:key done:^(NSDictionary* cookies) {
+        MainWindowController* me2 = weakSelf;
+        if (!me2) return;
+        me2->_importingFromArc = NO;
+        [NSUserDefaults.standardUserDefaults setObject:[NSDate date] forKey:kArcImportCompletedKey];
+        NSAlert* a = [NSAlert new];
+        a.messageText = key ? @"Everything from Arc is here" : @"Some things couldn't come over from Arc";
+        a.informativeText = ArcImportSummary(n, cookies);
+        [a beginSheetModalForWindow:me2.window completionHandler:^(NSModalResponse r) {
+          dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf offerDefaultBrowserIfFirstLaunch]; });
+        }];
+      }];
+    });
+  });
 }
 
 // Arc acceptance: one button the first time NotArc opens, then you keep working like you never moved.
@@ -4276,27 +4431,45 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   }];
 }
 
+// Shown at launch while Arc's data is there and its import hasn't been run or turned down yet. Old builds set
+// "arcImportOffered" without the person ever importing (test and dev launches did too), so that key is ignored.
+BOOL ArcImportOfferDue(NSDictionary* prefs, BOOL arcDataExists) {
+  return arcDataExists && !prefs[kArcImportCompletedKey] && ![prefs[kArcImportDeclinedKey] boolValue];
+}
+
 - (void)offerArcImportIfFirstLaunch {
   NSUserDefaults* d = NSUserDefaults.standardUserDefaults;
-  if ([d boolForKey:@"arcImportOffered"] ||
-      ![NSFileManager.defaultManager fileExistsAtPath:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]]) {
+  NSMutableDictionary* prefs = [NSMutableDictionary dictionary];
+  prefs[kArcImportCompletedKey] = [d objectForKey:kArcImportCompletedKey];  // nil leaves it out
+  prefs[kArcImportDeclinedKey] = @([d boolForKey:kArcImportDeclinedKey]);
+  BOOL arc = [NSFileManager.defaultManager fileExistsAtPath:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]];
+  if (!ArcImportOfferDue(prefs, arc)) {
     [self offerDefaultBrowserIfFirstLaunch];
     return;
   }
-  [d setBool:YES forKey:@"arcImportOffered"];
+  if (self.window.attachedSheet || !self.window.visible) {  // another sheet first, or the window isn't up yet
+    __weak MainWindowController* weakSelf = self;
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [weakSelf offerArcImportIfFirstLaunch];
+    });
+    return;
+  }
   NSAlert* a = [NSAlert new];
   a.messageText = @"Bring everything over from Arc?";
-  a.informativeText = @"Your Spaces, tabs and logins are already here. This adds your history, extensions, saved "
-                      @"passwords, addresses and cards. "
-                      @"Arc itself isn't changed. You can do this later from File > Import Everything from Arc.";
+  a.informativeText = @"Your Spaces and tabs are already here. This adds your logins, so you stay signed in to your "
+                      @"sites, plus your history, extensions, saved passwords, addresses and cards. macOS asks once "
+                      @"to let NotArc read Arc's key. Arc itself isn't changed. You can do this later from File > "
+                      @"Import Everything from Arc, or in Settings > Profiles.";
   [a addButtonWithTitle:@"Import Everything"];
   [a addButtonWithTitle:@"Not Now"];
   __weak MainWindowController* weakSelf = self;
   [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
-    if (r == NSAlertFirstButtonReturn)
+    if (r == NSAlertFirstButtonReturn) {
       dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf importEverythingFromArcMenu:nil]; });
-    else
+    } else {
+      [NSUserDefaults.standardUserDefaults setBool:YES forKey:kArcImportDeclinedKey];
       dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf offerDefaultBrowserIfFirstLaunch]; });
+    }
   }];
 }
 
@@ -5567,26 +5740,42 @@ static NSString* SiteOf(NSString* url) {
 
 // Saved passwords, addresses and cards from each Space's Arc profile ("Login Data", "Web Data"), with Arc's own
 // key ("Arc Safe Storage", the item cookie import already reads). nil when the key isn't available.
-- (NSDictionary<NSString*, NSNumber*>*)importArcPasswordsFromUserData:(NSString*)userData {
+- (NSDictionary*)importArcPasswordsFromUserData:(NSString*)userData {
   NSData* key = self.arcSafeStorageKeyOverride;
-  if (!key && !self.selfTestProfiles) {  // tests never read the real Keychain
-    NSString* pw = ArcSafeStoragePassword(nil);
-    if (pw) key = ArcCookieKey(pw);
+  NSString* keyError = nil;
+  if (!key && !self.selfTestProfiles && !_arcKeyFailed) {  // tests never read the real Keychain
+    __block NSError* error = nil;
+    __block NSData* read = nil;
+    dispatch_sync(ArcImportQueue(), ^{ read = ArcImportKey(&error); });
+    key = read;
+    if (!key) keyError = error.localizedDescription;
   }
-  if (!key) return nil;
-  NSUInteger passwords = 0, addresses = 0, cards = 0;
+  if (!key) return @{@"error" : [NSString stringWithFormat:@"macOS didn't give NotArc Arc's key%@.",
+                                                         keyError ? [NSString stringWithFormat:@" (%@)", keyError] : @""]};
+  PasswordStore* store = [PasswordStore shared];
+  if (![store unlockIfNeeded])
+    return @{@"error" : @"NotArc's own password vault is locked: macOS didn't let NotArc read its \"NotArc Safe "
+                        @"Storage\" Keychain item."};
+  NSUInteger passwords = 0, addresses = 0, cards = 0, existing = 0, bad = 0, found = 0;
   NSMutableSet* done = [NSMutableSet set];
   for (ArcSpace* s in _spaces) {
     NSString* p = s.profileDirectory.length ? s.profileDirectory : @"Default";
     if ([done containsObject:p]) continue;
     [done addObject:p];
-    NSDictionary* n = [[PasswordStore shared] importChromiumProfile:[userData stringByAppendingPathComponent:p] key:key
-                                                             source:[NSString stringWithFormat:@"Arc (%@)", s.title ?: p]];
+    NSDictionary* n = [store importChromiumProfile:[userData stringByAppendingPathComponent:p] key:key
+                                            source:[NSString stringWithFormat:@"Arc (%@)", s.title ?: p]];
+    if (!n) continue;  // no Login Data / Web Data in that profile
+    ++found;
     passwords += [n[@"passwords"] unsignedIntegerValue];
     addresses += [n[@"addresses"] unsignedIntegerValue];
     cards += [n[@"cards"] unsignedIntegerValue];
+    existing += [n[@"existing"] unsignedIntegerValue];
+    bad += [n[@"undecryptable"] unsignedIntegerValue];
   }
-  return @{@"passwords" : @(passwords), @"addresses" : @(addresses), @"cards" : @(cards)};
+  NSMutableDictionary* out = [@{@"passwords" : @(passwords), @"addresses" : @(addresses), @"cards" : @(cards),
+                                @"existing" : @(existing), @"undecryptable" : @(bad)} mutableCopy];
+  if (!found && done.count) out[@"error"] = @"Arc's password files weren't found in its profile folders.";
+  return out;
 }
 - (BOOL)isPeeking { return _peek != nil; }
 - (void)promotePeekToTab { [_peek openInMainWindow:nil]; }
@@ -8714,6 +8903,53 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
   };
   if (!mgr->SetCookie(url.UTF8String, c, new SetCB(mgr, cb)) && cb) cb(NO);
 }
+// Tests: every cookie (HttpOnly included) the current Space would send to `url`, with its fields.
+- (void)testCookieDetailsForURL:(NSString*)url done:(void (^)(NSArray<NSDictionary*>*))done {
+  CefRefPtr<CefRequestContext> ctx = [self contextForSpace:_space];
+  auto mgr = ctx ? ctx->GetCookieManager(nullptr) : nullptr;
+  if (!mgr) { done(@[]); return; }
+  class DetailVisitor : public CefCookieVisitor {
+   public:
+    explicit DetailVisitor(void (^b)(NSArray*)) : b_(b), out_([NSMutableArray array]) {}
+    ~DetailVisitor() override {
+      NSArray* n = [out_ copy];
+      void (^b)(NSArray*) = b_;
+      dispatch_async(dispatch_get_main_queue(), ^{ b(n); });
+    }
+    bool Visit(const CefCookie& c, int, int, bool&) override {
+      auto str = [](const cef_string_t& v) { return [NSString stringWithUTF8String:CefString(&v).ToString().c_str()]; };
+      [out_ addObject:@{@"name" : str(c.name), @"value" : str(c.value), @"domain" : str(c.domain), @"path" : str(c.path),
+                        @"secure" : @(c.secure != 0), @"httponly" : @(c.httponly != 0), @"samesite" : @((int)c.same_site),
+                        @"hasExpires" : @(c.has_expires != 0), @"expires" : @(c.expires.val)}];
+      return true;
+    }
+   private:
+    void (^b_)(NSArray*);
+    NSMutableArray* out_;
+    IMPLEMENT_REFCOUNTING(DetailVisitor);
+  };
+  if (!mgr->VisitUrlCookies(url.UTF8String, true, new DetailVisitor([done copy]))) done(@[]);
+}
+
+// Tests: removes every cookie the current Space holds for `url`, then calls back.
+- (void)testDeleteCookiesForURL:(NSString*)url done:(void (^)(void))done {
+  CefRefPtr<CefRequestContext> ctx = [self contextForSpace:_space];
+  auto mgr = ctx ? ctx->GetCookieManager(nullptr) : nullptr;
+  if (!mgr) { done(); return; }
+  class Deleted : public CefDeleteCookiesCallback {
+   public:
+    explicit Deleted(void (^b)(void)) : b_(b) {}
+    void OnComplete(int) override {
+      void (^b)(void) = b_;
+      dispatch_async(dispatch_get_main_queue(), ^{ b(); });
+    }
+   private:
+    void (^b_)(void);
+    IMPLEMENT_REFCOUNTING(Deleted);
+  };
+  if (!mgr->DeleteCookies(url.UTF8String, "", new Deleted([done copy]))) done();
+}
+
 - (void)testCookieNamesForURL:(NSString*)url done:(void (^)(NSArray<NSString*>*))done {
   CefRefPtr<CefRequestContext> ctx = [self contextForSpace:_space];
   auto mgr = ctx ? ctx->GetCookieManager(nullptr) : nullptr;

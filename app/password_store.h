@@ -80,9 +80,10 @@ typedef NS_ENUM(NSInteger, PasswordSaveResult) { PasswordUnchanged = 0, Password
 - (BOOL)isNeverOrigin:(NSString*)origin;
 - (BOOL)save;
 - (BOOL)reload;  // tests: drop the in-memory copy and read the file again
+- (BOOL)unlockIfNeeded;  // reads NotArc's Keychain key again if it wasn't available; YES when usable
 
 // Import one Chromium-family profile folder (Arc, Chrome, Brave, Edge, Vivaldi, Chromium) with that browser's
-// Safe Storage key. Returns @{passwords, addresses, cards, never, undecryptable} counts of what was added, or nil
+// Safe Storage key. Returns @{passwords, addresses, cards, never, undecryptable, existing} counts (existing = logins already here), or nil
 // when nothing in the folder could be read. Importing twice adds nothing twice.
 - (NSDictionary<NSString*, NSNumber*>*)importChromiumProfile:(NSString*)profileDir key:(NSData*)key source:(NSString*)source;
 // Password CSV export (Chrome: name,url,username,password,note; Firefox: url,username,password,...; Apple

@@ -3,9 +3,14 @@
 
 NSString* const kSettingAppIcon = @"appIcon";
 
+// The app's own icon (Icon A, the "¬" on indigo, app/NotArc.icns) comes first and is the default: choosing it
+// hands the Dock back to the bundle icon, so the Dock, Finder and Launchpad all match.
+NSString* const kAppIconBundle = @"notarc";
+
 // name, title, gradient top, gradient bottom, glyph colour (hex RGB). All NotArc's own colours and artwork.
 static NSArray<NSArray*>* Variants() {
   return @[
+    @[ kAppIconBundle, @"NotArc", @0x2E2A6B, @0x17143D, @0xF5B942 ],  // drawn from the bundle's .icns, see below
     @[ @"classic", @"Classic", @0x6E6AF0, @0x3B35B8, @0xFFFFFF ],
     @[ @"sunset", @"Sunset", @0xFF9A4D, @0xE0336F, @0xFFFFFF ],
     @[ @"forest", @"Forest", @0x3FCF8A, @0x0C7352, @0xFFFFFF ],
@@ -84,6 +89,14 @@ NSImage* AppIconImage(NSString* name) {
   if (!v) return nil;
   if (!cache) cache = [NSMutableDictionary dictionary];
   if (NSImage* img = cache[name]) return img;
+  if ([name isEqualToString:kAppIconBundle]) {
+    NSString* icns = [NSBundle.mainBundle pathForResource:@"NotArc" ofType:@"icns"];
+    NSImage* img = icns ? [[NSImage alloc] initWithContentsOfFile:icns] : nil;
+    if (img) {
+      cache[name] = img;
+      return img;
+    }
+  }
   NSImage* img = [NSImage imageWithSize:NSMakeSize(1024, 1024) flipped:NO drawingHandler:^BOOL(NSRect dst) {
     DrawIcon(v, dst);
     return YES;
@@ -94,10 +107,30 @@ NSImage* AppIconImage(NSString* name) {
 
 NSString* CurrentAppIconName(void) {
   id v = SettingValueOrDefault(kSettingAppIcon);
-  return [v isKindOfClass:NSString.class] && VariantNamed(v) ? v : @"classic";
+  return [v isKindOfClass:NSString.class] && VariantNamed(v) ? v : kAppIconBundle;
 }
 
-void ApplyAppIcon(void) { NSApp.applicationIconImage = AppIconImage(CurrentAppIconName()); }
+// Before 0.26.1 the bundle icon wasn't in the picker, and test runs of older builds could save a colourway into the
+// real preferences (Omar's Dock showed "forest" though he never picked it). Once, the saved choice is cleared so the
+// Dock shows the app's own icon; anything picked after that is kept.
+static NSString* const kAppIconMigrated = @"appIconBundleDefault";
+BOOL AppIconMigrationDue(NSDictionary* prefs) { return prefs[kSettingAppIcon] && ![prefs[kAppIconMigrated] boolValue]; }
+
+void MigrateAppIconOnce(void) {
+  if (SettingsMemoryOnly()) return;  // self-tests never touch the real preferences
+  NSUserDefaults* d = NSUserDefaults.standardUserDefaults;
+  NSMutableDictionary* prefs = [NSMutableDictionary dictionary];
+  prefs[kSettingAppIcon] = [d objectForKey:kSettingAppIcon];
+  prefs[kAppIconMigrated] = @([d boolForKey:kAppIconMigrated]);
+  if (AppIconMigrationDue(prefs)) [d removeObjectForKey:kSettingAppIcon];
+  [d setBool:YES forKey:kAppIconMigrated];
+}
+
+// nil puts the bundle's own icon back in the Dock.
+void ApplyAppIcon(void) {
+  NSString* name = CurrentAppIconName();
+  NSApp.applicationIconImage = [name isEqualToString:kAppIconBundle] ? nil : AppIconImage(name);
+}
 
 // Both images are drawn at 64x64 with high-quality scaling, then averaged down to 8x8, so a vector image and a
 // bitmap copy of it (what NSApp.applicationIconImage hands back) compare as nearly equal.
