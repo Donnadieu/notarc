@@ -4,6 +4,14 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- With the sidebar hidden, moving the pointer to the window's left edge slides it in as a floating panel over the
+  page, as in Arc; moving away hides it again.
+- Loading tabs show a spinner in place of their icon, and a soft glow in the Space's colour runs along the top of
+  the page while it loads.
+- Split views show in the sidebar as Arc draws them: each pane's icon and title side by side with a thin slash, the
+  pane on screen brighter.
+- Hovering the Today divider shows "Clear", which archives Today's tabs.
+- The sidebar dims its text and icons while the window isn't the active one.
 - Measured against Omar's own Arc screenshot to the pixel: the mini player is Arc's 32 pt bar (site icon, back,
   play/pause, forward, speaker, no text; hover the icon for what's playing), long tab titles end in "..." as in Arc
   1.169, the address pill shows its site buttons only while the pointer is over it, back / forward dim when there's

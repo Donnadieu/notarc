@@ -183,6 +183,12 @@ class BrowserClient : public CefClient,
   using LoadEndCallback = std::function<void(int browser_id, const std::string& url)>;
   void set_load_end_callback(LoadEndCallback cb) { on_load_end_ = std::move(cb); }
   void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override;
+  // The page started or stopped loading (spinner in the sidebar row, glow on the page card; back / forward state).
+  using LoadingCallback = std::function<void(int browser_id, bool loading)>;
+  void set_loading_callback(LoadingCallback cb) { on_loading_ = std::move(cb); }
+  void OnLoadingStateChange(CefRefPtr<CefBrowser> browser, bool isLoading, bool canGoBack, bool canGoForward) override {
+    if (on_loading_) on_loading_(browser->GetIdentifier(), isLoading);
+  }
 
   // Passwords and autofill (#67). Every http(s) document gets a small script (see autofill.mm) that reports login
   // submissions and clicks into login / address / card fields as "__notarc_af__:<nonce>:<json>" console lines.
@@ -226,6 +232,7 @@ class BrowserClient : public CefClient,
   MediaCallback on_media_;
   ZapCallback on_zap_;
   LoadEndCallback on_load_end_;
+  LoadingCallback on_loading_;
   LangCallback on_lang_;
   NotifyCallback on_notify_;
   FaviconCallback on_favicon_;

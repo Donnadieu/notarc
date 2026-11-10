@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-14 done of 66 items.
+21 done of 66 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -45,9 +45,10 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   hairline edge, soft shadow only in light mode. Ref: shot, app (content inset, corner radius).
 - [x] **V7 Traffic lights.** Window buttons sit inside the sidebar at x 20/43/66, centre y 24; they dim when the window
   is inactive and hide in focus mode. Ref: shot, app (dimmed window controls).
-- [ ] **V8 Inactive window.** An inactive window keeps the Space colour but its sidebar text and icons dim. Ref: app.
-- [ ] **V9 Loading.** A loading tab shows a spinner in place of its favicon, and a soft glow runs along the page card
-  while the page loads. Ref: app (glow progress indicator), video.
+- [x] **V8 Inactive window.** An inactive window keeps the Space colour but its sidebar text and icons dim. Ref: app.
+- [x] **V9 Loading.** A loading tab shows a small spinner in place of its icon (in its row, or in its pane of a split
+  row), and a soft glow in the Space's colour sweeps along the top of the page card while the shown page loads. Ref:
+  app (glow progress indicator), video.
 - [ ] **V10 Sad tab.** A crashed page shows a centred illustration, a short line and a Reload button on the page
   card. Ref: app (sad tab), video.
 
@@ -66,20 +67,21 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   white ~15%, x 18-255; no "Pinned" label. Ref: shot, colours.
 - [x] **V16 New Tab row.** "+ New Tab" under the divider in white ~45% with a hover fill; clicking it opens the
   command bar. Ref: shot, app.
-- [ ] **V17 Today and Clear.** Today's tabs under New Tab; hovering the divider shows a small "Clear" action that
-  archives them. Ref: app (Clear), video.
+- [x] **V17 Today and Clear.** Today's tabs under New Tab; hovering the divider shows a small "↓ Clear" at its right
+  that archives them. Ref: app (Clear), video.
 - [ ] **V18 Folders.** Folder icon that opens and closes, child rows indented, folder count; nested folders indent
   again. Ref: app, video.
-- [ ] **V19 Split view rows.** A split is one row: each pane's favicon and title side by side, separated by a thin
-  slash; the shown pane is brighter. Ref: colours (slash, content-visible fill), video.
-- [ ] **V20 Hover, selected and pressed states.** Selected white ~20%, hovered previous ~12%, pressed ~6.5%,
+- [x] **V19 Split view rows.** A split is one row: each pane's icon and title side by side, separated by a thin
+  slanted slash (white 30%); the pane on screen is full brightness, the others dimmed. Ref: colours (slash), video.
+- [x] **V20 Hover, selected and pressed states.** Selected white ~20%, hovered previous ~12%, pressed ~6.5%,
   multi-selected ~10% (dark); light mode uses white 85/50/... with a small shadow on the selected row. Ref: colours.
 - [ ] **V21 Drag and drop.** A dragged row lifts with a shadow, other rows slide apart to make a gap, a drop into a
   folder highlights it, and a drop on the page card offers split. Ref: app (drag hint), video.
-- [ ] **V22 Empty Space.** A Space with no tabs shows only the title, divider and "+ New Tab"; no placeholder text.
+- [x] **V22 Empty Space.** A Space with no tabs shows only the title, divider and "+ New Tab"; no placeholder text.
   Ref: shot, video.
-- [ ] **V23 Hidden sidebar.** With the sidebar hidden the card fills the window; hovering the left edge slides the
-  sidebar in as a floating rounded panel with a shadow over the page. Ref: app (gesture-hidden sidebar), video.
+- [x] **V23 Hidden sidebar.** With the sidebar hidden the card fills the window; moving the pointer to the left edge
+  slides the sidebar in as a floating rounded panel (10 pt corners, Space colour, deep shadow) over the page, and
+  moving away hides it again. Ref: app (gesture-hidden sidebar), video.
 - [x] **V24 Bottom bar.** Library button at left, one filled dot (or emoji) per Space in the middle, 34 pt apart
   (current white ~50%, others ~17%), "+" at right; icons white ~60%, centred 20.5 pt above the window bottom. Ref: shot.
 - [ ] **V25 Plus menu.** "+" opens Arc's own menu style (dark rounded panel, icon per row): New Tab, Split View,

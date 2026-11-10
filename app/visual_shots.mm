@@ -160,6 +160,23 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
       ArcItem* t = FindTab(c.currentSpace, arg);
       if (t) [c showItem:t];
       std::printf("VISUAL show %s\n", t ? t.url.UTF8String : "not found");
+    } else if ([cmd isEqual:@"split"] && args.count >= 2) {  // split <url> <url> [<url> ...]
+      [c openSplitFromText:[args componentsJoinedByString:@"\n"]];
+    } else if ([cmd isEqual:@"newspace"]) {
+      ArcSpace* s = [c createSpaceNamed:arg.length ? arg : @"Empty"];
+      if (s) [c switchToSpace:s];
+    } else if ([cmd isEqual:@"peek-sidebar"]) {
+      if (!c.sidebarHidden) [c toggleSidebar:nil];
+      [c beginSidebarPeekForTest];
+    } else if ([cmd isEqual:@"loading"]) {
+      if (c.shownItem) [c setItem:c.shownItem loadingForTest:![arg isEqual:@"0"]];
+    } else if ([cmd isEqual:@"inactive"]) {
+      [c sidebarDimmedForTest:![arg isEqual:@"0"]];
+    } else if ([cmd isEqual:@"hover-today"]) {
+      SEL s = NSSelectorFromString(@"setSidebarHoverRow:");
+      NSOutlineView* ov = [c valueForKey:@"_outline"];
+      NSInteger row = [ov rowForItem:c.currentSpace.unpinned];
+      ((void (*)(id, SEL, NSInteger))[c methodForSelector:s])(c, s, row);
     } else if ([cmd isEqual:@"hover"]) {
       ArcItem* t = arg.length ? FindTab(c.currentSpace, arg) : nil;
       [c hoverSidebarItem:t];

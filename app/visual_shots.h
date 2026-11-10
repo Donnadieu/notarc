@@ -11,6 +11,12 @@
 //   theme <n> <#hex> [#hex] <intensity>
 //   newtab <url>                 new Today tab in the current Space
 //   show <text>                  show the first tab whose address or title contains <text>
+//   split <url> <url> [...]      open a split view
+//   newspace <name>              make a Space and switch to it
+//   peek-sidebar                 hide the sidebar and float it in, as the left-edge hover does
+//   loading [0|1]                show the shown tab as loading
+//   inactive [0|1]               draw the window as inactive
+//   hover-today                  hover the Today divider (shows Clear)
 //   hover <text>                 hover the sidebar row of that tab (empty: none)
 //   js <script>                  run a script in the shown tab
 //   poll-media                   ask every tab what it's playing now

@@ -479,6 +479,34 @@ static BOOL IsDark(NSView* v) {
 }
 @end
 
+// Owner of a tracking area that only reports enter / exit (the left-edge strip and the floating sidebar).
+@interface HoverTracker : NSResponder
+@property(nonatomic, copy) void (^entered)(void);
+@property(nonatomic, copy) void (^exited)(void);
+@end
+@implementation HoverTracker
+- (void)mouseEntered:(NSEvent*)e { if (self.entered) self.entered(); }
+- (void)mouseExited:(NSEvent*)e { if (self.exited) self.exited(); }
+- (void)mouseMoved:(NSEvent*)e {}
+@end
+
+// The thin slanted line between the panes of a split row (Arc: TabCellSlash).
+@interface SplitSlashView : NSView
+@end
+@implementation SplitSlashView
+- (void)drawRect:(NSRect)r {
+  BOOL dark = [self.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
+              NSAppearanceNameDarkAqua;
+  [[NSColor colorWithWhite:dark ? 1 : 0 alpha:0.30] setStroke];
+  NSBezierPath* p = [NSBezierPath bezierPath];
+  p.lineWidth = 1;
+  p.lineCapStyle = NSLineCapStyleRound;
+  [p moveToPoint:NSMakePoint(NSMinX(self.bounds) + 1.5, NSMinY(self.bounds) + 1)];
+  [p lineToPoint:NSMakePoint(NSMaxX(self.bounds) - 1.5, NSMaxY(self.bounds) - 1)];
+  [p stroke];
+}
+@end
+
 // The mini player card: tells its owner when the pointer enters or leaves (mute shows only while it's inside).
 static const CGFloat kMediaCardHeight = 32;  // Arc (Omar's screenshot): x 8-264, 32 pt, 46 pt above the window bottom
 @interface MediaCardView : NSView
@@ -1063,7 +1091,15 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSImageView* _commandIcon;
   NSView* _commandScrim;
   NSButton* _navBack;
+  BOOL _sidebarPeeking;      // the hidden sidebar shown floating over the page (pointer at the left edge)
+  NSView* _edgeStrip;        // 6 pt strip at the window's left edge while the sidebar is hidden
+  HoverTracker* _edgeTracker;
+  HoverTracker* _peekTracker;
+  NSTrackingArea* _peekArea;
+  CALayer* _loadingGlow;     // Arc's glow along the page card's top edge while the shown page loads
   BOOL _pillButtonsForced;
+  BOOL _testInactive;
+  BOOL _todayHeaderHovered;
   NSButton* _navForward;
   BOOL _commandOpensNewTab;
   BOOL _saveScheduled;
@@ -1603,7 +1639,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSButton* close = [win standardWindowButton:NSWindowCloseButton];
   NSView* container = close.superview.superview;
   if (!container) return;
-  CGFloat h = _sidebar.hidden ? kToolbarHeight : 47;
+  CGFloat h = [self sidebarCollapsed] && !_sidebarPeeking ? kToolbarHeight : 47;
   NSRect cf = container.frame;
   cf.size.height = h;
   cf.origin.y = win.frame.size.height - h;
@@ -1624,7 +1660,10 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
 }
 - (void)windowDidEndLiveResize:(NSNotification*)note { [self positionWindowButtons]; }
 - (void)windowDidExitFullScreen:(NSNotification*)note { [self positionWindowButtons]; }
-- (void)windowDidBecomeMain:(NSNotification*)note { [self positionWindowButtons]; }
+- (void)windowDidBecomeMain:(NSNotification*)note {
+  [self positionWindowButtons];
+  [self applyWindowActive];
+}
 
 - (void)reloadSidebar {
   [_outline reloadData];
@@ -2180,6 +2219,10 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   _client->set_favicon_callback([weakSelf](int browserId, const std::string& url) {
     [OwnerOf(browserId, weakSelf) browser:browserId faviconURL:[NSString stringWithUTF8String:url.c_str()]];
   });
+  _client->set_loading_callback([weakSelf](int browserId, bool loading) {
+    MainWindowController* owner = OwnerOf(browserId, weakSelf);
+    dispatch_async(dispatch_get_main_queue(), ^{ [owner browser:browserId loading:loading]; });
+  });
   _client->set_load_end_callback([weakSelf](int browserId, const std::string& url) {
     [OwnerOf(browserId, weakSelf) updateNavButtons];
     [OwnerOf(browserId, weakSelf) applyBoostToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
@@ -2496,6 +2539,13 @@ static NSString* const kPiPExitJS =
     BOOL h = r == row && (!it.isSection || it == self->_space.unpinned);
     if (s.hovered != h) { s.hovered = h; s.needsDisplay = YES; }
   }];
+  BOOL todayHover = row >= 0 && [_outline itemAtRow:row] == _space.unpinned;
+  if (todayHover != _todayHeaderHovered) {
+    _todayHeaderHovered = todayHover;
+    NSInteger hr = [_outline rowForItem:_space.unpinned];
+    NSTableCellView* cell = hr >= 0 ? [_outline viewAtColumn:0 row:hr makeIfNecessary:NO] : nil;
+    [cell viewWithTag:83].hidden = !todayHover || _space.unpinned.children.count == 0;
+  }
 }
 - (void)pressSidebarItem:(ArcItem*)item down:(BOOL)down {  // tests
   NSInteger row = [_outline rowForItem:item];
@@ -2647,6 +2697,50 @@ static NSString* const kPiPExitJS =
   close.contentTintColor = indigo ? [ArcDefaultTabText() colorWithAlphaComponent:0.7] : NSColor.secondaryLabelColor;
   close.hidden = YES;
   if ([cell.superview isKindOfClass:SidebarRowView.class]) [(SidebarRowView*)cell.superview syncCloseButton];
+  // Arc's split row: each pane's icon and title side by side, split by a thin slash; the pane on screen is brighter.
+  NSView* segs = nil;
+  for (NSView* v in cell.subviews)
+    if ([v.identifier isEqual:@"splitSegments"]) segs = v;
+  if (a.isSplit && a.children.count) {
+    if (!segs) {
+      segs = [[NSView alloc] initWithFrame:NSZeroRect];
+      segs.identifier = @"splitSegments";
+      segs.autoresizingMask = NSViewMaxYMargin;
+      [cell addSubview:segs];
+    }
+    for (NSView* v in [segs.subviews copy]) [v removeFromSuperview];
+    CGFloat x0 = 10, W = cell.bounds.size.width - x0 - 8, n = a.children.count;
+    segs.frame = NSMakeRect(x0, 4, W, 33);
+    CGFloat slash = 12, segW = (W - slash * (n - 1)) / n;
+    BOOL anyShown = [a.children containsObject:_shown];
+    NSColor* text = indigo ? ArcDefaultTabText() : NSColor.labelColor;
+    for (NSUInteger k = 0; k < n; ++k) {
+      ArcItem* pane = a.children[k];
+      CGFloat sx = k * (segW + slash);
+      CGFloat alpha = !anyShown || pane == _shown ? 1 : 0.55;
+      NSImageView* ic = [NSImageView imageViewWithImage:[self iconImageForItem:pane]];
+      ic.imageScaling = NSImageScaleProportionallyUpOrDown;
+      ic.frame = NSMakeRect(sx, 8.5, 16, 16);
+      ic.alphaValue = alpha;
+      [segs addSubview:ic];
+      NSTextField* l = [NSTextField labelWithString:pane.displayTitle ?: @""];
+      l.font = [NSFont systemFontOfSize:14 weight:NSFontWeightMedium];
+      l.textColor = text;
+      l.lineBreakMode = NSLineBreakByTruncatingTail;
+      l.frame = NSMakeRect(sx + 25, 7.5, MAX(10, segW - 27), 18);
+      l.alphaValue = alpha;
+      [segs addSubview:l];
+      if (k + 1 < n) {  // Arc: TabCellSlash, white (black) 30%
+        SplitSlashView* s = [[SplitSlashView alloc] initWithFrame:NSMakeRect(sx + segW + 2, 6, slash - 4, 21)];
+        [segs addSubview:s];
+      }
+    }
+    segs.hidden = NO;
+    cell.textField.hidden = YES;
+    cell.imageView.hidden = YES;
+  } else {
+    segs.hidden = YES;
+  }
   // Other windows: "Move to main window" sits at the right of the Today header (Arc: moveToMainWindow).
   NSButton* toMain = [cell viewWithTag:78];
   if (newTab && !toMain) {
@@ -2661,6 +2755,32 @@ static NSString* const kPiPExitJS =
     [cell addSubview:toMain];
   }
   toMain.hidden = !newTab || [self isMainWindowController];
+  // Arc: hovering the Today divider shows a small "Clear" at its right that archives the Today tabs.
+  NSButton* clear = [cell viewWithTag:83];
+  if (newTab && !clear) {
+    clear = [NSButton buttonWithTitle:@"Clear" target:self action:@selector(clearToday:)];
+    clear.tag = 83;
+    clear.bordered = NO;
+    clear.image = [NSImage imageWithSystemSymbolName:@"arrow.down" accessibilityDescription:nil];
+    clear.imagePosition = NSImageLeading;
+    clear.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:9 weight:NSFontWeightSemibold];
+    clear.font = [NSFont systemFontOfSize:11 weight:NSFontWeightMedium];
+    clear.toolTip = @"Archive Today's tabs";
+    clear.autoresizingMask = NSViewMinXMargin | NSViewMinYMargin;
+    [cell addSubview:clear];
+  }
+  if (clear) {
+    NSColor* dim = [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.45];
+    clear.contentTintColor = dim;
+    clear.attributedTitle = [[NSAttributedString alloc]
+        initWithString:@"Clear"
+            attributes:@{NSForegroundColorAttributeName : dim, NSFontAttributeName : [NSFont systemFontOfSize:11 weight:NSFontWeightMedium]}];
+    [clear sizeToFit];
+    NSRect cf = clear.frame;
+    cf.origin = NSMakePoint(cell.bounds.size.width - 8 - cf.size.width, cell.bounds.size.height - 10 - cf.size.height / 2 - 1);
+    clear.frame = cf;
+    clear.hidden = !newTab || !_todayHeaderHovered || _space.unpinned.children.count == 0;
+  }
   if (!toMain.hidden) toMain.contentTintColor = [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.45];
   NSImage* image = nil;
   if (newTab) {
@@ -2677,6 +2797,26 @@ static NSString* const kPiPExitJS =
     cell.imageView.contentTintColor = indigo ? [ArcDefaultTabText() colorWithAlphaComponent:0.85] : NSColor.secondaryLabelColor;
   }
   cell.imageView.image = image;
+  NSProgressIndicator* spin = nil;
+  for (NSView* v in cell.subviews)
+    if ([v.identifier isEqual:@"spinner"]) spin = (NSProgressIndicator*)v;
+  BOOL loading = !a.isSection && !a.isFolder && (a.loading || (a.isSplit && [a.children indexesOfObjectsPassingTest:^BOOL(ArcItem* c, NSUInteger, BOOL*) {
+                                                                return c.loading;
+                                                              }].count));
+  if (loading && !spin) {
+    spin = [[NSProgressIndicator alloc] initWithFrame:cell.imageView.frame];
+    spin.style = NSProgressIndicatorStyleSpinning;
+    spin.controlSize = NSControlSizeSmall;
+    spin.displayedWhenStopped = NO;
+    spin.identifier = @"spinner";
+    spin.autoresizingMask = NSViewMaxYMargin;
+    [cell addSubview:spin];
+  }
+  spin.frame = cell.imageView.frame;
+  spin.hidden = !loading;
+  cell.imageView.hidden = loading;
+  if (loading) [spin startAnimation:nil];
+  else [spin stopAnimation:nil];
   return cell;
 }
 
@@ -7162,7 +7302,8 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 - (NSUInteger)cardPopCount { return _cardPops; }
 
 - (void)switchToSpace:(ArcSpace*)space {
-  [self hideLibrary];  // the Library closes when you pick a Space, as with Back
+  [self hideLibrary];
+  _todayHeaderHovered = NO;  // the Library closes when you pick a Space, as with Back
   if (!space || space == _space) return;
   [_extensionPopup closeBecause:@"space"];  // the popup runs in the old Space's profile
   NSUInteger from = _space ? [_spaces indexOfObject:_space] : 0, to = [_spaces indexOfObject:space];
@@ -7306,21 +7447,122 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 #pragma mark Arc shortcuts
 
 - (IBAction)toggleSidebar:(id)sender {
+  if (_sidebarPeeking) [self endSidebarPeek];
   _sidebar.hidden = !_sidebar.hidden;
   [self layoutContentArea];
   [self positionWindowButtons];
+  [self updateEdgeStrip];
 }
+// The sidebar takes no room: hidden, or only floating over the page.
+- (BOOL)sidebarCollapsed { return _sidebar.hidden || _sidebarPeeking; }
+
+// Arc: with the sidebar hidden, moving the pointer to the window's left edge slides it in as a floating panel over
+// the page (rounded, with a shadow, in the Space's colour); moving away slides it out again.
+- (void)updateEdgeStrip {
+  NSView* root = self.window.contentView;
+  BOOL want = _sidebar.hidden && !_sidebarPeeking && !_focusMode;
+  if (!_edgeStrip) {
+    _edgeStrip = [[NSView alloc] initWithFrame:NSZeroRect];
+    _edgeStrip.autoresizingMask = NSViewHeightSizable;
+    _edgeTracker = [HoverTracker new];
+    __weak MainWindowController* weakSelf = self;
+    _edgeTracker.entered = ^{ [weakSelf beginSidebarPeek]; };
+    [_edgeStrip addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                            options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow |
+                                                                    NSTrackingInVisibleRect
+                                                              owner:_edgeTracker
+                                                           userInfo:nil]];
+  }
+  _edgeStrip.frame = NSMakeRect(0, 0, 6, root.bounds.size.height);
+  if (want && _edgeStrip.superview != root) [root addSubview:_edgeStrip positioned:NSWindowAbove relativeTo:nil];
+  if (!want) [_edgeStrip removeFromSuperview];
+}
+- (void)beginSidebarPeek {
+  if (!_sidebar.hidden || _sidebarPeeking || _focusMode) return;
+  _sidebarPeeking = YES;
+  [_edgeStrip removeFromSuperview];
+  NSView* root = self.window.contentView;
+  CGFloat H = root.bounds.size.height;
+  [_sidebar removeFromSuperview];
+  [root addSubview:_sidebar positioned:NSWindowAbove relativeTo:nil];  // above the page card
+  _sidebar.wantsLayer = YES;
+  _sidebar.frame = NSMakeRect(6, 6, kSidebarWidth, H - 12);
+  NSColor* bg = _space.themeColors.count ? ColorFromHex(_space.themeColors.firstObject) : nil;
+  if (!bg) bg = IsDark(root) ? ColorFromHex(@"#120C39") : [NSColor colorWithSRGBRed:0.93 green:0.92 blue:0.97 alpha:1];
+  _sidebar.layer.backgroundColor = bg.CGColor;
+  _sidebar.layer.cornerRadius = 10;
+  _sidebar.layer.borderWidth = 1;
+  _sidebar.layer.borderColor = [NSColor colorWithWhite:IsDark(root) ? 1 : 0 alpha:0.10].CGColor;
+  _sidebar.shadow = [NSShadow new];
+  _sidebar.layer.shadowColor = NSColor.blackColor.CGColor;
+  _sidebar.layer.shadowOpacity = 0.35;
+  _sidebar.layer.shadowRadius = 18;
+  _sidebar.layer.shadowOffset = CGSizeMake(0, -4);
+  _sidebar.layer.masksToBounds = NO;
+  _sidebar.hidden = NO;
+  [self layoutSidebar];
+  [self positionWindowButtons];
+  if (!ReduceMotion()) {
+    CABasicAnimation* slide = [CABasicAnimation animationWithKeyPath:@"transform.translation.x"];
+    slide.fromValue = @(-(kSidebarWidth + 12));
+    slide.toValue = @0;
+    slide.duration = 0.22;
+    slide.timingFunction = [CAMediaTimingFunction functionWithControlPoints:0.2 :0.9 :0.3 :1];
+    [_sidebar.layer addAnimation:slide forKey:@"peekIn"];
+  }
+  if (!_peekTracker) {
+    _peekTracker = [HoverTracker new];
+    __weak MainWindowController* weakSelf = self;
+    _peekTracker.exited = ^{
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        MainWindowController* me = weakSelf;
+        if (!me || !me->_sidebarPeeking) return;
+        NSPoint p = [me->_sidebar convertPoint:me.window.mouseLocationOutsideOfEventStream fromView:nil];
+        if (!NSPointInRect(p, NSInsetRect(me->_sidebar.bounds, -8, -8)) && !me->_commandBar.isVisible) [me endSidebarPeek];
+      });
+    };
+  }
+  if (_peekArea) [_sidebar removeTrackingArea:_peekArea];
+  _peekArea = [[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                           options:NSTrackingMouseEnteredAndExited | NSTrackingActiveInKeyWindow | NSTrackingInVisibleRect
+                                             owner:_peekTracker
+                                          userInfo:nil];
+  [_sidebar addTrackingArea:_peekArea];
+}
+- (void)endSidebarPeek {
+  if (!_sidebarPeeking) return;
+  _sidebarPeeking = NO;
+  if (_peekArea) [_sidebar removeTrackingArea:_peekArea];
+  _peekArea = nil;
+  _sidebar.hidden = YES;
+  _sidebar.layer.backgroundColor = nil;
+  _sidebar.layer.cornerRadius = 0;
+  _sidebar.layer.borderWidth = 0;
+  _sidebar.layer.shadowOpacity = 0;
+  _sidebar.shadow = nil;
+  _sidebar.frame = NSMakeRect(0, 0, kSidebarWidth, self.window.contentView.bounds.size.height);
+  [self layoutSidebar];
+  [self positionWindowButtons];
+  [self updateEdgeStrip];
+}
+- (NSString*)sidebarPeekState {  // tests (V23)
+  return [NSString stringWithFormat:@"peeking=%d strip=%d floating=%d radius=%.0f shadow=%.2f cardFull=%d", _sidebarPeeking,
+                                    _edgeStrip.superview != nil, _sidebarPeeking && !_sidebar.hidden, _sidebar.layer.cornerRadius,
+                                    _sidebar.layer.shadowOpacity, NSMinX(_content.frame) == 0];
+}
+- (void)beginSidebarPeekForTest { [self beginSidebarPeek]; }
+- (void)endSidebarPeekForTest { [self endSidebarPeek]; }
 
 // Page area = window minus the sidebar (if shown) minus the toolbar (if shown).
 - (void)layoutContentArea {
   NSRect b = self.window.contentView.bounds;
-  CGFloat x = _sidebar.hidden ? 0 : kSidebarWidth;
+  CGFloat x = [self sidebarCollapsed] ? 0 : kSidebarWidth;
   BOOL bar = SettingBool(kSettingShowToolbar) && !_focusMode;
   _toolbar.hidden = !bar;
   CGFloat top = bar ? kToolbarHeight : 0;
   _toolbar.frame = NSMakeRect(x, b.size.height - kToolbarHeight, b.size.width - x, kToolbarHeight);
   // With no sidebar the window buttons sit over the toolbar's left end.
-  CGFloat shift = _sidebar.hidden ? 72 : 0;
+  CGFloat shift = [self sidebarCollapsed] ? 72 : 0;
   CGFloat bx = 8 + shift;
   for (NSView* v in _toolbar.subviews) {
     if (v == _address) continue;
@@ -7331,7 +7573,8 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   }
   _address.frame = NSMakeRect(bx + 6, 7, _toolbar.bounds.size.width - bx - 16, 24);
   // Card insets; with no sidebar (and in focus mode) the page fills the window, as in Arc.
-  BOOL card = !_sidebar.hidden;
+  BOOL card = ![self sidebarCollapsed];
+  [self updateEdgeStrip];
   CGFloat left = card ? 0 : 0, right = card ? kCardInsetSide : 0, bottom = card ? kCardInsetBottom : 0;
   CGFloat topInset = card && !bar ? kCardInsetTop : 0;
   _content.layer.cornerRadius = card ? kCardRadius : 0;
@@ -7371,7 +7614,104 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   _addressPill.toolTip = url;
   [self updateBoostIndicator];
   [self updateNavButtons];
+  [self updateLoadingGlow];
 }
+// Arc: a loading tab shows a small spinner where its icon was, and a soft glow runs along the top of the page card
+// while the shown page loads.
+- (void)browser:(int)browserId loading:(BOOL)loading {
+  ArcItem* item = [self itemForBrowserId:browserId];
+  if (!item || item.loading == loading) return;
+  item.loading = loading;
+  NSInteger row = [_outline rowForItem:item];
+  if (row >= 0) [_outline reloadItem:item];
+  ArcItem* group = [self parentOfItem:item];
+  if (group.isSplit && [_outline rowForItem:group] >= 0) [_outline reloadItem:group];
+  [self updateNavButtons];
+  [self updateLoadingGlow];
+}
+- (void)updateLoadingGlow {
+  BOOL on = _shown.loading && !_sidebarPeeking;
+  if (!_loadingGlow) {
+    CAGradientLayer* g = [CAGradientLayer layer];
+    g.startPoint = CGPointMake(0, 0.5);
+    g.endPoint = CGPointMake(1, 0.5);
+    g.locations = @[ @0, @0.5, @1 ];
+    _loadingGlow = g;
+  }
+  CAGradientLayer* g = (CAGradientLayer*)_loadingGlow;
+  if (!on) {
+    [g removeAllAnimations];
+    [g removeFromSuperlayer];
+    return;
+  }
+  NSColor* tint = _space.themeColors.count ? ColorFromHex(_space.themeColors.firstObject) : nil;
+  if (!tint) tint = [NSColor colorWithSRGBRed:0.333 green:0.522 blue:1 alpha:1];  // Arc's accent
+  g.colors = @[ (id)[tint colorWithAlphaComponent:0].CGColor, (id)[tint colorWithAlphaComponent:0.9].CGColor,
+                (id)[tint colorWithAlphaComponent:0].CGColor ];
+  _cardEdge.wantsLayer = YES;
+  CGFloat W = NSWidth(_cardEdge.bounds), H = NSHeight(_cardEdge.bounds);
+  [CATransaction begin];
+  [CATransaction setDisableActions:YES];
+  g.frame = CGRectMake(0, H - 2.5, W * 0.4, 2.5);
+  g.cornerRadius = 1.25;
+  [CATransaction commit];
+  if (g.superlayer != _cardEdge.layer) [_cardEdge.layer addSublayer:g];
+  if (![g animationForKey:@"sweep"] && !ReduceMotion()) {
+    CABasicAnimation* a = [CABasicAnimation animationWithKeyPath:@"position.x"];
+    a.fromValue = @(-W * 0.2);
+    a.toValue = @(W * 1.2);
+    a.duration = 1.4;
+    a.repeatCount = HUGE_VALF;
+    a.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+    [g addAnimation:a forKey:@"sweep"];
+  }
+}
+- (NSString*)splitRowStateForItem:(ArcItem*)split {  // tests (V19): segments, slashes, the dimmed pane count
+  NSInteger row = [_outline rowForItem:split];
+  NSTableCellView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
+  NSView* segs = nil;
+  for (NSView* v in cell.subviews)
+    if ([v.identifier isEqual:@"splitSegments"]) segs = v;
+  NSUInteger labels = 0, slashes = 0, dim = 0;
+  for (NSView* v in segs.subviews) {
+    if ([v isKindOfClass:SplitSlashView.class]) ++slashes;
+    else if ([v isKindOfClass:NSTextField.class]) {
+      ++labels;
+      if (v.alphaValue < 0.9) ++dim;
+    }
+  }
+  return [NSString stringWithFormat:@"segments=%lu slashes=%lu dim=%lu single=%d", (unsigned long)labels, (unsigned long)slashes,
+                                    (unsigned long)dim, segs && !segs.hidden && cell.textField.hidden];
+}
+- (NSString*)todayClearState {  // tests (V17): "hidden/shown" before and while the Today header is hovered
+  NSInteger hr = [_outline rowForItem:_space.unpinned];
+  NSTableCellView* cell = hr >= 0 ? [_outline viewAtColumn:0 row:hr makeIfNecessary:YES] : nil;
+  NSButton* c = [cell viewWithTag:83];
+  BOOL before = c && !c.hidden;
+  [self setSidebarHoverRow:hr];
+  BOOL during = c && !c.hidden && c.action == @selector(clearToday:) && NSMaxX(c.frame) <= NSWidth(cell.bounds);
+  [self setSidebarHoverRow:-1];
+  return [NSString stringWithFormat:@"before=%d during=%d after=%d", before, during, c && !c.hidden];
+}
+- (NSString*)loadingIndicatorStateForItem:(ArcItem*)item {  // tests (V9)
+  NSInteger row = [_outline rowForItem:item];
+  NSTableCellView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
+  NSProgressIndicator* spin = nil;
+  for (NSView* v in cell.subviews)
+    if ([v.identifier isEqual:@"spinner"]) spin = (NSProgressIndicator*)v;
+  return [NSString stringWithFormat:@"spinner=%d icon=%d glow=%d", spin && !spin.hidden, !cell.imageView.hidden,
+                                    _loadingGlow.superlayer != nil];
+}
+- (void)setItem:(ArcItem*)item loadingForTest:(BOOL)loading {
+  item.loading = !loading;
+  [self browser:item.browserId loading:loading];
+  if (!item.browserId) {
+    item.loading = loading;
+    [_outline reloadItem:item];
+    [self updateLoadingGlow];
+  }
+}
+
 // Arc dims back / forward when there's nowhere to go (white ~25% against ~60%).
 - (void)updateNavButtons {
   BOOL back = [self canGoBack], fwd = [self currentBrowser] && [self currentBrowser]->CanGoForward();
@@ -7427,7 +7767,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 }
 
 
-- (BOOL)sidebarHidden { return _sidebar.hidden; }
+- (BOOL)sidebarHidden { return [self sidebarCollapsed]; }
 - (NSRect)pageCardFrame { return _content.frame; }
 - (CGFloat)pageCardRadius { return _content.layer.cornerRadius; }
 - (NSString*)pageCardEdgeStyle {  // tests: "border=<alpha> shadow=<opacity>" after the window has drawn
@@ -7441,6 +7781,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 }
 
 - (IBAction)toggleFocusMode:(id)sender {
+  if (_sidebarPeeking) [self endSidebarPeek];
   _focusMode = !_focusMode;
   if (_focusMode) {
     _sidebarWasHidden = _sidebar.hidden;
@@ -7819,6 +8160,22 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
 // Arc closes Peek when you click outside it.
 - (void)windowDidBecomeKey:(NSNotification*)note {
   if (note.object == self.window && _peek) [_peek.window close];
+}
+// Arc dims the sidebar's text and icons while its window isn't the active one; the Space colour stays.
+- (void)windowDidResignMain:(NSNotification*)note { [self applyWindowActive]; }
+- (void)applyWindowActive {
+  BOOL active = self.window.isMainWindow || (self.selfTestProfiles && !_testInactive);
+  CGFloat a = active ? 1 : 0.55;
+  for (NSView* v in @[ _sidebarNav ?: [NSNull null], _addressPill ?: [NSNull null], _favGrid ?: [NSNull null],
+                       _spaceHeader ?: [NSNull null], _sidebarScroll ?: [NSNull null], _spaceBar ?: [NSNull null],
+                       _mediaBar ?: [NSNull null], _library ?: [NSNull null] ])
+    if ([v isKindOfClass:NSView.class]) v.alphaValue = a;
+}
+- (BOOL)sidebarDimmedForTest:(BOOL)inactive {  // tests (V8): returns whether the sidebar dimmed
+  _testInactive = inactive;
+  [self applyWindowActive];
+  BOOL dimmed = _sidebarScroll.alphaValue < 0.9 && _addressPill.alphaValue < 0.9 && _spaceBar.alphaValue < 0.9;
+  return dimmed;
 }
 
 #pragma mark Context menus

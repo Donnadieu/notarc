@@ -464,3 +464,11 @@ trackpad; everything else is checked by the hidden self-test.
 110. **The pill's site buttons show on hover only (V12).** The screenshot shows a bare pill with just the site; the
     buttons appear when the pointer is over it. A site with a Boost on keeps its Boost button visible, so you can
     still see the Boost is on.
+111. **The floating sidebar opens from a 6 pt strip at the window's left edge (V23)** and closes a quarter second after
+    the pointer leaves it (not while the command bar is open). It's drawn in the Space's first colour with Arc's
+    rounded corners and shadow; Reduce Motion turns the slide off.
+112. **The loading glow is a short band in the Space's colour sweeping along the card's top edge (V9).** Arc's own
+    glow is a Metal shader we can't copy; this keeps the idea (a moving glow, not a progress bar) with plain Core
+    Animation. Reduce Motion leaves it still.
+113. **Inactive windows dim the sidebar's content to 55% (V8),** the Space colour stays. The window counts as active
+    while it's the main window, so the command bar (a child panel taking key focus) doesn't dim it.

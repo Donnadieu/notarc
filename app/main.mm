@@ -1991,6 +1991,34 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                   w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown, w.sidebarScrollerIsOverlay,
                   w.spaceDotsAreArcStyle, pillButtons);
       if (!pillButtons) std::printf("SELFTEST-SIDEBARLOOK-DEBUG pill idle=%s hover=%s\n", pillIdle.UTF8String, pillHover.UTF8String);
+      {  // Visual parity V8, V9, V17, V23: inactive dimming, loading spinner + glow, Today's Clear, the floating sidebar.
+        BOOL dim = [w sidebarDimmedForTest:YES];
+        BOOL undim = ![w sidebarDimmedForTest:NO];
+        [w showItem:shownTab];
+        [w setItem:shownTab loadingForTest:YES];
+        NSString* loadOn = [w loadingIndicatorStateForItem:shownTab];
+        [w setItem:shownTab loadingForTest:NO];
+        NSString* loadOff = [w loadingIndicatorStateForItem:shownTab];
+        BOOL spinner = [loadOn isEqual:@"spinner=1 icon=0 glow=1"] && [loadOff isEqual:@"spinner=0 icon=1 glow=0"];
+        NSString* clear = w.todayClearState;
+        BOOL clearOK = w.currentSpace.unpinned.children.count == 0 || [clear isEqual:@"before=0 during=1 after=0"];
+        BOOL wasHidden = w.sidebarHidden;
+        if (!wasHidden) [w toggleSidebar:nil];
+        NSString* strip = w.sidebarPeekState;
+        [w beginSidebarPeekForTest];
+        NSString* peek = w.sidebarPeekState;
+        [w endSidebarPeekForTest];
+        NSString* after = w.sidebarPeekState;
+        if (!wasHidden) [w toggleSidebar:nil];
+        BOOL peekOK = [strip hasPrefix:@"peeking=0 strip=1"] && [peek hasPrefix:@"peeking=1 strip=0 floating=1 radius=10"] &&
+                      [peek hasSuffix:@"cardFull=1"] && [after hasPrefix:@"peeking=0 strip=1"] && w.sidebarHidden == wasHidden &&
+                      !w.sidebarHidden;
+        std::printf("SELFTEST-SIDEBARSTATES inactiveDim=%d activeFull=%d spinner=%d clear=%d peek=%d\n", dim, undim, spinner, clearOK,
+                    peekOK);
+        if (!spinner || !clearOK || !peekOK)
+          std::printf("SELFTEST-SIDEBARSTATES-DEBUG load=[%s][%s] clear=[%s] peek=[%s][%s][%s]\n", loadOn.UTF8String, loadOff.UTF8String,
+                      clear.UTF8String, strip.UTF8String, peek.UTF8String, after.UTF8String);
+      }
       if (!rowsOK) std::printf("SELFTEST-ROWS-DEBUG sel=[%s] hov=[%s] off=[%s]\n", selStyle.UTF8String, hovStyle.UTF8String, offStyle.UTF8String);
       [w toggleFocusMode:nil];
       NSRect ff = w.pageCardFrame;
@@ -4514,6 +4542,12 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           if (it.isSplit && it.children.count == 3 && it.splitFractions.count == 3 &&
               fabs(it.splitFractions[0].doubleValue - 0.5) < 0.03)
             persisted = YES;
+      {  // Visual parity V19: Arc's split row, one icon + title per pane with slashes, other panes dimmed.
+        NSString* sr = group ? [w splitRowStateForItem:group] : @"";
+        BOOL splitRow = [sr isEqual:@"segments=3 slashes=2 dim=2 single=1"];
+        std::printf("SELFTEST-SPLITROW arcStyle=%d\n", splitRow);
+        if (!splitRow) std::printf("SELFTEST-SPLITROW-DEBUG %s\n", sr.UTF8String);
+      }
       std::printf("SELFTEST-SPLIT3 oneSidebarItem=%d dividers=%lu dragResized=%d persisted=%d\n", oneItem,
                   (unsigned long)dividers, resized, persisted);
       [w closeSplitPane:nil];
