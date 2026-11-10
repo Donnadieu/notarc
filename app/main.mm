@@ -18,6 +18,7 @@
 #import "app/little_window.h"
 #import "app/arc_extensions.h"
 #import "app/extensions.h"
+#import "app/extension_popup.h"
 #import "app/link_routing.h"
 #import "app/link_routing_editor.h"
 #import "app/bookmark_import.h"
@@ -89,14 +90,15 @@
 static BOOL gCrashTestDone = NO;
 static BOOL gMaxTestDone = NO;    // self-test: the Arc Max checks (#58, #59) printed
 // Self-test fixture extension (#66): popup and options pages with known titles, no scripts.
-static NSString* gTestExtensionID;  // installed at launch when Chrome-style pages are on
+static NSString* gTestExtensionID;  // installed and loaded at launch in every test run
 static NSDictionary<NSString*, NSData*>* TestExtensionFiles(NSString* name, int manifestVersion) {
   NSString* manifest = [NSString stringWithFormat:@"{\"manifest_version\":%d,\"name\":\"%@\",\"version\":\"1.2\","
                                                   @"\"action\":{\"default_popup\":\"popup.html\"},\"options_page\":\"options.html\"}",
                                                   manifestVersion, name];
   return @{
     @"manifest.json" : [manifest dataUsingEncoding:NSUTF8StringEncoding],
-    @"popup.html" : [@"<!doctype html><title>NotArc Extension Popup</title><p>popup</p>" dataUsingEncoding:NSUTF8StringEncoding],
+    @"popup.html" : [@"<!doctype html><title>NotArc Extension Popup</title><div style=\"width:240px;height:120px\">popup</div>"
+                      dataUsingEncoding:NSUTF8StringEncoding],
     @"options.html" : [@"<!doctype html><title>NotArc Extension Options</title><p>options</p>" dataUsingEncoding:NSUTF8StringEncoding],
   };
 }
@@ -2140,27 +2142,80 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         });
       });
     });
-    // Chrome extensions (#66), Chrome-style pages only: the fixture extension installed at startup through the real CRX
-    // install path is loaded, the picker's Open and Options show its pages in tabs, chrome://extensions opens, and
-    // a stubbed Chrome Web Store page reports whether Chromium's own Web Store install API is there (info only).
+    // Chrome extensions (#66). First the action popup as a bubble (both settings: self-test runs always load the fixture
+    // extension, installed at startup through the real CRX install path, and the bubble is a Chrome-style page of its
+    // own): the picker's Open shows chrome-extension://<id>/popup.html in a panel under the picker button (or the
+    // address pill without it), sized to the page (240x120 box + 8 px body margins = 256x136), invisible like the test
+    // window; Esc, a click outside and the page's window.close() each close it. Then, with Chrome-style pages on,
+    // Options and chrome://extensions open in tabs and a stubbed Chrome Web Store page reports whether Chromium's own
+    // Web Store install API is there (info only).
     // Each wait is capped so this finishes before the hang check (75 s) needs the visible tab to itself.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 57 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
-      if (!ChromePagesEnabled()) {
-        std::printf("SELFTEST-EXTPAGES chromePagesOff=1\n");
-        return;
-      }
       NSMenu* menu = [w extensionPickerMenuForURL:nil];
       NSMenuItem* row = [menu itemWithTitle:@"NotArc Test Extension"];
       NSMenuItem* open = [row.submenu itemWithTitle:@"Open"];
       NSMenuItem* options = [row.submenu itemWithTitle:@"Options"];
+      NotArcExtension* fixture = row.representedObject;
       BOOL installedAtStart = gTestExtensionID != nil && row != nil;
       if (open) [NSApp sendAction:open.action to:open.target from:open];
-      ArcItem* popupTab = open ? w.shownItem : nil;
-      WaitUntil(^{ return [popupTab.liveTitle isEqualToString:@"NotArc Extension Popup"]; }, 4, ^{
-        BOOL popup = [popupTab.liveTitle isEqualToString:@"NotArc Extension Popup"] &&
-                     [popupTab.url hasPrefix:[NSString stringWithFormat:@"chrome-extension://%@/", gTestExtensionID]];
-        if (options) [NSApp sendAction:options.action to:options.target from:options];
+      ExtensionPopup* p = w.extensionPopup;
+      NSString* expectURL = [NSString stringWithFormat:@"chrome-extension://%@/popup.html", gTestExtensionID];
+      WaitUntil(^{ return (BOOL)(p.loadedURL && p.title && p.sizedBy && p.panel.isVisible); }, 5, ^{
+       NSWindow* win = w.window;
+       NSRect f = p.panel.frame;
+       NSView* anchor = [w extensionPopupAnchor];
+       NSRect a = [win convertRectToScreen:[anchor convertRect:anchor.bounds toView:nil]];
+       BOOL created = p != nil && p.panel != nil && p.pageWindow != nil;
+       BOOL anchored = p.panel.parentWindow == win && NSContainsRect(win.frame, f) && NSMaxY(f) <= NSMinY(a) &&
+                       NSMinY(a) - NSMaxY(f) <= 12 && NSMinX(f) < NSMaxX(a) && NSMaxX(f) > NSMinX(a);
+       NSRect pf = p.pageWindow.frame;
+       BOOL pageOnBubble = p.pageWindow.parentWindow == p.panel && fabs(NSMinX(pf) - NSMinX(f)) <= 1 &&
+                           fabs(NSMinY(pf) - NSMinY(f)) <= 1 && fabs(pf.size.width - f.size.width) <= 1 &&
+                           fabs(pf.size.height - f.size.height) <= 1;
+       BOOL url = [p.loadedURL isEqualToString:expectURL] && [p.title isEqualToString:@"NotArc Extension Popup"] && !p.loadFailed;
+       BOOL sized = fabs(f.size.width - 256) <= 2 && fabs(f.size.height - 136) <= 2;
+       BOOL clamp = NSEqualSizes(ExtensionPopupClampSize(NSMakeSize(3, 3)), NSMakeSize(25, 25)) &&
+                    NSEqualSizes(ExtensionPopupClampSize(NSMakeSize(2000, 900)), NSMakeSize(800, 600)) &&
+                    NSEqualSizes(ExtensionPopupClampSize(NSMakeSize(300.2, 200)), NSMakeSize(301, 200)) &&
+                    NSContainsRect(NSMakeRect(0, 0, 500, 400), ExtensionPopupFrame(NSMakeRect(450, 350, 26, 26), NSMakeSize(300, 500),
+                                                                                    NSMakeRect(0, 0, 500, 400)));
+       BOOL hidden = p.panel.alphaValue <= 0.011 && p.panel.ignoresMouseEvents && p.pageWindow.alphaValue <= 0.011 &&
+                     p.pageWindow.ignoresMouseEvents && !p.pageWindow.isKeyWindow && win.alphaValue <= 0.011;
+       NSString* sizedBy = p.sizedBy;
+       NSEvent* esc = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0
+                                   windowNumber:p.pageWindow.windowNumber context:nil characters:@"\x1b"
+                    charactersIgnoringModifiers:@"\x1b" isARepeat:NO keyCode:53];
+       BOOL escConsumed = [p handleLocalEvent:esc] == nil;
+       BOOL escCloses = escConsumed && !p.isOpen && [p.closeReason isEqualToString:@"esc"] && !p.panel.isVisible &&
+                        !p.panel.parentWindow && w.extensionPopup == nil;
+       ExtensionPopup* p2 = [w showPopupOfExtension:fixture];
+       WaitUntil(^{ return (BOOL)(p2.panel.isVisible && p2.loadedURL); }, 3, ^{
+        NSEvent* click = [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:NSMakePoint(400, 300) modifierFlags:0
+                                           timestamp:0 windowNumber:w.window.windowNumber context:nil eventNumber:0
+                                          clickCount:1 pressure:1];
+        BOOL passedOn = [p2 handleLocalEvent:click] == click;
+        BOOL clickOutside = p2 && passedOn && !p2.isOpen && [p2.closeReason isEqualToString:@"click"] && !p2.panel.isVisible;
+        ExtensionPopup* p3 = [w showPopupOfExtension:fixture];
+        WaitUntil(^{ return (BOOL)(p3.panel.isVisible && p3.loadedURL); }, 3, ^{
+         [p3 runJS:@"window.close()"];
+         WaitUntil(^{ return (BOOL)(p3 && !p3.isOpen); }, 3, ^{
+          BOOL scriptClose = p3 && !p3.isOpen && [p3.closeReason isEqualToString:@"script"] && !p3.panel.isVisible &&
+                             w.extensionPopup == nil;
+          if (p3.isOpen) [p3 closeBecause:@"test"];
+          std::printf("SELFTEST-EXTPOPUP installed=%d created=%d anchored=%d pageOnBubble=%d url=%d sized=%d clamp=%d hidden=%d "
+                      "escCloses=%d clickOutside=%d scriptClose=%d\n", installedAtStart, created, anchored, pageOnBubble, url,
+                      sized, clamp, hidden, escCloses, clickOutside, scriptClose);
+          std::printf("SELFTEST-EXTPOPUP-DEBUG sizedBy=%s size=%gx%g page=%gx%g anchorY=%g top=%g reason3=%s\n",
+                      sizedBy.UTF8String ?: "-", f.size.width, f.size.height, p.pageSize.width, p.pageSize.height, NSMinY(a),
+                      NSMaxY(f), p3.closeReason.UTF8String ?: "-");
+          std::fflush(stdout);
+          if (!ChromePagesEnabled()) {
+            std::printf("SELFTEST-EXTPAGES chromePagesOff=1\n");
+            return;
+          }
+          BOOL popup = url;
+          if (options) [NSApp sendAction:options.action to:options.target from:options];
         ArcItem* optionsTab = options ? w.shownItem : nil;
         WaitUntil(^{ return [optionsTab.liveTitle isEqualToString:@"NotArc Extension Options"]; }, 4, ^{
           BOOL optionsOK = [optionsTab.liveTitle isEqualToString:@"NotArc Extension Options"];
@@ -2185,6 +2240,9 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
             });
           });
         });
+         });
+        });
+       });
       });
     });
     // Chrome extensions (#66), both settings: Install Extension... from a Web Store link or ID (download stubbed with
@@ -2198,6 +2256,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
      NSData* old = BuildTestCRX(TestExtensionFiles(@"Old Format", 2), &oldID);
      dispatch_async(dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
+      BOOL pagesAtStart = SettingBool(kSettingChromePages);  // installs below turn it on; put back at the end
       NSFileManager* fm = NSFileManager.defaultManager;
       NSString* dir = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-installed-extensions"];
       [fm removeItemAtPath:dir error:nil];
@@ -2281,10 +2340,53 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
               std::printf("SELFTEST-EXTPICKER listed=%d footer=%d storePage=%d offShown=%d offNotLoaded=%d relaunchOffered=%d "
                           "relaunchCounted=%d onAgain=%d removed=%d button=%d menuBar=%d settings=%d\n", listed, footer, storePage,
                           offShown, offNotLoaded, relaunchOffered, relaunchCounted, onAgain, removed, button, menuBar, settings);
-              SetExtensionFetcherForTest(nil);
-              SettingSetObject(kDisabledExtensionsKey, @[]);
-              w.extensionsDirectoryOverride = nil;
-              [fm removeItemAtPath:dir error:nil];
+              // Relaunch offer (#66): the toast with Relaunch Now wired to the relaunch (counted, never quits), and
+              // installs or Arc imports turning Chrome-style pages on (memory-only settings, restored after). Waits for
+              // any other check's toast to go, and hides its own in the same turn, so no other check sees it.
+              WaitUntil(^{ return (BOOL)(w.toastText == nil); }, 8, ^{
+               BOOL savedPages = pagesAtStart;
+               SettingSetBool(kSettingChromePages, YES);
+               [w offerRelaunchForExtensions:@"Picker Test is installed."];
+               BOOL toast = [w.toastText isEqualToString:@"Picker Test is installed. Relaunch to apply."];
+               NSButton* rb = [w toastButtonTitled:@"Relaunch Now"];
+               BOOL wired = rb && rb.target == w && rb.action == @selector(relaunchToApplyExtensions:);
+               NSInteger r0 = [w relaunchRequestsForTest];
+               [rb performClick:nil];
+               BOOL clicked = [w relaunchRequestsForTest] == r0 + 1;
+               SettingSetBool(kSettingChromePages, NO);
+               [w offerRelaunchForExtensions:@"Picker Test is removed."];
+               BOOL offNoButton = [w.toastText hasPrefix:@"Picker Test is removed."] && ![w toastButtonTitled:@"Relaunch Now"];
+               [w hideToast];
+               [w installExtensionFromInput:@"https://example.com/not-an-extension" done:^(NSString* nb, NSError*) {
+                BOOL failKeepsOff = !nb && !SettingBool(kSettingChromePages);
+                [w installExtensionFromInput:goodID done:^(NSString* n6, NSError*) {
+                 BOOL installTurnsOn = n6 && SettingBool(kSettingChromePages);
+                 SettingSetBool(kSettingChromePages, NO);
+                 NSString* fake = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-arc-userdata-pages"];
+                 NSString* arcDest = [NSTemporaryDirectory() stringByAppendingPathComponent:@"selftest-arc-extensions-pages"];
+                 [fm removeItemAtPath:fake error:nil];
+                 [fm removeItemAtPath:arcDest error:nil];
+                 NSString* prof = w.currentSpace.profileDirectory.length ? w.currentSpace.profileDirectory : @"Default";
+                 NSString* d = [NSString stringWithFormat:@"%@/%@/Extensions/cccccccccccccccccccccccccccccccc/1.0_0", fake, prof];
+                 [fm createDirectoryAtPath:d withIntermediateDirectories:YES attributes:nil error:nil];
+                 [@"{\"manifest_version\":3,\"name\":\"Arc Copy\",\"version\":\"1.0\"}" writeToFile:[d stringByAppendingPathComponent:@"manifest.json"]
+                                                                                 atomically:YES encoding:NSUTF8StringEncoding error:nil];
+                 NSArray* copies = [w importArcExtensionsTurningOnPagesInto:arcDest fromArcUserData:fake];
+                 BOOL importTurnsOn = copies.count == 1 && SettingBool(kSettingChromePages);
+                 SettingSetBool(kSettingChromePages, savedPages);
+                 BOOL restored = SettingBool(kSettingChromePages) == savedPages && !w.toastText;
+                 std::printf("SELFTEST-EXTRELAUNCH toast=%d wired=%d clicked=%d offNoButton=%d failKeepsOff=%d installTurnsOn=%d "
+                             "importTurnsOn=%d restored=%d\n", toast, wired, clicked, offNoButton, failKeepsOff, installTurnsOn,
+                             importTurnsOn, restored);
+                 [fm removeItemAtPath:fake error:nil];
+                 [fm removeItemAtPath:arcDest error:nil];
+                 SetExtensionFetcherForTest(nil);
+                 SettingSetObject(kDisabledExtensionsKey, @[]);
+                 w.extensionsDirectoryOverride = nil;
+                 [fm removeItemAtPath:dir error:nil];
+                }];
+               }];
+              });
             }];
           }];
         }];
@@ -4369,8 +4471,10 @@ int main(int argc, char* argv[]) {
     for (char* a : args) if (a == noMacOcclusion) testRun = YES;
     NSString* extDir = NotArcExtensionsDirectory(testRun);
     NSSet* disabled = [NSSet setWithArray:testRun ? @[] : ([NSUserDefaults.standardUserDefaults arrayForKey:kDisabledExtensionsKey] ?: @[])];
-    if (testRun && ChromePagesEnabled()) InstallSelfTestExtension(extDir);  // through the real CRX install path
-    NSArray<NSString*>* paths = ChromePagesEnabled() ? ExtensionLoadPaths(extDir, disabled) : @[];
+    // Test runs always load the fixture extension (through the real CRX install path): its popup bubble is a
+    // Chrome-style page of its own, so it's checked with either setting.
+    if (testRun) InstallSelfTestExtension(extDir);
+    NSArray<NSString*>* paths = ChromePagesEnabled() || testRun ? ExtensionLoadPaths(extDir, disabled) : @[];
     if (paths.count) {
       loadExt = std::string("--load-extension=") + [paths componentsJoinedByString:@","].UTF8String;
       features = std::string("--disable-features=DisableLoadExtensionCommandLineSwitch") +
