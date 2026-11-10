@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-5 done of 66 items.
+14 done of 66 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -23,12 +23,12 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   while scrolling a long list, and the empty area below the tabs is just the Space colour. Ref: shot (no track),
   Omar's NotArc screenshot (track visible).
 - [x] **V2 Tab rows.** 36 pt rows on a 41 pt pitch, 16 pt favicon at x 18, title at x 45 in 13-14 pt medium
-  lavender-white; a long title fades out at the right edge (no "..."), and the fade makes room for a close button
-  that shows on the row under the pointer (not on the selected row by itself). Ref: shot, colours, app, video.
-- [x] **V3 Mini player and media controls.** A card above the bottom bar for the tab playing sound: artwork or favicon,
-  the track title and the site on two lines (no "(2:52)" in the title), and back, play/pause and forward buttons;
-  mute on hover. A playing video you leave keeps playing in a small player there. Ref: help (Mini Player), shot
-  (media bar black ~45%, radius 8), colours (playback control colour).
+  lavender-white; a long title ends in "..." (Omar's Arc 1.169 screenshot), and a close button shows on the row under
+  the pointer (not on the selected row by itself). Ref: shot, colours, app, video.
+- [x] **V3 Mini player and media controls.** A 32 pt bar above the bottom bar (x 8-264, black ~60%, 8 pt corners)
+  for the tab playing sound: the site's icon or artwork, then back, play/pause, forward and the speaker spread evenly,
+  no text (what's playing is the icon's tooltip, without any running "(2:52)" clock). Back and forward use the
+  page's own previous / next track, else skip 10 s. Ref: shot (measured to the pixel), help (Mini Player).
 - [x] **V4 Archive in the sidebar.** The archive button opens Archive inside the sidebar (Library), not a window: a
   search field, archived tabs grouped by when they were archived (Today, Yesterday, earlier days and months), each a
   normal favicon + title row; clicking one brings it back as a tab. Long archives load as you scroll. Ref: app
@@ -41,9 +41,9 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
 
 ## Window
 
-- [ ] **V6 Window frame.** No title bar; the page is a rounded card (8 pt corners) inset 10/9/9 pt on the Space colour,
+- [x] **V6 Window frame.** No title bar; the page is a rounded card (8 pt corners) inset 10/9/9 pt on the Space colour,
   hairline edge, soft shadow only in light mode. Ref: shot, app (content inset, corner radius).
-- [ ] **V7 Traffic lights.** Window buttons sit inside the sidebar at x 20/43/66, centre y 24; they dim when the window
+- [x] **V7 Traffic lights.** Window buttons sit inside the sidebar at x 20/43/66, centre y 24; they dim when the window
   is inactive and hide in focus mode. Ref: shot, app (dimmed window controls).
 - [ ] **V8 Inactive window.** An inactive window keeps the Space colour but its sidebar text and icons dim. Ref: app.
 - [ ] **V9 Loading.** A loading tab shows a spinner in place of its favicon, and a soft glow runs along the page card
@@ -53,18 +53,18 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
 
 ## Sidebar
 
-- [ ] **V11 Top bar.** Sidebar toggle right of the traffic lights; back, forward and reload at the right, in the
-  toolbar icon colour, disabled ones dimmed. Ref: shot, colours.
-- [ ] **V12 Address pill.** x 8-264, 36 pt tall, ~10 pt corners, white ~9% (dark); shows the domain only in 13 pt; site
-  buttons (copy link, site controls, extensions) at its right; hover lightens it; click opens the command bar on top of
-  it. Ref: shot, app.
-- [ ] **V13 Favorites grid.** Tiles 3 to a row (79 x 47 pt, 9 pt gaps, ~10 pt corners, white ~8%), 16 pt icon centred;
+- [x] **V11 Top bar.** Sidebar toggle right of the traffic lights; back, forward and reload at the right, in the
+  toolbar icon colour (white ~60%); back / forward dim to ~22% when there's nowhere to go. Ref: shot, colours.
+- [x] **V12 Address pill.** x 8-264, 36 pt tall, ~10 pt corners, white ~9% (dark); shows the domain only in 13 pt;
+  the site buttons (Boost, copy link, site controls, extensions) appear at its right only while the pointer is over
+  it (a site with a Boost on keeps that one); hover lightens it; click opens the command bar. Ref: shot, app.
+- [x] **V13 Favorites grid.** Tiles 3 to a row (79 x 47 pt, 9 pt gaps, ~10 pt corners, white ~8%), 16 pt icon centred;
   selected tile is brighter; unread badge at the corner; tiles widen when there are fewer per row. Ref: shot.
-- [ ] **V14 Space title.** Space name (and its emoji icon) at x 18 in 12-13 pt semibold, white ~45%; "..." menu on hover.
+- [x] **V14 Space title.** Space name (and its emoji icon) at x 18 in 12-13 pt semibold, white ~45%; "..." menu on hover.
   Ref: shot, app (Space header).
-- [ ] **V15 Pinned section and divider.** Pinned tabs sit between Favorites and the divider; the divider is 1 pt,
+- [x] **V15 Pinned section and divider.** Pinned tabs sit between Favorites and the divider; the divider is 1 pt,
   white ~15%, x 18-255; no "Pinned" label. Ref: shot, colours.
-- [ ] **V16 New Tab row.** "+ New Tab" under the divider in white ~45% with a hover fill; clicking it opens the
+- [x] **V16 New Tab row.** "+ New Tab" under the divider in white ~45% with a hover fill; clicking it opens the
   command bar. Ref: shot, app.
 - [ ] **V17 Today and Clear.** Today's tabs under New Tab; hovering the divider shows a small "Clear" action that
   archives them. Ref: app (Clear), video.
@@ -80,8 +80,8 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   Ref: shot, video.
 - [ ] **V23 Hidden sidebar.** With the sidebar hidden the card fills the window; hovering the left edge slides the
   sidebar in as a floating rounded panel with a shadow over the page. Ref: app (gesture-hidden sidebar), video.
-- [ ] **V24 Bottom bar.** Library button at left, one dot (or emoji) per Space in the middle (current one light, others
-  ~25%), "+" at right. Ref: shot.
+- [x] **V24 Bottom bar.** Library button at left, one filled dot (or emoji) per Space in the middle, 34 pt apart
+  (current white ~50%, others ~17%), "+" at right; icons white ~60%, centred 20.5 pt above the window bottom. Ref: shot.
 - [ ] **V25 Plus menu.** "+" opens Arc's own menu style (dark rounded panel, icon per row): New Tab, Split View,
   Folder, Easel, Note, Boost, Space, Profile. Ref: app (plus button icons, menu colours).
 - [ ] **V26 Unread badge and sound icon.** Unread count/dot on a row or tile; a speaker icon on a playing tab that

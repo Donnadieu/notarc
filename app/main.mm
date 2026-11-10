@@ -1677,7 +1677,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       NSString* offStyle = otherTab ? [w sidebarRowStyleForItem:otherTab] : @"";
       BOOL rowsOK = [selStyle hasPrefix:@"h=36 r=8 sel=1"] && [hovStyle containsString:@"hover=1"] &&
                     [offStyle hasSuffix:@"alpha=0.00"];
-      {  // Visual parity V2: close button on the hovered row only, long titles fade (no "...").
+      {  // Visual parity V2: close button on the hovered row only, long titles end in "..." as in Arc 1.169.
         NSString* selAcc = shownTab ? [w tabRowAccessoriesForItem:shownTab] : @"";
         [w hoverSidebarItem:otherTab];
         NSString* hovAcc = otherTab ? [w tabRowAccessoriesForItem:otherTab] : @"";
@@ -1694,11 +1694,10 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         longTab.renamed = YES;
         [w reloadSidebarItemForTest:longTab];
         NSString* longAcc = longTab ? [w tabRowAccessoriesForItem:longTab] : @"";
-        BOOL fade = [longAcc containsString:@"fade=1 clip=1"];
+        BOOL fade = [longAcc containsString:@"ellipsis=1"];  // Arc 1.169: long titles end in "..."
         longTab.title = savedTitle;
         longTab.renamed = savedRenamed;
         [w reloadSidebarItemForTest:longTab];
-        BOOL shortNoFade = [[w tabRowAccessoriesForItem:longTab] containsString:@"fade=0"] || longTab.displayTitle.length > 30;
         // The close button on a row that isn't shown closes that tab (archived) and leaves the shown tab alone.
         NSUInteger todayBefore = w.currentSpace.unpinned.children.count;
         [w openInNewTab:@"https://closebutton.example/" background:YES];
@@ -1708,8 +1707,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         BOOL pressed = extra && [w pressCloseButtonOfItem:extra];
         BOOL closeOther = pressed && w.shownItem == shownTab && w.currentSpace.unpinned.children.count == todayBefore &&
                           ![w.currentSpace.unpinned.children containsObject:extra];
-        std::printf("SELFTEST-TABROWS closeShown=%d room=%d fade=%d shortNoFade=%d closeOther=%d\n", closeShown, room, fade,
-                    shortNoFade, closeOther);
+        std::printf("SELFTEST-TABROWS closeShown=%d room=%d ellipsis=%d closeOther=%d\n", closeShown, room, fade, closeOther);
         if (!closeShown || !room || !fade)
           std::printf("SELFTEST-TABROWS-DEBUG sel=[%s] hov=[%s] off=[%s] long=[%s]\n", selAcc.UTF8String, hovAcc.UTF8String,
                       offAcc.UTF8String, longAcc.UTF8String);
@@ -1982,8 +1980,17 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           [[NSFileManager defaultManager] removeItemAtPath:saved error:nil];
         }
       }
-      std::printf("SELFTEST-SIDEBARLOOK grid=%d defaultTheme=%d noScrollTrack=%d\n", gridOK,
-                  w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown, w.sidebarScrollerIsOverlay);
+      [w showItem:shownTab];
+      NSString* pillIdle = w.pillButtonState;
+      [w setPillHoveredForTest:YES];
+      NSString* pillHover = w.pillButtonState;
+      [w setPillHoveredForTest:NO];
+      BOOL pillButtons = ([pillIdle hasPrefix:@"0/"] || ([pillIdle hasPrefix:@"1/"] && [w.boostIndicatorState isEqual:@"on"])) && [pillHover componentsSeparatedByString:@"/"].firstObject.integerValue >= 2 &&
+                         [[pillHover componentsSeparatedByString:@"/"].firstObject isEqual:[pillHover componentsSeparatedByString:@"/"].lastObject];
+      std::printf("SELFTEST-SIDEBARLOOK grid=%d defaultTheme=%d noScrollTrack=%d dots=%d pillButtons=%d\n", gridOK,
+                  w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown, w.sidebarScrollerIsOverlay,
+                  w.spaceDotsAreArcStyle, pillButtons);
+      if (!pillButtons) std::printf("SELFTEST-SIDEBARLOOK-DEBUG pill idle=%s hover=%s\n", pillIdle.UTF8String, pillHover.UTF8String);
       if (!rowsOK) std::printf("SELFTEST-ROWS-DEBUG sel=[%s] hov=[%s] off=[%s]\n", selStyle.UTF8String, hovStyle.UTF8String, offStyle.UTF8String);
       [w toggleFocusMode:nil];
       NSRect ff = w.pageCardFrame;
@@ -2172,19 +2179,17 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
             {  // Visual parity V3: Arc's mini player card (what's playing, the site, back/play/forward, mute on hover).
               [w pollMediaNow];
               NSString* card = w.mediaCardDescription;
-              BOOL meta = [card containsString:@"title=Test Track subtitle=Test Artist"];
-              BOOL buttons = [card containsString:@"prev=0 play=1 next=1"];
-              BOOL muteHidden = [card containsString:@"mute=0"];
-              [w setMediaCardHoveredForTest:YES];
-              BOOL muteOnHover = [w.mediaCardDescription containsString:@"mute=1"];
-              [w setMediaCardHoveredForTest:NO];
-              BOOL size = [card hasPrefix:@"h=48"] && [card hasSuffix:@"art=1"];
+              BOOL meta = [card containsString:@"title=Test Track subtitle=Test Artist"] &&
+                          [card containsString:@"tip=Test Track — Test Artist"];
+              BOOL buttons = [card containsString:@"prev=1 play=1 next=1 mute=1"];
+              BOOL noText = [card hasSuffix:@"text=0"];  // Arc shows no text in the bar
+              BOOL size = [card hasPrefix:@"h=32"] && [card containsString:@"art=1"];
               BOOL clock = [MediaBarTitle(@"brain.fm (2:52)") isEqualToString:@"brain.fm"] &&
                            [MediaBarTitle(@"\u25B6 Song - Artist 1:02 / 3:40") isEqualToString:@"Song - Artist"] &&
                            [MediaBarTitle(@"Lisbon - Wikipedia") isEqualToString:@"Lisbon - Wikipedia"];
               [w mediaBarNext:nil];
-              std::printf("SELFTEST-MINIPLAYER meta=%d buttons=%d muteHidden=%d muteOnHover=%d size=%d clock=%d\n", meta, buttons,
-                          muteHidden, muteOnHover, size, clock);
+              std::printf("SELFTEST-MINIPLAYER meta=%d buttons=%d noText=%d size=%d clock=%d\n", meta, buttons, noText, size,
+                          clock);
               if (!meta || !buttons || !size) std::printf("SELFTEST-MINIPLAYER-DEBUG %s\n", card.UTF8String);
             }
             [w toggleMuteItem:m];

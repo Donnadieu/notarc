@@ -282,6 +282,7 @@ static NSColor* gCommandPillColor;
 // (Arc colour catalogue: SidebarItemBackground / SidebarItemHoveredBackground). Click opens the command bar.
 @interface SidebarPillView : NSView
 @property(nonatomic, copy) void (^onClick)(void);
+@property(nonatomic, copy) void (^hoverChanged)(void);
 @property(nonatomic) BOOL hovered;
 @end
 @implementation SidebarPillView
@@ -302,8 +303,16 @@ static NSColor* gCommandPillColor;
                                                              NSTrackingInVisibleRect
                                                        owner:self userInfo:nil]];
 }
-- (void)mouseEntered:(NSEvent*)e { self.hovered = YES; self.needsDisplay = YES; }
-- (void)mouseExited:(NSEvent*)e { self.hovered = NO; self.needsDisplay = YES; }
+- (void)mouseEntered:(NSEvent*)e {
+  self.hovered = YES;
+  self.needsDisplay = YES;
+  if (self.hoverChanged) self.hoverChanged();
+}
+- (void)mouseExited:(NSEvent*)e {
+  self.hovered = NO;
+  self.needsDisplay = YES;
+  if (self.hoverChanged) self.hoverChanged();
+}
 - (void)mouseUp:(NSEvent*)e { if (self.onClick) self.onClick(); }
 @end
 
@@ -384,6 +393,30 @@ constexpr CGFloat kRowPitch = 41, kPinnedHeaderHeight = 6, kNewTabHeaderHeight =
 // Arc's default (unthemed) dark Space: deep indigo, slightly lighter at the bottom; text is lavender, not white.
 static NSColor* ArcDefaultTabText() { return [NSColor colorWithSRGBRed:0xda / 255.0 green:0xd9 / 255.0 blue:0xfe / 255.0 alpha:1]; }
 
+// Arc's sidebar icons (traffic-light row, Library, "+"): white ~60% on a dark Space, black ~45% on a light one
+// (measured from Omar's Arc screenshot: #9F9CAF over #120D39).
+static NSColor* SidebarIconColor() {
+  static NSColor* c = [NSColor colorWithName:@"NotArcSidebarIcon" dynamicProvider:^NSColor*(NSAppearance* a) {
+    BOOL dark = [a bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] == NSAppearanceNameDarkAqua;
+    return dark ? [NSColor colorWithWhite:1 alpha:0.60] : [NSColor colorWithWhite:0 alpha:0.45];
+  }];
+  return c;
+}
+static NSColor* SidebarIconDimColor() {  // disabled back / forward
+  static NSColor* c = [NSColor colorWithName:@"NotArcSidebarIconDim" dynamicProvider:^NSColor*(NSAppearance* a) {
+    BOOL dark = [a bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] == NSAppearanceNameDarkAqua;
+    return dark ? [NSColor colorWithWhite:1 alpha:0.22] : [NSColor colorWithWhite:0 alpha:0.18];
+  }];
+  return c;
+}
+// Arc's Space dots: the current one white ~50%, the others ~17% (black on a light Space).
+static NSColor* SpaceDotColor(BOOL current) {
+  return [NSColor colorWithName:nil dynamicProvider:^NSColor*(NSAppearance* a) {
+    BOOL dark = [a bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] == NSAppearanceNameDarkAqua;
+    return [NSColor colorWithWhite:dark ? 1 : 0 alpha:current ? (dark ? 0.50 : 0.45) : (dark ? 0.17 : 0.15)];
+  }];
+}
+
 static BOOL IsDark(NSView* v) {
   return [v.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
          NSAppearanceNameDarkAqua;
@@ -447,7 +480,7 @@ static BOOL IsDark(NSView* v) {
 @end
 
 // The mini player card: tells its owner when the pointer enters or leaves (mute shows only while it's inside).
-static const CGFloat kMediaCardHeight = 48;
+static const CGFloat kMediaCardHeight = 32;  // Arc (Omar's screenshot): x 8-264, 32 pt, 46 pt above the window bottom
 @interface MediaCardView : NSView
 @property(nonatomic, copy) void (^hoverChanged)(BOOL inside);
 @property(nonatomic) BOOL inside;
@@ -1029,6 +1062,9 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSTextField* _commandField;
   NSImageView* _commandIcon;
   NSView* _commandScrim;
+  NSButton* _navBack;
+  BOOL _pillButtonsForced;
+  NSButton* _navForward;
   BOOL _commandOpensNewTab;
   BOOL _saveScheduled;
   NSMutableArray<ArchivedTab*>* _archive;
@@ -1228,7 +1264,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
 
   // Arc's mini player: a dark card above the bottom bar with the artwork (or the site's icon), what's playing and
   // the site on two lines, and back / play-pause / forward; mute shows while the pointer is over the card.
-  MediaCardView* card = [[MediaCardView alloc] initWithFrame:NSMakeRect(8, 44, kSidebarWidth - 17, kMediaCardHeight)];
+  MediaCardView* card = [[MediaCardView alloc] initWithFrame:NSMakeRect(8, 46, kSidebarWidth - 17, kMediaCardHeight)];
   card.hoverChanged = ^(BOOL inside) { [weakOwner updateMediaBar]; };
   _mediaBar = card;
   _mediaBar.wantsLayer = YES;
@@ -1242,7 +1278,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
     b.toolTip = label;
     return b;
   };
-  _mediaArt = [[NSImageView alloc] initWithFrame:NSMakeRect(8, 8, 32, 32)];
+  _mediaArt = [[NSImageView alloc] initWithFrame:NSMakeRect(13, 8, 16, 16)];
   _mediaArt.imageScaling = NSImageScaleProportionallyUpOrDown;
   _mediaArt.wantsLayer = YES;
   _mediaArt.layer.cornerRadius = 6;
@@ -1259,10 +1295,10 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _mediaSubtitle.lineBreakMode = NSLineBreakByClipping;
   _mediaSubtitle.font = [NSFont systemFontOfSize:11];
   _mediaSubtitle.frame = NSMakeRect(48, 9, 120, 14);
-  _mediaPrev = mediaButton(@"backward.fill", @"Previous", @selector(mediaBarPrevious:), 11);
-  _mediaPlay = mediaButton(@"pause.fill", @"Pause", @selector(mediaBarPlay:), 14);
-  _mediaNext = mediaButton(@"forward.fill", @"Next", @selector(mediaBarNext:), 11);
-  _mediaMute = mediaButton(@"speaker.wave.2.fill", @"Mute", @selector(mediaBarMute:), 11);
+  _mediaPrev = mediaButton(@"backward.end.fill", @"Previous", @selector(mediaBarPrevious:), 11);
+  _mediaPlay = mediaButton(@"pause.fill", @"Pause", @selector(mediaBarPlay:), 12);
+  _mediaNext = mediaButton(@"forward.end.fill", @"Next", @selector(mediaBarNext:), 11);
+  _mediaMute = mediaButton(@"speaker.wave.2.fill", @"Mute", @selector(mediaBarMute:), 12);
   // Arc's call controls: in a call, the bar shows microphone and camera toggles instead of play / mute.
   _callCam = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"video.fill" accessibilityDescription:@"Camera"]
                                 target:self action:@selector(callBarCamera:)];
@@ -1394,9 +1430,11 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
     NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:n[0] accessibilityDescription:nil]
                                      target:self action:NSSelectorFromString(n[1])];
     b.bordered = NO;
-    b.contentTintColor = NSColor.secondaryLabelColor;
+    b.contentTintColor = SidebarIconColor();
     b.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:14 weight:NSFontWeightMedium];
     b.frame = NSMakeRect([n[2] doubleValue], 1, 26, 26);
+    if ([n[1] isEqual:@"goBack:"]) _navBack = b;
+    if ([n[1] isEqual:@"goForward:"]) _navForward = b;
     [_sidebarNav addSubview:b];
   }
   [sidebar addSubview:_sidebarNav];
@@ -1405,6 +1443,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _addressPill.autoresizingMask = NSViewMinYMargin;
   __weak MainWindowController* weakSelf = self;
   _addressPill.onClick = ^{ [weakSelf openLocation:nil]; };
+  _addressPill.hoverChanged = ^{ [weakSelf updatePillButtons]; };
   _addressPillText = [NSTextField labelWithString:@""];
   _addressPillText.font = [NSFont systemFontOfSize:13];
   _addressPillText.textColor = [NSColor colorWithName:nil dynamicProvider:^NSColor*(NSAppearance* ap) {
@@ -1430,6 +1469,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
     b.frame = NSMakeRect(px, 5, 26, 26);
     if ([n[1] isEqualToString:@"editBoost:"]) _boostButton = b;
     if ([n[1] isEqualToString:@"showExtensionPicker:"]) _extensionsButton = b;
+    b.tag = 90;  // site buttons: shown while the pointer is over the pill (updatePillButtons)
     [_addressPill addSubview:b];
     px += 26;
   }
@@ -1445,12 +1485,13 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   [sidebar addSubview:_addressPill];
 
   // Bottom bar, as in Arc: archive (Library) at the left, one icon per Space in the middle, "+" menu at the right.
-  _spaceBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 8, kSidebarWidth - 17, 30)];  // Arc: centred 23.5 pt up
+  _spaceBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 5.5, kSidebarWidth - 17, 30)];  // Arc: icons centred 20.5 pt up
   NSButton* lib = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"archivebox" accessibilityDescription:@"Archive"]
                                      target:self action:@selector(showArchive:)];
   lib.bordered = NO;
   lib.toolTip = @"Archive";
-  lib.contentTintColor = NSColor.secondaryLabelColor;
+  lib.contentTintColor = SidebarIconColor();
+  lib.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:14 weight:NSFontWeightMedium];
   lib.frame = NSMakeRect(2, 2, 26, 26);
   _libraryButton = lib;
   [_spaceBar addSubview:lib];
@@ -1458,7 +1499,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
                                       target:self action:@selector(showNewMenu:)];
   plus.bordered = NO;
   plus.toolTip = @"New Tab, Folder or Space";
-  plus.contentTintColor = NSColor.secondaryLabelColor;
+  plus.contentTintColor = SidebarIconColor();
+  plus.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:15 weight:NSFontWeightMedium];
   plus.frame = NSMakeRect(_spaceBar.bounds.size.width - 29, 2, 26, 26);
   [_spaceBar addSubview:plus];
   _spaceIcons = [NSStackView stackViewWithViews:@[]];
@@ -1526,7 +1568,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   CGFloat below = gridH ? 90 + gridH : 82;
   _spaceHeader.frame = NSMakeRect(8, H - below - 42, w, 34);
   CGFloat top = _spaceHeader.hidden ? below + 8 : below + 42;
-  CGFloat bottom = _mediaBar.hidden ? 42 : 44 + kMediaCardHeight + 4;
+  CGFloat bottom = _mediaBar.hidden ? 42 : 46 + kMediaCardHeight + 4;
   NSRect mf = _meetingBar.frame;
   mf.origin.y = bottom + 2;
   _meetingBar.frame = mf;
@@ -2138,6 +2180,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
     [OwnerOf(browserId, weakSelf) browser:browserId faviconURL:[NSString stringWithUTF8String:url.c_str()]];
   });
   _client->set_load_end_callback([weakSelf](int browserId, const std::string& url) {
+    [OwnerOf(browserId, weakSelf) updateNavButtons];
     [OwnerOf(browserId, weakSelf) applyBoostToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
     [OwnerOf(browserId, weakSelf) applyAdBlockCosmeticsToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
     [OwnerOf(browserId, weakSelf) installCallHookInBrowser:browserId];
@@ -2506,8 +2549,8 @@ static NSString* const kPiPExitJS =
     icon.autoresizingMask = NSViewMaxYMargin;  // pinned to the bottom 41 pt (the "+ New Tab" header is taller)
     [cell addSubview:icon];
     cell.imageView = icon;
-    NSTextField* label = [FadingLabel labelWithString:@""];
-    label.lineBreakMode = NSLineBreakByClipping;
+    NSTextField* label = [NSTextField labelWithString:@""];
+    label.lineBreakMode = NSLineBreakByTruncatingTail;  // Arc 1.169 ends long titles in "..." (Omar's screenshot)
     label.frame = NSMakeRect(37, 11.5, col.width - 45, 18);
     label.autoresizingMask = NSViewWidthSizable | NSViewMaxYMargin;
     [cell addSubview:label];
@@ -2603,7 +2646,6 @@ static NSString* const kPiPExitJS =
   close.contentTintColor = indigo ? [ArcDefaultTabText() colorWithAlphaComponent:0.7] : NSColor.secondaryLabelColor;
   close.hidden = YES;
   if ([cell.superview isKindOfClass:SidebarRowView.class]) [(SidebarRowView*)cell.superview syncCloseButton];
-  if ([cell.textField isKindOfClass:FadingLabel.class]) [(FadingLabel*)cell.textField updateFade];
   // Other windows: "Move to main window" sits at the right of the Today header (Arc: moveToMainWindow).
   NSButton* toMain = [cell viewWithTag:78];
   if (newTab && !toMain) {
@@ -2756,8 +2798,13 @@ static NSString* const kMediaSessionHookJS =
     @"(()=>{const s=navigator.mediaSession;if(!s||window.__notarcMSHook)return;window.__notarcMSHook=1;"
     @"window.__notarcMSActions={};const o=s.setActionHandler.bind(s);"
     @"s.setActionHandler=(n,f)=>{window.__notarcMSActions[n]=f;return o(n,f);};})()";
+// Runs the page's own previous / next track handler; a page without one skips 10 s back or forward instead.
 static NSString* MediaActionJS(NSString* action) {
-  return [NSString stringWithFormat:@"(()=>{const f=(window.__notarcMSActions||{})['%@'];if(f)f({action:'%@'});})()", action, action];
+  int seek = [action isEqual:@"nexttrack"] ? 10 : -10;
+  return [NSString stringWithFormat:@"(()=>{const f=(window.__notarcMSActions||{})['%@'];if(f){f({action:'%@'});return;}"
+                                    @"for(const e of document.querySelectorAll('video,audio'))if(!e.paused)"
+                                    @"e.currentTime=Math.max(0,e.currentTime+(%d));})()",
+                                    action, action, seek];
 }
 static NSString* const kMediaPauseJS =
     @"(function(){[].slice.call(document.querySelectorAll('video,audio')).forEach(function(e){"
@@ -3050,11 +3097,8 @@ NSString* FavoritePreviewKind(NSString* url) {
   _mediaItem = item;
   BOOL show = item != nil;
   if (show) {
-    BOOL hover = ((MediaCardView*)_mediaBar).inside;
-    _mediaPlay.hidden = call != nil;
-    _mediaPrev.hidden = call || !item.mediaCanPrevious;
-    _mediaNext.hidden = call || !item.mediaCanNext;
-    _mediaMute.hidden = call || !(hover || item.audioMuted);
+    // Arc's bar: site icon, back, play/pause, forward and the speaker, spread evenly; a call swaps in mic and camera.
+    _mediaPlay.hidden = _mediaPrev.hidden = _mediaNext.hidden = _mediaMute.hidden = call != nil;
     if (call) {
       _callMic.image = [NSImage imageWithSystemSymbolName:call.micMuted ? @"mic.slash.fill" : @"mic.fill" accessibilityDescription:nil];
       _callMic.contentTintColor = call.micMuted ? NSColor.systemRedColor : nil;
@@ -3073,6 +3117,10 @@ NSString* FavoritePreviewKind(NSString* url) {
     if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
     _mediaTitle.stringValue = (!call && item.mediaTitle.length) ? item.mediaTitle : MediaBarTitle(item.displayTitle);
     _mediaSubtitle.stringValue = (!call && item.mediaArtist.length) ? item.mediaArtist : host;
+    // Arc shows no text in the bar; what's playing is the icon's tooltip.
+    _mediaArt.toolTip = _mediaSubtitle.stringValue.length
+                            ? [NSString stringWithFormat:@"%@ — %@", _mediaTitle.stringValue, _mediaSubtitle.stringValue]
+                            : _mediaTitle.stringValue;
     [self updateMediaArtworkFor:item];
     [self layoutMediaCard];
   }
@@ -3081,27 +3129,25 @@ NSString* FavoritePreviewKind(NSString* url) {
   [self layoutSidebar];
 }
 
-// Right to left: mute (while hovered), next, play, previous; or the call's camera and microphone. The two text
-// lines take the rest of the card.
+// Arc (Omar's screenshot, 1x): the bar is black ~60% over the Space colour, 8 pt corners; the site icon (16 pt) sits
+// 14 pt in and the four controls follow at even 53 pt steps, the speaker last, all in white ~65%.
 - (void)layoutMediaCard {
   BOOL dark = IsDark(_sidebar);
-  _mediaBar.layer.backgroundColor = (dark ? [NSColor colorWithWhite:0 alpha:0.40] : [NSColor colorWithWhite:1 alpha:0.60]).CGColor;
-  BOOL indigo = [self usingDefaultTheme];
-  NSColor* text = indigo && dark ? ArcDefaultTabText() : NSColor.labelColor;
-  _mediaTitle.textColor = text;
-  _mediaSubtitle.textColor = [text colorWithAlphaComponent:0.55];
-  CGFloat x = NSWidth(_mediaBar.bounds) - 6, y = (kMediaCardHeight - 24) / 2;
-  for (NSButton* b in @[ _mediaMute, _callMic, _callCam, _mediaNext, _mediaPlay, _mediaPrev ]) {
+  _mediaBar.layer.backgroundColor = (dark ? [NSColor colorWithWhite:0 alpha:0.60] : [NSColor colorWithWhite:1 alpha:0.60]).CGColor;
+  NSColor* fg = dark ? [NSColor colorWithSRGBRed:0.667 green:0.667 blue:0.702 alpha:1] : [NSColor colorWithWhite:0 alpha:0.6];
+  _mediaTitle.hidden = _mediaSubtitle.hidden = YES;
+  CGFloat W = NSWidth(_mediaBar.bounds), first = 21.5, step = (W - 22 - first) / 4;
+  _mediaArt.frame = NSMakeRect(first - 8, (kMediaCardHeight - 16) / 2, 16, 16);
+  NSArray<NSButton*>* slots = _callMic.hidden && _callCam.hidden ? @[ _mediaPrev, _mediaPlay, _mediaNext, _mediaMute ]
+                                                                 : @[ _callMic, _callCam ];
+  NSUInteger i = 1;
+  for (NSButton* b in slots) {
     if (b.hidden) continue;
-    x -= 24;
-    b.frame = NSMakeRect(x, y, 24, 24);
-    b.contentTintColor = b == _callMic || b == _callCam ? b.contentTintColor : [text colorWithAlphaComponent:b == _mediaMute ? 0.6 : 0.85];
+    CGFloat cx = slots.count == 4 ? first + step * i : W - 22 - step * (slots.count - i);
+    b.frame = NSMakeRect(round(cx - 12), (kMediaCardHeight - 24) / 2, 24, 24);
+    if (b != _callMic && b != _callCam) b.contentTintColor = fg;
+    ++i;
   }
-  CGFloat w = MAX(40, x - 4 - 48);
-  _mediaTitle.frame = NSMakeRect(48, 24, w, 16);
-  _mediaSubtitle.frame = NSMakeRect(48, 9, w, 14);
-  [(FadingLabel*)_mediaTitle updateFade];
-  [(FadingLabel*)_mediaSubtitle updateFade];
 }
 
 // The page's artwork when it gives one (loaded once, never in hidden test runs), else the site's icon.
@@ -3123,14 +3169,15 @@ NSString* FavoritePreviewKind(NSString* url) {
                                }] resume];
   }
   _mediaArt.image = img ?: [self iconImageForItem:item];
-  _mediaArt.imageScaling = img ? NSImageScaleProportionallyUpOrDown : NSImageScaleNone;
-  _mediaArt.layer.backgroundColor = img ? nil : [NSColor colorWithWhite:IsDark(_sidebar) ? 1 : 0 alpha:0.08].CGColor;
+  _mediaArt.imageScaling = NSImageScaleProportionallyUpOrDown;
+  _mediaArt.layer.cornerRadius = img ? 3 : 0;
 }
 
 - (NSString*)mediaCardDescription {  // tests (visual parity V3)
-  return [NSString stringWithFormat:@"h=%.0f title=%@ subtitle=%@ prev=%d play=%d next=%d mute=%d art=%d", NSHeight(_mediaBar.frame),
-                                    _mediaTitle.stringValue, _mediaSubtitle.stringValue, !_mediaPrev.hidden, !_mediaPlay.hidden,
-                                    !_mediaNext.hidden, !_mediaMute.hidden, _mediaArt.image != nil];
+  return [NSString stringWithFormat:@"h=%.0f title=%@ subtitle=%@ prev=%d play=%d next=%d mute=%d art=%d tip=%@ text=%d",
+                                    NSHeight(_mediaBar.frame), _mediaTitle.stringValue, _mediaSubtitle.stringValue,
+                                    !_mediaPrev.hidden, !_mediaPlay.hidden, !_mediaNext.hidden, !_mediaMute.hidden,
+                                    _mediaArt.image != nil, _mediaArt.toolTip, !_mediaTitle.hidden];
 }
 - (void)setMediaCardHoveredForTest:(BOOL)hovered {
   ((MediaCardView*)_mediaBar).inside = hovered;
@@ -6161,11 +6208,11 @@ static ArcItem* NewSection(NSString* title) {
       b.font = [NSFont systemFontOfSize:current ? 15 : 13];
       b.alphaValue = current ? 1 : 0.55;
     } else {
-      b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:current ? @"circle.fill" : @"circle"
-                                                 accessibilityDescription:sp.title]
+      // Arc: filled 8 pt dots for every Space; the current one is brighter.
+      b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"circle.fill" accessibilityDescription:sp.title]
                              target:self action:@selector(spaceIconClicked:)];
-      b.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:8 weight:NSFontWeightRegular];
-      b.contentTintColor = current ? NSColor.labelColor : NSColor.tertiaryLabelColor;
+      b.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:7 weight:NSFontWeightRegular];
+      b.contentTintColor = SpaceDotColor(current);
     }
     b.bordered = NO;
     b.tag = (NSInteger)i++;
@@ -6523,6 +6570,28 @@ static ArcItem* NewSection(NSString* title) {
                                      : NSColor.secondaryLabelColor;
   _boostButton.toolTip = on ? @"Boost on: edit Boost" : (b ? @"Boost off: edit Boost" : @"Boost This Site");
   _boostIndicator = on ? @"on" : (b ? @"off" : @"none");
+  [self updatePillButtons];
+}
+// Arc's address pill shows only the site until the pointer is over it; then copy link, site controls (and Boost,
+// extensions) appear at its right. A site with a Boost on keeps its Boost button showing.
+- (void)updatePillButtons {
+  BOOL hover = ((SidebarPillView*)_addressPill).hovered || _pillButtonsForced;
+  BOOL boostOn = [_boostIndicator isEqual:@"on"];
+  for (NSView* v in _addressPill.subviews)
+    if (v.tag == 90) v.alphaValue = hover || (v == _boostButton && boostOn) ? 1 : 0;
+}
+- (NSString*)pillButtonState {  // tests: how many site buttons show, out of how many
+  NSUInteger shown = 0, all = 0;
+  for (NSView* v in _addressPill.subviews)
+    if (v.tag == 90) {
+      ++all;
+      if (v.alphaValue > 0.5) ++shown;
+    }
+  return [NSString stringWithFormat:@"%lu/%lu", (unsigned long)shown, (unsigned long)all];
+}
+- (void)setPillHoveredForTest:(BOOL)hovered {
+  _pillButtonsForced = hovered;
+  [self updatePillButtons];
 }
 - (NSString*)boostIndicatorState { return _boostIndicator ?: @"none"; }  // tests
 // Arc's shuffle: a random colour and font for the site.
@@ -7300,6 +7369,32 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   _addressPillText.stringValue = host ?: @"";
   _addressPill.toolTip = url;
   [self updateBoostIndicator];
+  [self updateNavButtons];
+}
+// Arc dims back / forward when there's nowhere to go (white ~25% against ~60%).
+- (void)updateNavButtons {
+  BOOL back = [self canGoBack], fwd = [self currentBrowser] && [self currentBrowser]->CanGoForward();
+  for (NSButton* b in @[ _navBack ?: [NSNull null], _navForward ?: [NSNull null] ]) {
+    if (![b isKindOfClass:NSButton.class]) continue;
+    BOOL on = b == _navBack ? back : fwd;
+    b.enabled = on;
+    b.contentTintColor = on ? SidebarIconColor() : SidebarIconDimColor();
+  }
+}
+- (BOOL)spaceDotsAreArcStyle {  // tests: every dot filled, the current one brighter
+  NSUInteger cur = [_spaces indexOfObject:_space];
+  __block BOOL ok = YES;
+  [self.window.effectiveAppearance performAsCurrentDrawingAppearance:^{
+    for (NSButton* b in self->_spaceIcons.views) {
+      if (!b.image) continue;  // an emoji Space
+      CGFloat alpha = [b.contentTintColor colorUsingColorSpace:NSColorSpace.sRGBColorSpace].alphaComponent;
+      if ((NSUInteger)b.tag == cur ? alpha < 0.4 : alpha > 0.25) ok = NO;
+    }
+  }];
+  return ok;
+}
+- (NSString*)navButtonState {  // tests
+  return [NSString stringWithFormat:@"back=%d forward=%d", _navBack.enabled, _navForward.enabled];
 }
 
 - (void)updateToolbarAddress {
@@ -8919,11 +9014,10 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target) {
   NSInteger row = [_outline rowForItem:item];
   NSTableCellView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
   RowCloseButton* b = [cell viewWithTag:81];
-  FadingLabel* l = (FadingLabel*)cell.textField;
-  BOOL fade = [l isKindOfClass:FadingLabel.class] && [(id)l fadesForTest];
-  BOOL clip = l.lineBreakMode == NSLineBreakByClipping;
+  NSTextField* l = cell.textField;
+  BOOL ellipsis = l.lineBreakMode == NSLineBreakByTruncatingTail;
   BOOL roomForClose = b && (b.hidden || NSMaxX(l.frame) <= NSMinX(b.frame));
-  return [NSString stringWithFormat:@"close=%d fade=%d clip=%d room=%d", b && !b.hidden, fade, clip, roomForClose];
+  return [NSString stringWithFormat:@"close=%d ellipsis=%d room=%d", b && !b.hidden, ellipsis, roomForClose];
 }
 - (void)reloadSidebarItemForTest:(ArcItem*)item { [_outline reloadItem:item]; }
 - (BOOL)pressCloseButtonOfItem:(ArcItem*)item {  // tests
@@ -9856,7 +9950,7 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
 - (void)applyLibraryColors {
   BOOL dark = IsDark(_sidebar);
   _library.textColor = [self usingDefaultTheme] && dark ? ArcDefaultTabText() : NSColor.labelColor;
-  _libraryButton.contentTintColor = _libraryShown ? (_library.textColor ?: NSColor.labelColor) : NSColor.secondaryLabelColor;
+  _libraryButton.contentTintColor = _libraryShown ? (_library.textColor ?: NSColor.labelColor) : SidebarIconColor();
 }
 - (void)hideLibrary {
   if (!_libraryShown) return;

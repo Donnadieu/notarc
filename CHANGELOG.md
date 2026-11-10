@@ -4,14 +4,15 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Measured against Omar's own Arc screenshot to the pixel: the mini player is Arc's 32 pt bar (site icon, back,
+  play/pause, forward, speaker, no text; hover the icon for what's playing), long tab titles end in "..." as in Arc
+  1.169, the address pill shows its site buttons only while the pointer is over it, back / forward dim when there's
+  nowhere to go, the Space dots are filled (the current one brighter), and the sidebar icons use Arc's brightness.
 - The sidebar never shows a scrollbar track, even with a mouse plugged in or "Show scroll bars: Always" set in macOS;
   a thin scroller appears only while you scroll a long list, as in Arc. Tab rows now reach their full width, so the
   selected row's right corners are rounded.
-- Tab rows look like Arc's: a long title fades out at the right edge instead of ending in "...", and a close button
-  shows on the row under the pointer. Closing a row that isn't shown leaves the shown tab alone.
-- The mini player is now Arc's card: the artwork (or the site's icon), what's playing and the artist or site on two
-  lines, and back, play/pause and forward when the site supports them; mute shows while the pointer is over it.
-  Running clocks in page titles, like "brain.fm (2:52)", are left out.
+- Tab rows show a close button on the row under the pointer. Closing a row that isn't shown leaves the shown tab
+  alone.
 - Archive opens inside the sidebar, as in Arc, instead of a separate table window: a search field and your
   archived tabs grouped by day (Today, Yesterday, weekdays, Last Week, then months), each a normal tab row with the
   time it was archived. Click one to bring it back; Back, Esc or picking a Space closes it.
