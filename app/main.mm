@@ -1164,6 +1164,11 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       std::printf("SELFTEST-BASICS afterBack=%s zoomReset=%.1f\n", [w currentURL].UTF8String, [w currentZoomLevel]);
       [w findText:@"domain" forward:YES];
       WaitUntil(^{ return (BOOL)(w.lastFindCount > 0); }, 5, ^{
+        [w findInPage:nil];  // Visual parity V35: Arc's floating find bar at the card's top-right
+        NSString* fb = w.findBarStyle;
+        [w closeFindBar:nil];
+        std::printf("SELFTEST-FINDBAR arcStyle=%d\n", [fb isEqual:@"buttons=3 card=1 corner=1"]);
+        if (![fb isEqual:@"buttons=3 card=1 corner=1"]) std::printf("SELFTEST-FINDBAR-DEBUG %s\n", fb.UTF8String);
         [w copyCurrentURLAsMarkdown:nil];
         std::printf("SELFTEST-BASICS findDomainCount=%d markdown=%s\n", w.lastFindCount,
                     [NSPasteboard.generalPasteboard stringForType:NSPasteboardTypeString].UTF8String);
@@ -1502,6 +1507,10 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                   [w shouldPeekFromItem:today toURL:@"https://en.wikipedia.org/wiki/Peek"]);
       [w openPeek:@"https://example.net/peeked"];
       BOOL open = [w isPeeking];
+      NSString* peekStyle = w.peekStyle;  // Visual parity V39: Arc's floating card, no title bar, page dimmed
+      BOOL peekLook = [peekStyle isEqual:@"peek=1 titlebar=0 radius=10 buttons=2 clear=1 scrim=1"];
+      std::printf("SELFTEST-PEEKLOOK card=%d\n", peekLook);
+      if (!peekLook) std::printf("SELFTEST-PEEKLOOK-DEBUG %s\n", peekStyle.UTF8String);
       [w promotePeekToTab];
       std::printf("SELFTEST-PEEK opened=%d afterPromote=%d promotedInSidebar=%d\n", open, [w isPeeking],
                   [w tabWithURLPrefix:@"https://example.net/peeked"] != nil);
@@ -2914,7 +2923,12 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           NSRange wr = [style rangeOfString:@"width="];
           double width = wr.location == NSNotFound ? 0 : [[style substringFromIndex:wr.location + 6] doubleValue];
           BOOL wide = width >= 480 && width <= 780;
-          std::printf("SELFTEST-CMDBARLOOK card=%d centred=%d hint=%d wide=%d\n", card, centred, hint, wide);
+          [w showCommandBarForNewTab:NO];
+          NSString* inPlace = w.commandBarStyle;
+          [w hideCommandBar];
+          BOOL onPill = [inPlace hasSuffix:@"scrim=0 centred=1"];
+          std::printf("SELFTEST-CMDBARLOOK card=%d centred=%d hint=%d wide=%d onPill=%d\n", card, centred, hint, wide, onPill);
+          if (!onPill) std::printf("SELFTEST-CMDBARLOOK-DEBUG cmdL %s\n", inPlace.UTF8String);
           if (!card || !centred || !hint || !wide) std::printf("SELFTEST-CMDBARLOOK-DEBUG %s\n", style.UTF8String);
         }
         std::printf("SELFTEST-SUGGEST goFirst=%d tab=%d space=%d action=%d history=%d topSites=%d switched=%d learned=%d "

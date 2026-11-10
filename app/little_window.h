@@ -26,6 +26,8 @@ typedef void (^LittleWindowMoveToSpace)(NSString* url, NSUInteger spaceIndex);
 - (void)openInSpaceAtIndex:(NSUInteger)index;
 // Peek: shown as an overlay attached to `parent`, button reads "Open as Tab", Esc closes it.
 - (void)presentAsPeekOver:(NSWindow*)parent;
+- (void)presentAsPeekOver:(NSWindow*)parent inRect:(NSRect)screenRect;  // the card's frame, in screen points
+- (NSString*)peekStyleDescription;  // tests
 @property(nonatomic, readonly) NSString* currentURL;
 @property(nonatomic, readonly) NSString* pageTitle;
 // Incognito (#40): dark window, nothing saved (in-memory profile), no history, no archive, can't move into a Space.

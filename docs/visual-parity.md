@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-21 done of 66 items.
+27 done of 66 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -94,32 +94,33 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
 
 ## Command bar and navigation
 
-- [ ] **V29 Command bar on the address pill (Cmd+L).** Opens in place over the address pill at the top of the sidebar,
-  widening to the right over the page, with the current address selected. Ref: app (top-left placement).
+- [x] **V29 Command bar on the address pill (Cmd+L).** Opens in place: its top-left on the address pill, reaching out
+  over the page (up to 640 pt), the current address selected, no dimming; with the sidebar hidden it opens centred.
+  Ref: app (top-left placement).
 - [ ] **V30 Command bar rows.** Open tabs ("Switch to Tab"), history, search suggestions, Spaces and actions, each with
   its icon; the empty state shows recent tabs and actions rather than a plain "Top Site" list. Ref: app, help.
 - [ ] **V31 Command bar keyboard.** Up/Down move the pill, Tab completes, Enter opens, Shift+Enter opens a Little
   Window, Cmd+Enter keeps it in the background, Esc closes; typing a site's name then Tab starts Site Search with a
   capsule. Ref: help (Site Search, Actions), app.
-- [ ] **V32 Command bar text and colours.** Text white 80% / 33%, row hover 5%, hairline 10%, placeholder 60%,
+- [x] **V32 Command bar text and colours.** Text white 80% / 33%, row hover 5%, hairline 10%, placeholder 60%,
   accessory chips 5%; light mode mirrored in black. Ref: colours.
 - [ ] **V33 Ctrl+Tab switcher.** A centred panel of up to 5 recent tabs as page pictures with titles, the chosen one
   outlined; release to switch. Ref: video (tab switcher), help.
 - [ ] **V34 Hover cards.** Hovering a sidebar row shows a card to its right with a page picture, title and address.
   Ref: app (hover card), video.
-- [ ] **V35 Find in page.** A small floating bar at the top-right of the page card with the match count and arrows.
-  Ref: video.
+- [x] **V35 Find in page.** A small rounded floating bar 10 pt in from the page card's top-right: glass, field, match
+  count, up / down arrows and a close button. Ref: video.
 - [ ] **V36 Toolbar mode.** View > Show Toolbar puts a thin bar with back/forward/reload and the full address above
   the page. Ref: app.
 
 ## Split view, Little Arc, Peek
 
-- [ ] **V37 Split panes on the page.** Each pane is its own rounded card with a small gap; the focused pane has a
+- [x] **V37 Split panes on the page.** Each pane is its own rounded card with a small gap; the focused pane has a
   subtle outline. Ref: video, app.
 - [ ] **V38 Little Arc window.** A small window with a thin top bar (domain, Space colour) and an "Open in" button;
   no sidebar. Ref: help (Little Arc), app.
-- [ ] **V39 Peek.** Links open in a large rounded card floating over the dimmed page, with close and "Open as Tab"
-  buttons at its top. Ref: help (Peek), video.
+- [x] **V39 Peek.** Links open in a large rounded card (10 pt corners, deep shadow, no title bar) floating over the
+  dimmed page card, with round Open as Tab and close buttons above its top-right corner. Ref: help (Peek), video.
 - [ ] **V40 Picture in picture.** Video PiP and the document PiP for calls with a thin top bar. Ref: app (PiP top bar).
 
 ## Library and content
@@ -167,8 +168,8 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   (import screens), video.
 - [ ] **V58 Settings window.** Toolbar tabs with icons (General, Profiles, Links, Shortcuts, Icon, Max, Advanced),
   grouped sections, Arc's button styles. Ref: app (settings panes).
-- [ ] **V59 Toasts.** Small dark rounded capsule with an icon and short text ("Copied URL") near the bottom of the
-  page card, with Undo where it applies; fades out. Ref: app (toasts), video.
+- [x] **V59 Toasts.** A dark capsule with an icon and short text ("Copied URL") near the bottom of the page card, a
+  thin divider, then plain-text actions (Undo) in blue; fades out. Ref: app (toasts), video.
 - [ ] **V60 Alerts and dialogs.** Rounded card dialogs with Arc's contrasting and red destructive buttons. Ref: app
   (button styles).
 

@@ -177,6 +177,25 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
       NSOutlineView* ov = [c valueForKey:@"_outline"];
       NSInteger row = [ov rowForItem:c.currentSpace.unpinned];
       ((void (*)(id, SEL, NSInteger))[c methodForSelector:s])(c, s, row);
+    } else if ([cmd isEqual:@"peek"]) {
+      [c openPeek:arg];
+      // macOS moves a window onto a screen when it's first ordered in; put the Peek back where it was asked to be.
+      NSWindowController* pk = [c valueForKey:@"_peek"];
+      NSView* content = [c valueForKey:@"_content"];
+      NSRect card = [c.window convertRectToScreen:[content convertRect:content.bounds toView:nil]];
+      [pk.window setFrame:NSMakeRect(NSMinX(card) + card.size.width * 0.05, NSMinY(card) + card.size.height * 0.04,
+                                     card.size.width * 0.90, card.size.height * 0.96 - 8)
+                  display:YES];
+    } else if ([cmd isEqual:@"close-peek"]) {
+      [c closePeek];
+    } else if ([cmd isEqual:@"toast"]) {
+      SEL s = NSSelectorFromString(@"showToast:action:selector:");
+      ((void (*)(id, SEL, id, id, SEL))[c methodForSelector:s])(c, s, arg, @"Undo", NSSelectorFromString(@"hideToast"));
+    } else if ([cmd isEqual:@"find"]) {
+      [c findInPage:nil];
+      NSTextField* f = [c valueForKey:@"_findField"];
+      f.stringValue = arg;
+      [c findText:arg forward:YES];
     } else if ([cmd isEqual:@"hover"]) {
       ArcItem* t = arg.length ? FindTab(c.currentSpace, arg) : nil;
       [c hoverSidebarItem:t];

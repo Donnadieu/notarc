@@ -472,3 +472,8 @@ trackpad; everything else is checked by the hidden self-test.
     Animation. Reduce Motion leaves it still.
 113. **Inactive windows dim the sidebar's content to 55% (V8),** the Space colour stays. The window counts as active
     while it's the main window, so the command bar (a child panel taking key focus) doesn't dim it.
+114. **Cmd+L opens the command bar on the address pill, without dimming (V29);** only Cmd+T (a new tab) gets the big
+    centred bar over a dimmed window. Arc names both placements (top-left and centred); which one dims is our call.
+115. **Peek stays a separate child window, drawn as a card (V39).** It keeps its own browser so Open as Tab still
+    moves the page without reloading; the title bar is hidden and the window is clear around a rounded card, so it
+    looks like Arc's in-window card.

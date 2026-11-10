@@ -1091,6 +1091,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSImageView* _commandIcon;
   NSView* _commandScrim;
   NSButton* _navBack;
+  NSView* _peekScrim;
   BOOL _sidebarPeeking;      // the hidden sidebar shown floating over the page (pointer at the left edge)
   NSView* _edgeStrip;        // 6 pt strip at the window's left edge while the sidebar is hidden
   HoverTracker* _edgeTracker;
@@ -4112,27 +4113,73 @@ static NSString* RelativeAgo(NSDate* d) {
 - (IBAction)actualSize:(id)sender { [self stepZoom:0]; }
 - (double)currentZoomLevel { auto b = [self currentBrowser]; return b ? b->GetHost()->GetZoomLevel() : 0; }
 
+// Arc's find bar: a small rounded floating bar at the page card's top-right: field, match count, up / down
+// arrows and a close button.
 - (IBAction)findInPage:(id)sender {
   if (!_findBar) {
-    _findBar = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 340, 40)
+    _findBar = [[NSPanel alloc] initWithContentRect:NSMakeRect(0, 0, 360, 40)
                                           styleMask:NSWindowStyleMaskBorderless
                                             backing:NSBackingStoreBuffered
                                               defer:NO];
-    _findBar.backgroundColor = NSColor.windowBackgroundColor;
-    _findField = [[NSSearchField alloc] initWithFrame:NSMakeRect(8, 8, 240, 24)];
+    _findBar.backgroundColor = NSColor.clearColor;
+    _findBar.opaque = NO;
+    _findBar.hasShadow = YES;
+    NSView* card = [[CommandCardView alloc] initWithFrame:NSMakeRect(0, 0, 360, 40)];
+    card.wantsLayer = YES;
+    card.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [_findBar.contentView addSubview:card];
+    NSImageView* glass = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"magnifyingglass" accessibilityDescription:nil]];
+    glass.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:12 weight:NSFontWeightMedium];
+    glass.contentTintColor = NSColor.secondaryLabelColor;
+    glass.frame = NSMakeRect(12, 12, 16, 16);
+    [_findBar.contentView addSubview:glass];
+    _findField = [[NSSearchField alloc] initWithFrame:NSMakeRect(32, 10, 188, 20)];
     _findField.placeholderString = @"Find in page";
     _findField.delegate = (id<NSSearchFieldDelegate>)self;
     _findField.sendsSearchStringImmediately = YES;
+    _findField.bezeled = NO;
+    _findField.drawsBackground = NO;
+    _findField.focusRingType = NSFocusRingTypeNone;
+    _findField.font = [NSFont systemFontOfSize:13];
+    ((NSSearchFieldCell*)_findField.cell).searchButtonCell = nil;  // NotArc draws its own glass; the bar has its own X
+    ((NSSearchFieldCell*)_findField.cell).cancelButtonCell = nil;
     [_findBar.contentView addSubview:_findField];
     _findLabel = [NSTextField labelWithString:@""];
-    _findLabel.frame = NSMakeRect(254, 12, 80, 16);
+    _findLabel.frame = NSMakeRect(222, 12, 66, 16);
+    _findLabel.alignment = NSTextAlignmentRight;
+    _findLabel.font = [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightMedium];
+    _findLabel.textColor = NSColor.secondaryLabelColor;
     [_findBar.contentView addSubview:_findLabel];
+    CGFloat x = 292;
+    for (NSArray* d in @[ @[ @"chevron.up", @"findPrevious:", @"Previous" ], @[ @"chevron.down", @"findNext:", @"Next" ],
+                          @[ @"xmark", @"closeFindBar:", @"Close" ] ]) {
+      NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:d[0] accessibilityDescription:d[2]]
+                                       target:self action:NSSelectorFromString(d[1])];
+      b.bordered = NO;
+      b.toolTip = d[2];
+      b.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightSemibold];
+      b.contentTintColor = NSColor.secondaryLabelColor;
+      b.frame = NSMakeRect(x, 8, 22, 24);
+      b.tag = 91;
+      [_findBar.contentView addSubview:b];
+      x += 22;
+    }
   }
-  NSRect f = self.window.frame;
-  [_findBar setFrameOrigin:NSMakePoint(NSMaxX(f) - 356, NSMaxY(f) - 80)];
+  NSRect card = [self.window convertRectToScreen:[_content convertRect:_content.bounds toView:nil]];
+  [_findBar setFrameOrigin:NSMakePoint(NSMaxX(card) - 360 - 10, NSMaxY(card) - 40 - 10)];
   [self.window addChildWindow:_findBar ordered:NSWindowAbove];
   [_findBar makeKeyAndOrderFront:nil];
   [_findBar makeFirstResponder:_findField];
+}
+- (IBAction)closeFindBar:(id)sender { [self hideFindBar]; }
+- (NSString*)findBarStyle {  // tests (V35)
+  NSUInteger buttons = 0;
+  for (NSView* v in _findBar.contentView.subviews)
+    if (v.tag == 91) ++buttons;
+  NSRect card = [self.window convertRectToScreen:[_content convertRect:_content.bounds toView:nil]];
+  BOOL corner = fabs(NSMaxX(_findBar.frame) - (NSMaxX(card) - 10)) <= 1 && fabs(NSMaxY(_findBar.frame) - (NSMaxY(card) - 10)) <= 1;
+  return [NSString stringWithFormat:@"buttons=%lu card=%d corner=%d", (unsigned long)buttons,
+                                    [_findBar.contentView.subviews.firstObject isKindOfClass:CommandCardView.class], corner];
 }
 
 - (void)hideFindBar {
@@ -6176,12 +6223,35 @@ static NSString* SiteOf(NSString* url) {
       onClose:^(LittleWindowController*, NSString* closedURL, NSString*, BOOL moved) {
         [weakSelf peekClosed:closedURL moved:moved];
       }];
-  [_peek presentAsPeekOver:self.window];
+  // Arc: the Peek card sits over the page card, a little inset, with the page dimmed behind it.
+  NSRect card = [self.window convertRectToScreen:[_content convertRect:_content.bounds toView:nil]];
+  NSRect area = NSMakeRect(NSMinX(card) + card.size.width * 0.05, NSMinY(card) + card.size.height * 0.04,
+                           card.size.width * 0.90, card.size.height * 0.96 - 8);
+  [self showPeekScrim:YES];
+  [_peek presentAsPeekOver:self.window inRect:area];
   [self hideToast];
+}
+- (void)showPeekScrim:(BOOL)show {
+  if (!show) {
+    [_peekScrim removeFromSuperview];
+    return;
+  }
+  if (!_peekScrim) {
+    _peekScrim = [[NSView alloc] initWithFrame:NSZeroRect];
+    _peekScrim.wantsLayer = YES;
+    _peekScrim.layer.backgroundColor = [NSColor colorWithWhite:0 alpha:0.35].CGColor;
+    _peekScrim.layer.cornerRadius = kCardRadius;
+  }
+  _peekScrim.frame = _content.frame;
+  [self.window.contentView addSubview:_peekScrim positioned:NSWindowAbove relativeTo:_content];
+}
+- (NSString*)peekStyle {  // tests (V39)
+  return [NSString stringWithFormat:@"%@ scrim=%d", [_peek peekStyleDescription] ?: @"none", _peekScrim.superview != nil];
 }
 
 - (void)peekClosed:(NSString*)url moved:(BOOL)moved {
   _peek = nil;
+  [self showPeekScrim:NO];
   if (moved || _closing || !url.length || [url isEqualToString:@"about:blank"]) return;
   _lastClosedPeekURL = [url copy];
   __weak MainWindowController* weakSelf = self;
@@ -6209,23 +6279,47 @@ static NSString* SiteOf(NSString* url) {
 - (void)showToast:(NSString*)text buttons:(NSArray<NSArray<NSString*>*>*)buttons target:(id)target
          duration:(NSTimeInterval)duration {
   [self hideToast];
+  // Arc's toast: a dark capsule with an icon, the message, and plain-text actions after a thin divider.
   NSTextField* label = [NSTextField labelWithString:text];
   label.textColor = NSColor.whiteColor;
-  NSMutableArray* views = [NSMutableArray arrayWithObject:label];
+  label.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
+  NSString* symbol = [text hasPrefix:@"Copied"] ? @"checkmark.circle.fill"
+                     : [text.lowercaseString containsString:@"closed"] || [text.lowercaseString containsString:@"archiv"] ? @"archivebox.fill"
+                                                                                                                         : @"info.circle.fill";
+  NSImageView* icon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil]];
+  icon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:13 weight:NSFontWeightMedium];
+  icon.contentTintColor = [NSColor colorWithWhite:1 alpha:0.75];
+  NSMutableArray* views = [NSMutableArray arrayWithObjects:icon, label, nil];
   for (NSArray<NSString*>* b in buttons) {
+    NSBox* sep = [[NSBox alloc] initWithFrame:NSMakeRect(0, 0, 1, 16)];
+    sep.boxType = NSBoxCustom;
+    sep.borderWidth = 0;
+    sep.fillColor = [NSColor colorWithWhite:1 alpha:0.2];
+    [sep.widthAnchor constraintEqualToConstant:1].active = YES;
+    [sep.heightAnchor constraintEqualToConstant:16].active = YES;
+    [views addObject:sep];
     NSButton* button = [NSButton buttonWithTitle:b[0] target:target action:NSSelectorFromString(b[1])];
-    button.bezelStyle = NSBezelStyleRounded;
+    button.bordered = NO;
+    button.attributedTitle = [[NSAttributedString alloc]
+        initWithString:b[0]
+            attributes:@{NSForegroundColorAttributeName : [NSColor colorWithSRGBRed:0.55 green:0.68 blue:1 alpha:1],
+                         NSFontAttributeName : [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold]}];
     [views addObject:button];
   }
   NSStackView* stack = [NSStackView stackViewWithViews:views];
-  stack.edgeInsets = NSEdgeInsetsMake(6, 14, 6, 8);
-  stack.spacing = 10;
+  stack.edgeInsets = NSEdgeInsetsMake(8, 12, 8, 14);
+  stack.spacing = 8;
   stack.wantsLayer = YES;
-  stack.layer.cornerRadius = 10;
+  stack.shadow = [NSShadow new];
+  stack.layer.shadowColor = NSColor.blackColor.CGColor;
+  stack.layer.shadowOpacity = 0.3;
+  stack.layer.shadowRadius = 10;
+  stack.layer.shadowOffset = CGSizeMake(0, -3);
   // Arc's toasts are dark in both appearances.
   stack.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];
-  stack.layer.backgroundColor = [NSColor colorWithWhite:0.1 alpha:0.9].CGColor;
+  stack.layer.backgroundColor = [NSColor colorWithSRGBRed:0.11 green:0.11 blue:0.13 alpha:0.96].CGColor;
   NSSize sz = stack.fittingSize;
+  stack.layer.cornerRadius = sz.height / 2;
   NSRect c = _content.frame;
   stack.frame = NSMakeRect(NSMidX(c) - sz.width / 2, NSMinY(c) + 20, sz.width, sz.height);
   stack.autoresizingMask = NSViewMinXMargin | NSViewMaxXMargin | NSViewMaxYMargin;
@@ -8859,7 +8953,8 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
   NSTableCellView* first = _suggestionTable.numberOfRows ? [_suggestionTable viewAtColumn:0 row:0 makeIfNecessary:YES] : nil;
   NSTextField* hint = [first viewWithTag:3];
   NSRect bf = _commandBar.frame, wf = self.window.frame;
-  BOOL centred = fabs(NSMidX(bf) - NSMidX(wf)) <= 1 && NSMaxY(wf) - NSMaxY(bf) >= 80;
+  BOOL centred = _commandOpensNewTab ? fabs(NSMidX(bf) - NSMidX(wf)) <= 1 && NSMaxY(wf) - NSMaxY(bf) >= 80
+                                     : fabs(NSMinX(bf) - NSMinX(wf) - 4) <= 1 && fabs(NSMaxY(wf) - NSMaxY(bf) - 42) <= 1;
   NSView* card = _commandBar.contentView.subviews.firstObject;
   return [NSString stringWithFormat:@"sel=%02X%02X%02X rowClass=%@ divider=%d placeholder=%@ cell=%@ width=%.0f font=%.0f card=%@ "
                                     @"row=%.0f hint=%@ scrim=%d centred=%d",
@@ -8943,7 +9038,17 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
   CGFloat W = round(MIN(780, MAX(480, f.size.width * 0.65)));
   CGFloat top = NSMaxY(f) - MAX(80, round(f.size.height * 0.26));
   if (top - h < NSMinY(f) + 20) top = MIN(NSMaxY(f) - 60, NSMinY(f) + 20 + h);
-  [_commandBar setFrame:NSMakeRect(round(NSMidX(f) - W / 2), top - h, W, h) display:YES];
+  CGFloat left = round(NSMidX(f) - W / 2);
+  // Arc: Cmd+L (and clicking the address) opens the bar in place, its top-left on the address pill's, reaching
+  // out over the page; only a new tab (Cmd+T) gets the big centred bar.
+  BOOL inPlace = !_commandOpensNewTab && ![self sidebarCollapsed];
+  if (inPlace) {
+    NSRect pill = [self.window convertRectToScreen:[_addressPill convertRect:_addressPill.bounds toView:nil]];
+    W = round(MIN(640, f.size.width - 16));
+    left = NSMinX(pill) - 4;
+    top = NSMaxY(pill) + 4;
+  }
+  [_commandBar setFrame:NSMakeRect(left, top - h, W, h) display:YES];
   _commandIcon.frame = NSMakeRect(18, h - 42, 20, 20);
   _commandIcon.contentTintColor = [NSColor colorWithWhite:IsDark(_commandBar.contentView) ? 1 : 0 alpha:0.33];
   _commandField.frame = NSMakeRect(48, h - 45, W - 48 - 16, 26);
@@ -8951,7 +9056,8 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
   _suggestionTable.tableColumns.firstObject.width = W - 16;
   _suggestionScroll.hidden = listH == 0;
   _commandDivider.frame = NSMakeRect(0, h - 64, W, 1);
-  [self updateCommandScrim];
+  if (inPlace) _commandScrim.hidden = YES;
+  else [self updateCommandScrim];
   _commandDivider.hidden = listH == 0;
 }
 

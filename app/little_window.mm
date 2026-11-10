@@ -19,6 +19,9 @@ static const CGFloat kToolbarHeight = 34;
   LittleWindowClosed _onClose;
   BOOL _moved;
   BOOL _incognito;
+  BOOL _peekMode;
+  NSView* _peekCard;
+  NSView* _peekButtons;
 }
 
 - (instancetype)initWithURL:(NSString*)url
@@ -119,15 +122,80 @@ static const CGFloat kToolbarHeight = 34;
 }
 
 - (void)presentAsPeekOver:(NSWindow*)parent {
+  NSRect f = parent.frame;
+  [self presentAsPeekOver:parent inRect:NSInsetRect(f, f.size.width * 0.08, f.size.height * 0.08)];
+}
+
+// Arc's Peek: the page as a large rounded card floating over the (dimmed) page, no title bar; two small round
+// buttons sit above its top-right corner: Open as Tab and close.
+- (void)presentAsPeekOver:(NSWindow*)parent inRect:(NSRect)area {
   NSWindow* w = self.window;
   w.level = NSNormalWindowLevel;
-  w.styleMask = w.styleMask & ~NSWindowStyleMaskMiniaturizable;
+  w.styleMask = w.styleMask & ~(NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable);
+  for (NSWindowButton b : {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton})
+    [w standardWindowButton:b].hidden = YES;
+  w.opaque = NO;
+  w.backgroundColor = NSColor.clearColor;
+  w.hasShadow = NO;
+  w.movable = NO;
   _openButton.title = @"Open as Tab";
-  NSRect f = parent.frame;
-  CGFloat inset = 0.08;
-  [w setFrame:NSInsetRect(f, f.size.width * inset, f.size.height * inset) display:NO];
+  _peekMode = YES;
+  [w setFrame:area display:NO];
+  NSView* root = w.contentView;
+  NSRect b = root.bounds;
+  NSView* toolbar = _titleLabel.superview;
+  toolbar.hidden = YES;
+  const CGFloat bar = 30;
+  _webContainer.frame = NSMakeRect(0, 0, b.size.width, b.size.height - bar);
+  _webContainer.wantsLayer = YES;
+  _webContainer.layer.cornerRadius = 10;
+  _webContainer.layer.masksToBounds = YES;
+  _webContainer.layer.borderWidth = 1;
+  _webContainer.layer.borderColor = [NSColor colorWithWhite:0 alpha:0.12].CGColor;
+  if (!_peekCard) {  // the card's shadow, drawn behind the page (the page view itself is clipped)
+    _peekCard = [[NSView alloc] initWithFrame:_webContainer.frame];
+    _peekCard.wantsLayer = YES;
+    _peekCard.layer.backgroundColor = NSColor.whiteColor.CGColor;
+    _peekCard.layer.cornerRadius = 10;
+    _peekCard.layer.shadowColor = NSColor.blackColor.CGColor;
+    _peekCard.layer.shadowOpacity = 0.45;
+    _peekCard.layer.shadowRadius = 24;
+    _peekCard.layer.shadowOffset = CGSizeMake(0, -6);
+    _peekCard.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [root addSubview:_peekCard positioned:NSWindowBelow relativeTo:_webContainer];
+  }
+  _peekCard.frame = _webContainer.frame;
+  if (!_peekButtons) {
+    _peekButtons = [[NSView alloc] initWithFrame:NSMakeRect(b.size.width - 62, b.size.height - 26, 62, 24)];
+    _peekButtons.autoresizingMask = NSViewMinXMargin | NSViewMinYMargin;
+    NSArray* defs = @[ @[ @"arrow.up.left.and.arrow.down.right", @"openInMainWindow:", @"Open as Tab" ],
+                       @[ @"xmark", @"closeTab:", @"Close Peek" ] ];
+    CGFloat x = 0;
+    for (NSArray* d in defs) {
+      NSButton* btn = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:d[0] accessibilityDescription:d[2]]
+                                         target:self action:NSSelectorFromString(d[1])];
+      btn.bordered = NO;
+      btn.toolTip = d[2];
+      btn.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:10 weight:NSFontWeightBold];
+      btn.contentTintColor = NSColor.whiteColor;
+      btn.wantsLayer = YES;
+      btn.layer.cornerRadius = 12;
+      btn.layer.backgroundColor = [NSColor colorWithWhite:0.12 alpha:0.85].CGColor;
+      btn.frame = NSMakeRect(x, 0, 24, 24);
+      [_peekButtons addSubview:btn];
+      x += 30;
+    }
+    [root addSubview:_peekButtons];
+  }
   [parent addChildWindow:w ordered:NSWindowAbove];
   [w makeKeyAndOrderFront:nil];
+}
+
+- (NSString*)peekStyleDescription {  // tests
+  return [NSString stringWithFormat:@"peek=%d titlebar=%d radius=%.0f buttons=%lu clear=%d", _peekMode,
+                                    !_titleLabel.superview.hidden || ![self.window standardWindowButton:NSWindowCloseButton].hidden,
+                                    _webContainer.layer.cornerRadius, (unsigned long)_peekButtons.subviews.count,
+                                    !self.window.opaque];
 }
 
 - (void)cancelOperation:(id)sender { [self.window close]; }

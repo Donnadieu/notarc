@@ -4,6 +4,11 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Cmd+L (or a click on the address) opens the command bar in place over the address pill, as in Arc; Cmd+T keeps the
+  big centred bar.
+- Peek is Arc's floating card over the dimmed page, with no title bar and round Open as Tab and close buttons.
+- The find bar is a rounded floating bar at the page's top-right with up / down arrows and a close button.
+- Toasts are dark capsules with an icon and a blue text action.
 - With the sidebar hidden, moving the pointer to the window's left edge slides it in as a floating panel over the
   page, as in Arc; moving away hides it again.
 - Loading tabs show a spinner in place of their icon, and a soft glow in the Space's colour runs along the top of
