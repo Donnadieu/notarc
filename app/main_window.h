@@ -480,6 +480,9 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (NSString*)speakerStateForItem:(ArcItem*)item;  // tests (V26)
 - (NSString*)crashViewStyleForItem:(ArcItem*)item;  // tests (V10)
 - (NSString*)updateBannerState;                 // tests (V27)
+- (NSString*)hoverCardStyle;                    // tests (V34)
+- (NSString*)tabSwitcherStyle;                  // tests (V33)
+- (NSMenu*)newItemMenu;                         // the sidebar's + menu (V25)
 - (void)hideUpdateBannerForTest;
 - (IBAction)restartToUpdate:(id)sender;
 - (NSString*)findBarStyle;                      // tests (V35)

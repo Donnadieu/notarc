@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-34 done of 66 items.
+37 done of 66 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -85,8 +85,9 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   moving away hides it again. Ref: app (gesture-hidden sidebar), video.
 - [x] **V24 Bottom bar.** Library button at left, one filled dot (or emoji) per Space in the middle, 34 pt apart
   (current white ~50%, others ~17%), "+" at right; icons white ~60%, centred 20.5 pt above the window bottom. Ref: shot.
-- [ ] **V25 Plus menu.** "+" opens Arc's own menu style (dark rounded panel, icon per row): New Tab, Split View,
-  Folder, Easel, Note, Boost, Space, Profile. Ref: app (plus button icons, menu colours).
+- [x] **V25 Plus menu.** "+" opens a native menu (as Arc's is) with an icon on every row, in Arc's order: New Tab,
+  New Split View (right / below), New Folder, New Easel, New Note, New Boost, New Live Folder, then New Space and New
+  Profile; it opens upward from the button. Ref: app (plus button icons and menu item types).
 - [x] **V26 Unread badge and sound icon.** Unread count/dot on a Favorite's tile; a tab with sound keeps its site
   icon and gets a speaker button at the row's right (left of the cross on hover) that mutes and unmutes it. Ref:
   app (mute button in the tab cell), video.
@@ -108,10 +109,12 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   capsule. Ref: help (Site Search, Actions), app.
 - [x] **V32 Command bar text and colours.** Text white 80% / 33%, row hover 5%, hairline 10%, placeholder 60%,
   accessory chips 5%; light mode mirrored in black. Ref: colours.
-- [ ] **V33 Ctrl+Tab switcher.** A centred panel of up to 5 recent tabs as page pictures with titles, the chosen one
-  outlined; release to switch. Ref: video (tab switcher), help.
-- [ ] **V34 Hover cards.** Hovering a sidebar row shows a card to its right with a page picture, title and address.
-  Ref: app (hover card), video.
+- [x] **V33 Ctrl+Tab switcher.** A centred dark HUD of recent tabs as page pictures with a soft shadow, the site's
+  icon and title under each, the chosen one on a light rounded plate (no accent colour). Ref: app (item switcher:
+  snapshots, shadow, visual-effect material).
+- [x] **V34 Hover cards.** Hovering a sidebar row shows a card to its right: the page's picture edge to edge on top,
+  the title, a link row (site icon + domain), then when it was last used. Ref: app (hover card: banner image, title,
+  link views).
 - [x] **V35 Find in page.** A small rounded floating bar 10 pt in from the page card's top-right: glass, field, match
   count, up / down arrows and a close button. Ref: video.
 - [x] **V36 Toolbar mode.** View > Show Toolbar puts a thin bar with back/forward/reload and the full address above

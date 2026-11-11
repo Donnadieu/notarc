@@ -4140,6 +4140,24 @@ static NSString* RelativeAgo(NSDate* d) {
 
 - (BOOL)hoverCardShown { return _hoverCard.shown; }
 - (BOOL)hoverCardHasThumbnail { return _hoverCard != nil && _hoverCardHasThumbnail; }
+- (NSString*)hoverCardStyle {  // tests (V34): banner edge to edge, a link row
+  NSView* root = _hoverCard.contentViewController.view;
+  __block NSView* banner = nil;
+  __block NSView* link = nil;
+  __block void (^walk)(NSView*);
+  void (^w)(NSView*) = ^(NSView* v) {
+    if ([v.identifier isEqual:@"hoverBanner"]) banner = v;
+    if ([v.identifier isEqual:@"hoverLink"]) link = v;
+    for (NSView* s in v.subviews) walk(s);
+  };
+  walk = w;
+  if (root) walk(root);
+  walk = nil;
+  [root layoutSubtreeIfNeeded];
+  BOOL edge = banner && fabs(banner.frame.size.width - root.bounds.size.width) <= 1 &&
+              fabs(NSMaxY(banner.frame) - root.bounds.size.height) <= 1;
+  return [NSString stringWithFormat:@"banner=%d edge=%d link=%d", banner != nil, edge, link != nil];
+}
 
 - (void)hideHoverCard {
   [_hoverCard close];
@@ -4163,38 +4181,67 @@ static NSString* RelativeAgo(NSDate* d) {
     [lines addObject:[@"Pinned at " stringByAppendingString:item.pinnedURL]];
   [lines addObject:url];
 
+  // Arc's hover card: the page's picture edge to edge on top, then the title and a link row (site icon + domain).
+  const CGFloat W = 300;
   NSStackView* stack = [NSStackView new];
   stack.orientation = NSUserInterfaceLayoutOrientationVertical;
   stack.alignment = NSLayoutAttributeLeading;
-  stack.spacing = 3;
-  stack.edgeInsets = NSEdgeInsetsMake(10, 12, 10, 12);
+  stack.spacing = 4;
+  stack.edgeInsets = NSEdgeInsetsMake(0, 0, 12, 0);
   // The page as it looked when last on screen (#65); never for the tab you're looking at.
   _hoverCardHasThumbnail = NO;
   if (item.thumbnail && item != _shown) {
     NSImageView* iv = [NSImageView imageViewWithImage:item.thumbnail];
-    iv.imageScaling = NSImageScaleProportionallyUpOrDown;
-    iv.wantsLayer = YES;
-    iv.layer.cornerRadius = 6;
-    iv.layer.masksToBounds = YES;
+    iv.imageScaling = NSImageScaleAxesIndependently;
+    iv.identifier = @"hoverBanner";
     NSSize s = item.thumbnail.size;
-    [iv.widthAnchor constraintEqualToConstant:280].active = YES;
-    [iv.heightAnchor constraintEqualToConstant:s.width > 0 ? 280 * s.height / s.width : 160].active = YES;
+    CGFloat h = round(MIN(W * 0.56, s.width > 0 ? W * s.height / s.width : 160));
+    [iv.widthAnchor constraintEqualToConstant:W].active = YES;
+    [iv.heightAnchor constraintEqualToConstant:h].active = YES;
     [stack addArrangedSubview:iv];
-    [stack setCustomSpacing:8 afterView:iv];
+    [stack setCustomSpacing:10 afterView:iv];
     _hoverCardHasThumbnail = YES;
+  } else {
+    stack.edgeInsets = NSEdgeInsetsMake(12, 0, 12, 0);
   }
-  for (NSUInteger i = 0; i < lines.count; ++i) {
-    NSTextField* l = [NSTextField wrappingLabelWithString:lines[i]];
-    l.preferredMaxLayoutWidth = 280;
-    l.maximumNumberOfLines = i == 0 ? 2 : (i + 1 == lines.count ? 3 : 1);
-    l.lineBreakMode = i + 1 == lines.count ? NSLineBreakByCharWrapping : NSLineBreakByTruncatingTail;
-    l.font = i == 0 ? [NSFont boldSystemFontOfSize:13] : [NSFont systemFontOfSize:i + 1 == lines.count ? 10 : 11];
-    l.textColor = i == 0 ? NSColor.labelColor : NSColor.secondaryLabelColor;
-    [stack addArrangedSubview:l];
-  }
+  auto padded = ^NSView*(NSView* v) {  // text rows sit 14 pt in from the card's edges
+    NSView* box = [NSView new];
+    v.translatesAutoresizingMaskIntoConstraints = NO;
+    [box addSubview:v];
+    [NSLayoutConstraint activateConstraints:@[
+      [v.leadingAnchor constraintEqualToAnchor:box.leadingAnchor constant:14],
+      [v.trailingAnchor constraintLessThanOrEqualToAnchor:box.trailingAnchor constant:-14],
+      [v.topAnchor constraintEqualToAnchor:box.topAnchor], [v.bottomAnchor constraintEqualToAnchor:box.bottomAnchor],
+      [box.widthAnchor constraintEqualToConstant:W]
+    ]];
+    return box;
+  };
+  NSTextField* title = [NSTextField wrappingLabelWithString:lines[0]];
+  title.preferredMaxLayoutWidth = W - 28;
+  title.maximumNumberOfLines = 2;
+  title.lineBreakMode = NSLineBreakByTruncatingTail;
+  title.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
+  title.textColor = NSColor.labelColor;
+  [stack addArrangedSubview:padded(title)];
+  NSImageView* fav = [NSImageView imageViewWithImage:[self iconImageForItem:item] ?: [NSImage imageWithSystemSymbolName:@"globe" accessibilityDescription:nil]];
+  fav.imageScaling = NSImageScaleProportionallyUpOrDown;
+  [fav.widthAnchor constraintEqualToConstant:14].active = YES;
+  [fav.heightAnchor constraintEqualToConstant:14].active = YES;
+  NSTextField* link = [NSTextField labelWithString:host];
+  link.font = [NSFont systemFontOfSize:12];
+  link.textColor = NSColor.secondaryLabelColor;
+  link.lineBreakMode = NSLineBreakByTruncatingTail;
+  NSStackView* linkRow = [NSStackView stackViewWithViews:@[ fav, link ]];
+  linkRow.spacing = 6;
+  linkRow.identifier = @"hoverLink";
+  [stack addArrangedSubview:padded(linkRow)];
+  NSTextField* when = [NSTextField labelWithString:lines[2]];
+  when.font = [NSFont systemFontOfSize:11];
+  when.textColor = NSColor.tertiaryLabelColor;
+  [stack addArrangedSubview:padded(when)];
   NSViewController* vc = [NSViewController new];
   vc.view = stack;
-  stack.frame = NSMakeRect(0, 0, 304, stack.fittingSize.height);
+  stack.frame = NSMakeRect(0, 0, W, stack.fittingSize.height);
   _hoverCard = [NSPopover new];
   _hoverCard.contentViewController = vc;
   _hoverCard.behavior = NSPopoverBehaviorApplicationDefined;
@@ -6721,16 +6768,37 @@ static ArcItem* NewSection(NSString* title) {
   item.submenu = sub;
   return item;
 }
-- (IBAction)showNewMenu:(NSButton*)sender {
+// Arc's + menu: a native menu with an icon on every row (tab, split right / below, folder, easel, note, boost,
+// space), in that order, opening upward from the button.
+- (NSMenu*)newItemMenu {
   NSMenu* m = [[NSMenu alloc] initWithTitle:@"New"];
-  [m addItemWithTitle:@"New Tab" action:@selector(newTab:) keyEquivalent:@""].target = self;
-  [m addItemWithTitle:@"New Folder" action:@selector(newFolder:) keyEquivalent:@""].target = self;
-  [m addItemWithTitle:@"New Note" action:@selector(newNote:) keyEquivalent:@""].target = self;
-  [m addItemWithTitle:@"New Easel" action:@selector(newEasel:) keyEquivalent:@""].target = self;
-  [m addItem:[self newLiveFolderMenuItem]];
-  [m addItem:NSMenuItem.separatorItem];
-  [m addItemWithTitle:@"New Space..." action:@selector(newSpace:) keyEquivalent:@""].target = self;
-  [m popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, sender.bounds.size.height + 4) inView:sender];
+  NSArray* rows = @[
+    @[ @"New Tab", @"newTab:", @"plus.square" ], @[ @"New Split View", @"addVerticalSplit:", @"rectangle.split.2x1" ],
+    @[ @"New Split View Below", @"addHorizontalSplit:", @"rectangle.split.1x2" ], @[ @"-" ],
+    @[ @"New Folder", @"newFolder:", @"folder" ], @[ @"New Easel", @"newEasel:", @"scribble.variable" ],
+    @[ @"New Note", @"newNote:", @"note.text" ], @[ @"New Boost", @"editBoost:", @"paintbrush.pointed" ], @[ @"LIVE" ], @[ @"-" ],
+    @[ @"New Space...", @"newSpace:", @"square.on.square" ], @[ @"New Profile...", @"newProfileForSpace:", @"person.crop.circle.badge.plus" ]
+  ];
+  for (NSArray* r in rows) {
+    if ([r[0] isEqual:@"-"]) {
+      [m addItem:NSMenuItem.separatorItem];
+      continue;
+    }
+    if ([r[0] isEqual:@"LIVE"]) {
+      NSMenuItem* live = [self newLiveFolderMenuItem];
+      live.image = [NSImage imageWithSystemSymbolName:@"dot.radiowaves.up.forward" accessibilityDescription:nil];
+      [m addItem:live];
+      continue;
+    }
+    NSMenuItem* it = [m addItemWithTitle:r[0] action:NSSelectorFromString(r[1]) keyEquivalent:@""];
+    it.target = self;
+    it.image = [NSImage imageWithSystemSymbolName:r[2] accessibilityDescription:nil];
+  }
+  return m;
+}
+- (IBAction)showNewMenu:(NSButton*)sender {
+  NSMenu* m = [self newItemMenu];
+  [m popUpMenuPositioningItem:m.itemArray.lastObject atLocation:NSMakePoint(0, sender.bounds.size.height + 4) inView:sender];
 }
 
 - (void)updateSpaceHeader {
@@ -8298,6 +8366,7 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
   }
   NSVisualEffectView* card = [[NSVisualEffectView alloc] initWithFrame:NSMakeRect(0, 0, w, h)];
   card.material = NSVisualEffectMaterialHUDWindow;
+  _switcher.appearance = [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua];  // always the dark HUD, as in Arc
   card.state = NSVisualEffectStateActive;
   card.wantsLayer = YES;
   card.layer.cornerRadius = 14;
@@ -8315,12 +8384,33 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
     iv.layer.cornerRadius = 6;
     iv.layer.masksToBounds = YES;
     iv.layer.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.06].CGColor;
+    // each picture floats with a small shadow (a holder carries it; the image itself is clipped to its corners)
+    NSView* holder = [[NSView alloc] initWithFrame:iv.frame];
+    holder.wantsLayer = YES;
+    holder.layer.shadowColor = NSColor.blackColor.CGColor;
+    holder.layer.shadowOpacity = 0.35;
+    holder.layer.shadowRadius = 6;
+    holder.layer.shadowOffset = CGSizeMake(0, -2);
+    CGPathRef sp = CGPathCreateWithRoundedRect(CGRectMake(0, 0, iv.frame.size.width, iv.frame.size.height), 6, 6, NULL);
+    holder.layer.shadowPath = sp;
+    CGPathRelease(sp);
+    holder.identifier = @"switcherShadow";
+    [tile addSubview:holder];
     [tile addSubview:iv];
+    // under each picture: the site's icon and the title, centred, in white (the panel is always the dark HUD)
     NSTextField* title = [NSTextField labelWithString:items[i].displayTitle ?: items[i].url];
-    title.frame = NSMakeRect(6, 6, kSwitcherTileW - 12, 18);
-    title.font = [NSFont systemFontOfSize:11];
+    title.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+    title.textColor = [NSColor colorWithWhite:1 alpha:0.9];
     title.lineBreakMode = NSLineBreakByTruncatingTail;
-    title.alignment = NSTextAlignmentCenter;
+    NSImageView* fav = [NSImageView imageViewWithImage:[self iconImageForItem:items[i]] ?: [NSImage imageWithSystemSymbolName:@"globe" accessibilityDescription:nil]];
+    fav.imageScaling = NSImageScaleProportionallyUpOrDown;
+    fav.frame = NSMakeRect(0, 0, 14, 14);
+    fav.identifier = @"switcherIcon";
+    CGFloat tw = MIN(ceil(title.fittingSize.width), kSwitcherTileW - 12 - 20);
+    CGFloat x0 = round((kSwitcherTileW - (14 + 6 + tw)) / 2);
+    fav.frame = NSMakeRect(x0, 8, 14, 14);
+    title.frame = NSMakeRect(x0 + 20, 6, tw, 18);
+    [tile addSubview:fav];
     [tile addSubview:title];
     [self fillSwitcherTile:tile item:items[i]];
     NSClickGestureRecognizer* click = [[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(switcherTileClicked:)];
@@ -8385,12 +8475,27 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
   for (NSUInteger i = 0; i < _switcherTiles.count; ++i) {
     CALayer* l = _switcherTiles[i].layer;
     BOOL on = (NSInteger)i == _switcherIndex;
-    l.backgroundColor = on ? [NSColor.controlAccentColor colorWithAlphaComponent:0.25].CGColor : NSColor.clearColor.CGColor;
-    l.borderWidth = on ? 2 : 0;
-    l.borderColor = NSColor.controlAccentColor.CGColor;
+    // Arc's switcher (like the macOS app switcher): the chosen item sits on a soft light rounded plate, no accent.
+    l.backgroundColor = on ? [NSColor colorWithWhite:1 alpha:0.16].CGColor : NSColor.clearColor.CGColor;
+    l.borderWidth = 0;
   }
 }
 
+- (NSString*)tabSwitcherStyle {  // tests (V33)
+  NSUInteger shadows = 0, icons = 0;
+  for (NSView* t in _switcherTiles)
+    for (NSView* v in t.subviews) {
+      if ([v.identifier isEqual:@"switcherShadow"]) ++shadows;
+      if ([v.identifier isEqual:@"switcherIcon"]) ++icons;
+    }
+  BOOL neutral = NO;
+  if (_switcherIndex >= 0 && (NSUInteger)_switcherIndex < _switcherTiles.count) {
+    CALayer* l = _switcherTiles[_switcherIndex].layer;
+    neutral = l.borderWidth == 0 && l.backgroundColor != nil;
+  }
+  return [NSString stringWithFormat:@"tiles=%lu shadows=%lu icons=%lu neutral=%d", (unsigned long)_switcherTiles.count,
+                                    (unsigned long)shadows, (unsigned long)icons, neutral];
+}
 - (void)updateTabSwitcherTileFor:(ArcItem*)item {
   NSUInteger i = [_switcherItems indexOfObjectIdenticalTo:item];
   if (_switcher && i != NSNotFound) [self fillSwitcherTile:_switcherTiles[i] item:item];

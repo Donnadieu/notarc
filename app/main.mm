@@ -1210,6 +1210,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       [w showItem:t];
       [w showHoverCardForItem:src];
       BOOL inCard = w.hoverCardHasThumbnail;
+      NSString* hoverLook = w.hoverCardStyle;  // Visual parity V34: Arc's card (picture edge to edge, link row)
       [w hideHoverCard];
       [w showHoverCardForItem:t];  // the tab on screen shows no (stale) picture
       BOOL notShown = !w.hoverCardHasThumbnail;
@@ -1220,6 +1221,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       BOOL open = w.tabSwitcherShown;
       BOOL order = items.count >= 2 && items[0] == t && items[1] == src && w.tabSwitcherSelection == src;
       BOOL thumb = [w tabSwitcherShowsThumbnailFor:src];
+      NSString* switcherLook = w.tabSwitcherStyle;  // Visual parity V33
       [w stepTabSwitcher:1];
       BOOL stepped = w.tabSwitcherSelection == (items.count > 2 ? items[2] : items[0]);
       [w stepTabSwitcher:-1];
@@ -1262,6 +1264,12 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                     taken, small, page, inCard, notShown, fast, switchFast, flipNoCopy);
         std::printf("SELFTEST-TABSWITCHER open=%d order=%d thumbnail=%d stepped=%d switched=%d cancelled=%d\n", open, order,
                     thumb, stepped, switched, cancelled);
+        BOOL hoverOK = [hoverLook isEqual:@"banner=1 edge=1 link=1"];
+        BOOL switcherOK = [switcherLook hasSuffix:@" neutral=1"] &&
+                          [switcherLook containsString:[NSString stringWithFormat:@"tiles=%lu shadows=%lu icons=%lu",
+                                                        (unsigned long)items.count, (unsigned long)items.count, (unsigned long)items.count]];
+        std::printf("SELFTEST-HOVERSWITCHLOOK hoverCard=%d switcher=%d\n", hoverOK, switcherOK);
+        if (!hoverOK || !switcherOK) std::printf("SELFTEST-HOVERSWITCHLOOK-DEBUG %s | %s\n", hoverLook.UTF8String, switcherLook.UTF8String);
         gLateTestsDone = YES;
       });
     });
@@ -3619,6 +3627,20 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         BOOL signInState = f.children.count == 1 && [f.children[0].url isEqualToString:kLiveFolderGitHubSignInURL] &&
                            [f.children[0].displayTitle containsString:@"Sign in to GitHub"] && [f.liveError containsString:@"GitHub"] &&
                            !f.children[0].liveUnread && !f.liveFilled;
+        {  // Visual parity V25: Arc's + menu, an icon on every row, in Arc's order
+          NSMutableArray* titles = [NSMutableArray array];
+          BOOL icons = YES;
+          for (NSMenuItem* it in [w newItemMenu].itemArray) {
+            if (it.isSeparatorItem) continue;
+            [titles addObject:it.title];
+            if (!it.image) icons = NO;
+          }
+          BOOL order = [[titles componentsJoinedByString:@","]
+              isEqual:@"New Tab,New Split View,New Split View Below,New Folder,New Easel,New Note,New Boost,New Live Folder,"
+                      @"New Space...,New Profile..."];
+          std::printf("SELFTEST-PLUSMENU icons=%d order=%d\n", icons, order);
+          if (!order) std::printf("SELFTEST-PLUSMENU-DEBUG %s\n", [titles componentsJoinedByString:@","].UTF8String);
+        }
         NSMenu* sub = [w newLiveFolderMenuItem].submenu;
         BOOL menu = [sub itemWithTitle:@"GitHub: My Pull Requests"].action == @selector(newMyPullRequestsFolder:) &&
                     [sub itemWithTitle:@"YouTube Channel..."].action == @selector(newYouTubeLiveFolder:) &&

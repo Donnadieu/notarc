@@ -480,3 +480,8 @@ trackpad; everything else is checked by the hidden self-test.
 116. **Background update checks download first, then offer a restart in the sidebar (V27),** like Arc. They stay
     under the existing "Check for updates" setting and still honour Skip This Version; the menu's Check for Updates
     keeps its dialog. Self-tests only post the "ready" notice and count the Restart click.
+117. **The + menu stays a native menu (V25).** Arc builds it from AppKit menu items with its own icons; NotArc uses the
+    same kind of menu with SF Symbols. A native menu can't be drawn without showing it on screen, so its check is the
+    self-test (every row has an icon, Arc's order), not a picture.
+118. **The Ctrl+Tab switcher's chosen tile uses a neutral light plate, not the accent colour (V33),** like the macOS
+    app switcher Arc's design follows. No Arc picture of it was available; this is a taste call for Omar to check.
