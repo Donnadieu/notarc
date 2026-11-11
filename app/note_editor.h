@@ -41,6 +41,7 @@ typedef NS_ENUM(NSInteger, NoteList) { NoteListNone = 0, NoteListBullet, NoteLis
 - (NSString*)markdown;  // the note as Markdown
 // Tests.
 - (NSArray<NSControl*>*)toolbarControls;
+- (NSString*)floatingBarDescription;  // tests (V44)
 - (CGFloat)readingWidth;  // width of the text column
 - (CGFloat)sideMargin;
 - (BOOL)looksDark;        // toolbar and page resolve to dark colours, with light text

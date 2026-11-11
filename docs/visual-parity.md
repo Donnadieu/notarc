@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-42 done of 66 items.
+46 done of 66 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -138,12 +138,16 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
 - [x] **V42 Downloads.** Downloads live in the Library as cards (file icon, name, status, a thin progress bar while
   downloading, a hover fill); a new download's icon flies from the page into the Library button and a small tray of
   recent download cards opens beside it in Arc's download-item colours. Ref: app (download item colours), video.
-- [ ] **V43 Easels.** Canvas on a dotted background, floating tool bar with pointer, pen, shapes, text and image
-  tools, capture button. Ref: app (Easel tools), video.
-- [ ] **V44 Notes.** Note page with a large title, reading column and a floating format bar. Ref: app, video.
-- [ ] **V45 Boosts editor.** Card with a colour wheel, Intensity, font tiles, Zap and Code. Ref: app (Boost editor),
+- [x] **V43 Easels.** Canvas on a dotted background, a floating rounded tool bar at the top with pointer, text,
+  arrow, shapes and pen, then Add Image and Capture, then the colours; no scrollbar track. Ref: app (Easel tools),
   video.
-- [ ] **V46 Capture.** Area selection overlay and the capture result card with Copy/Save. Ref: app, video.
+- [x] **V44 Notes.** Note page with a large title ("Untitled" in grey while empty), a centred reading column and a
+  floating rounded format bar over the top. Ref: app, video.
+- [x] **V45 Boosts editor.** Card with a colour wheel, the Intensity slider, font tiles, size, Case, Zap and Code
+  (already matched; checked against a render). Ref: app (Boost editor), video.
+- [x] **V46 Capture.** The page dims with a dark hint capsule at the top; the selection gets a white rounded outline
+  and a size tag; the result card at the page's bottom-right shows the picture with Copy, Show and Easel. Ref: app,
+  video.
 
 ## Menus and panels
 

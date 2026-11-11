@@ -1,4 +1,5 @@
 #import "app/easel.h"
+#import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
 
 static const CGFloat kPad = 10;     // room around a drawing for its stroke and arrowhead
 static const CGFloat kStroke = 3;   // drawing line width
@@ -316,11 +317,32 @@ static CGPathRef CreateDrawingPath(EaselObject* o, NSRect bounds) {
   bar.material = NSVisualEffectMaterialPopover;
   bar.state = NSVisualEffectStateActive;
   bar.wantsLayer = YES;
-  bar.layer.cornerRadius = 10;
+  bar.layer.cornerRadius = 12;
+  bar.layer.borderWidth = 0.5;
+  bar.layer.borderColor = [NSColor colorWithWhite:0.5 alpha:0.25].CGColor;
+  bar.shadow = [NSShadow new];
+  bar.identifier = @"easelToolbar";
   CGFloat h = MAX(34, _tools.frame.size.height + 10), x = 6;
   _tools.frameOrigin = NSMakePoint(x, round((h - _tools.frame.size.height) / 2));
   [bar addSubview:_tools];
-  x += _tools.frame.size.width + 8;
+  x += _tools.frame.size.width + 6;
+  // Arc's easel bar also adds a picture from a file and captures part of a page straight onto the canvas.
+  for (NSArray* a in @[ @[ @"photo", @"Add Image...", @"addImageFromFile:" ], @[ @"camera.viewfinder", @"Capture", @"captureIntoEasel:" ] ]) {
+    NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:a[0] accessibilityDescription:a[1]]
+                                     target:self action:NSSelectorFromString(a[2])];
+    b.bordered = NO;
+    b.toolTip = a[1];
+    b.identifier = @"easelExtraTool";
+    b.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:13 weight:NSFontWeightMedium];
+    b.contentTintColor = NSColor.secondaryLabelColor;
+    b.frame = NSMakeRect(x, round((h - 24) / 2), 28, 24);
+    [bar addSubview:b];
+    x += 30;
+  }
+  NSBox* sep = [[NSBox alloc] initWithFrame:NSMakeRect(x + 2, round((h - 18) / 2), 1, 18)];
+  sep.boxType = NSBoxSeparator;
+  [bar addSubview:sep];
+  x += 10;
   _swatches = [NSMutableArray array];
   for (NSString* hex in [EaselView palette]) {
     EaselSwatch* s = [[EaselSwatch alloc] initWithFrame:NSMakeRect(x, round((h - 22) / 2), 22, 22)];
@@ -336,6 +358,27 @@ static CGPathRef CreateDrawingPath(EaselObject* o, NSRect bounds) {
   bar.toolTip = nil;
   _toolbar = bar;
   return bar;
+}
+- (IBAction)addImageFromFile:(id)sender {
+  NSOpenPanel* op = [NSOpenPanel openPanel];
+  op.allowedContentTypes = @[ UTTypeImage ];
+  op.allowsMultipleSelection = NO;
+  __weak EaselView* weakSelf = self;
+  [op beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    if (r != NSModalResponseOK || !op.URL) return;
+    NSImage* img = [[NSImage alloc] initWithContentsOfURL:op.URL];
+    NSBitmapImageRep* rep = img ? [NSBitmapImageRep imageRepWithData:img.TIFFRepresentation] : nil;
+    NSData* png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+    if (png) [weakSelf addImagePNG:png link:nil];
+  }];
+}
+- (IBAction)captureIntoEasel:(id)sender {
+  if ([self.delegate respondsToSelector:@selector(easelWantsCapture:)]) [self.delegate easelWantsCapture:self];
+}
+- (NSUInteger)extraToolCount {  // tests (V43)
+  NSUInteger n = 0;
+  for (NSView* v in _toolbar.subviews) n += [v.identifier isEqual:@"easelExtraTool"];
+  return n;
 }
 - (void)toolPicked:(NSSegmentedControl*)s {
   NSArray* t = [EaselView toolNames];

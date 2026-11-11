@@ -27,6 +27,8 @@
 @protocol EaselViewDelegate <NSObject>
 - (void)easelDidChange:(EaselView*)easel;
 - (void)easel:(EaselView*)easel openLink:(NSString*)url;
+@optional
+- (void)easelWantsCapture:(EaselView*)easel;  // the bar's Capture button: pick a page area to add
 @end
 
 @interface EaselView : NSView <NSTextFieldDelegate>
@@ -45,6 +47,7 @@
 - (BOOL)save;
 - (EaselObject*)addText:(NSString*)text at:(NSPoint)p;
 - (EaselObject*)addImagePNG:(NSData*)png link:(NSString*)link;
+- (NSUInteger)extraToolCount;  // tests (V43): the bar's image and capture buttons
 - (EaselObject*)addClipPNG:(NSData*)png link:(NSString*)link region:(NSRect)region viewport:(NSSize)viewport
                     scroll:(NSPoint)scroll;
 - (BOOL)replaceImageOf:(EaselObject*)o png:(NSData*)png;  // a refreshed clip picture

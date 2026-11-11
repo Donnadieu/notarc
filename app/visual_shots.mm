@@ -246,6 +246,16 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
         [DownloadManager.shared update:fid received:rec total:tot speed:rec / 3 path:path
                                  state:rec >= tot ? DownloadComplete : DownloadInProgress];
       }
+    } else if ([cmd isEqual:@"front"]) {  // front <ivar>: order a panel kept hidden in test runs to the front (off screen)
+      NSWindow* pw = [c valueForKey:arg];
+      if ([pw isKindOfClass:NSWindow.class]) {
+        pw.hidesOnDeactivate = NO;
+        [pw orderFront:nil];
+      }
+    } else if ([cmd isEqual:@"capture-card"]) {  // the capture result card for the shown page (test pasteboard)
+      c.captureDirectory = NSTemporaryDirectory();
+      __weak MainWindowController* wc = c;
+      [c capture:@"visible" rect:NSZeroRect done:^(NSData* png) { [wc deliverCapture:png]; }];
     } else if ([cmd isEqual:@"library"]) {
       [c showLibrary:nil];
     } else if ([cmd isEqual:@"library-open"]) {
