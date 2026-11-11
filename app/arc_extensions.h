@@ -17,5 +17,7 @@ NSArray<ArcExtensionCopy*>* ArcCopyExtensions(NSString* arcUserData, NSArray<NSS
 // Folders already copied (one per extension), for loading at startup.
 NSArray<NSString*>* ArcCopiedExtensionPaths(NSString* destination);
 NSString* NotArcExtensionsDirectory(BOOL selfTest);
+// Extensions pinned to the toolbar in Arc's profiles (Chromium's extensions.pinned_extensions), in order, no repeats.
+NSArray<NSString*>* ArcPinnedExtensionIDs(NSString* arcUserData, NSArray<NSString*>* profiles);
 // The manifest's name, with "__MSG_...__" looked up in the default locale.
 NSString* ExtensionDisplayName(NSDictionary* manifest, NSString* dir);

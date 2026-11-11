@@ -453,6 +453,18 @@ NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed 
 - (NSString*)folderChevronForItem:(ArcItem*)folder;       // tests
 - (BOOL)stockDisclosureShown;                             // tests
 - (NSString*)commandBarStyle;
+// Omar, Nov 11 (V67, V68, V71): clicking the address pill opens Arc's compact dropdown over the pill; Cmd+T keeps
+// the big centred bar. A click outside, Esc or another window taking focus closes it with no navigation.
+- (NSString*)commandBarGeometry;          // tests: "compact=1 onPill=1 width=348 rows=5 rowH=50 font=13 scrim=0 ..."
+- (NSWindow*)commandBarWindow;            // tests
+- (NSEvent*)commandBarFilterEvent:(NSEvent*)event;  // the click-outside monitor (nil = swallowed)
+// The address pill's hover row (V69): pinned extensions, the puzzle (More), Copy URL, the site control center.
+- (NSString*)pillButtonOrder;             // tests: "ext:<id>,more,copy,site" (hidden buttons left out)
+- (BOOL)pillExtensionHasOwnIcon:(NSString*)extensionID;  // tests
+- (BOOL)extensionIsPinned:(NSString*)extensionID;
+- (void)setExtension:(NSString*)extensionID pinned:(BOOL)pinned;
+- (ExtensionPopup*)clickPillExtensionForTest:(NSString*)extensionID;
+- (void)rebuildPillExtensions;            // after extensions or pins change (and on a profile change)
 // Boosts
 - (IBAction)editBoost:(id)sender;
 - (IBAction)zapElements:(id)sender;

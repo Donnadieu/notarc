@@ -3,6 +3,20 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## 0.30.0
+- Clicking the address bar opens Arc's small dropdown right over it (five rows, the site's icon, 13 pt text) instead
+  of the big command bar; Cmd+T still opens the big one. A click outside, Esc or switching apps closes it.
+- Hovering the address bar shows your extensions first (their own icons, two pinned, the rest under the puzzle),
+  then Copy URL and the site controls, as in Arc. Pin and unpin from the puzzle menu or the site controls; clicking a
+  pinned icon opens it right under it.
+- Import Everything from Arc now turns on Chrome-style pages when it copies extensions, so they actually load (after a
+  relaunch), and brings Arc's pinned extensions along.
+- The command bar card is see-through like Arc's, with Arc's smaller corners.
+- Site controls open from the address bar's controls button and list your extensions with a pin button each; the
+  footer has Clear Cookies, Clear Cache and a menu with the rest.
+- Self-tests no longer pick up your own Chrome-style pages setting (with it on, every test run crashed at the Web
+  Store check).
+
 ## 0.29.0
 - Dialogs are Arc-style cards over the dimmed window, with Arc's blue, red and neutral buttons.
 - Settings has Arc's panes (General, Profiles, Max, Links, Shortcuts, Icon, Advanced) with grouped cards and switches;

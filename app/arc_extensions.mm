@@ -68,3 +68,21 @@ NSArray<NSString*>* ArcCopiedExtensionPaths(NSString* destination) {
   }
   return [out sortedArrayUsingSelector:@selector(compare:)];
 }
+
+// Chromium keeps the toolbar's pinned extensions in each profile's Preferences (extensions.pinned_extensions).
+// Read-only, and nothing else in the file is used.
+NSArray<NSString*>* ArcPinnedExtensionIDs(NSString* arcUserData, NSArray<NSString*>* profiles) {
+  NSMutableArray<NSString*>* out = [NSMutableArray array];
+  for (NSString* profile in profiles) {
+    NSData* d = [NSData dataWithContentsOfFile:[[arcUserData stringByAppendingPathComponent:profile]
+                                                   stringByAppendingPathComponent:@"Preferences"]];
+    NSDictionary* prefs = d ? [NSJSONSerialization JSONObjectWithData:d options:0 error:nil] : nil;
+    if (![prefs isKindOfClass:NSDictionary.class]) continue;
+    NSDictionary* ext = prefs[@"extensions"];
+    NSArray* pinned = [ext isKindOfClass:NSDictionary.class] ? ext[@"pinned_extensions"] : nil;
+    if (![pinned isKindOfClass:NSArray.class]) continue;
+    for (id ident in pinned)
+      if ([ident isKindOfClass:NSString.class] && [ident length] == 32 && ![out containsObject:ident]) [out addObject:ident];
+  }
+  return out;
+}

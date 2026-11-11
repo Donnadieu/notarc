@@ -21,6 +21,9 @@
 //   inactive [0|1]               draw the window as inactive
 //   hover-today                  hover the Today divider (shows Clear)
 //   hover <text>                 hover the sidebar row of that tab (empty: none)
+//   pill-hover [0|1]             show the address pill's hover row (extensions, Copy URL, site controls)
+//   fake-extension <name> <#hex> add an extension with a lettered icon (renders only; pinned like a new one)
+//   shot-popover <name>          the site control center's content on its own (popovers land on a real screen)
 //   js <script>                  run a script in the shown tab
 //   poll-media                   ask every tab what it's playing now
 //   load <n>                     load the first n tabs of every Space (real icons and titles)

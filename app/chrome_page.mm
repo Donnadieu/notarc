@@ -7,9 +7,18 @@
 
 BOOL ChromePagesEnabled(void) {
   // NOTARC_CHROME_PAGES=1 turns it on for a --selftest run (the shared test runner passes no extra arguments).
+  // Test and render runs never read the person's saved setting: this runs before test isolation hides real
+  // preferences, and Omar's own "chromePages" (on since Nov 11) put every test run into Chrome-style pages.
   NSArray<NSString*>* args = NSProcessInfo.processInfo.arguments;
-  static BOOL on = [NSUserDefaults.standardUserDefaults boolForKey:@"chromePages"] || [args containsObject:@"--chrome-pages"] ||
-                   ([args containsObject:@"--selftest"] && [NSProcessInfo.processInfo.environment[@"NOTARC_CHROME_PAGES"] isEqualToString:@"1"]);
+  static BOOL on = ^BOOL {
+    BOOL testRun = NO;
+    for (NSString* a in args)
+      if ([a isEqual:@"--selftest"] || [a isEqual:@"--selftest-reload"] || [a hasPrefix:@"--visual-shots="] ||
+          [a hasPrefix:@"--sidebar-snapshot="])
+        testRun = YES;
+    if (testRun) return [args containsObject:@"--chrome-pages"] || [NSProcessInfo.processInfo.environment[@"NOTARC_CHROME_PAGES"] isEqualToString:@"1"];
+    return [NSUserDefaults.standardUserDefaults boolForKey:@"chromePages"] || [args containsObject:@"--chrome-pages"];
+  }();
   return on;
 }
 
