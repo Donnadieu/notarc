@@ -485,3 +485,8 @@ trackpad; everything else is checked by the hidden self-test.
     self-test (every row has an icon, Arc's order), not a picture.
 118. **The Ctrl+Tab switcher's chosen tile uses a neutral light plate, not the accent colour (V33),** like the macOS
     app switcher Arc's design follows. No Arc picture of it was available; this is a taste call for Omar to check.
+119. **Right-click menus stay native and are checked by the self-test (V47, V48).** A native menu can't be drawn
+    without showing it, so the checks assert every row has an icon and Arc's items are present. Labels Arc's strings
+    didn't settle (e.g. the split layout flip) use plain names.
+120. **Site controls keep Ask / Allow / Block per permission (V49).** Arc shows each setting's current answer as a
+    subtitle; NotArc shows the same and keeps the three-way choice at the row's right.

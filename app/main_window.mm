@@ -3809,19 +3809,103 @@ static NSArray<NSArray*>* SiteSettingRows() {
   }
   _siteSettingsOrigin = OriginKey(url);
   BOOL secure = [u.scheme isEqualToString:@"https"];
+  // Arc's site control center: the domain and a row of round actions on top, the connection, then sections
+  // (Boosts, Site Settings) with an icon, a title and a subtitle per row, and the clean-up actions at the bottom.
+  const CGFloat W = 300;
+  NSMutableArray* views = [NSMutableArray array];
   NSTextField* host = [NSTextField labelWithString:[u.host hasPrefix:@"www."] ? [u.host substringFromIndex:4] : u.host];
-  host.font = [NSFont boldSystemFontOfSize:14];
-  NSImageView* lock = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:secure ? @"lock.fill" : @"exclamationmark.triangle"
-                                                             accessibilityDescription:nil]];
-  lock.contentTintColor = secure ? NSColor.secondaryLabelColor : NSColor.systemOrangeColor;
-  NSTextField* sec = [NSTextField labelWithString:secure ? @"Connection is secure" : @"Connection is not secure"];
-  sec.textColor = NSColor.secondaryLabelColor;
-  sec.font = [NSFont systemFontOfSize:11];
-  NSMutableArray* views = [NSMutableArray arrayWithObjects:host, [NSStackView stackViewWithViews:@[ lock, sec ]], nil];
+  host.font = [NSFont systemFontOfSize:15 weight:NSFontWeightSemibold];
+  host.lineBreakMode = NSLineBreakByTruncatingMiddle;
+  [host.widthAnchor constraintLessThanOrEqualToConstant:W - 32].active = YES;
+  [views addObject:host];
+  NSMutableArray* actions = [NSMutableArray array];
+  for (NSArray* a in @[ @[ @"link", @"copyCurrentURL:", @"Copy URL" ], @[ @"square.and.arrow.up", @"siteShare:", @"Share" ],
+                        @[ @"camera.viewfinder", @"captureArea:", @"Capture a portion of this page" ],
+                        @[ @"rectangle.dashed.and.paperclip", @"captureFullPage:", @"Capture the full page" ],
+                        @[ @"paintbrush.pointed", @"editBoost:", @"New Boost" ] ]) {
+    NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:a[0] accessibilityDescription:a[2]]
+                                     target:self action:NSSelectorFromString(a[1])];
+    b.bordered = NO;
+    b.toolTip = a[2];
+    b.identifier = @"siteAction";
+    b.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:13 weight:NSFontWeightMedium];
+    b.wantsLayer = YES;
+    b.layer.cornerRadius = 17;
+    b.layer.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.07].CGColor;
+    [b.widthAnchor constraintEqualToConstant:50].active = YES;
+    [b.heightAnchor constraintEqualToConstant:34].active = YES;
+    [actions addObject:b];
+  }
+  NSStackView* actionRow = [NSStackView stackViewWithViews:actions];
+  actionRow.spacing = 6;
+  [views addObject:actionRow];
+  auto row = ^NSView*(NSString* symbol, NSString* title, NSString* subtitle, NSView* accessory, NSColor* tint) {
+    NSImageView* icon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil]];
+    icon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:12 weight:NSFontWeightSemibold];
+    icon.contentTintColor = tint ?: NSColor.secondaryLabelColor;
+    NSView* tile = [NSView new];
+    tile.wantsLayer = YES;
+    tile.layer.cornerRadius = 7;
+    tile.layer.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.07].CGColor;
+    icon.translatesAutoresizingMaskIntoConstraints = NO;
+    [tile addSubview:icon];
+    [NSLayoutConstraint activateConstraints:@[
+      [tile.widthAnchor constraintEqualToConstant:28], [tile.heightAnchor constraintEqualToConstant:28],
+      [icon.centerXAnchor constraintEqualToAnchor:tile.centerXAnchor], [icon.centerYAnchor constraintEqualToAnchor:tile.centerYAnchor]
+    ]];
+    NSTextField* t = [NSTextField labelWithString:title];
+    t.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
+    NSTextField* st = [NSTextField labelWithString:subtitle ?: @""];
+    st.font = [NSFont systemFontOfSize:11];
+    st.textColor = NSColor.secondaryLabelColor;
+    st.identifier = @"siteSubtitle";
+    NSStackView* text = [NSStackView stackViewWithViews:subtitle ? @[ t, st ] : @[ t ]];
+    text.orientation = NSUserInterfaceLayoutOrientationVertical;
+    text.alignment = NSLayoutAttributeLeading;
+    text.spacing = 0;
+    NSMutableArray* parts = [NSMutableArray arrayWithObjects:tile, text, nil];
+    NSView* spacer = [NSView new];
+    [spacer setContentHuggingPriority:1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+    [parts addObject:spacer];
+    if (accessory) [parts addObject:accessory];
+    NSStackView* r = [NSStackView stackViewWithViews:parts];
+    r.spacing = 10;
+    r.identifier = @"siteRow";
+    [r.widthAnchor constraintEqualToConstant:W - 32].active = YES;
+    return r;
+  };
+  auto header = ^NSTextField*(NSString* s) {
+    NSTextField* h = [NSTextField labelWithString:s];
+    h.font = [NSFont systemFontOfSize:11 weight:NSFontWeightSemibold];
+    h.textColor = NSColor.tertiaryLabelColor;
+    h.identifier = @"siteSection";
+    return h;
+  };
+  [views addObject:row(secure ? @"lock.fill" : @"exclamationmark.triangle.fill",
+                       secure ? @"Connection is secure" : @"Connection is not secure", nil, nil,
+                       secure ? nil : NSColor.systemOrangeColor)];
+  // Boosts for this site
+  [views addObject:header(@"Boosts")];
+  Boost* boost = [self boostForURL:url];
+  if (boost) {
+    NSSwitch* sw = [NSSwitch new];
+    sw.controlSize = NSControlSizeSmall;
+    sw.state = boost.enabled ? NSControlStateValueOn : NSControlStateValueOff;
+    sw.target = self;
+    sw.action = @selector(toggleBoost:);
+    [views addObject:row(@"paintbrush.pointed.fill", @"Boost", boost.enabled ? @"On" : @"Off", sw, nil)];
+  } else {
+    NSButton* add = [NSButton buttonWithTitle:@"New Boost" target:self action:@selector(editBoost:)];
+    add.controlSize = NSControlSizeSmall;
+    add.bezelStyle = NSBezelStyleInline;
+    [views addObject:row(@"paintbrush.pointed", @"No Boost on this site", nil, add, nil)];
+  }
+  // Site settings: one row per permission (Ask / Allow / Block), then the site's switches.
+  [views addObject:header(@"Site Settings")];
   NSDictionary* saved = [self sitePermissionsForOrigin:_siteSettingsOrigin];
+  NSDictionary* symbols = @{ @"camera" : @"video.fill", @"microphone" : @"mic.fill", @"location" : @"location.fill",
+                             @"notifications" : @"bell.fill", @"clipboard" : @"doc.on.clipboard.fill" };
   for (NSArray* r in SiteSettingRows()) {
-    NSTextField* label = [NSTextField labelWithString:r[1]];
-    [label.widthAnchor constraintEqualToConstant:110].active = YES;
     NSPopUpButton* pop = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
     [pop addItemsWithTitles:@[ @"Ask", @"Allow", @"Block" ]];
     NSNumber* v = saved[r[0]];
@@ -3829,33 +3913,60 @@ static NSArray<NSArray*>* SiteSettingRows() {
     pop.identifier = r[0];
     pop.target = self;
     pop.action = @selector(sitePermissionChosen:);
-    [views addObject:[NSStackView stackViewWithViews:@[ label, pop ]]];
+    pop.controlSize = NSControlSizeSmall;
+    pop.bordered = NO;
+    pop.font = [NSFont systemFontOfSize:12];
+    NSString* sub = !v ? @"Ask" : (v.boolValue ? @"Allowed" : @"Blocked");
+    [views addObject:row(symbols[r[0]] ?: @"gearshape", r[1], sub, pop, nil)];
   }
   if (SettingBool(kSettingBlockAds)) {
-    NSButton* ads = [NSButton checkboxWithTitle:@"Block Ads & Trackers" target:self action:@selector(siteAdBlockToggled:)];
-    ads.state = [self adBlockingOnForHost:u.host] ? NSControlStateValueOn : NSControlStateValueOff;
-    NSButton* manage = [NSButton buttonWithTitle:@"Manage Ad Blockers..." target:self action:@selector(showManageAdBlockers:)];
-    manage.controlSize = NSControlSizeSmall;
-    [views addObject:[NSStackView stackViewWithViews:@[ ads, manage ]]];
+    NSSwitch* ads = [NSSwitch new];
+    ads.controlSize = NSControlSizeSmall;
+    BOOL on = [self adBlockingOnForHost:u.host];
+    ads.state = on ? NSControlStateValueOn : NSControlStateValueOff;
+    ads.target = self;
+    ads.action = @selector(siteAdBlockToggled:);
+    [views addObject:row(@"shield.lefthalf.filled", @"Block Ads & Trackers", on ? @"On for this site" : @"Off for this site", ads, nil)];
   }
   if ([u.scheme isEqualToString:@"http"] || [u.scheme isEqualToString:@"https"]) {
-    NSButton* dev = [NSButton checkboxWithTitle:@"Developer Mode" target:self action:@selector(siteDeveloperModeToggled:)];
-    dev.state = DeveloperModeOnForHost(u.host) ? NSControlStateValueOn : NSControlStateValueOff;
+    NSSwitch* dev = [NSSwitch new];
+    dev.controlSize = NSControlSizeSmall;
+    BOOL on = DeveloperModeOnForHost(u.host);
+    dev.state = on ? NSControlStateValueOn : NSControlStateValueOff;
+    dev.target = self;
+    dev.action = @selector(siteDeveloperModeToggled:);
     dev.toolTip = @"Full address with port in the sidebar, never archived, Developer Tools in the address pill";
-    [views addObject:dev];
+    [views addObject:row(@"hammer.fill", @"Developer Mode", on ? @"On" : @"Off", dev, nil)];
   }
-  NSButton* clear = [NSButton buttonWithTitle:@"Clear Cookies and Refresh" target:self action:@selector(siteSettingsClearCookies:)];
-  NSButton* reset = [NSButton buttonWithTitle:@"Reset Permissions" target:self action:@selector(siteSettingsReset:)];
-  [views addObject:[NSStackView stackViewWithViews:@[ clear, reset ]]];
+  NSBox* line = [[NSBox alloc] initWithFrame:NSMakeRect(0, 0, W - 32, 1)];
+  line.boxType = NSBoxSeparator;
+  [line.widthAnchor constraintEqualToConstant:W - 32].active = YES;
+  [views addObject:line];
+  NSMutableArray* footer = [NSMutableArray array];
+  for (NSArray* f in @[ @[ @"Clear Cookies", @"siteSettingsClearCookies:" ], @[ @"Reset Permissions", @"siteSettingsReset:" ],
+                        @[ @"Manage Ad Blockers...", @"showManageAdBlockers:" ] ]) {
+    if ([f[1] isEqual:@"showManageAdBlockers:"] && !SettingBool(kSettingBlockAds)) continue;
+    NSButton* b = [NSButton buttonWithTitle:f[0] target:self action:NSSelectorFromString(f[1])];
+    b.bordered = NO;
+    b.font = [NSFont systemFontOfSize:12];
+    b.contentTintColor = NSColor.secondaryLabelColor;
+    b.identifier = @"siteFooter";
+    [footer addObject:b];
+  }
+  NSStackView* foot = [NSStackView stackViewWithViews:footer];
+  foot.spacing = 14;
+  [views addObject:foot];
   NSStackView* stack = [NSStackView stackViewWithViews:views];
   stack.orientation = NSUserInterfaceLayoutOrientationVertical;
   stack.alignment = NSLayoutAttributeLeading;
-  stack.spacing = 8;
-  stack.edgeInsets = NSEdgeInsetsMake(14, 16, 14, 16);
+  stack.spacing = 10;
+  stack.edgeInsets = NSEdgeInsetsMake(16, 16, 12, 16);
+  [stack setCustomSpacing:14 afterView:actionRow];
   NSViewController* vc = [NSViewController new];
   vc.view = stack;
-  stack.frame = NSMakeRect(0, 0, stack.fittingSize.width, stack.fittingSize.height);
+  stack.frame = NSMakeRect(0, 0, W, stack.fittingSize.height);
   _sitePopover = [NSPopover new];
+  _sitePopover.appearance = self.window.effectiveAppearance;  // the Space's light / dark, not the app's
   _sitePopover.behavior = NSPopoverBehaviorTransient;
   _sitePopover.contentViewController = vc;
   // Anchor: the address field when the toolbar is shown, else the top-left of the page.
@@ -3942,6 +4053,33 @@ static NSString* AdBlockSiteKey(NSString* host) {
 - (void)sitePermissionChosen:(NSPopUpButton*)pop {
   NSInteger i = pop.indexOfSelectedItem;
   [self setSitePermission:pop.identifier value:i == 0 ? nil : @(i == 1) forOrigin:_siteSettingsOrigin];
+  for (NSView* v in pop.superview.subviews)  // the row's subtitle follows the choice
+    if ([v isKindOfClass:NSStackView.class])
+      for (NSView* x in v.subviews)
+        if ([x.identifier isEqual:@"siteSubtitle"]) ((NSTextField*)x).stringValue = i == 0 ? @"Ask" : (i == 1 ? @"Allowed" : @"Blocked");
+}
+- (IBAction)siteShare:(NSButton*)sender {
+  NSString* url = _shown ? [self itemCurrentURL:_shown] : nil;
+  NSURL* u = url.length ? [NSURL URLWithString:url] : nil;
+  if (!u) return;
+  NSSharingServicePicker* picker = [[NSSharingServicePicker alloc] initWithItems:@[ u ]];
+  [picker showRelativeToRect:sender.bounds ofView:sender preferredEdge:NSRectEdgeMinY];
+}
+- (NSString*)siteControlsStyle {  // tests (V49)
+  NSView* root = _sitePopover.contentViewController.view;
+  __block int actions = 0, rows = 0, sections = 0, footer = 0;
+  __block void (^walk)(NSView*);
+  void (^w)(NSView*) = ^(NSView* v) {
+    if ([v.identifier isEqual:@"siteAction"]) ++actions;
+    if ([v.identifier isEqual:@"siteRow"]) ++rows;
+    if ([v.identifier isEqual:@"siteSection"]) ++sections;
+    if ([v.identifier isEqual:@"siteFooter"]) ++footer;
+    for (NSView* s in v.subviews) walk(s);
+  };
+  walk = w;
+  if (root) walk(root);
+  walk = nil;
+  return [NSString stringWithFormat:@"actions=%d rows=%d sections=%d footer=%d", actions, rows, sections, footer];
 }
 
 - (void)siteSettingsClearCookies:(id)sender {
@@ -4243,6 +4381,7 @@ static NSString* RelativeAgo(NSDate* d) {
   vc.view = stack;
   stack.frame = NSMakeRect(0, 0, W, stack.fittingSize.height);
   _hoverCard = [NSPopover new];
+  _hoverCard.appearance = self.window.effectiveAppearance;
   _hoverCard.contentViewController = vc;
   _hoverCard.behavior = NSPopoverBehaviorApplicationDefined;
   _hoverCard.animates = NO;
@@ -8853,6 +8992,7 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
   if (row >= 0) [_outline editColumn:0 row:row withEvent:nil select:YES];
 }
 
+static void ApplyArcMenuIcons(NSMenu* menu);
 - (NSMenu*)sidebarMenuForItems:(NSArray<ArcItem*>*)items {
   NSMenu* m = [[NSMenu alloc] initWithTitle:@"Sidebar"];
   NSUInteger n = [self tabsIn:items].count;
@@ -8953,6 +9093,13 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
   BOOL isToday = section == _space.unpinned, isPinned = section == _space.pinned;
   BOOL isTab = item.url.length > 0;
   if (isTab || item.isSplit) [m addItem:[self menuItem:@"Open" action:@selector(menuOpen:) item:item]];
+  if (item.isSplit) {  // Arc's split view menu: flip the layout, separate the tabs
+    [m addItem:[self menuItem:item.splitHorizontal ? @"Show Side by Side" : @"Show Top and Bottom"
+                       action:@selector(menuFlipSplit:) item:item]];
+    [m addItem:[self menuItem:@"Separate All Tabs" action:@selector(menuSeparateAll:) item:item]];
+  }
+  if ([self parentOfItem:item].isSplit)
+    [m addItem:[self menuItem:@"Separate from Split View" action:@selector(menuSeparateOne:) item:item]];
   if (isTab) {
     [m addItem:[self menuItem:@"Open in Split View" action:@selector(menuOpenInSplit:) item:item]];
     [m addItem:[self menuItem:@"Open in Little Window" action:@selector(menuOpenLittle:) item:item]];
@@ -8988,9 +9135,12 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
   if (isToday) [m addItem:[self menuItem:@"Pin" action:@selector(menuTogglePin:) item:item]];
   if (isPinned && [_space.pinned.children containsObject:item])
     [m addItem:[self menuItem:@"Unpin" action:@selector(menuTogglePin:) item:item]];
-  if (!isToday && item.pinnedURL.length) {
-    [m addItem:[self menuItem:@"Reset to Pinned URL" action:@selector(menuResetPinned:) item:item]];
-    [m addItem:[self menuItem:@"Replace Pinned URL with Current" action:@selector(menuReplacePinned:) item:item]];
+  if (!isToday && item.pinnedURL.length) {  // Arc groups these under "Edit Pinned Page"
+    NSMenuItem* edit = [[NSMenuItem alloc] initWithTitle:@"Edit Pinned Page" action:nil keyEquivalent:@""];
+    edit.submenu = [[NSMenu alloc] initWithTitle:@"Edit Pinned Page"];
+    [edit.submenu addItem:[self menuItem:@"Reset to Pinned URL" action:@selector(menuResetPinned:) item:item]];
+    [edit.submenu addItem:[self menuItem:@"Replace Pinned URL with Current" action:@selector(menuReplacePinned:) item:item]];
+    [m addItem:edit];
   }
   BOOL canFavorite = isTab && !item.isSplit && (isToday || isPinned) && _space.favorites && ![self parentOfItem:item].isSplit;
   if ((isToday || isPinned) && (_spaces.count > 1 || canFavorite)) {
@@ -9027,8 +9177,52 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
     [m addItem:[NSMenuItem separatorItem]];
     [m addItem:[self menuItem:isToday ? @"Archive Tab" : @"Close and Keep Pinned" action:@selector(menuClose:) item:item]];
   }
+  ApplyArcMenuIcons(m);
   return m;
 }
+
+// Arc's context menus carry an icon on nearly every row (split rows use their own split drawings); NotArc puts an
+// SF Symbol on each item it knows, in this menu and its submenus.
+static void ApplyArcMenuIcons(NSMenu* menu) {
+  static NSDictionary<NSString*, NSString*>* icons;
+  static dispatch_once_t once;
+  dispatch_once(&once, ^{
+    icons = @{
+      @"Open" : @"arrow.up.forward.square", @"Open in Split View" : @"rectangle.split.2x1",
+      @"Open in Little Window" : @"macwindow", @"Copy URL" : @"link", @"Copy URL as Markdown" : @"text.badge.plus",
+      @"Copy Clean Link" : @"link.badge.plus", @"Mute Tab" : @"speaker.slash", @"Unmute Tab" : @"speaker.wave.2",
+      @"Pause Media" : @"pause", @"Play Media" : @"play", @"Rename..." : @"pencil", @"Use Page Title" : @"textformat",
+      @"Tidy Title" : @"wand.and.stars", @"Remove from Favorites" : @"star.slash", @"Move to Pinned" : @"pin",
+      @"Show Unread Badge" : @"app.badge", @"Refresh Live Folder" : @"arrow.clockwise",
+      @"Remove from Live Folder" : @"minus.circle", @"New Nested Folder" : @"folder.badge.plus",
+      @"Duplicate" : @"plus.square.on.square", @"Pin" : @"pin", @"Unpin" : @"pin.slash", @"Edit Pinned Page" : @"pin.circle",
+      @"Reset to Pinned URL" : @"arrow.uturn.backward", @"Replace Pinned URL with Current" : @"arrow.triangle.2.circlepath",
+      @"Move to" : @"arrow.right.square", @"Move to New Window" : @"macwindow.badge.plus",
+      @"Move to Main Window" : @"macwindow.and.cursorarrow", @"Archive Other Tabs" : @"archivebox",
+      @"Archive Tabs Above" : @"arrow.up.to.line", @"Archive Tabs Below" : @"arrow.down.to.line",
+      @"Archive Tab" : @"archivebox", @"Close and Keep Pinned" : @"xmark", @"Favorites" : @"star",
+      @"Show Side by Side" : @"rectangle.split.2x1", @"Show Top and Bottom" : @"rectangle.split.1x2",
+      @"Separate All Tabs" : @"rectangle.on.rectangle.slash", @"Separate from Split View" : @"rectangle.portrait.and.arrow.right",
+    };
+  });
+  for (NSMenuItem* it in menu.itemArray) {
+    if (it.isSeparatorItem) continue;
+    NSString* sym = icons[it.title];
+    if (!sym && [it.title containsString:@" in "]) sym = [it.title hasPrefix:@"Pinned"] ? @"pin" : @"calendar.day.timeline.left";
+    if (sym && !it.image) it.image = [NSImage imageWithSystemSymbolName:sym accessibilityDescription:nil];
+    if (it.submenu) ApplyArcMenuIcons(it.submenu);
+  }
+}
+- (void)menuFlipSplit:(NSMenuItem*)sender {
+  ArcItem* split = sender.representedObject;
+  if (![split.children containsObject:_shown]) [self showItem:split.children.firstObject];
+  [self flipSplitLayout:nil];
+}
+- (void)menuSeparateAll:(NSMenuItem*)sender {
+  ArcItem* split = sender.representedObject;
+  for (ArcItem* c in [split.children.reverseObjectEnumerator allObjects]) [self detachFromSplit:c keep:YES];
+}
+- (void)menuSeparateOne:(NSMenuItem*)sender { [self detachFromSplit:sender.representedObject keep:YES]; }
 
 - (void)menuOpen:(NSMenuItem*)sender {
   ArcItem* item = sender.representedObject;

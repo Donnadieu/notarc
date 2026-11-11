@@ -4,6 +4,11 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Sidebar right-click menus show an icon on every row; pinned-URL actions are under "Edit Pinned Page", and split
+  rows can flip their layout or separate all their tabs.
+- The site button opens Arc's site control center: round actions (copy, share, capture, full-page capture, new
+  Boost), the site's Boost, and permission rows with icons and their current answer. It follows the Space's light or
+  dark look.
 - The sidebar's + menu has an icon on every row and Arc's items in Arc's order, including New Split View, New Boost
   and New Profile.
 - The Ctrl+Tab switcher is a dark panel of page pictures with soft shadows, each with its site's icon and title; the

@@ -483,6 +483,7 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (NSString*)hoverCardStyle;                    // tests (V34)
 - (NSString*)tabSwitcherStyle;                  // tests (V33)
 - (NSMenu*)newItemMenu;                         // the sidebar's + menu (V25)
+- (NSString*)siteControlsStyle;                 // tests (V49)
 - (void)hideUpdateBannerForTest;
 - (IBAction)restartToUpdate:(id)sender;
 - (NSString*)findBarStyle;                      // tests (V35)
