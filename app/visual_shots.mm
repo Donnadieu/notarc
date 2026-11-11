@@ -312,6 +312,59 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
       [c hoverSidebarItem:t];
     } else if ([cmd isEqual:@"pill-hover"]) {  // show the address pill's hover row (V69)
       [c setPillHoveredForTest:arg.length == 0 || arg.boolValue];
+    } else if ([cmd isEqual:@"fake-extension"] && args.count >= 2) {  // fake-extension <name> <#hex>: a lettered icon
+      NSString* dir = [c valueForKey:@"extensionsDirectory"];
+      NSString* name = args[0];
+      NSUInteger h = name.hash;
+      NSMutableString* ident = [NSMutableString string];
+      for (int i = 0; i < 32; ++i) [ident appendFormat:@"%c", 'a' + (int)((h >> ((i % 16) * 4)) & 15)];
+      NSString* root = [dir stringByAppendingPathComponent:ident];
+      [NSFileManager.defaultManager createDirectoryAtPath:root withIntermediateDirectories:YES attributes:nil error:nil];
+      NSString* manifest = [NSString stringWithFormat:@"{\"manifest_version\":3,\"name\":\"%@\",\"version\":\"1.0\","
+                                                      @"\"icons\":{\"32\":\"icon.png\"},\"action\":{\"default_popup\":\"p.html\"}}", name];
+      [manifest writeToFile:[root stringByAppendingPathComponent:@"manifest.json"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+      unsigned rgb = 0;
+      [[NSScanner scannerWithString:[args[1] stringByReplacingOccurrencesOfString:@"#" withString:@""]] scanHexInt:&rgb];
+      NSImage* img = [NSImage imageWithSize:NSMakeSize(32, 32) flipped:NO drawingHandler:^BOOL(NSRect r) {
+        [[NSColor colorWithSRGBRed:((rgb >> 16) & 255) / 255.0 green:((rgb >> 8) & 255) / 255.0 blue:(rgb & 255) / 255.0 alpha:1] setFill];
+        [[NSBezierPath bezierPathWithRoundedRect:NSInsetRect(r, 2, 2) xRadius:7 yRadius:7] fill];
+        NSString* letter = [name substringToIndex:1];
+        NSDictionary* at = @{NSFontAttributeName : [NSFont systemFontOfSize:18 weight:NSFontWeightBold], NSForegroundColorAttributeName : NSColor.whiteColor};
+        NSSize ls = [letter sizeWithAttributes:at];
+        [letter drawAtPoint:NSMakePoint((32 - ls.width) / 2, (32 - ls.height) / 2) withAttributes:at];
+        return YES;
+      }];
+      NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithData:img.TIFFRepresentation];
+      [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:[root stringByAppendingPathComponent:@"icon.png"] atomically:YES];
+      [c rebuildPillExtensions];
+    } else if ([cmd isEqual:@"shot-popover"]) {  // shot-popover <name>: the site control center's content on its own
+      // An offscreen window's popover gets placed on a real screen (where it's kept invisible), so draw its content
+      // view instead, over the popover's own dark or light material colour.
+      NSPopover* p = [c valueForKey:@"_sitePopover"];
+      NSView* v = p.contentViewController.view;
+      if (v) {
+        // Popover text is drawn vibrant, which a plain cache of the popover doesn't keep: move the content into a
+        // borderless window that's never ordered in, with the popover's appearance and a solid popover colour.
+        NSAppearance* ap = p.appearance ?: c.window.effectiveAppearance;
+        BOOL dark = [ap bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] == NSAppearanceNameDarkAqua;
+        [p close];
+        NSRect b = v.bounds;
+        NSWindow* tmp = [[NSWindow alloc] initWithContentRect:b styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
+        tmp.appearance = ap;
+        tmp.backgroundColor = dark ? [NSColor colorWithSRGBRed:0.17 green:0.17 blue:0.19 alpha:1] : [NSColor colorWithWhite:0.97 alpha:1];
+        [v removeFromSuperview];
+        tmp.contentView = v;
+        [v layoutSubtreeIfNeeded];
+        [v displayIfNeeded];
+        NSView* frameView = tmp.contentView.superview ?: v;
+        NSBitmapImageRep* rep = [frameView bitmapImageRepForCachingDisplayInRect:frameView.bounds];
+        [frameView cacheDisplayInRect:frameView.bounds toBitmapImageRep:rep];
+        NSString* path = [self.outDir stringByAppendingPathComponent:[arg stringByAppendingString:@".png"]];
+        BOOL ok = [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES];
+        std::printf("VISUAL shot-popover %s %s %.0fx%.0f\n", arg.UTF8String, ok ? "ok" : "failed", b.size.width, b.size.height);
+      } else {
+        std::printf("VISUAL shot-popover none\n");
+      }
     } else if ([cmd isEqual:@"js"]) {  // run a script in the shown tab
       if (c.shownItem) [c runJS:arg inItem:c.shownItem];
     } else if ([cmd isEqual:@"poll-media"]) {

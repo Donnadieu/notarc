@@ -4339,9 +4339,10 @@ static NSArray<NSArray*>* SiteSettingRows() {
   NSView* fspacer = [NSView new];
   [fspacer setContentHuggingPriority:1 forOrientation:NSLayoutConstraintOrientationHorizontal];
   [footer addObject:fspacer];
-  NSButton* more = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"ellipsis" accessibilityDescription:@"More"]
+  NSButton* more = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"ellipsis.circle" accessibilityDescription:@"More"]
                                       target:self action:@selector(siteSettingsFooterMenu:)];
   more.bordered = NO;
+  more.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:14 weight:NSFontWeightRegular];
   more.toolTip = @"More";
   more.identifier = @"siteFooterMenu";
   more.contentTintColor = NSColor.secondaryLabelColor;

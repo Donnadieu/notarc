@@ -464,6 +464,7 @@ NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed 
 - (BOOL)extensionIsPinned:(NSString*)extensionID;
 - (void)setExtension:(NSString*)extensionID pinned:(BOOL)pinned;
 - (ExtensionPopup*)clickPillExtensionForTest:(NSString*)extensionID;
+- (void)rebuildPillExtensions;            // after extensions or pins change (and on a profile change)
 // Boosts
 - (IBAction)editBoost:(id)sender;
 - (IBAction)zapElements:(id)sender;
