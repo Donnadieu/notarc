@@ -3226,6 +3226,9 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           NSString* before = w.shownItem.url;
           [w showCommandBarForNewTab:NO];
           NSString* geo = w.commandBarGeometry;
+          NSArray* listed = [[w valueForKey:@"_suggestionList"] valueForKey:@"items"];
+          NSDictionary* row0 = listed.firstObject;
+          BOOL pageFirst = [row0[@"kind"] isEqual:@"go"] && [row0[@"url"] isEqual:before];  // Arc: the page, then recents
           NSRange rr = [geo rangeOfString:@" rows="];
           int rows = rr.location == NSNotFound ? 99 : [[geo substringFromIndex:NSMaxRange(rr)] intValue];
           BOOL compact = [geo hasPrefix:@"compact=1 onPill=1 width=348 "] && rows >= 1 && rows <= 5 &&
@@ -3252,8 +3255,8 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           NSString* big = w.commandBarGeometry;
           [w hideCommandBar];
           BOOL bigForNewTab = [big hasPrefix:@"compact=0 "] && [big containsString:@" scrim=1"];
-          std::printf("SELFTEST-ADDRBAR compact=%d insideKeeps=%d outsideCloses=%d escCloses=%d focusCloses=%d bigForNewTab=%d\n",
-                      compact, insideKeeps, outsideCloses, escCloses, focusCloses, bigForNewTab);
+          std::printf("SELFTEST-ADDRBAR compact=%d pageFirst=%d insideKeeps=%d outsideCloses=%d escCloses=%d focusCloses=%d bigForNewTab=%d\n",
+                      compact, pageFirst, insideKeeps, outsideCloses, escCloses, focusCloses, bigForNewTab);
           if (!compact || !bigForNewTab) std::printf("SELFTEST-ADDRBAR-DEBUG compact: %s | big: %s\n", geo.UTF8String, big.UTF8String);
           // Omar, Nov 11 (V71): Arc's command bar card is see-through (the Space's colour shows through) with 10 pt corners.
           BOOL radius = [big containsString:@" radius=10 "], seeThrough = [big containsString:@" translucent=1"];

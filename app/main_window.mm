@@ -10479,6 +10479,15 @@ static void ApplyArcMenuIcons(NSMenu* menu) {
 - (void)refreshSuggestions {
   [self fetchSearchSuggestions:_commandField.stringValue];
   NSArray* items = [self commandSuggestionsFor:_commandField.stringValue];
+  // Arc's dropdown under the pill, opened on the current address: the current page first, then what the empty bar
+  // offers (recent tabs, actions, top sites), not matches for the address itself (Omar's Arc screenshot, Nov 11).
+  if (_commandCompact && _shown.url.length && [_commandField.stringValue isEqualToString:_shown.url]) {
+    NSMutableArray* list = [NSMutableArray arrayWithObject:@{ @"kind" : @"go", @"title" : _shown.displayTitle ?: _shown.url,
+                                                               @"subtitle" : @"", @"key" : @"go", @"text" : _shown.url,
+                                                               @"url" : _shown.url }];
+    [list addObjectsFromArray:[self commandSuggestionsFor:@""]];
+    items = list;
+  }
   // Arc's dropdown under the pill lists at most five rows (Omar's Arc 1.169 screenshot).
   if (_commandCompact && items.count > kCompactSuggestions) items = [items subarrayWithRange:NSMakeRange(0, kCompactSuggestions)];
   _suggestionList.items = items;
