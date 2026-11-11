@@ -484,6 +484,13 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (NSString*)tabSwitcherStyle;                  // tests (V33)
 - (NSMenu*)newItemMenu;                         // the sidebar's + menu (V25)
 - (NSString*)siteControlsStyle;                 // tests (V49)
+- (IBAction)showLibrary:(id)sender;
+- (NSString*)libraryHomeForTest;                // tests (V41)
+- (void)openLibraryRowForTest:(NSUInteger)i;
+- (NSString*)librarySectionForTest;
+- (id)libraryPanelForTest;
+- (NSString*)downloadsTrayState;               // tests (V42)
+- (void)closeDownloadsTrayForTest;
 - (void)hideUpdateBannerForTest;
 - (IBAction)restartToUpdate:(id)sender;
 - (NSString*)findBarStyle;                      // tests (V35)

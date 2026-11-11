@@ -9,6 +9,10 @@ extern NSString* const kSettingDownloadFolder;  // path; default ~/Downloads
 
 typedef NS_ENUM(NSInteger, DownloadState) { DownloadInProgress, DownloadComplete, DownloadCanceled, DownloadFailed };
 
+// Posted on the main thread: a download began (object = the DownloadEntry), and any change to the list.
+extern NSString* const DownloadStartedNotification;
+extern NSString* const DownloadsChangedNotification;
+
 @interface DownloadEntry : NSObject
 @property(nonatomic) uint32_t cefId;
 @property(nonatomic, copy) NSString* url;

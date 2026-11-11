@@ -30,6 +30,9 @@ static NSString* Bytes(int64_t n) {
 - (void)reload;
 @end
 
+NSString* const DownloadStartedNotification = @"NotArcDownloadStarted";
+NSString* const DownloadsChangedNotification = @"NotArcDownloadsChanged";
+
 @implementation DownloadManager {
   NSMutableArray<DownloadEntry*>* _entries;
   DownloadsWindowController* _window;
@@ -79,10 +82,12 @@ static NSString* Bytes(int64_t n) {
 - (void)changed {
   [_window reload];
   if (self.onChange) self.onChange();
+  [NSNotificationCenter.defaultCenter postNotificationName:DownloadsChangedNotification object:self];
 }
 
 - (void)begin:(uint32_t)cefId url:(NSString*)url path:(NSString*)path {
   DownloadEntry* e = [self entry:cefId];
+  BOOL fresh = !e;
   if (!e) {
     e = [DownloadEntry new];
     e.cefId = cefId;
@@ -93,6 +98,7 @@ static NSString* Bytes(int64_t n) {
   e.path = path;
   e.state = DownloadInProgress;
   [self changed];
+  if (fresh) [NSNotificationCenter.defaultCenter postNotificationName:DownloadStartedNotification object:e];
 }
 
 - (void)update:(uint32_t)cefId received:(int64_t)received total:(int64_t)total speed:(int64_t)speed
