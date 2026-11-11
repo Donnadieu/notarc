@@ -477,3 +477,6 @@ trackpad; everything else is checked by the hidden self-test.
 115. **Peek stays a separate child window, drawn as a card (V39).** It keeps its own browser so Open as Tab still
     moves the page without reloading; the title bar is hidden and the window is clear around a rounded card, so it
     looks like Arc's in-window card.
+116. **Background update checks download first, then offer a restart in the sidebar (V27),** like Arc. They stay
+    under the existing "Check for updates" setting and still honour Skip This Version; the menu's Check for Updates
+    keeps its dialog. Self-tests only post the "ready" notice and count the Restart click.

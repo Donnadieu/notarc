@@ -17,6 +17,10 @@ NSString* UpdaterCurrentVersion(void);
 @property(nonatomic, copy) NSString* notes;
 @end
 
+// Posted on the main thread once a background check has downloaded and staged a newer version; userInfo has
+// @"version" and @"staged" (the app to swap in). Windows show their "Restart to Update" banner.
+extern NSString* const UpdaterUpdateReadyNotification;
+
 @interface Updater : NSObject
 + (instancetype)shared;
 @property(nonatomic, copy) NSString* feedURL;  // GitHub API releases/latest
@@ -38,4 +42,7 @@ NSString* UpdaterCurrentVersion(void);
 // Menu / timer entry points. interactive = say "you're up to date" and show errors.
 - (void)checkInteractive:(BOOL)interactive;
 - (void)scheduleDailyChecks;
+// The version staged by a background check (nil if none); installing it quits and relaunches NotArc.
+@property(nonatomic, readonly, copy) NSString* readyVersion;
+- (void)installReadyUpdate;
 @end

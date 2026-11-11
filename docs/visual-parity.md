@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-30 done of 66 items.
+34 done of 66 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -49,8 +49,8 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
 - [x] **V9 Loading.** A loading tab shows a small spinner in place of its icon (in its row, or in its pane of a split
   row), and a soft glow in the Space's colour sweeps along the top of the page card while the shown page loads. Ref:
   app (glow progress indicator), video.
-- [ ] **V10 Sad tab.** A crashed page shows a centred illustration, a short line and a Reload button on the page
-  card. Ref: app (sad tab), video.
+- [x] **V10 Sad tab.** A crashed page turns plain (light or dark) with one centred drawing (NotArc's own torn page,
+  not Arc's picture), a single line and "Reload" as a link in it. Ref: app (sad tab), video.
 
 ## Sidebar
 
@@ -87,11 +87,14 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   (current white ~50%, others ~17%), "+" at right; icons white ~60%, centred 20.5 pt above the window bottom. Ref: shot.
 - [ ] **V25 Plus menu.** "+" opens Arc's own menu style (dark rounded panel, icon per row): New Tab, Split View,
   Folder, Easel, Note, Boost, Space, Profile. Ref: app (plus button icons, menu colours).
-- [ ] **V26 Unread badge and sound icon.** Unread count/dot on a row or tile; a speaker icon on a playing tab that
-  mutes on click. Ref: app, video.
-- [ ] **V27 Update banner.** When an update is ready, a small banner at the bottom of the sidebar offers to restart.
-  Ref: app (sidebar banner), video.
-- [ ] **V28 Next meeting bar.** A compact card at the sidebar bottom before a meeting, with Join. Ref: app, video.
+- [x] **V26 Unread badge and sound icon.** Unread count/dot on a Favorite's tile; a tab with sound keeps its site
+  icon and gets a speaker button at the row's right (left of the cross on hover) that mutes and unmutes it. Ref:
+  app (mute button in the tab cell), video.
+- [x] **V27 Update banner.** A background check downloads the update quietly, then a small card at the bottom of
+  the sidebar says the version is ready with a Restart capsule (white on light, black on dark, Arc's updater-button
+  colours). Ref: app (updater button colours).
+- [x] **V28 Next meeting bar.** The same compact card at the sidebar bottom before a meeting: calendar icon, title
+  and time, a Join capsule. Ref: app, video.
 
 ## Command bar and navigation
 

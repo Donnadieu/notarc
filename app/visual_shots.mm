@@ -196,6 +196,25 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
       NSTextField* f = [c valueForKey:@"_findField"];
       f.stringValue = arg;
       [c findText:arg forward:YES];
+    } else if ([cmd isEqual:@"crash"]) {  // crash <tab>: show the crashed-page view on it (no real crash)
+      ArcItem* t = FindTab(c.currentSpace, arg);
+      if (t) {
+        SEL s = NSSelectorFromString(@"showCrashedViewFor:status:");
+        ((void (*)(id, SEL, id, int))[c methodForSelector:s])(c, s, t, 3);
+      }
+    } else if ([cmd isEqual:@"audible"] || [cmd isEqual:@"muted"]) {  // audible|muted <tab>: the row of a tab with sound
+      ArcItem* t = FindTab(c.currentSpace, arg);
+      if (t) {
+        t.mediaPlaying = YES;
+        t.audioMuted = [cmd isEqual:@"muted"];
+        [c reloadSidebarItemForTest:t];
+      }
+    } else if ([cmd isEqual:@"update-ready"]) {
+      [NSNotificationCenter.defaultCenter postNotificationName:@"NotArcUpdateReady" object:nil
+                                                      userInfo:@{@"version" : arg.length ? arg : @"0.27.0", @"staged" : @"/nonexistent"}];
+    } else if ([cmd isEqual:@"meeting"]) {  // a fake "Standup in 5 min" card (memory-only settings)
+      SEL s = NSSelectorFromString(@"showMeetingForVisualShots");
+      if ([c respondsToSelector:s]) ((void (*)(id, SEL))[c methodForSelector:s])(c, s);
     } else if ([cmd isEqual:@"hovercard"]) {
       ArcItem* t = FindTab(c.currentSpace, arg);
       if (t) [c showHoverCardForItem:t];

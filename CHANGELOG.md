@@ -4,6 +4,11 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Updates found by the daily check download quietly; a card at the bottom of the sidebar then offers Restart (as in
+  Arc) instead of a dialog. Check for Updates in the menu still asks first.
+- The next-meeting bar uses the same Arc-style card with a Join capsule.
+- A crashed page shows one centred drawing and a single line with Reload as a link, in light and dark.
+- A tab playing sound keeps its site icon and shows a speaker button at the right of its row; click it to mute.
 - Folders use Arc's open and closed folder icons (open ones in the Space's colour) with bold names and no chevron.
 - Little Windows are framed in the Space's colour with the page as a rounded card, the site's name and an "Open in"
   capsule on top.

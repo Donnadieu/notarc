@@ -2235,9 +2235,15 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                           clock);
               if (!meta || !buttons || !size) std::printf("SELFTEST-MINIPLAYER-DEBUG %s\n", card.UTF8String);
             }
+            [w reloadSidebarItemForTest:m];
+            NSString* sp1 = [w speakerStateForItem:m];  // Visual parity V26: site icon kept, speaker button at the right
             [w toggleMuteItem:m];
             BOOL muted = m.audioMuted;
+            NSString* sp2 = [w speakerStateForItem:m];
             [w toggleMuteItem:m];
+            BOOL speakerOK = [sp1 isEqual:@"speaker=1 muted=0"] && [sp2 isEqual:@"speaker=1 muted=1"];
+            std::printf("SELFTEST-SPEAKER arcStyle=%d\n", speakerOK);
+            if (!speakerOK) std::printf("SELFTEST-SPEAKER-DEBUG %s | %s\n", sp1.UTF8String, sp2.UTF8String);
             [w togglePlayItem:m];
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
               BOOL paused = !m.mediaPlaying && m.mediaPaused && w.mediaBarItem == m;
@@ -2265,6 +2271,9 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         [w loadURL:@"chrome://crash" inItem:c];
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
           BOOL crashed = c.crashed;
+          NSString* sad = [w crashViewStyleForItem:c];  // Visual parity V10: drawing, one line, Reload as a link
+          std::printf("SELFTEST-SADTAB arcStyle=%d\n", [sad isEqual:@"glyph=1 line=1 link=1"]);
+          if (![sad isEqual:@"glyph=1 line=1 link=1"]) std::printf("SELFTEST-SADTAB-DEBUG %s\n", sad.UTF8String);
           [w reloadCrashedItem:c];
           dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 4 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
             [w showItem:c];
@@ -2796,6 +2805,16 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       SettingSetBool(kSettingCalendar, YES);
       [w setCalendarEventsForTest:events now:now];
       BOOL bar = [w.meetingBarText hasPrefix:@"Standup"] && [w.meetingBarText containsString:@"in 5 min"] && w.meetingJoinShown;
+      {  // Visual parity V27/V28: Arc's sidebar cards; the update banner appears on the ready notice, below the tabs
+        [NSNotificationCenter.defaultCenter postNotificationName:UpdaterUpdateReadyNotification object:nil
+                                                        userInfo:@{@"version" : @"9.9.9", @"staged" : @"/nonexistent"}];
+        [w restartToUpdate:nil];  // memory-only in tests: counted, never quits
+        NSString* ub = w.updateBannerState;
+        BOOL look = [ub isEqual:@"shown=1 text=NotArc 9.9.9 is ready button=Restart belowTabs=1 clicks=1"];
+        std::printf("SELFTEST-UPDATEBANNER arcStyle=%d\n", look);
+        if (!look) std::printf("SELFTEST-UPDATEBANNER-DEBUG %s\n", ub.UTF8String);
+        [w hideUpdateBannerForTest];
+      }
       SettingSetBool(kSettingCalendar, NO);
       [w setCalendarEventsForTest:events now:now];
       BOOL off = w.meetingBarText == nil;
