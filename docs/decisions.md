@@ -490,3 +490,6 @@ trackpad; everything else is checked by the hidden self-test.
     didn't settle (e.g. the split layout flip) use plain names.
 120. **Site controls keep Ask / Allow / Block per permission (V49).** Arc shows each setting's current answer as a
     subtitle; NotArc shows the same and keeps the three-way choice at the row's right.
+121. **Library Media lists image and video downloads plus NotArc's own captures (V41).** Arc kept a separate media
+    store synced to its servers; NotArc builds the list from files already on disk. The Downloads window
+    (Cmd+Shift+J) stays for filtering and cancelling.

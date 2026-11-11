@@ -24,10 +24,118 @@ NSString* ArchiveGroupTitle(NSDate* when, NSDate* now, NSCalendar* cal) {
   return [f stringFromDate:when];
 }
 
+NSString* const kLibraryHome = @"home";
+
 static BOOL PanelIsDark(NSView* v) {
   return [v.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
          NSAppearanceNameDarkAqua;
 }
+
+@implementation LibraryEntry
+- (instancetype)init {
+  if ((self = [super init])) _progress = -1;
+  return self;
+}
++ (instancetype)entry:(NSString*)title detail:(NSString*)detail icon:(NSImage*)icon open:(void (^)(void))open {
+  LibraryEntry* e = [LibraryEntry new];
+  e.title = title;
+  e.detail = detail;
+  e.icon = icon;
+  e.open = open;
+  return e;
+}
+@end
+
+@implementation DownloadCardView {
+  BOOL _solid, _hover;
+  NSImageView* _icon;
+  NSTextField* _name;
+  NSTextField* _status;
+  NSView* _barTrack;
+  NSView* _barFill;
+  double _progress;
+  void (^_open)(void);
+}
+- (instancetype)initWithFrame:(NSRect)frame solid:(BOOL)solid {
+  if (!(self = [super initWithFrame:frame])) return nil;
+  _solid = solid;
+  self.wantsLayer = YES;
+  self.layer.cornerRadius = 8;
+  _icon = [[NSImageView alloc] initWithFrame:NSZeroRect];
+  _icon.imageScaling = NSImageScaleProportionallyUpOrDown;
+  _name = [NSTextField labelWithString:@""];
+  _name.font = [NSFont systemFontOfSize:13 weight:NSFontWeightMedium];
+  _name.lineBreakMode = NSLineBreakByTruncatingMiddle;
+  _status = [NSTextField labelWithString:@""];
+  _status.font = [NSFont systemFontOfSize:11];
+  _barTrack = [NSView new];
+  _barTrack.wantsLayer = YES;
+  _barTrack.layer.cornerRadius = 1.5;
+  _barFill = [NSView new];
+  _barFill.wantsLayer = YES;
+  _barFill.layer.cornerRadius = 1.5;
+  [_barTrack addSubview:_barFill];
+  for (NSView* v in @[ _icon, _name, _status, _barTrack ]) [self addSubview:v];
+  self.identifier = @"downloadCard";
+  return self;
+}
+- (BOOL)hasProgressBar { return !_barTrack.hidden; }
+- (void)updateTrackingAreas {
+  [super updateTrackingAreas];
+  for (NSTrackingArea* t in self.trackingAreas) [self removeTrackingArea:t];
+  [self addTrackingArea:[[NSTrackingArea alloc] initWithRect:NSZeroRect
+                                                     options:NSTrackingMouseEnteredAndExited | NSTrackingActiveAlways | NSTrackingInVisibleRect
+                                                       owner:self
+                                                    userInfo:nil]];
+}
+- (void)mouseEntered:(NSEvent*)e { _hover = YES; [self applyFill]; }
+- (void)mouseExited:(NSEvent*)e { _hover = NO; [self applyFill]; }
+- (void)mouseUp:(NSEvent*)e { if (_open && e.clickCount == 1) _open(); }
+- (void)viewDidChangeEffectiveAppearance { [super viewDidChangeEffectiveAppearance]; [self applyFill]; }
+- (void)applyFill {
+  BOOL dark = PanelIsDark(self);
+  NSColor* c;
+  if (_solid)  // Arc 1.169: DownloadItemBackground white / 0.05, Hovered 0.96 / 0.12
+    c = dark ? [NSColor colorWithWhite:_hover ? 0.12 : 0.05 alpha:1] : [NSColor colorWithWhite:_hover ? 0.96 : 1 alpha:1];
+  else
+    c = dark ? [NSColor colorWithWhite:1 alpha:_hover ? 0.14 : 0.07] : [NSColor colorWithWhite:1 alpha:_hover ? 0.75 : 0.45];
+  self.layer.backgroundColor = c.CGColor;
+  _barTrack.layer.backgroundColor = [NSColor colorWithWhite:dark ? 1 : 0 alpha:0.12].CGColor;
+  _barFill.layer.backgroundColor = NSColor.controlAccentColor.CGColor;
+}
+- (void)showEntry:(LibraryEntry*)e textColor:(NSColor*)tc {
+  tc = tc ?: NSColor.labelColor;
+  _icon.image = e.icon;
+  _name.stringValue = e.title ?: @"";
+  _name.textColor = tc;
+  _status.stringValue = e.detail ?: @"";
+  _status.textColor = [tc colorWithAlphaComponent:0.5];
+  _progress = e.progress;
+  _barTrack.hidden = e.progress < 0;
+  _open = [e.open copy];
+  self.toolTip = e.searchText;
+  self.needsLayout = YES;
+  [self applyFill];
+}
+- (void)layout {
+  [super layout];
+  CGFloat W = self.bounds.size.width, H = self.bounds.size.height;
+  _icon.frame = NSMakeRect(10, (H - 28) / 2, 28, 28);
+  BOOL bar = !_barTrack.hidden;
+  _name.frame = NSMakeRect(46, H / 2 + (bar ? 3 : 1), W - 56, 17);
+  _status.frame = NSMakeRect(46, H / 2 - (bar ? 13 : 16), W - 56, 14);
+  _barTrack.frame = NSMakeRect(46, 8, W - 58, 3);
+  _barFill.frame = NSMakeRect(0, 0, round((W - 58) * MAX(0.02, MIN(1, _progress))), 3);
+}
+@end
+
+// A home-list row that opens a section.
+@interface LibrarySectionRow : NSObject
+@property(nonatomic, copy) NSDictionary* info;
+@end
+@implementation LibrarySectionRow
+@end
+
 
 // Same scroller rule as the sidebar: never a track.
 @interface LibraryScrollView : NSScrollView
@@ -99,6 +207,8 @@ static BOOL PanelIsDark(NSView* v) {
   NSUInteger _count;
   NSDateFormatter* _timeFormat;
   NSDateFormatter* _dayFormat;
+  NSString* _section;
+  BOOL _cameFromHome;
 }
 
 static const CGFloat kHeaderH = 34, kSearchH = 32, kRowH = 41, kHeadingH = 30;
@@ -113,6 +223,7 @@ static const CGFloat kHeaderH = 34, kSearchH = 32, kRowH = 41, kHeadingH = 30;
   _backButton.toolTip = @"Back to Tabs";
   _backButton.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:12 weight:NSFontWeightSemibold];
   [self addSubview:_backButton];
+  _section = @"archive";
   _title = [NSTextField labelWithString:@"Archive"];
   _title.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
   [self addSubview:_title];
@@ -179,12 +290,15 @@ static const CGFloat kHeaderH = 34, kSearchH = 32, kRowH = 41, kHeadingH = 30;
 - (void)layout {
   [super layout];
   CGFloat W = self.bounds.size.width, H = self.bounds.size.height;
+  BOOL home = [_section isEqual:kLibraryHome];
   _backButton.frame = NSMakeRect(2, H - kHeaderH + 5, 24, 24);
-  _title.frame = NSMakeRect(28, H - kHeaderH + 8, W - 36, 18);
+  _title.frame = home ? NSMakeRect(10, H - kHeaderH + 8, W - 20, 18) : NSMakeRect(28, H - kHeaderH + 8, W - 36, 18);
+  _backButton.hidden = home;
+  _searchBox.hidden = home;
   _searchBox.frame = NSMakeRect(0, H - kHeaderH - kSearchH - 2, W - 2, kSearchH);
   _searchIcon.frame = NSMakeRect(10, (kSearchH - 16) / 2, 16, 16);
   _search.frame = NSMakeRect(32, (kSearchH - 18) / 2, W - 2 - 40, 18);
-  CGFloat top = H - kHeaderH - kSearchH - 10;
+  CGFloat top = home ? H - kHeaderH - 4 : H - kHeaderH - kSearchH - 10;
   _scroll.frame = NSMakeRect(0, 0, W, MAX(0, top));
   _table.tableColumns.firstObject.width = W;
   _emptyTitle.frame = NSMakeRect(12, top - 70, W - 24, 18);
@@ -217,13 +331,34 @@ static const CGFloat kHeaderH = 34, kSearchH = 32, kRowH = 41, kHeadingH = 30;
   _searchIcon.contentTintColor = [_textColor colorWithAlphaComponent:0.45];
   _search.textColor = _textColor;
   _search.placeholderAttributedString = [[NSAttributedString alloc]
-      initWithString:@"Search Archive"
+      initWithString:[@"Search " stringByAppendingString:_title.stringValue]
           attributes:@{NSForegroundColorAttributeName : [_textColor colorWithAlphaComponent:0.45], NSFontAttributeName : _search.font}];
   _emptyTitle.textColor = [_textColor colorWithAlphaComponent:0.7];
   _emptyText.textColor = [_textColor colorWithAlphaComponent:0.45];
 }
 
+- (NSString*)section { return _section; }
+- (void)setSection:(NSString*)section { [self openSection:section]; }
+- (void)openSection:(NSString*)sectionID {
+  _cameFromHome = NO;
+  _section = sectionID.length ? [sectionID copy] : kLibraryHome;
+  NSString* title = @"Library";
+  if ([_section isEqual:@"archive"]) title = @"Archive";
+  for (NSDictionary* s in self.sectionsProvider ? self.sectionsProvider() : @[])
+    if ([s[@"id"] isEqual:_section]) title = s[@"title"];
+  _title.stringValue = title;
+  _backButton.toolTip = [_section isEqual:kLibraryHome] ? @"Back to Tabs" : @"Back to Library";
+  _search.stringValue = @"";
+  self.needsLayout = YES;
+  [self layout];
+  [self reload];
+}
+
 - (void)reload {
+  if (![_section isEqual:@"archive"]) {
+    [self reloadEntries];
+    return;
+  }
   NSArray<ArchivedTab*>* all = self.archiveProvider ? self.archiveProvider() : @[];
   NSArray<ArchivedTab*>* found = ArchiveSearch(all, _search.stringValue ?: @"");  // newest first
   NSMutableArray* rows = [NSMutableArray arrayWithCapacity:found.count + 16];
@@ -247,7 +382,62 @@ static const CGFloat kHeaderH = 34, kSearchH = 32, kRowH = 41, kHeadingH = 30;
                                  : @"Try another word from the page's title or address.";
 }
 
-- (void)focusSearch { [self.window makeFirstResponder:_search]; }
+- (void)reloadEntries {
+  NSMutableArray* rows = [NSMutableArray array];
+  NSUInteger count = 0;
+  if ([_section isEqual:kLibraryHome]) {
+    NSArray* spaces = self.entriesProvider ? self.entriesProvider(@"spaces") : @[];
+    if (spaces.count) {
+      [rows addObject:@"Spaces"];
+      [rows addObjectsFromArray:spaces];
+      count += spaces.count;
+    }
+    [rows addObject:@"Library"];
+    for (NSDictionary* s in self.sectionsProvider ? self.sectionsProvider() : @[]) {
+      LibrarySectionRow* r = [LibrarySectionRow new];
+      r.info = s;
+      [rows addObject:r];
+      ++count;
+    }
+  } else {
+    NSString* q = _search.stringValue.lowercaseString ?: @"";
+    for (LibraryEntry* e in self.entriesProvider ? self.entriesProvider(_section) : @[]) {
+      NSString* hay = [NSString stringWithFormat:@"%@ %@", e.title ?: @"", e.searchText ?: e.detail ?: @""].lowercaseString;
+      if (q.length && ![hay containsString:q]) continue;
+      [rows addObject:e];
+      ++count;
+    }
+  }
+  _rows = rows;
+  _count = count;
+  _table.hoveredRow = -1;
+  [_table reloadData];
+  BOOL empty = count == 0;
+  _emptyTitle.hidden = _emptyText.hidden = !empty;
+  _emptyTitle.stringValue = _search.stringValue.length ? @"No matches" : [NSString stringWithFormat:@"No %@ yet", _title.stringValue];
+  _emptyText.stringValue = _search.stringValue.length ? @"Try another word." : @"";
+}
+- (NSString*)homeDescription {
+  NSMutableArray* out = [NSMutableArray array];
+  for (id r in _rows) {
+    if ([r isKindOfClass:NSString.class]) [out addObject:[@"#" stringByAppendingString:r]];
+    else if ([r isKindOfClass:LibrarySectionRow.class]) [out addObject:((LibrarySectionRow*)r).info[@"title"]];
+    else if ([r isKindOfClass:LibraryEntry.class]) [out addObject:@"space"];
+  }
+  return [out componentsJoinedByString:@","];
+}
+- (void)openRowForTest:(NSUInteger)index {
+  NSUInteger n = 0;
+  for (NSUInteger i = 0; i < _rows.count; ++i) {
+    if ([_rows[i] isKindOfClass:NSString.class]) continue;
+    if (n++ == index) {
+      [self openRow:(NSInteger)i];
+      return;
+    }
+  }
+}
+
+- (void)focusSearch { [self.window makeFirstResponder:_searchBox.hidden ? _table : _search]; }
 - (void)setQuery:(NSString*)query {
   _search.stringValue = query ?: @"";
   [self reload];
@@ -275,10 +465,9 @@ static const CGFloat kHeaderH = 34, kSearchH = 32, kRowH = 41, kHeadingH = 30;
     return YES;
   }
   if (sel == @selector(insertNewline:)) {  // Return opens the first match
-    for (id r in _rows)
-      if ([r isKindOfClass:ArchivedTab.class]) {
-        if (self.reopen) self.reopen(r);
-        [self reload];
+    for (NSInteger i = 0; i < (NSInteger)_rows.count; ++i)
+      if (![_rows[(NSUInteger)i] isKindOfClass:NSString.class]) {
+        [self openRow:i];
         break;
       }
     return YES;
@@ -286,7 +475,7 @@ static const CGFloat kHeaderH = 34, kSearchH = 32, kRowH = 41, kHeadingH = 30;
   if (sel == @selector(moveDown:) && _table.numberOfRows) {
     [self.window makeFirstResponder:_table];
     for (NSInteger i = 0; i < (NSInteger)_rows.count; ++i)
-      if ([_rows[(NSUInteger)i] isKindOfClass:ArchivedTab.class]) {
+      if (![_rows[(NSUInteger)i] isKindOfClass:NSString.class]) {
         [_table selectRowIndexes:[NSIndexSet indexSetWithIndex:(NSUInteger)i] byExtendingSelection:NO];
         break;
       }
@@ -308,6 +497,12 @@ static const CGFloat kHeaderH = 34, kSearchH = 32, kRowH = 41, kHeadingH = 30;
 }
 
 - (void)backClicked:(id)sender {
+  // From a section opened off the home list: back to the list. From the home list (or Archive opened on its own,
+  // File > Show Archive): out of the Library.
+  if (![_section isEqual:kLibraryHome] && _cameFromHome) {
+    [self openSection:kLibraryHome];
+    return;
+  }
   if (self.back) self.back();
 }
 
@@ -315,6 +510,15 @@ static const CGFloat kHeaderH = 34, kSearchH = 32, kRowH = 41, kHeadingH = 30;
 - (void)openRow:(NSInteger)row {
   if (row < 0 || row >= (NSInteger)_rows.count) return;
   id r = _rows[(NSUInteger)row];
+  if ([r isKindOfClass:LibrarySectionRow.class]) {
+    [self openSection:((LibrarySectionRow*)r).info[@"id"]];
+    _cameFromHome = YES;
+    return;
+  }
+  if ([r isKindOfClass:LibraryEntry.class]) {
+    if (((LibraryEntry*)r).open) ((LibraryEntry*)r).open();
+    return;
+  }
   if (![r isKindOfClass:ArchivedTab.class]) return;
   if (self.reopen) self.reopen(r);
   [self reload];
@@ -322,13 +526,16 @@ static const CGFloat kHeaderH = 34, kSearchH = 32, kRowH = 41, kHeadingH = 30;
 
 - (NSInteger)numberOfRowsInTableView:(NSTableView*)t { return (NSInteger)_rows.count; }
 - (CGFloat)tableView:(NSTableView*)t heightOfRow:(NSInteger)row {
-  return [_rows[(NSUInteger)row] isKindOfClass:NSString.class] ? kHeadingH : kRowH;
+  id r = _rows[(NSUInteger)row];
+  if ([r isKindOfClass:LibraryEntry.class] && ((LibraryEntry*)r).card) return 58;
+  return [r isKindOfClass:NSString.class] ? kHeadingH : kRowH;
 }
-- (BOOL)tableView:(NSTableView*)t shouldSelectRow:(NSInteger)row { return [_rows[(NSUInteger)row] isKindOfClass:ArchivedTab.class]; }
+- (BOOL)tableView:(NSTableView*)t shouldSelectRow:(NSInteger)row { return ![_rows[(NSUInteger)row] isKindOfClass:NSString.class]; }
 - (NSTableRowView*)tableView:(NSTableView*)t rowViewForRow:(NSInteger)row {
   LibraryRowView* rv = [t makeViewWithIdentifier:@"lrow" owner:self] ?: [LibraryRowView new];
   rv.identifier = @"lrow";
-  rv.heading = [_rows[(NSUInteger)row] isKindOfClass:NSString.class];
+  id rr = _rows[(NSUInteger)row];
+  rv.heading = [rr isKindOfClass:NSString.class] || ([rr isKindOfClass:LibraryEntry.class] && ((LibraryEntry*)rr).card);
   rv.hovered = row == _table.hoveredRow;
   return rv;
 }
@@ -350,7 +557,14 @@ static const CGFloat kHeaderH = 34, kSearchH = 32, kRowH = 41, kHeadingH = 30;
     [box addSubview:h];
     return box;
   }
-  ArchivedTab* tab = r;
+  if ([r isKindOfClass:LibraryEntry.class] && ((LibraryEntry*)r).card) {  // the card draws its own fill
+    NSView* box = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, W, 58)];
+    DownloadCardView* card = [[DownloadCardView alloc] initWithFrame:NSMakeRect(0, 3, W, 52) solid:NO];
+    card.autoresizingMask = NSViewWidthSizable;
+    [card showEntry:r textColor:_textColor];
+    [box addSubview:card];
+    return box;
+  }
   NSTableCellView* cell = [t makeViewWithIdentifier:@"tab" owner:self];
   if (!cell) {
     cell = [[NSTableCellView alloc] initWithFrame:NSMakeRect(0, 0, W, kRowH)];
@@ -371,18 +585,42 @@ static const CGFloat kHeaderH = 34, kSearchH = 32, kRowH = 41, kHeadingH = 30;
     [cell addSubview:when];
   }
   NSTextField* when = [cell viewWithTag:5];
-  NSCalendar* cal = NSCalendar.currentCalendar;
-  BOOL recent = tab.archivedAt && [cal components:NSCalendarUnitDay fromDate:tab.archivedAt toDate:[NSDate date] options:0].day < 2;
-  when.stringValue = tab.archivedAt ? [(recent ? _timeFormat : _dayFormat) stringFromDate:tab.archivedAt] : @"";
+  NSString *title = @"", *detail = @"", *tip = nil;
+  NSImage* icon = nil;
+  BOOL tint = NO;
+  if ([r isKindOfClass:ArchivedTab.class]) {
+    ArchivedTab* tab = r;
+    NSCalendar* cal = NSCalendar.currentCalendar;
+    BOOL recent = tab.archivedAt && [cal components:NSCalendarUnitDay fromDate:tab.archivedAt toDate:[NSDate date] options:0].day < 2;
+    detail = tab.archivedAt ? [(recent ? _timeFormat : _dayFormat) stringFromDate:tab.archivedAt] : @"";
+    title = tab.title.length ? tab.title : (tab.url ?: @"");
+    icon = self.iconForURL ? self.iconForURL(tab.url) : nil;
+    tip = tab.url;
+  } else if ([r isKindOfClass:LibrarySectionRow.class]) {
+    NSDictionary* s = ((LibrarySectionRow*)r).info;
+    title = s[@"title"];
+    NSNumber* n = s[@"count"];
+    detail = n && n.integerValue > 0 ? n.stringValue : @"";
+    icon = [NSImage imageWithSystemSymbolName:s[@"symbol"] accessibilityDescription:nil];
+    tint = YES;
+  } else {
+    LibraryEntry* e = r;
+    title = e.title ?: @"";
+    detail = e.detail ?: @"";
+    icon = e.icon;
+    tint = e.tintIcon;
+    tip = e.searchText;
+  }
+  when.stringValue = detail;
   when.textColor = [_textColor colorWithAlphaComponent:0.35];
   CGFloat ww = ceil(when.attributedStringValue.size.width) + 2;
   when.frame = NSMakeRect(W - 10 - ww, 12.5, ww, 15);
-  cell.textField.stringValue = tab.title.length ? tab.title : (tab.url ?: @"");
+  cell.textField.stringValue = title;
   cell.textField.textColor = _textColor;
   cell.textField.frame = NSMakeRect(37, 11.5, MAX(20, W - 37 - ww - 18), 18);
-  cell.imageView.image = self.iconForURL ? self.iconForURL(tab.url) : nil;
-  cell.imageView.contentTintColor = [_textColor colorWithAlphaComponent:0.7];
-  cell.toolTip = tab.url;
+  cell.imageView.image = icon;
+  cell.imageView.contentTintColor = [_textColor colorWithAlphaComponent:tint ? 0.6 : 0.7];
+  cell.toolTip = tip;
   return cell;
 }
 @end

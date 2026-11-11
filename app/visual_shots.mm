@@ -1,5 +1,6 @@
 // Hidden design renders for the visual parity checklist. See visual_shots.h for the plan format.
 #import "app/visual_shots.h"
+#import "app/downloads.h"
 
 #include <dlfcn.h>
 #include <objc/runtime.h>
@@ -234,6 +235,21 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
           CGImageRelease(img);
         }
       }
+    } else if ([cmd isEqual:@"fake-download"]) {  // fake-download <name> <received> <total>: a download row, no network
+      NSArray* a2 = [arg componentsSeparatedByString:@" "];
+      static uint32_t fid = 900000;
+      ++fid;
+      NSString* path = [NSTemporaryDirectory() stringByAppendingPathComponent:a2.firstObject];
+      [DownloadManager.shared begin:fid url:[@"https://example.com/" stringByAppendingString:a2.firstObject] path:path];
+      if (a2.count >= 3) {
+        int64_t rec = [a2[1] longLongValue], tot = [a2[2] longLongValue];
+        [DownloadManager.shared update:fid received:rec total:tot speed:rec / 3 path:path
+                                 state:rec >= tot ? DownloadComplete : DownloadInProgress];
+      }
+    } else if ([cmd isEqual:@"library"]) {
+      [c showLibrary:nil];
+    } else if ([cmd isEqual:@"library-open"]) {
+      [c openLibraryRowForTest:(NSUInteger)arg.integerValue];
     } else if ([cmd isEqual:@"site-controls"]) {
       [c showSiteSettings:nil];
     } else if ([cmd isEqual:@"hovercard"]) {

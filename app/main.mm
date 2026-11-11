@@ -4111,6 +4111,15 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         for (DownloadEntry* e in dm.entries) done += e.state == DownloadComplete;
         NSString* body = [NSString stringWithContentsOfFile:[dir stringByAppendingPathComponent:@"NotArc-0.5.0-arm64.dmg.sha256"]
                                                    encoding:NSUTF8StringEncoding error:nil];
+        {  // Visual parity V42: each new download flew into the Library button and opened the tray of cards
+          NSString* tray = [self.window downloadsTrayState];
+          NSArray* parts = [tray componentsSeparatedByString:@" "];
+          BOOL flew = [[parts.lastObject substringFromIndex:8] integerValue] >= 2;
+          BOOL cards = [[parts[1] substringFromIndex:6] integerValue] >= 1;
+          [self.window closeDownloadsTrayForTest];
+          std::printf("SELFTEST-DOWNLOADLOOK flew=%d cards=%d\n", flew, cards);
+          if (!flew || !cards) std::printf("SELFTEST-DOWNLOADLOOK-DEBUG %s\n", tray.UTF8String);
+        }
         [dm showWindow];
         std::printf("SELFTEST-DOWNLOADS entries=%lu complete=%lu inProgress=%lu files=%s contentOK=%d filter=%lu filterNone=%lu\n",
                     (unsigned long)dm.entries.count, (unsigned long)done, (unsigned long)dm.inProgressCount,
@@ -4700,6 +4709,20 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         [w switchToSpace:home];
         std::printf("SELFTEST-ARCHIVEPANEL inSidebar=%d look=%d grouping=%d closed=%d closedBySpace=%d\n", inSidebar, look, grouping,
                     closed, closedBySpace);
+        {  // Visual parity V41: the Library button opens Arc's Library list; a section opens in place; Back returns
+          NSString* homeList = w.libraryHomeForTest;
+          BOOL list = [homeList hasPrefix:@"#Spaces,space"] &&
+                      [homeList hasSuffix:@"#Library,Archive,Downloads,Media,Easels,Notes,Boosts"];
+          NSUInteger spaces = w.spaces.count;
+          [w openLibraryRowForTest:spaces + 1];  // Downloads
+          BOOL opened = [w.librarySectionForTest isEqual:@"downloads"] && w.libraryInSidebar;
+          [w.libraryPanelForTest performSelector:@selector(backClicked:) withObject:nil];
+          BOOL back = [w.librarySectionForTest isEqual:@"home"] && w.libraryShown;
+          [w showLibrary:nil];  // the button again closes it
+          BOOL toggled = !w.libraryShown;
+          std::printf("SELFTEST-LIBRARYHOME list=%d section=%d back=%d toggles=%d\n", list, opened, back, toggled);
+          if (!list) std::printf("SELFTEST-LIBRARYHOME-DEBUG %s\n", homeList.UTF8String);
+        }
         if (!look) std::printf("SELFTEST-ARCHIVEPANEL-DEBUG %s\n", style.UTF8String);
       }
       [w saveSidebarNow];

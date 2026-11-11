@@ -1218,6 +1218,9 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSButton* _navBack;
   NSView* _peekScrim;
   NSBox* _updateBanner;
+  NSPopover* _downloadsTray;
+  NSUInteger _downloadsTrayToken;
+  NSInteger _downloadFlights;
   NSInteger _restartToUpdateClicks;
   BOOL _sidebarPeeking;      // the hidden sidebar shown floating over the page (pointer at the left edge)
   NSView* _edgeStrip;        // 6 pt strip at the window's left edge while the sidebar is hidden
@@ -1484,6 +1487,10 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _meetingBar = SidebarBannerCard(@"calendar", self, @selector(joinMeeting:), @"Join");
   _meetingTitle = [_meetingBar viewWithTag:1];
   _meetingJoin = [_meetingBar viewWithTag:2];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(downloadStarted:)
+                                             name:DownloadStartedNotification object:nil];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(downloadsChanged:)
+                                             name:DownloadsChangedNotification object:nil];
   _updateBanner = SidebarBannerCard(@"arrow.down.circle.fill", self, @selector(restartToUpdate:), @"Restart");
   _updateBanner.hidden = YES;
   _updateBanner.toolTip = @"Restart NotArc to finish updating; your tabs come back";
@@ -1645,10 +1652,10 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
 
   // Bottom bar, as in Arc: archive (Library) at the left, one icon per Space in the middle, "+" menu at the right.
   _spaceBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 5.5, kSidebarWidth - 17, 30)];  // Arc: icons centred 20.5 pt up
-  NSButton* lib = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"archivebox" accessibilityDescription:@"Archive"]
-                                     target:self action:@selector(showArchive:)];
+  NSButton* lib = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"square.stack" accessibilityDescription:@"Library"]
+                                     target:self action:@selector(showLibrary:)];
   lib.bordered = NO;
-  lib.toolTip = @"Archive";
+  lib.toolTip = @"Library";
   lib.contentTintColor = SidebarIconColor();
   lib.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:14 weight:NSFontWeightMedium];
   lib.frame = NSMakeRect(2, 2, 26, 26);
@@ -10925,12 +10932,27 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
 }
 
 // Arc: the Library button opens Archive inside the sidebar, in place of the Space's tabs; again closes it.
+// The Library button opens Arc's Library home list (Spaces, then Archive, Downloads, Media, Easels, Notes, Boosts);
+// File > Show Archive goes straight to Archive.
+- (IBAction)showLibrary:(id)sender {
+  if (_libraryShown) {
+    [self hideLibrary];
+    return;
+  }
+  [self libraryPanel];
+  [_library openSection:kLibraryHome];
+  _libraryShown = YES;
+  [self layoutSidebar];
+  [self applyLibraryColors];
+  _responderBeforeLibrary = self.window.firstResponder;
+}
 - (IBAction)showArchive:(id)sender {
   if (_libraryShown && sender == _libraryButton) {
     [self hideLibrary];
     return;
   }
   [self libraryPanel];
+  [_library openSection:@"archive"];
   [_library setQuery:@""];
   _libraryShown = YES;
   [self layoutSidebar];
@@ -10955,10 +10977,253 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
     probe.url = url;
     return [s iconImageForItem:probe];
   };
+  _library.sectionsProvider = ^NSArray<NSDictionary*>* {
+    MainWindowController* s = weakSelf;
+    if (!s) return @[];
+    return @[
+      @{@"id" : @"archive", @"title" : @"Archive", @"symbol" : @"archivebox", @"count" : @([s archivedTabs].count)},
+      @{@"id" : @"downloads", @"title" : @"Downloads", @"symbol" : @"arrow.down.circle", @"count" : @(DownloadManager.shared.entries.count)},
+      @{@"id" : @"media", @"title" : @"Media", @"symbol" : @"photo.on.rectangle", @"count" : @([s libraryEntries:@"media"].count)},
+      @{@"id" : @"easels", @"title" : @"Easels", @"symbol" : @"scribble.variable", @"count" : @([s libraryEntries:@"easels"].count)},
+      @{@"id" : @"notes", @"title" : @"Notes", @"symbol" : @"note.text", @"count" : @([s libraryEntries:@"notes"].count)},
+      @{@"id" : @"boosts", @"title" : @"Boosts", @"symbol" : @"paintbrush.pointed", @"count" : @([s boostList].count)},
+    ];
+  };
+  _library.entriesProvider = ^NSArray<LibraryEntry*>*(NSString* sid) { return [weakSelf libraryEntries:sid]; };
   _library.hidden = YES;
   [_sidebar addSubview:_library];
   return _library;
 }
+
+static NSImage* EmojiImage(NSString* emoji, CGFloat size) {
+  return [NSImage imageWithSize:NSMakeSize(size, size) flipped:NO drawingHandler:^BOOL(NSRect r) {
+    NSDictionary* a = @{NSFontAttributeName : [NSFont systemFontOfSize:size * 0.85]};
+    NSSize s = [emoji sizeWithAttributes:a];
+    [emoji drawAtPoint:NSMakePoint((size - s.width) / 2, (size - s.height) / 2) withAttributes:a];
+    return YES;
+  }];
+}
+static NSString* LibrarySize(int64_t bytes) {
+  return [NSByteCountFormatter stringFromByteCount:bytes countStyle:NSByteCountFormatterCountStyleFile];
+}
+static BOOL LibraryIsMediaFile(NSString* path) {
+  static NSSet* ext;
+  if (!ext) ext = [NSSet setWithArray:@[ @"png", @"jpg", @"jpeg", @"gif", @"webp", @"heic", @"svg", @"mp4", @"mov", @"webm", @"m4v" ]];
+  return [ext containsObject:path.pathExtension.lowercaseString];
+}
+
+// Rows for one Library section (see LibraryPanelView).
+- (NSArray<LibraryEntry*>*)libraryEntries:(NSString*)sid {
+  __weak MainWindowController* weakSelf = self;
+  NSMutableArray<LibraryEntry*>* out = [NSMutableArray array];
+  NSDateFormatter* day = [NSDateFormatter new];
+  [day setLocalizedDateFormatFromTemplate:@"MMMd"];
+  if ([sid isEqual:@"spaces"]) {
+    for (ArcSpace* sp in _spaces) {
+      NSImage* icon = sp.iconEmoji.length ? EmojiImage(sp.iconEmoji, 16)
+                                          : [NSImage imageWithSystemSymbolName:sp == _space ? @"circle.fill" : @"circle"
+                                                      accessibilityDescription:nil];
+      LibraryEntry* e = [LibraryEntry entry:sp.title ?: @"Space" detail:sp == _space ? @"Current" : @"" icon:icon open:^{
+        MainWindowController* s = weakSelf;
+        if (!s) return;
+        [s hideLibrary];
+        if (s->_space != sp) [s switchToSpace:sp];
+      }];
+      e.tintIcon = !sp.iconEmoji.length;
+      [out addObject:e];
+    }
+  } else if ([sid isEqual:@"downloads"] || [sid isEqual:@"media"]) {
+    BOOL media = [sid isEqual:@"media"];
+    NSMutableSet* seen = [NSMutableSet set];
+    for (DownloadEntry* d in DownloadManager.shared.entries) {
+      if (media && !LibraryIsMediaFile(d.path ?: d.fileName)) continue;
+      NSString* path = d.path;
+      UTType* ft = path.pathExtension.length ? [UTType typeWithFilenameExtension:path.pathExtension] : nil;
+      NSImage* icon = path.length && [NSFileManager.defaultManager fileExistsAtPath:path] ? [NSWorkspace.sharedWorkspace iconForFile:path]
+                      : ft ? [NSWorkspace.sharedWorkspace iconForContentType:ft] : nil;
+      LibraryEntry* e = [LibraryEntry entry:d.fileName detail:d.state == DownloadInProgress ? d.statusText
+                                                                                         : (d.total > 0 ? LibrarySize(d.total) : d.statusText)
+                                       icon:icon
+                                       open:^{
+                                         if (path.length) [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:path]];
+                                       }];
+      e.searchText = d.url;
+      e.card = !media;  // Arc: downloads are cards with a progress bar
+      e.progress = d.state == DownloadInProgress ? (d.total > 0 ? (double)d.received / d.total : 0) : -1;
+      if (path) [seen addObject:path];
+      [out addObject:e];
+    }
+    if (media) {  // NotArc's own captures in the capture folder
+      NSString* dir = self.captureDirectory;
+      NSArray* names = [NSFileManager.defaultManager contentsOfDirectoryAtPath:dir error:nil];
+      for (NSString* n in [names sortedArrayUsingSelector:@selector(compare:)].reverseObjectEnumerator) {
+        if (![n hasPrefix:@"NotArc Capture "] || ![n.pathExtension isEqual:@"png"]) continue;
+        NSString* path = [dir stringByAppendingPathComponent:n];
+        if ([seen containsObject:path]) continue;
+        NSDate* when = [NSFileManager.defaultManager attributesOfItemAtPath:path error:nil].fileModificationDate;
+        LibraryEntry* e = [LibraryEntry entry:@"Capture" detail:when ? [day stringFromDate:when] : @""
+                                         icon:[NSWorkspace.sharedWorkspace iconForFile:path]
+                                         open:^{ [NSWorkspace.sharedWorkspace openURL:[NSURL fileURLWithPath:path]]; }];
+        e.searchText = n;
+        [out addObject:e];
+      }
+    }
+  } else if ([sid isEqual:@"easels"] || [sid isEqual:@"notes"]) {
+    BOOL easels = [sid isEqual:@"easels"];
+    for (ArcSpace* sp in _spaces) {
+      NSMutableArray* stack = [NSMutableArray arrayWithArray:[self sectionsOfSpace:sp]];
+      while (stack.count) {
+        ArcItem* it = stack.lastObject;
+        [stack removeLastObject];
+        [stack addObjectsFromArray:it.children ?: @[]];
+        if (!(easels ? it.easelID.length : it.noteID.length)) continue;
+        LibraryEntry* e = [LibraryEntry entry:it.displayTitle ?: (easels ? @"Easel" : @"Note") detail:sp.title ?: @""
+                                         icon:[NSImage imageWithSystemSymbolName:easels ? @"scribble.variable" : @"note.text"
+                                                        accessibilityDescription:nil]
+                                         open:^{
+                                           MainWindowController* s = weakSelf;
+                                           if (!s) return;
+                                           [s hideLibrary];
+                                           if (s->_space != sp) [s switchToSpace:sp];
+                                           [s showItem:it];
+                                         }];
+        e.tintIcon = YES;
+        [out addObject:e];
+      }
+    }
+  } else if ([sid isEqual:@"boosts"]) {
+    for (Boost* b in [self boostList]) {
+      NSString* host = b.host ?: @"";
+      LibraryEntry* e = [LibraryEntry entry:host detail:b.enabled ? @"On" : @"Off"
+                                       icon:[NSImage imageWithSystemSymbolName:b.enabled ? @"paintbrush.pointed.fill" : @"paintbrush.pointed"
+                                                      accessibilityDescription:nil]
+                                       open:^{
+                                         MainWindowController* s = weakSelf;
+                                         [s hideLibrary];
+                                         if (host.length) [s openInNewTab:[@"https://" stringByAppendingString:host]];
+                                       }];
+      e.tintIcon = YES;
+      [out addObject:e];
+    }
+  }
+  return out;
+}
+// Arc: a new download's icon flies from the page into the Library button, and a small tray of recent downloads
+// opens beside the button for a few seconds.
+- (BOOL)isFrontWindowForDownloads {
+  return self.window.isMainWindow || (!NSApp.mainWindow && self == gMainWindow) || (self.selfTestProfiles && self == gMainWindow);
+}
+- (void)downloadStarted:(NSNotification*)n {
+  if (![self isFrontWindowForDownloads]) return;
+  DownloadEntry* d = n.object;
+  [self flyDownloadToLibrary:d];
+  [self showDownloadsTray];
+}
+- (void)downloadsChanged:(NSNotification*)n {
+  if (_libraryShown && ([_library.section isEqual:@"downloads"] || [_library.section isEqual:@"media"] ||
+                        [_library.section isEqual:kLibraryHome]))
+    [_library reload];
+  if (_downloadsTray.isShown) [self fillDownloadsTray];
+}
+- (void)flyDownloadToLibrary:(DownloadEntry*)d {
+  NSView* root = self.window.contentView;
+  if (!root || _libraryButton.hidden || !_libraryButton.window) return;
+  ++_downloadFlights;
+  UTType* type = d.path.pathExtension.length ? [UTType typeWithFilenameExtension:d.path.pathExtension] : nil;
+  NSImage* icon = type ? [NSWorkspace.sharedWorkspace iconForContentType:type]
+                       : [NSImage imageWithSystemSymbolName:@"arrow.down.circle.fill" accessibilityDescription:nil];
+  NSRect c = _content.frame;
+  NSPoint from = NSMakePoint(NSMidX(c), NSMidY(c));
+  NSRect lb = [_libraryButton convertRect:_libraryButton.bounds toView:root];
+  NSPoint to = NSMakePoint(NSMidX(lb), NSMidY(lb));
+  NSImageView* fly = [NSImageView imageViewWithImage:icon];
+  fly.frame = NSMakeRect(from.x - 24, from.y - 24, 48, 48);
+  fly.wantsLayer = YES;
+  fly.identifier = @"downloadFlight";
+  [root addSubview:fly positioned:NSWindowAbove relativeTo:nil];
+  // an arc up and over, shrinking into the button
+  CAKeyframeAnimation* path = [CAKeyframeAnimation animationWithKeyPath:@"position"];
+  CGMutablePathRef pth = CGPathCreateMutable();
+  CGPathMoveToPoint(pth, NULL, from.x, from.y);
+  CGPathAddQuadCurveToPoint(pth, NULL, (from.x + to.x) / 2, MAX(from.y, to.y) + 120, to.x, to.y);
+  path.path = pth;
+  CGPathRelease(pth);
+  CABasicAnimation* shrink = [CABasicAnimation animationWithKeyPath:@"transform.scale"];
+  shrink.fromValue = @1;
+  shrink.toValue = @0.3;
+  CAAnimationGroup* g = [CAAnimationGroup animation];
+  g.animations = @[ path, shrink ];
+  g.duration = 0.7;
+  g.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseIn];
+  g.removedOnCompletion = NO;
+  g.fillMode = kCAFillModeForwards;
+  fly.layer.anchorPoint = CGPointMake(0.5, 0.5);
+  fly.layer.position = to;
+  [fly.layer addAnimation:g forKey:@"fly"];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.75 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    [fly removeFromSuperview];
+  });
+}
+- (void)showDownloadsTray {
+  if (!_downloadsTray) {
+    _downloadsTray = [NSPopover new];
+    _downloadsTray.behavior = NSPopoverBehaviorTransient;
+    _downloadsTray.animates = !self.selfTestProfiles;
+    _downloadsTray.contentViewController = [NSViewController new];
+    _downloadsTray.contentViewController.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 280, 80)];
+  }
+  _downloadsTray.appearance = self.window.effectiveAppearance;
+  [self fillDownloadsTray];
+  if (!_downloadsTray.isShown)
+    [_downloadsTray showRelativeToRect:_libraryButton.bounds ofView:_libraryButton preferredEdge:NSRectEdgeMaxY];
+  NSUInteger token = ++_downloadsTrayToken;
+  __weak MainWindowController* weakSelf = self;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    MainWindowController* s = weakSelf;
+    if (s && s->_downloadsTrayToken == token) [s->_downloadsTray close];
+  });
+}
+- (void)fillDownloadsTray {
+  NSView* root = _downloadsTray.contentViewController.view;
+  for (NSView* v in [root.subviews copy]) [v removeFromSuperview];
+  NSArray<LibraryEntry*>* all = [self libraryEntries:@"downloads"];
+  NSArray<LibraryEntry*>* recent = [all subarrayWithRange:NSMakeRange(0, MIN((NSUInteger)3, all.count))];
+  const CGFloat W = 280, cardH = 52, gap = 6, pad = 8;
+  NSTextField* title = [NSTextField labelWithString:@"Downloads"];
+  title.font = [NSFont systemFontOfSize:12 weight:NSFontWeightSemibold];
+  title.textColor = NSColor.secondaryLabelColor;
+  CGFloat H = pad + 20 + recent.count * (cardH + gap) + pad - (recent.count ? gap : 0);
+  root.frame = NSMakeRect(0, 0, W, H);
+  title.frame = NSMakeRect(pad + 4, H - pad - 17, W - 2 * pad, 16);
+  [root addSubview:title];
+  CGFloat y = H - pad - 20 - cardH;
+  for (LibraryEntry* e in recent) {
+    DownloadCardView* card = [[DownloadCardView alloc] initWithFrame:NSMakeRect(pad, y, W - 2 * pad, cardH) solid:YES];
+    [card showEntry:e textColor:nil];
+    [root addSubview:card];
+    y -= cardH + gap;
+  }
+  _downloadsTray.contentSize = NSMakeSize(W, H);
+}
+- (NSString*)downloadsTrayState {  // tests (V42)
+  NSUInteger cards = 0, bars = 0;
+  for (NSView* v in _downloadsTray.contentViewController.view.subviews)
+    if ([v isKindOfClass:DownloadCardView.class]) {
+      ++cards;
+      if (((DownloadCardView*)v).hasProgressBar) ++bars;
+    }
+  return [NSString stringWithFormat:@"tray=%d cards=%lu bars=%lu flights=%ld", _downloadsTray.isShown, (unsigned long)cards,
+                                    (unsigned long)bars, (long)_downloadFlights];
+}
+- (void)closeDownloadsTrayForTest { [_downloadsTray close]; }
+- (NSString*)libraryHomeForTest {
+  [self showLibrary:nil];
+  NSString* d = _library.homeDescription;
+  return d;
+}
+- (void)openLibraryRowForTest:(NSUInteger)i { [_library openRowForTest:i]; }
+- (NSString*)librarySectionForTest { return _library.section; }
+- (LibraryPanelView*)libraryPanelForTest { return _library; }
 - (void)applyLibraryColors {
   BOOL dark = IsDark(_sidebar);
   _library.textColor = [self usingDefaultTheme] && dark ? ArcDefaultTabText() : NSColor.labelColor;
