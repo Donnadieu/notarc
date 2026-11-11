@@ -493,3 +493,5 @@ trackpad; everything else is checked by the hidden self-test.
 121. **Library Media lists image and video downloads plus NotArc's own captures (V41).** Arc kept a separate media
     store synced to its servers; NotArc builds the list from files already on disk. The Downloads window
     (Cmd+Shift+J) stays for filtering and cancelling.
+122. **The note format bar floats over the top of the note (V44),** matching the easel's bar placement; no Arc
+    picture of a note was available, so the position is a taste call for Omar to check.

@@ -491,6 +491,7 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (id)libraryPanelForTest;
 - (NSString*)downloadsTrayState;               // tests (V42)
 - (void)closeDownloadsTrayForTest;
+- (NSString*)captureCardState;                  // tests (V46)
 - (void)hideUpdateBannerForTest;
 - (IBAction)restartToUpdate:(id)sender;
 - (NSString*)findBarStyle;                      // tests (V35)

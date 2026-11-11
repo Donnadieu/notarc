@@ -1117,20 +1117,26 @@ static BOOL RemoveItem(ArcItem* parent, ArcItem* target);
   p.windingRule = NSWindingRuleEvenOdd;
   [[NSColor colorWithWhite:0 alpha:0.35] setFill];
   [p fill];
+  // a dark capsule with the hint at the top (Arc's capture banner); the selection gets a white outline and a size tag
+  auto capsule = ^(NSString* text, NSPoint centre, CGFloat fontSize) {
+    NSDictionary* a = @{NSForegroundColorAttributeName : NSColor.whiteColor,
+                        NSFontAttributeName : [NSFont systemFontOfSize:fontSize weight:NSFontWeightMedium]};
+    NSSize s = [text sizeWithAttributes:a];
+    NSRect r = NSMakeRect(round(centre.x - s.width / 2 - 12), round(centre.y - s.height / 2 - 6), s.width + 24, s.height + 12);
+    [[NSColor colorWithWhite:0.08 alpha:0.85] setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:r xRadius:r.size.height / 2 yRadius:r.size.height / 2] fill];
+    [text drawAtPoint:NSMakePoint(NSMinX(r) + 12, NSMinY(r) + 6) withAttributes:a];
+  };
   if (NSIsEmptyRect(_sel)) {
-    NSDictionary* a = @{NSForegroundColorAttributeName : NSColor.whiteColor, NSFontAttributeName : [NSFont systemFontOfSize:15 weight:NSFontWeightMedium]};
-    NSString* hint = @"Drag to capture an area. Esc cancels.";
-    NSSize s = [hint sizeWithAttributes:a];
-    [hint drawAtPoint:NSMakePoint(NSMidX(self.bounds) - s.width / 2, NSMidY(self.bounds) - s.height / 2) withAttributes:a];
+    capsule(@"Drag to capture an area  ·  Esc to cancel", NSMakePoint(NSMidX(self.bounds), 34), 13);
     return;
   }
-  [[NSColor colorWithWhite:1 alpha:0.9] setStroke];
-  NSBezierPath* b = [NSBezierPath bezierPathWithRect:NSInsetRect(_sel, 0.5, 0.5)];
-  b.lineWidth = 1;
+  [[NSColor colorWithWhite:1 alpha:0.95] setStroke];
+  NSBezierPath* b = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(_sel, -1, -1) xRadius:4 yRadius:4];
+  b.lineWidth = 2;
   [b stroke];
-  NSString* size = [NSString stringWithFormat:@"%.0f × %.0f", _sel.size.width, _sel.size.height];
-  NSDictionary* a = @{NSForegroundColorAttributeName : NSColor.whiteColor, NSFontAttributeName : [NSFont monospacedDigitSystemFontOfSize:11 weight:NSFontWeightMedium]};
-  [size drawAtPoint:NSMakePoint(NSMinX(_sel), NSMaxY(_sel) + 4) withAttributes:a];
+  capsule([NSString stringWithFormat:@"%.0f × %.0f", _sel.size.width, _sel.size.height],
+          NSMakePoint(NSMidX(_sel), MIN(NSMaxY(_sel) + 20, NSMaxY(self.bounds) - 16)), 11);
 }
 - (void)mouseDown:(NSEvent*)e {
   _start = [self convertPoint:e.locationInWindow fromView:nil];
@@ -1218,6 +1224,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSButton* _navBack;
   NSView* _peekScrim;
   NSBox* _updateBanner;
+  NSView* _captureCard;
+  NSString* _lastCapturePath;
   NSPopover* _downloadsTray;
   NSUInteger _downloadsTrayToken;
   NSInteger _downloadFlights;
@@ -4886,6 +4894,7 @@ static const CGFloat kPaneGap = 6;
         _easelScroll.hasVerticalScroller = YES;
         _easelScroll.hasHorizontalScroller = YES;
         _easelScroll.autohidesScrollers = YES;
+        _easelScroll.scrollerStyle = NSScrollerStyleOverlay;  // no scrollbar track over the canvas
         _easelView = [[EaselView alloc] initWithFrame:_easelScroll.bounds];
         _easelView.delegate = (id<EaselViewDelegate>)self;
         _easelScroll.documentView = _easelView;
@@ -4960,6 +4969,15 @@ static NSString* ClipKey(NSString* dir, EaselObject* o) {
   }
 }
 - (void)easel:(EaselView*)easel openLink:(NSString*)url { [self openInNewTab:url]; }
+// The easel's Capture button: go back to the page you came from and pick an area; it lands on this easel.
+- (void)easelWantsCapture:(EaselView*)easel {
+  ArcItem* page = nil;
+  for (ArcItem* it in [self recentTabsForSwitcherMax:8])
+    if (it.url.length && !it.easelID && !it.noteID) { page = it; break; }
+  if (!page) { NSBeep(); return; }
+  [self showItem:page];
+  [self captureAreaToEasel:nil];
+}
 - (ArcItem*)createEaselWithID:(NSString*)easelID {
   if (!_space) return nil;
   ArcItem* n = [ArcItem new];
@@ -5685,10 +5703,86 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
     path = [dir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@ %d.png", base, n]];
   if (![png writeToFile:path atomically:YES]) path = nil;
   PlaySoundEffect(NotArcSoundCapture);  // Arc played a shutter sound on capture
-  if (!_captureDirectory)
-    [self showToast:path ? @"Capture copied and saved to Downloads" : @"Capture copied" action:@"Add to Easel"
-           selector:@selector(addLastCaptureToEasel:)];
+  [self showCaptureCard:png path:path];
   return path;
+}
+
+// Arc's capture result: a card at the page's bottom-right with the picture and its actions (Copy, Save / Show in
+// Finder, Add to Easel); it goes away on its own after a few seconds.
+- (void)showCaptureCard:(NSData*)png path:(NSString*)path {
+  [_captureCard removeFromSuperview];
+  NSImage* img = [[NSImage alloc] initWithData:png];
+  if (!img) return;
+  const CGFloat W = 260, pad = 10;
+  NSSize s = img.size;
+  CGFloat ih = round(MIN(150, s.width > 0 ? (W - 2 * pad) * s.height / s.width : 120));
+  CGFloat H = pad + ih + 8 + 28 + pad;
+  NSView* card = [[CommandCardView alloc] initWithFrame:NSMakeRect(0, 0, W, H)];
+  card.wantsLayer = YES;
+  card.identifier = @"captureCard";
+  card.shadow = [NSShadow new];
+  card.layer.shadowColor = NSColor.blackColor.CGColor;
+  card.layer.shadowOpacity = 0.3;
+  card.layer.shadowRadius = 14;
+  card.layer.shadowOffset = CGSizeMake(0, -4);
+  NSImageView* iv = [NSImageView imageViewWithImage:img];
+  iv.frame = NSMakeRect(pad, pad + 28 + 8, W - 2 * pad, ih);
+  iv.imageScaling = NSImageScaleProportionallyUpOrDown;
+  iv.wantsLayer = YES;
+  iv.layer.cornerRadius = 6;
+  iv.layer.masksToBounds = YES;
+  iv.layer.backgroundColor = [NSColor colorWithWhite:0.5 alpha:0.12].CGColor;
+  [card addSubview:iv];
+  NSArray* acts = @[ @[ @"Copy", @"doc.on.doc", @"copyLastCapture:" ],
+                     @[ path ? @"Show" : @"Save", path ? @"folder" : @"square.and.arrow.down", @"revealLastCapture:" ],
+                     @[ @"Easel", @"scribble.variable", @"addLastCaptureToEasel:" ] ];
+  CGFloat bw = (W - 2 * pad - 2 * 6) / 3, x = pad;
+  for (NSArray* a in acts) {
+    NSButton* b = [NSButton buttonWithTitle:a[0] image:[NSImage imageWithSystemSymbolName:a[1] accessibilityDescription:a[0]]
+                                     target:self action:NSSelectorFromString(a[2])];
+    b.bordered = NO;
+    b.imagePosition = NSImageLeading;
+    b.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+    b.wantsLayer = YES;
+    b.layer.cornerRadius = 7;
+    b.layer.backgroundColor = [NSColor colorWithWhite:0.5 alpha:0.16].CGColor;
+    b.frame = NSMakeRect(x, pad, bw, 28);
+    b.identifier = @"captureAction";
+    [card addSubview:b];
+    x += bw + 6;
+  }
+  NSRect c = _content.frame;
+  card.frame = NSMakeRect(NSMaxX(c) - W - 14, NSMinY(c) + 14, W, H);
+  [_content.superview addSubview:card positioned:NSWindowAbove relativeTo:nil];
+  _captureCard = card;
+  _lastCapturePath = path;
+  __weak NSView* weakCard = card;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 6 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+    NSView* cv = weakCard;
+    if (!cv.superview) return;
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext* ctx) {
+      ctx.duration = 0.25;
+      cv.animator.alphaValue = 0;
+    } completionHandler:^{ [cv removeFromSuperview]; }];
+  });
+}
+- (IBAction)copyLastCapture:(id)sender {
+  if (!_lastCapture) return;
+  NSPasteboard* pb = _captureDirectory ? [NSPasteboard pasteboardWithName:@"io.github.donnadieu.notarc.selftest"]
+                                       : NSPasteboard.generalPasteboard;
+  [pb clearContents];
+  [pb setData:_lastCapture forType:NSPasteboardTypePNG];
+}
+- (IBAction)revealLastCapture:(id)sender {
+  if (_lastCapturePath && !_captureDirectory)
+    [NSWorkspace.sharedWorkspace activateFileViewerSelectingURLs:@[ [NSURL fileURLWithPath:_lastCapturePath] ]];
+}
+- (NSString*)captureCardState {  // tests (V46)
+  NSUInteger acts = 0;
+  for (NSView* v in _captureCard.subviews) acts += [v.identifier isEqual:@"captureAction"];
+  NSRect c = _content.frame;
+  BOOL corner = _captureCard && fabs(NSMaxX(_captureCard.frame) - (NSMaxX(c) - 14)) <= 1 && fabs(NSMinY(_captureCard.frame) - (NSMinY(c) + 14)) <= 1;
+  return [NSString stringWithFormat:@"card=%d actions=%lu corner=%d", _captureCard.superview != nil, (unsigned long)acts, corner];
 }
 
 - (IBAction)addLastCaptureToEasel:(id)sender {

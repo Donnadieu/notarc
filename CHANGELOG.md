@@ -4,6 +4,10 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Easels: the floating tool bar gains Add Image and Capture buttons; the canvas shows no scrollbar track.
+- Notes: the format bar floats over the top of the note, and an empty note shows a large grey "Untitled".
+- Capture: a hint capsule at the top while you pick an area, a rounded outline with the size, and a result card with
+  the picture and Copy, Show and Easel instead of a toast.
 - The Library button opens Arc's Library in the sidebar: your Spaces, then Archive, Downloads, Media, Easels, Notes
   and Boosts, each opened in place with its own search. File > Show Archive still goes straight to Archive.
 - Downloads are cards with a progress bar; a new download flies into the Library button and a small tray of recent

@@ -718,6 +718,9 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                             BOOL saved = path && [path hasPrefix:dir] && [[NSData dataWithContentsOfFile:path] isEqual:area];
                             BOOL copied = [[pb dataForType:NSPasteboardTypePNG] isEqual:area];
                             (void)sc;
+                            NSString* cc = w.captureCardState;  // Visual parity V46: the capture result card
+                            std::printf("SELFTEST-CAPTURELOOK card=%d\n", [cc isEqual:@"card=1 actions=3 corner=1"]);
+                            if (![cc isEqual:@"card=1 actions=3 corner=1"]) std::printf("SELFTEST-CAPTURELOOK-DEBUG %s\n", cc.UTF8String);
                             std::printf("SELFTEST-CAPTURE visible=%d area=%d full=%d portrait=%d saved=%d copied=%d shutter=%d\n",
                                         visible, areaOK, fullOK, portrait, saved, copied, shutter);
                             if (!areaOK || !fullOK) std::printf("CAPTURE-DEBUG v=%ldx%ld a=%ldx%ld f=%ldx%ld view=%.0f\n",
@@ -1292,7 +1295,10 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
     if (c.action && c.target == tv) ++controls;
     if (c.action == @selector(noteToggleItalic:)) italicButton = (NSButton*)c;
   }
-  BOOL toolbar = ed && controls >= 9 && ed.toolbar.superview == ed && NSMaxY(ed.toolbar.frame) == NSMaxY(ed.bounds);
+  [ed setFrameSize:ed.frame.size];  // lays the parts out
+  NSString* barLook = ed.floatingBarDescription;  // Visual parity V44: floating rounded bar, "Untitled" placeholder
+  BOOL toolbar = ed && controls >= 9 && ed.toolbar.superview == ed && [barLook isEqual:@"floating=1 centred=1 radius=10 placeholder=1"];
+  if (!toolbar) std::printf("SELFTEST-NOTESTYLE-DEBUG controls=%lu %s\n", (unsigned long)controls, barLook.UTF8String);
   [w typeInNote:@"Plan\nIntro\nmilk\neggs\nbread\nwash car\nsee the docs now"];
   NSTextStorage* ts = tv.textStorage;
   NSFont* (^fontAt)(NSString*) = ^NSFont*(NSString* word) {
@@ -3734,6 +3740,10 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           [ev save];
           [w easelDidChange:ev];
           BOOL titled = [easel.displayTitle isEqualToString:@"Trip ideas"];
+          {  // Visual parity V43: Arc's easel bar also has Add Image and Capture
+            BOOL bar = ev.extraToolCount == 2 && [ev.toolbar.identifier isEqual:@"easelToolbar"] && ev.toolbar.layer.cornerRadius == 12;
+            std::printf("SELFTEST-EASELLOOK bar=%d\n", bar);
+          }
           [w showItem:src];
           BOOL hidden = [w easelView] == nil;
           [w showItem:easel];

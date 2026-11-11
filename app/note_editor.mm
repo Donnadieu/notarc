@@ -3,7 +3,7 @@
 // Sizes and spacing. The first paragraph is the title; headings are bold and larger than body text.
 static const CGFloat kTitleSize = 30, kH1Size = 24, kH2Size = 20, kH3Size = 17, kBodySize = 15;
 static const CGFloat kReadingWidth = 680;  // Arc's notes are a centred column, not the full pane width
-static const CGFloat kMinMargin = 28, kTopMargin = 24, kToolbarHeight = 36, kListIndent = 26;
+static const CGFloat kMinMargin = 28, kTopMargin = 72, kToolbarHeight = 34, kListIndent = 26;  // the format bar floats over the top
 
 static NSString* const kBullet = @"\u2022\t", *const kUnchecked = @"\u2610\t", *const kChecked = @"\u2611\t";
 
@@ -583,6 +583,7 @@ NSString* NoteMarkdown(NSAttributedString* a) {
   NSTimer* _saveTimer;
   BOOL _styling;
   NSMutableArray<NSControl*>* _controls;
+  NSTextField* _placeholder;
 }
 
 - (instancetype)initWithFrame:(NSRect)frame {
@@ -590,6 +591,7 @@ NSString* NoteMarkdown(NSAttributedString* a) {
   _scroll = [[NSScrollView alloc] initWithFrame:NSZeroRect];
   _scroll.hasVerticalScroller = YES;
   _scroll.autohidesScrollers = YES;
+  _scroll.scrollerStyle = NSScrollerStyleOverlay;
   _scroll.drawsBackground = NO;
   _textView = [[NoteTextView alloc] initWithFrame:NSMakeRect(0, 0, 400, 400)];
   _textView.owner = self;
@@ -611,6 +613,12 @@ NSString* NoteMarkdown(NSAttributedString* a) {
   _textView.textStorage.delegate = self;
   _scroll.documentView = _textView;
   [self addSubview:_scroll];
+  // Arc's empty note: a large grey "Untitled" where the title goes.
+  _placeholder = [NSTextField labelWithString:@"Untitled"];
+  _placeholder.font = TitleFont();
+  _placeholder.textColor = NSColor.tertiaryLabelColor;
+  _placeholder.identifier = @"notePlaceholder";
+  [_textView addSubview:_placeholder];
   [self buildToolbar];
   [self layoutParts];
   return self;
@@ -638,7 +646,16 @@ NSString* NoteMarkdown(NSAttributedString* a) {
 // Arc's note format bar: paragraph type, then bold/italic/underline/strikethrough, lists, link.
 - (void)buildToolbar {
   _controls = [NSMutableArray array];
-  _toolbar = [[NSView alloc] initWithFrame:NSZeroRect];
+  // Arc's format bar floats over the top of the note as a small rounded bar, not a full-width strip.
+  NSVisualEffectView* bar = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
+  bar.material = NSVisualEffectMaterialPopover;
+  bar.state = NSVisualEffectStateActive;
+  bar.wantsLayer = YES;
+  bar.layer.cornerRadius = 10;
+  bar.layer.borderWidth = 0.5;
+  bar.layer.borderColor = [NSColor colorWithWhite:0.5 alpha:0.25].CGColor;
+  bar.shadow = [NSShadow new];
+  _toolbar = bar;
   _blockPopup = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 0, 110, 24) pullsDown:NO];
   _blockPopup.bordered = NO;
   _blockPopup.font = [NSFont systemFontOfSize:12];
@@ -683,16 +700,30 @@ NSString* NoteMarkdown(NSAttributedString* a) {
 
 - (void)layoutParts {
   NSRect b = self.bounds;
-  _toolbar.frame = NSMakeRect(0, NSMaxY(b) - kToolbarHeight, b.size.width, kToolbarHeight);
-  _rule.frame = NSMakeRect(0, 0, b.size.width, 1);
   NSSize fit = _stack.fittingSize;
-  CGFloat w = MIN(fit.width, b.size.width - 16);
-  _stack.frame = NSMakeRect(floor((b.size.width - w) / 2), floor((kToolbarHeight - fit.height) / 2), w, fit.height);
-  _scroll.frame = NSMakeRect(0, 0, b.size.width, MAX(0, b.size.height - kToolbarHeight));
+  CGFloat w = MIN(fit.width, b.size.width - 40);
+  _toolbar.frame = NSMakeRect(floor((b.size.width - w - 20) / 2), NSMaxY(b) - kToolbarHeight - 12, w + 20, kToolbarHeight);
+  _rule.hidden = YES;
+  _stack.frame = NSMakeRect(10, floor((kToolbarHeight - fit.height) / 2), w, fit.height);
+  _scroll.frame = b;
   CGFloat width = _scroll.contentSize.width;
   CGFloat margin = MAX(kMinMargin, floor((width - kReadingWidth) / 2));
   if (_textView.textContainerInset.width != margin) _textView.textContainerInset = NSMakeSize(margin, kTopMargin);
   _textView.frame = NSMakeRect(0, 0, width, MAX(_textView.frame.size.height, _scroll.contentSize.height));
+  [self updatePlaceholder];
+}
+- (void)updatePlaceholder {
+  _placeholder.hidden = _textView.string.length > 0;
+  NSSize s = _placeholder.fittingSize;
+  NSSize inset = _textView.textContainerInset;
+  CGFloat pad = _textView.textContainer.lineFragmentPadding;
+  _placeholder.frame = NSMakeRect(inset.width + pad, _textView.isFlipped ? inset.height : NSMaxY(_textView.bounds) - inset.height - s.height,
+                                  s.width, s.height);
+}
+- (NSString*)floatingBarDescription {  // tests (V44)
+  NSRect b = self.bounds, t = _toolbar.frame;
+  return [NSString stringWithFormat:@"floating=%d centred=%d radius=%.0f placeholder=%d", NSMaxY(t) == NSMaxY(b) - 12 && t.size.width < b.size.width,
+                                    fabs(NSMidX(t) - NSMidX(b)) <= 1, _toolbar.layer.cornerRadius, !_placeholder.hidden];
 }
 
 // The page colour comes from the window's appearance, which follows the Space (light, dark or system).
@@ -711,6 +742,7 @@ NSString* NoteMarkdown(NSAttributedString* a) {
   [_textView.textStorage setAttributedString:a];
   _textView.typingAttributes = a.length ? BodyAttributes() : TitleAttributes();
   [_textView.undoManager removeAllActions];
+  [self updatePlaceholder];
   [self updateToolbarState];
 }
 
@@ -772,6 +804,7 @@ NSString* NoteMarkdown(NSAttributedString* a) {
 }
 
 - (void)textDidChange:(NSNotification*)n {
+  [self updatePlaceholder];
   [self.delegate noteEditorDidChange:self];
   [_saveTimer invalidate];
   __weak NoteEditorView* weakSelf = self;
