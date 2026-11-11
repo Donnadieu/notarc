@@ -502,3 +502,41 @@ trackpad; everything else is checked by the hidden self-test.
     counts 65 items.
 125. **The extensions button stays behind Chrome-style pages (V50)** until Omar has looked at them on screen; the
     bubble popups and the button already match Arc.
+126. **Test runs never touch the real NotArc profile (Nov 11).** A Nov 10 run reported Omar's real settings as
+    changed while his own NotArc was open. Checking it found a real gap: macOS saves preferences to the real
+    `~/Library/Preferences` even with `CFFIXED_USER_HOME` set (checked with a probe), so any direct NSUserDefaults
+    write in a test could reach Omar's settings. Now every test mode keeps all preference writes in memory and hides
+    Omar's saved values (`app/test_isolation.mm`), refuses to start without a throwaway home (exit 3), and ends with
+    `SELFTEST-REALPROFILE` (fails if his preferences or data files changed). `selftest.sh` only forgives a change when
+    one of Omar's own NotArc windows was open during the run.
+127. **NotArc's own dialogs are Arc-style cards (V60):** a rounded card (16 pt corners, Arc's popover colours) over the
+    dimmed window, blue primary, red destructive and quiet neutral buttons in Arc's button colours, Return and Esc as
+    before. macOS's own panels (open/save, Keychain) stay native. The corner radius is a guess from Arc's dialogs.
+128. **Settings follows Arc's panes: General, Profiles, Max, Links, Shortcuts, Icon, Advanced (V58).** Space
+    appearance (Arc sets it in its theme picker) also has a row in General; the keyboard shortcuts editor moved from
+    its own window into Settings > Shortcuts. Rows are grouped in cards with switches at the right and Arc's flat
+    settings buttons. Arc's Account pane has no equivalent (no accounts).
+129. **The theme picker is NotArc's own drawing of Arc's (V52):** a popover with automatic / light / dark, a dotted pad
+    with up to three colour dots (across = hue, up = lighter), + and -, a wave for intensity, a dial for grain and
+    five pages of swatches. The brand, pastel, muted and grey swatches use Arc's colour values; the gradient page is
+    NotArc's own mix of them. The mode buttons set this Space's appearance (NotArc keeps appearance per Space; Arc's
+    is global), and changes apply live with no Done or Cancel, as in Arc.
+130. **Theme colours are shaded for the mode (V53, V61, V62):** half-way toward a near-black navy in dark mode and a
+    third of the way toward white in light mode, so white or black sidebar text stays readable on any colour. Arc
+    also darkens themes in dark mode; the exact amounts are a taste call. Up to three colours now make a gradient.
+131. **New Space is one card (V54):** icon, name, profile (or a new profile for the Space) and a theme colour, then
+    Create Space.
+132. **Space switching keeps the sideways push but with a small spring overshoot, and the theme colours cross-fade
+    (V55).** Cmd+S slides the sidebar out (a picture of it) or in, and the page card grows into the room on a spring
+    (V66). Nothing moves with Reduce Motion.
+133. **Row animations (V65):** a new tab's row grows from nothing, a closed row squashes away while the rows below
+    slide up, and Clear or auto-archive send the rows flying into the Library button. Only for changes of one to three
+    rows within the same Space; bigger changes just redraw.
+134. **Drag and drop (V21):** the dragged row lifts as a slightly larger pill with a shadow, rows open a gap where it
+    will land, a folder under it lights up in Arc's hover colour (no system blue ring), and the existing drop-on-page
+    split preview stays.
+135. **First-launch welcome (V56) and import screen (V57)** show only on a brand-new install (no saved sidebar yet), so
+    people updating NotArc never see them. Browser cards show a letter, not the browser's logo. Arc brings everything
+    (as File > Import Everything from Arc); other Chromium browsers bring history and bookmarks. The welcome text is
+    NotArc's own.
+

@@ -29,6 +29,9 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 
 NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed name stands for, or nil
 
+@class ThemePickerController;
+@class ArcAlert;
+@class WelcomeView;
 @interface MainWindowController : NSWindowController <NSWindowDelegate>
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID;
 // Self-test: Space profiles live in separate "SelfTest Space ..." folders and Arc cookies are not imported,
@@ -56,6 +59,20 @@ NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed 
 - (BOOL)applyTidyTitle:(NSString*)tidy toItem:(ArcItem*)item announce:(BOOL)announce;  // undoable; NO if unchanged
 - (void)usePageTitleOfItem:(ArcItem*)item;
 - (void)setThemeGrain:(double)grain forSpace:(ArcSpace*)space;  // #26
+- (ThemePickerController*)themePickerForTest;  // V52: the open theme picker, nil when closed
+- (BOOL)themePickerShown;
+- (NSString*)newSpaceCardLook;  // V54 tests
+- (void)showWelcome;  // V56: first-launch welcome and import (V57)
+- (WelcomeView*)welcomeViewForTest;
+- (NSString*)layoutMetricsForTest;  // V63/V64
+- (NSString*)spaceSwitchMotion;  // V55 tests: "push=1 spring=1 crossfade=1"
+- (NSString*)lastSidebarMotion;  // V66 tests: "slide=1 card=1" or "none"
+- (NSString*)dragLookDebugForTest;
+- (NSString*)dragLookForTest;   // V21 tests: "gap=1 lifted=1 folderHighlight=1 pageSplit=1"
+- (NSString*)sidebarRowMotion;   // V65 tests: "grow=N slideUp=N ghosts=N library=0|1"
+- (ArcAlert*)newSpaceCardForTest;
+- (void)fillNewSpaceCard:(NSString*)name emoji:(NSString*)emoji swatch:(NSUInteger)swatch;
+- (void)closeThemePicker;
 - (float)themeGrainOpacity;
 - (BOOL)swipeSpacesBy:(NSInteger)step;
 - (IBAction)peekEmail:(id)sender;

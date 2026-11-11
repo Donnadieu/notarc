@@ -7,6 +7,9 @@
 #include <vector>
 
 #import "app/arc_import.h"
+#import "app/arc_alert.h"
+#import "app/theme_picker.h"
+#import "app/welcome.h"
 #import "app/main_window.h"
 #import "app/tidy_title.h"
 #import "app/global_hotkey.h"
@@ -35,6 +38,7 @@
 #import "app/easel_clip.h"
 #import "app/live_folder.h"
 #import "app/settings.h"
+#import "app/test_isolation.h"
 #import "app/app_icons.h"
 #include "app/content_blocker.h"
 #import "app/filter_lists.h"
@@ -69,7 +73,7 @@
 - (void)terminate:(id)sender {
   NSUInteger active = [DownloadManager shared].inProgressCount;
   if (active && sender) {
-    NSAlert* a = [NSAlert new];
+    ArcAlert* a = [ArcAlert new];
     a.messageText = active == 1 ? @"A download is in progress." : [NSString stringWithFormat:@"%lu downloads are in progress.", (unsigned long)active];
     a.informativeText = @"Quitting NotArc will cancel them.";
     [a addButtonWithTitle:@"Quit"];
@@ -86,6 +90,7 @@
 @property(nonatomic) BOOL selfTest;
 @property(nonatomic) BOOL selfTestReload;  // phase 2: reopen the saved store, no actions
 @property(nonatomic, copy) NSString* snapshotPath;  // --sidebar-snapshot=<png>: hidden run that renders the sidebar and quits
+@property(nonatomic) BOOL freshInstall;  // no saved sidebar yet: the welcome shows (V56)
 @property(nonatomic, copy) NSString* visualPlan;  // --visual-shots=<plan>: hidden design renders (app/visual_shots.h)
 @property(nonatomic, copy) NSString* pendingSource;
 @property(nonatomic, strong) NSMutableArray<NSString*>* pendingURLs;  // links that arrived before the window
@@ -522,6 +527,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
   NSString* focused = nil;
   // Our own store wins; Arc's files are only imported when we have none yet.
   NSArray<ArcSpace*>* spaces = SidebarStoreLoad(storePath, &focused, &error);
+  self.freshInstall = spaces == nil && ![NSFileManager.defaultManager fileExistsAtPath:storePath];  // V56: first launch ever
   if (spaces) {
     std::fprintf(stderr, "loaded sidebar from %s\n", storePath.UTF8String);
   } else {
@@ -605,7 +611,10 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
   for (NSString* url in self.pendingURLs) [self.window routeExternalLink:url sourceApp:self.pendingSource];
   self.pendingURLs = nil;
   if (!self.selfTest) [NSApp activateIgnoringOtherApps:YES];
-  if (!self.selfTest) [self.window offerArcImportIfFirstLaunch];  // never in hidden test runs
+  if (!self.selfTest) {  // never in hidden test runs
+    if (self.freshInstall && !SettingBool(@"welcomeCompleted")) [self.window showWelcome];  // V56: Arc's welcome, then import
+    else [self.window offerArcImportIfFirstLaunch];
+  }
 
   if (self.selfTest) {
     // Hidden run: no Dock icon, never activates, every window 1% opaque (invisible, but not "occluded", so media still plays) and click-through,
@@ -793,6 +802,9 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 170 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
      WaitUntil(^{ return (BOOL)((gLateTestsDone && gMaxTestDone && gAdBlockTestDone && gEaselToolsDone) || self.selfTestReload); }, 45, ^{
       void (^finish)(void) = ^{
+        // Last check of every run: nothing above touched the user's real profile or settings.
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::printf("SELFTEST-REALPROFILE-DEBUG %s\n", TestIsolationDebug().UTF8String);
         for (NSDictionary* tab in [self.window tabSnapshot])
           std::printf("SELFTEST space=\"%s\" profile=\"%s\" title=\"%s\" url=%s\n", [tab[@"space"] UTF8String],
                       [tab[@"profile"] UTF8String], [tab[@"title"] UTF8String], [tab[@"url"] UTF8String]);
@@ -1182,7 +1194,148 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
 }
 
 // Basics run alone first; the other steps would otherwise navigate or close its tab mid-test.
+// Visual parity V52 (theme picker) and V54 (New Space card). Runs first, before any timed check, since it switches
+// Spaces, changes the theme and shows a popover and a card.
+- (void)runSpaceCardsSelfTest {
+  MainWindowController* w = self.window;
+  ArcSpace* sp = w.currentSpace;
+  {  // Visual parity V52: Arc's theme picker popover drives the Space theme live (dots, presets, modes, sliders).
+    NSString* ownScheme = sp.colorScheme;
+    NSArray* ownColors = sp.themeColors;
+    double ownIntensity = sp.themeIntensity, ownGrain = sp.themeGrain;
+    [w setTheme:nil intensity:0.5 forSpace:sp];
+    [w editThemeColor:nil];
+    ThemePickerController* tp = w.themePickerForTest;
+    BOOL popover = w.themePickerShown && tp != nil;
+    NSString* look = [tp lookDescription];
+    BOOL looks = [look isEqualToString:@"pad=1 dots=0 modes=3 wave=1 dial=1 swatches=9 pages=5 plusMinus=1"];
+    [tp addDot];
+    BOOL one = sp.themeColors.count == 1 && !w.themeView.hidden;
+    [tp addDot];
+    [tp addDot];
+    [tp addDot];  // the fourth is ignored: at most three colours
+    BOOL three = sp.themeColors.count == 3 && tp.colors.count == 3;
+    NSString* before = sp.themeColors.firstObject;
+    [tp moveDot:0 toUnitPoint:NSMakePoint(0.05, 0.9)];
+    BOOL dragged = ![sp.themeColors.firstObject isEqual:before];
+    [tp pickPreset:7 onPage:0];
+    BOOL preset = sp.themeColors.count == 3 && [sp.themeColors isEqualToArray:tp.colors];
+    [tp pickPreset:4 onPage:1];
+    BOOL single = sp.themeColors.count == 1;
+    [tp setIntensityValue:0.8];
+    [tp setGrainValue:0.5];
+    BOOL sliders = fabs(sp.themeIntensity - 0.8) < 0.01 && fabs(sp.themeGrain - 0.5) < 0.01;
+    [tp chooseScheme:@"light"];
+    [w.window displayIfNeeded];
+    BOOL light = [sp.colorScheme isEqual:@"light"] && !w.sidebarIsDark;
+    [tp chooseScheme:@"auto"];
+    BOOL autoBack = sp.colorScheme == nil;
+    while (tp.colors.count) [tp removeDot];
+    BOOL cleared2 = sp.themeColors.count == 0;
+    [w closeThemePicker];
+    [w setTheme:ownColors intensity:ownIntensity forSpace:sp];
+    [w setThemeGrain:ownGrain forSpace:sp];
+    [w setColorScheme:ownScheme forSpace:sp];
+    std::printf("SELFTEST-THEMEPICKER popover=%d look=%d oneColor=%d threeMax=%d drag=%d preset=%d single=%d sliders=%d "
+                "light=%d autoBack=%d removeAll=%d\n", popover, looks, one, three, dragged, preset, single, sliders, light,
+                autoBack, cleared2);
+    if (!looks) std::printf("SELFTEST-THEMEPICKER-DEBUG %s\n", look.UTF8String);
+  }
+  {  // Visual parity V54: Arc's New Space card (icon, name, profile, theme) makes the Space in one step.
+    ArcSpace* before = w.currentSpace;
+    NSUInteger count = w.spaces.count;
+    [w newSpace:nil];
+    NSString* look = [w newSpaceCardLook];
+    NSString* want = [NSString stringWithFormat:@"card=1 emoji=1 name=1 profiles=%lu swatches=9",
+                                                (unsigned long)w.profileDirectories.count + 2];
+    [w fillNewSpaceCard:@"SelfTest Card Space" emoji:@"\U0001F9EA" swatch:3];
+    [[w newSpaceCardForTest] dismissWithResponse:NSAlertFirstButtonReturn];
+    ArcSpace* made = w.currentSpace;
+    BOOL created = made != before && w.spaces.count == count + 1 && [made.title isEqual:@"SelfTest Card Space"] &&
+                   [made.iconEmoji isEqual:@"\U0001F9EA"] && [made.themeColors.firstObject isEqual:@"#F25E6B"] &&
+                   [made.profileDirectory isEqual:before.profileDirectory];
+    [w deleteSpace:made];
+    [w switchToSpace:before];
+    [w newSpace:nil];
+    [[w newSpaceCardForTest] dismissWithResponse:NSAlertSecondButtonReturn];
+    BOOL cancelled = w.spaces.count == count && w.currentSpace == before && [w newSpaceCardForTest] == nil;
+    std::printf("SELFTEST-NEWSPACE card=%d created=%d cancelled=%d\n", [look isEqual:want], created, cancelled);
+    if (![look isEqual:want]) std::printf("SELFTEST-NEWSPACE-DEBUG %s\n", look.UTF8String);
+  }
+}
+
+// Visual parity V60: NotArc's dialogs are Arc-style cards over the dimmed window, answered by Return and Esc.
+- (void)runAlertLookSelfTest {
+  NSWindow* win = self.window.window;
+  __block NSModalResponse first = 0, second = 0;
+  ArcAlert* a = [ArcAlert new];
+  a.messageText = @"Delete this Space?";
+  a.informativeText = @"Self-test dialog.";
+  [a addButtonWithTitle:@"Delete"].hasDestructiveAction = YES;
+  [a addButtonWithTitle:@"Cancel"];
+  [a beginSheetModalForWindow:win completionHandler:^(NSModalResponse r) { first = r; }];
+  NSString* look = [a lookDescription];
+  BOOL shown = ArcAlertShownOn(win) && !win.attachedSheet;
+  [a.window performKeyEquivalent:[NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0
+                                                  timestamp:0 windowNumber:a.window.windowNumber context:nil
+                                                 characters:@"\r" charactersIgnoringModifiers:@"\r" isARepeat:NO keyCode:36]];
+  BOOL gone = !ArcAlertShownOn(win) && !a.isShown && a.window.parentWindow == nil;
+  ArcAlert* b = [ArcAlert new];
+  b.messageText = @"Second";
+  [b addButtonWithTitle:@"OK"];
+  [b addButtonWithTitle:@"Cancel"];
+  [b beginSheetModalForWindow:win completionHandler:^(NSModalResponse r) { second = r; }];
+  NSString* lookB = [b lookDescription];
+  [b.window cancelOperation:nil];
+  BOOL ok = [look isEqual:@"card=1 child=1 scrim=1 radius=16 primary=0 destructive=1 neutral=1 returnKey=1 escKey=1"] &&
+            [lookB isEqual:@"card=1 child=1 scrim=1 radius=16 primary=1 destructive=0 neutral=1 returnKey=1 escKey=1"];
+  std::printf("SELFTEST-ALERTLOOK arcCard=%d shownOverWindow=%d returnFirst=%d escCancel=%d dismissed=%d\n", ok, shown,
+              first == NSAlertFirstButtonReturn, second == NSAlertSecondButtonReturn, gone && !ArcAlertShownOn(win));
+  if (!ok) std::printf("SELFTEST-ALERTLOOK-DEBUG %s | %s\n", look.UTF8String, lookB.UTF8String);
+}
+
+// Visual parity V56/V57: the welcome covers the window, walks the tour, offers the browsers, imports, and goes.
+- (void)runWelcomeSelfTest {
+  MainWindowController* w = self.window;
+  [w showWelcome];
+  WelcomeView* wv = w.welcomeViewForTest;
+  BOOL covers = wv && NSEqualRects(wv.frame, w.window.contentView.bounds) && wv.superview == w.window.contentView;
+  NSString* hello = [wv lookDescription];
+  BOOL welcome = [hello hasPrefix:@"glow=1 title=Welcome to NotArc primary=Get Started"];
+  NSMutableArray* pages = [NSMutableArray array];
+  for (int i = 0; i < 5; ++i) {
+    [wv next];
+    [pages addObject:wv.page];
+  }
+  BOOL tour = [pages isEqualToArray:@[ @"pin", @"spaces", @"split", @"commandbar", @"import" ]];
+  [wv back];
+  BOOL back = [wv.page isEqual:@"commandbar"];
+  [wv next];
+  NSString* importLook = [wv lookDescription];
+  BOOL cards = wv.browsers.count >= 1 && [importLook containsString:[NSString stringWithFormat:@"cards=%lu", (unsigned long)wv.browsers.count]] &&
+               [wv.browsers.firstObject[@"kind"] isEqual:@"arc"];  // the test home has Arc's files
+  __block NSDictionary* picked = nil;
+  wv.importChosen = ^(NSDictionary* b, void (^done)(NSString*, BOOL)) {  // no real import in a test
+    picked = b;
+    done(@"SelfTest import", YES);
+  };
+  [wv chooseBrowserAtIndex:0];
+  [wv next];
+  BOOL imported = [picked[@"name"] isEqual:@"Arc"] && [wv.page isEqual:@"done"];
+  [wv next];  // Start Browsing
+  BOOL gone = w.welcomeViewForTest == nil && SettingBool(@"welcomeCompleted");
+  std::printf("SELFTEST-WELCOME covers=%d welcome=%d tour=%d back=%d importCards=%d imported=%d closed=%d\n", covers, welcome,
+              tour, back, cards, imported, gone);
+  if (!welcome || !cards) std::printf("SELFTEST-WELCOME-DEBUG %s | %s\n", hello.UTF8String, importLook.UTF8String);
+  SettingSetObject(@"welcomeCompleted", nil);
+  SettingSetObject(@"defaultBrowserOffered", nil);
+  SettingSetObject(@"arcImportNotNow", nil);
+}
+
 - (void)runSelfTestActions {
+  [self runAlertLookSelfTest];
+  [self runSpaceCardsSelfTest];
+  [self runWelcomeSelfTest];
   [self.window openInNewTab:@"https://example.com"];
   [self runBasicsTestWhenReady:0];
 }
@@ -1585,6 +1738,11 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       NSString* back = w.lastSpaceSlide;
       [w selectSpaceAtIndex:madeIdx];
       NSString* fwd = w.lastSpaceSlide;
+      NSString* motion = w.spaceSwitchMotion;  // V55: push with a spring overshoot, theme colours cross-fade
+      BOOL springSlide = reduce || ([motion hasPrefix:@"push=1 spring=1"] &&
+                                    (w.themeView.hidden || [motion hasSuffix:@"crossfade=1"]));
+      std::printf("SELFTEST-SPACEMOTION spring=%d\n", springSlide);
+      if (!springSlide) std::printf("SELFTEST-SPACEMOTION-DEBUG %s\n", motion.UTF8String);
       BOOL slide = reduce ? [back isEqualToString:@"none"] : ([back isEqualToString:@"left"] && [fwd isEqualToString:@"right"]);
       BOOL pop = reduce || w.cardPopCount > popsBefore;
       std::printf("SELFTEST-MOTION slide=%d pop=%d reduceMotion=%d\n", slide, pop, reduce);
@@ -1629,8 +1787,17 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       MainWindowController* w = self.window;
       [w toggleSidebar:nil];
       BOOL hidden = [w sidebarHidden];
+      NSString* hideMotion = w.lastSidebarMotion;
       [w toggleSidebar:nil];
       BOOL shownAgain = ![w sidebarHidden];
+      {  // Visual parity V66: the sidebar slides out / in and the page card follows, on a spring; none with Reduce Motion.
+        BOOL reduce = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
+        NSString* showMotion = w.lastSidebarMotion;
+        BOOL ok = reduce ? [hideMotion isEqual:@"none"] && [showMotion isEqual:@"none"]
+                         : [hideMotion isEqual:@"slide=1 card=1"] && [showMotion isEqual:@"slide=1 card=1"];
+        std::printf("SELFTEST-SIDEBARMOTION springs=%d\n", ok);
+        if (!ok) std::printf("SELFTEST-SIDEBARMOTION-DEBUG hide=%s show=%s\n", hideMotion.UTF8String, showMotion.UTF8String);
+      }
       NSArray<ArcItem*>* tabs = w.currentSpace.allTabs;
       [w selectTabAtIndex:0];
       BOOL first = [w shownItem] == tabs.firstObject;
@@ -1642,6 +1809,12 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       NSUInteger todayBefore = w.currentSpace.unpinned.children.count;
       NSUInteger archivedBefore = [w archivedTabs].count;
       [w clearToday:nil];
+      {  // V65: Clear sends the rows flying to the Library button
+        NSString* cm = w.sidebarRowMotion;
+        BOOL flew = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion || [cm hasSuffix:@"library=1"];
+        std::printf("SELFTEST-CLEARMOTION toLibrary=%d\n", flew);
+        if (!flew) std::printf("SELFTEST-CLEARMOTION-DEBUG %s\n", cm.UTF8String);
+      }
       std::printf("SELFTEST-SHORTCUTS sidebarHidden=%d sidebarBack=%d tab1=%d nextTab=%d prevTab=%d "
                   "clearToday=%lu->%lu archivedDelta=%ld\n", hidden, shownAgain, first, second, back,
                   (unsigned long)todayBefore, (unsigned long)w.currentSpace.unpinned.children.count,
@@ -2125,11 +2298,29 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       [w openInNewTab:@"https://example.com/undo-a"];
       ArcItem* a = w.shownItem;
       [w openInNewTab:@"https://example.com/undo-b"];
+      NSString* openMotion = w.sidebarRowMotion;
       NSArray* before = w.currentSpace.allTabs;
       NSUInteger posA = [before indexOfObject:a];
       NSUInteger archived = w.archivedTabs.count;
       [w showItem:a];
       [w closeCurrentTab];
+      {  // Visual parity V65: the new row grew in; the closed row squashed away and the row under it slid up.
+        BOOL reduce = NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
+        NSString* closeMotion = w.sidebarRowMotion;
+        BOOL grew = reduce || [openMotion hasPrefix:@"grow=1 "];
+        BOOL shrank = reduce || ([closeMotion containsString:@"ghosts=1"] && ![closeMotion hasPrefix:@"grow=1"]);
+        std::printf("SELFTEST-ROWMOTION grow=%d closeShrinks=%d\n", grew, shrank);
+        NSString* metrics = w.layoutMetricsForTest;  // V63/V64: Arc's type and measurements, read from the live layout
+        NSString* want = @"sidebar=273 inset=8 pill=36 pillRadius=10 row=36 pitch=41 rowRadius=8 card=8 favRadius=10 "
+                         @"tab=14-medium space=13-semibold address=13-regular command=20";
+        std::printf("SELFTEST-METRICS arcSizes=%d\n", [metrics isEqual:want]);
+        if (![metrics isEqual:want]) std::printf("SELFTEST-METRICS-DEBUG %s\n", metrics.UTF8String);
+        NSString* drag = w.dragLookForTest;  // V21: gap opens, lifted pill, folder lights up, page drop splits
+        std::printf("SELFTEST-DRAGLOOK arcStyle=%d\n", [drag isEqual:@"gap=1 lifted=1 folderHighlight=1 pageSplit=1"]);
+        if (![drag isEqual:@"gap=1 lifted=1 folderHighlight=1 pageSplit=1"])
+          std::printf("SELFTEST-DRAGLOOK-DEBUG %s | %s\n", drag.UTF8String, w.dragLookDebugForTest.UTF8String);
+        if (!grew || !shrank) std::printf("SELFTEST-ROWMOTION-DEBUG open=%s close=%s\n", openMotion.UTF8String, closeMotion.UTF8String);
+      }
       BOOL gone = ![w.currentSpace.allTabs containsObject:a] && w.archivedTabs.count == archived + 1;
       NSUndoManager* um = [w windowWillReturnUndoManager:w.window];
       BOOL canUndo = um.canUndo && [um.undoActionName isEqualToString:@"Close Tab"];
@@ -2175,11 +2366,20 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       [w setThemeGrain:0 forSpace:sp];
       BOOL grainOff = w.themeGrainOpacity == 0;
       std::printf("SELFTEST-GRAIN on=%d saved=%d off=%d\n", grainOn, grainSaved, grainOff);
+      {  // Visual parity V53: three colours paint a three-stop gradient, with grain over it
+        [w setTheme:@[ @"#F29BBB", @"#A6729D", @"#7EB8D6" ] intensity:0.8 forSpace:sp];
+        [w setThemeGrain:0.5 forSpace:sp];
+        CAGradientLayer* g3 = (CAGradientLayer*)w.themeView.layer.sublayers.firstObject;
+        BOOL three = g3.colors.count == 3 && w.themeGrainOpacity > 0.1f;
+        std::printf("SELFTEST-GRADIENT threeStops=%d grain=%d\n", g3.colors.count == 3, three);
+        [w setThemeGrain:0 forSpace:sp];
+      }
       [w setTheme:nil intensity:0.5 forSpace:sp];
       BOOL cleared = w.themeView.hidden == !w.defaultThemeShown;
       [w setIcon:@"" forSpace:sp];
       std::printf("SELFTEST-THEME shown=%d colors=%d icon=%d saved=%d perSpace=%d cleared=%d\n", shown, colors, icon, saved,
                   perSpace, cleared && sp.iconEmoji == nil);
+
     });
     // Hover card on a sidebar tab.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 54 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -4452,8 +4652,8 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
             writeToFile:[folder stringByAppendingPathComponent:@"icons.png"] atomically:YES];
       }
       {  // #72: Arc's panes, everything that was in Settings is still there, Profiles / Appearance / Advanced work.
-        BOOL panes = [sw.paneIdentifiers isEqualToArray:@[ @"general", @"profiles", @"appearance", @"links", @"max", @"advanced" ]] &&
-                     find([sw viewOfPane:@"max"], @"Turn on Max") != nil;
+        BOOL panes = [sw.paneIdentifiers isEqualToArray:@[ @"general", @"profiles", @"max", @"links", @"shortcuts", @"icon", @"advanced" ]] &&
+                     [sw checkboxForSetting:kSettingMaxEnabled] != nil;
         [sw selectPane:@"advanced"];
         BOOL select = [sw.selectedPane isEqualToString:@"advanced"];
         [sw selectPane:@"general"];
@@ -4512,6 +4712,28 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         ApplyAppIcon();
         SettingsDidChange();
         [sw selectPane:@"general"];
+        {  // Visual parity V58: grouped cards, switches, Arc's flat buttons, the Icon pane's radio list.
+          NSString* gen = [sw paneLook:@"general"], *adv2 = [sw paneLook:@"advanced"], *icon = [sw paneLook:@"icon"];
+          NSString* links = [sw paneLook:@"links"], *keys = [sw paneLook:@"shortcuts"];
+          auto num = ^int(NSString* look, NSString* k) {
+            for (NSString* part in [look componentsSeparatedByString:@" "])
+              if ([part hasPrefix:[k stringByAppendingString:@"="]]) return [[part substringFromIndex:k.length + 1] intValue];
+            return -1;
+          };
+          BOOL cards = num(gen, @"cards") >= 6 && num(adv2, @"cards") >= 3 && num(links, @"cards") >= 3;
+          BOOL switches = num(gen, @"switches") >= 8 && num(gen, @"checkboxes") == 0 && num(links, @"checkboxes") == 0;
+          BOOL buttons = num(gen, @"flatButtons") >= 2 && num(adv2, @"flatButtons") >= 3 && num(adv2, @"systemButtons") == 0;
+          BOOL iconList = num(icon, @"radios") == (int)AppIconNames().count && num(icon, @"cards") == 1;
+          BOOL shortcuts = num(keys, @"cards") == 1 && [sw viewOfPane:@"shortcuts"] != nil;
+          [sw chooseAppIcon:AppIconNames().lastObject];
+          BOOL radioFollows = [[sw appIconShownAsChosen] isEqualToString:AppIconNames().lastObject];
+          [sw chooseAppIcon:kAppIconBundle];
+          std::printf("SELFTEST-SETTINGSLOOK cards=%d switches=%d buttons=%d iconList=%d shortcutsPane=%d radioFollows=%d\n", cards,
+                      switches, buttons, iconList, shortcuts, radioFollows);
+          if (!(cards && switches && buttons && iconList && shortcuts))
+            std::printf("SELFTEST-SETTINGSLOOK-DEBUG general[%s] advanced[%s] icon[%s] links[%s] shortcuts[%s]\n", gen.UTF8String,
+                        adv2.UTF8String, icon.UTF8String, links.UTF8String, keys.UTF8String);
+        }
         std::printf("SELFTEST-SETTINGSPANES panes=%d select=%d kept=%d listed=%d spaceShown=%d created=%d renamed=%d "
                     "darkDefault=%d lightDefault=%d spaceWins=%d autoBack=%d advanced=%d reset=%d\n", panes, select, kept,
                     listed, spaceShown, created, renamed, darkDefault, lightDefault, spaceWins, autoBack, advanced, reset);
@@ -4773,9 +4995,10 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
 // Settings > Profiles has the button; the Settings window isn't the browser's, so it lands here.
 - (IBAction)importEverythingFromArcMenu:(id)sender { [self.window importEverythingFromArcMenu:sender]; }
 
-- (IBAction)showKeyboardShortcuts:(id)sender {
-  [[ShortcutsWindowController shared] showWindow:nil];
-  [[ShortcutsWindowController shared].window makeKeyAndOrderFront:nil];
+- (IBAction)showKeyboardShortcuts:(id)sender {  // Arc keeps them in Settings > Shortcuts
+  [[SettingsWindowController shared] showWindow:nil];
+  [[SettingsWindowController shared] selectPane:@"shortcuts"];
+  [[SettingsWindowController shared].window makeKeyAndOrderFront:nil];
 }
 
 - (IBAction)showSettings:(id)sender {
@@ -4954,6 +5177,20 @@ int main(int argc, char* argv[]) {
         selfTest = YES;  // same isolation as the self-test: test profiles, mock Keychain, hidden window
         snapshotPath = [NSString stringWithUTF8String:argv[i] + strlen("--sidebar-snapshot=")];
       }
+
+    if (selfTest) {
+      // Test runs never touch the user's real profile: they need a throwaway home (CFFIXED_USER_HOME, see
+      // scripts/make-test-home.py), and their preference writes stay in memory (app/test_isolation.h).
+      if (!TestIsolationHomeIsolated()) {
+        std::printf("SELFTEST-REALPROFILE isolatedHome=0 refused=1\n");
+        std::fprintf(stderr, "NotArc test runs need a throwaway home so they never touch your real profile:\n"
+                             "  scripts/make-test-home.py /tmp/notarc-home\n"
+                             "  CFFIXED_USER_HOME=/tmp/notarc-home %s %s\n", argv[0], argc > 1 ? argv[1] : "");
+        std::fflush(stdout);
+        return 3;
+      }
+      TestIsolationInstall();
+    }
 
     CefSettings settings;
     settings.no_sandbox = true;

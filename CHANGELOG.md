@@ -3,6 +3,23 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## 0.29.0
+- Dialogs are Arc-style cards over the dimmed window, with Arc's blue, red and neutral buttons.
+- Settings has Arc's panes (General, Profiles, Max, Links, Shortcuts, Icon, Advanced) with grouped cards and switches;
+  keyboard shortcuts moved into Settings > Shortcuts, and the Icon pane is a list with a preview of each icon.
+- Edit Theme opens Arc's theme picker: light, dark or automatic, a colour pad with up to three colour dots for a
+  gradient, intensity and grain, and pages of preset colours. Changes show at once.
+- Theme colours are shaded for dark and light mode so the sidebar text stays readable.
+- New Space is one card: icon, name, profile and theme.
+- Switching Spaces pages the sidebar with a little spring and cross-fades the window colour; Cmd+S slides the sidebar
+  out and in while the page grows and shrinks. Nothing moves with Reduce Motion.
+- New tabs grow into the sidebar, closed tabs shrink away, and Clear sends tabs flying to the Library button.
+- Dragging a tab lifts it with a shadow, the list opens a gap where it will land, and folders light up under it.
+- A brand-new install starts with a welcome and a short tour, then offers to bring everything over from Arc or
+  another browser.
+- Self-tests can no longer change your real NotArc settings or files: they refuse to run without a throwaway home and
+  check at the end that nothing of yours changed.
+
 ## 0.28.0
 - Command bar: the empty bar shows your recent tabs and a few actions before top sites; Tab completes the selected
   row; a site's name then Tab starts Site Search ("Search Wikipedia" capsule); Shift+Return opens a Little Window

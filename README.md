@@ -129,8 +129,8 @@ Requirements: an Apple Silicon Mac, Apple's Command Line Tools (Xcode isn't need
 3. Open `build/Release/NotArc.app`
 4. Optional: `scripts/package.sh` makes the release disk image in `dist/`
 
-Developer flags: `--selftest` runs the automated self-test (separate test data; it never touches your own profiles,
-settings or Keychain), `--dump-arc` prints what would be imported from Arc, and `--dump-store` prints NotArc's saved
+Developer flags: `--selftest` runs the automated self-test (needs a throwaway home, see CONTRIBUTING.md; it never
+touches your own profiles, settings or Keychain), `--dump-arc` prints what would be imported from Arc, and `--dump-store` prints NotArc's saved
 sidebar.
 
 ## Project layout

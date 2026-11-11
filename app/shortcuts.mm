@@ -119,7 +119,7 @@ NSString* SetShortcut(NSMenu* mainMenu, NSString* path, NSString* key, NSEventMo
   _search.target = self;
   _search.action = @selector(reload);
   _table = [[NSTableView alloc] initWithFrame:NSZeroRect];
-  for (NSArray* c in @[ @[ @"cmd", @"Command", @360 ], @[ @"key", @"Shortcut", @140 ] ]) {
+  for (NSArray* c in @[ @[ @"cmd", @"Command", @290 ], @[ @"key", @"Shortcut", @96 ] ]) {
     NSTableColumn* tc = [[NSTableColumn alloc] initWithIdentifier:c[0]];
     tc.title = c[1];
     tc.width = [c[2] doubleValue];
@@ -139,7 +139,16 @@ NSString* SetShortcut(NSMenu* mainMenu, NSString* path, NSString* key, NSEventMo
   NSButton* reset = [NSButton buttonWithTitle:@"Reset" target:self action:@selector(resetShortcut:)];
   _status = [NSTextField labelWithString:@"Double-click a command, then press the new keys. Esc cancels."];
   _status.textColor = NSColor.secondaryLabelColor;
-  NSView* c = w.contentView;
+  NSView* c = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 484, 420)];
+  w.contentView = c;
+  _table.usesAlternatingRowBackgroundColors = NO;
+  _table.rowHeight = 28;
+  _table.headerView = nil;
+  _table.style = NSTableViewStylePlain;
+  _table.columnAutoresizingStyle = NSTableViewLastColumnOnlyAutoresizingStyle;
+  scroll.borderType = NSNoBorder;
+  scroll.drawsBackground = NO;
+  _table.backgroundColor = NSColor.clearColor;
   for (NSView* v in @[ _search, scroll, change, clear, reset, _status ]) {
     v.translatesAutoresizingMaskIntoConstraints = NO;
     [c addSubview:v];
@@ -167,6 +176,17 @@ NSString* SetShortcut(NSMenu* mainMenu, NSString* path, NSString* key, NSEventMo
   return self;
 }
 
+- (NSView*)contentForSettingsPane {
+  NSView* c = self.window.contentView;
+  if (c.subviews.count == 0) return c;  // already moved
+  self.window.contentView = [NSView new];
+  c.translatesAutoresizingMaskIntoConstraints = NO;
+  [c.widthAnchor constraintEqualToConstant:484].active = YES;
+  [c.heightAnchor constraintEqualToConstant:420].active = YES;
+  _status.stringValue = @"Double-click a command, then press the new keys. Esc cancels.";
+  return c;
+}
+
 - (void)reload {
   NSString* q = _search.stringValue.lowercaseString;
   NSMutableArray* items = [NSMutableArray array];
@@ -181,11 +201,35 @@ NSString* SetShortcut(NSMenu* mainMenu, NSString* path, NSString* key, NSEventMo
 
 - (NSView*)tableView:(NSTableView*)t viewForTableColumn:(NSTableColumn*)col row:(NSInteger)row {
   NSMenuItem* i = _items[(NSUInteger)row];
+  NSString* path = ShortcutPath(i);
+  if ([path hasPrefix:@"/"]) path = [@"NotArc" stringByAppendingString:path];  // the app menu has no title of its own
   NSString* text = [col.identifier isEqualToString:@"cmd"]
-      ? [ShortcutPath(i) stringByReplacingOccurrencesOfString:@"/" withString:@" › "]
+      ? [path stringByReplacingOccurrencesOfString:@"/" withString:@" › "]
       : (row == _recordingRow ? @"Press keys..." : ShortcutDisplay(i.keyEquivalent, i.keyEquivalentModifierMask & kMods));
   NSTextField* f = [NSTextField labelWithString:text];
   f.lineBreakMode = NSLineBreakByTruncatingTail;
+  if ([col.identifier isEqualToString:@"key"]) {  // Arc: the keys in a small rounded keycap box, "---" when unset
+    f.stringValue = text.length ? text : @"---";
+    f.alignment = NSTextAlignmentCenter;
+    f.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+    f.wantsLayer = YES;
+    f.drawsBackground = YES;
+    f.backgroundColor = [NSColor colorWithName:nil dynamicProvider:^NSColor*(NSAppearance* a) {
+      BOOL dark = [[a bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] isEqual:NSAppearanceNameDarkAqua];
+      return dark ? [NSColor colorWithWhite:1 alpha:0.1] : [NSColor whiteColor];
+    }];
+    f.layer.cornerRadius = 5;
+    if (!text.length) f.textColor = NSColor.tertiaryLabelColor;
+    NSView* cell = [NSView new];
+    f.translatesAutoresizingMaskIntoConstraints = NO;
+    [cell addSubview:f];
+    [NSLayoutConstraint activateConstraints:@[
+      [f.centerYAnchor constraintEqualToAnchor:cell.centerYAnchor],
+      [f.trailingAnchor constraintEqualToAnchor:cell.trailingAnchor constant:-4],
+      [f.widthAnchor constraintGreaterThanOrEqualToConstant:64],
+    ]];
+    return cell;
+  }
   return f;
 }
 

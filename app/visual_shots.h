@@ -8,7 +8,10 @@
 //   size <w> <h>                 main window size in points
 //   appearance dark|light|auto
 //   space <n>                    switch to the n-th Space (0-based)
-//   theme <n> <#hex> [#hex] <intensity>
+//   theme <n> <#hex> [#hex] [#hex] <intensity>
+//   grain <n> <0..1>             the Space's grain
+//   welcome <page>               the first-launch welcome on a page (welcome, pin, spaces, split, commandbar, import,
+//                                progress, done)
 //   newtab <url>                 new Today tab in the current Space
 //   show <text>                  show the first tab whose address or title contains <text>
 //   split <url> <url> [...]      open a split view

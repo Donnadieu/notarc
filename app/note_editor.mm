@@ -1,4 +1,5 @@
 #import "app/note_editor.h"
+#import "app/arc_alert.h"
 
 // Sizes and spacing. The first paragraph is the title; headings are bold and larger than body text.
 static const CGFloat kTitleSize = 30, kH1Size = 24, kH2Size = 20, kH3Size = 17, kBodySize = 15;
@@ -536,7 +537,7 @@ NSString* NoteMarkdown(NSAttributedString* a) {
 - (IBAction)noteAddLink:(id)sender {
   NSRange r = self.selectedRange;
   id cur = r.length ? [self.textStorage attribute:NSLinkAttributeName atIndex:r.location effectiveRange:nil] : nil;
-  NSAlert* alert = [NSAlert new];
+  ArcAlert* alert = [ArcAlert new];
   alert.messageText = r.length ? @"Link the selected text to:" : @"Insert a link to:";
   [alert addButtonWithTitle:@"OK"];
   [alert addButtonWithTitle:@"Cancel"];

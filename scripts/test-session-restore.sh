@@ -6,6 +6,11 @@
 set -u
 APP="${1:-build/Release/NotArc.app}/Contents/MacOS/NotArc"
 LOG=$(mktemp -d)
+# Test runs refuse the real home (they'd touch your own NotArc profile): make a throwaway one unless given.
+if [ -z "${CFFIXED_USER_HOME:-}" ]; then
+  export CFFIXED_USER_HOME="$LOG/home"
+  python3 "$(dirname "$0")/make-test-home.py" "$CFFIXED_USER_HOME" >/dev/null || exit 1
+fi
 perl -e 'alarm 280; exec @ARGV' "$APP" --selftest > "$LOG/phase1.log" 2>&1
 "$APP" --selftest-reload > "$LOG/crash.log" 2>&1 &
 PID=$!
@@ -14,6 +19,9 @@ kill -9 $PID 2>/dev/null; wait $PID 2>/dev/null
 pkill -9 -f "NotArc Helper.*SelfTest" 2>/dev/null
 sleep 2
 perl -e 'alarm 90; exec @ARGV' "$APP" --selftest-reload > "$LOG/restore.log" 2>&1
+if grep -h '^SELFTEST-REALPROFILE ' "$LOG"/*.log | grep -q 'isolatedHome=0\|Untouched=0'; then
+  echo "REAL PROFILE TOUCHED (logs in $LOG)"; exit 1
+fi
 LINE=$(grep SELFTEST-RESTORE "$LOG/restore.log")
 echo "$LINE"
 if echo "$LINE" | grep -q "crashedLastTime=1" && echo "$LINE" | grep -q "shown=https://example.org/session-restore-marker" &&

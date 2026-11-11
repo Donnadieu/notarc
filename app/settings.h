@@ -103,7 +103,7 @@ void SettingsDidChange(void);
 - (NSArray<NSString*>*)profileRows;  // "Name: Space A, Space B" per profile, in table order
 - (NSString*)createProfileNamed:(NSString*)name;
 - (BOOL)renameProfileAtRow:(NSInteger)row to:(NSString*)name;
-// Appearance pane.
+// General (Space appearance) and Icon panes.
 - (void)chooseSpaceAppearance:(NSString*)scheme;  // same as the pop-up
 - (void)chooseAppIcon:(NSString*)name;            // same as clicking an icon
 - (NSString*)appIconShownAsChosen;                // the icon the picker marks as chosen
@@ -112,4 +112,5 @@ void SettingsDidChange(void);
 - (NSString*)developerModeSitesText;
 - (IBAction)resetDeveloperModeSites:(id)sender;
 - (BOOL)hasCheckboxForKey:(NSString*)key;  // tests
+- (NSString*)paneLook:(NSString*)identifier;  // tests: "cards=N switches=N checkboxes=N flatButtons=N systemButtons=N radios=N"
 @end

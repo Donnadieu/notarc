@@ -1,5 +1,6 @@
 // Hidden design renders for the visual parity checklist. See visual_shots.h for the plan format.
 #import "app/visual_shots.h"
+#import "app/welcome.h"
 #import "app/downloads.h"
 
 #include <dlfcn.h>
@@ -155,6 +156,12 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
       NSUInteger i = (NSUInteger)args[0].integerValue;
       NSArray* colors = [args subarrayWithRange:NSMakeRange(1, args.count - 2)];
       if (i < c.spaces.count) [c setTheme:colors intensity:args.lastObject.doubleValue forSpace:c.spaces[i]];
+    } else if ([cmd isEqual:@"welcome"]) {  // welcome <page>: the first-launch welcome (V56, V57) on that page
+      if (!c.welcomeViewForTest) [c showWelcome];
+      if (arg.length) [c.welcomeViewForTest showPage:arg];
+    } else if ([cmd isEqual:@"grain"] && args.count >= 2) {  // grain <n> <0..1>
+      NSUInteger i = (NSUInteger)args[0].integerValue;
+      if (i < c.spaces.count) [c setThemeGrain:args[1].doubleValue forSpace:c.spaces[i]];
     } else if ([cmd isEqual:@"newtab"] || [cmd isEqual:@"open"]) {
       [c openInNewTab:arg];
     } else if ([cmd isEqual:@"show"]) {

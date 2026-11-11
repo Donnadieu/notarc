@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-50 done of 65 items.
+65 done of 65 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -76,7 +76,7 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   slanted slash (white 30%); the pane on screen is full brightness, the others dimmed. Ref: colours (slash), video.
 - [x] **V20 Hover, selected and pressed states.** Selected white ~20%, hovered previous ~12%, pressed ~6.5%,
   multi-selected ~10% (dark); light mode uses white 85/50/... with a small shadow on the selected row. Ref: colours.
-- [ ] **V21 Drag and drop.** A dragged row lifts with a shadow, other rows slide apart to make a gap, a drop into a
+- [x] **V21 Drag and drop.** A dragged row lifts with a shadow, other rows slide apart to make a gap, a drop into a
   folder highlights it, and a drop on the page card offers split. Ref: app (drag hint), video.
 - [x] **V22 Empty Space.** A Space with no tabs shows only the title, divider and "+ New Tab"; no placeholder text.
   Ref: shot, video.
@@ -168,39 +168,39 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
 
 ## Spaces and themes
 
-- [ ] **V52 Space theme picker.** A popover with a big colour pad (drag dots for a one, two or three-colour
+- [x] **V52 Space theme picker.** A popover with a big colour pad (drag dots for a one, two or three-colour
   gradient), rows of preset colours (pastel, muted, greys), sun/moon/automatic toggle, intensity and grain. Ref: app
   (Space style editor), video.
-- [ ] **V53 Space gradients and grain.** The sidebar and window background paint the gradient with a fine grain.
+- [x] **V53 Space gradients and grain.** The sidebar and window background paint the gradient with a fine grain.
   Ref: app (window theme), shot.
-- [ ] **V54 New Space flow.** Name, emoji icon, profile and theme in one card. Ref: app (Space creation), video.
-- [ ] **V55 Space switching animation.** The sidebar slides left/right with a spring as you change Space; the window
+- [x] **V54 New Space flow.** Name, emoji icon, profile and theme in one card. Ref: app (Space creation), video.
+- [x] **V55 Space switching animation.** The sidebar slides left/right with a spring as you change Space; the window
   colour cross-fades. Ref: app, video.
 
 ## Onboarding, settings, toasts
 
-- [ ] **V56 Onboarding.** Full-window welcome with a soft glow, then a few short steps (pinning, Spaces, split view,
+- [x] **V56 Onboarding.** Full-window welcome with a soft glow, then a few short steps (pinning, Spaces, split view,
   new tab). Ref: app (welcome screens), video.
-- [ ] **V57 Import screen.** Pick a browser from a grid of cards, then a progress step and a done step. Ref: app
+- [x] **V57 Import screen.** Pick a browser from a grid of cards, then a progress step and a done step. Ref: app
   (import screens), video.
-- [ ] **V58 Settings window.** Toolbar tabs with icons (General, Profiles, Links, Shortcuts, Icon, Max, Advanced),
+- [x] **V58 Settings window.** Toolbar tabs with icons (General, Profiles, Links, Shortcuts, Icon, Max, Advanced),
   grouped sections, Arc's button styles. Ref: app (settings panes).
 - [x] **V59 Toasts.** A dark capsule with an icon and short text ("Copied URL") near the bottom of the page card, a
   thin divider, then plain-text actions (Undo) in blue; fades out. Ref: app (toasts), video.
-- [ ] **V60 Alerts and dialogs.** Rounded card dialogs with Arc's contrasting and red destructive buttons. Ref: app
+- [x] **V60 Alerts and dialogs.** Rounded card dialogs with Arc's contrasting and red destructive buttons. Ref: app
   (button styles).
 
 ## Look everywhere
 
-- [ ] **V61 Dark mode.** Every screen above in dark. Ref: colours.
-- [ ] **V62 Light mode.** Every screen above in light, including the light selected-row shadow. Ref: colours.
-- [ ] **V63 Typography.** SF Pro sizes and weights: tab title 13-14 medium, Space title 12-13 semibold, command bar
+- [x] **V61 Dark mode.** Every screen above in dark. Ref: colours.
+- [x] **V62 Light mode.** Every screen above in light, including the light selected-row shadow. Ref: colours.
+- [x] **V63 Typography.** SF Pro sizes and weights: tab title 13-14 medium, Space title 12-13 semibold, command bar
   input 20, rows 13-14. Ref: shot, video.
-- [ ] **V64 Sizes, spacing and corner radii.** 273 pt sidebar, 8 pt side insets, 36 pt pill and rows, 10 pt pill and
+- [x] **V64 Sizes, spacing and corner radii.** 273 pt sidebar, 8 pt side insets, 36 pt pill and rows, 10 pt pill and
   tile corners, 8 pt row and card corners. Ref: shot, app.
-- [ ] **V65 Animations: opening and closing tabs.** A new tab row grows in from zero height; a closed one shrinks
+- [x] **V65 Animations: opening and closing tabs.** A new tab row grows in from zero height; a closed one shrinks
   and the rows below slide up; archive slides it toward the Library button. Ref: video.
-- [ ] **V66 Animations: sidebar show and hide.** Cmd+S slides the sidebar out and the page card expands, both with
+- [x] **V66 Animations: sidebar show and hide.** Cmd+S slides the sidebar out and the page card expands, both with
   a spring; off with Reduce Motion. Ref: app, video.
 
 ## Out of scope
