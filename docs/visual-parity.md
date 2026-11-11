@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-32 done of 66 items.
+34 done of 66 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -90,9 +90,11 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
 - [x] **V26 Unread badge and sound icon.** Unread count/dot on a Favorite's tile; a tab with sound keeps its site
   icon and gets a speaker button at the row's right (left of the cross on hover) that mutes and unmutes it. Ref:
   app (mute button in the tab cell), video.
-- [ ] **V27 Update banner.** When an update is ready, a small banner at the bottom of the sidebar offers to restart.
-  Ref: app (sidebar banner), video.
-- [ ] **V28 Next meeting bar.** A compact card at the sidebar bottom before a meeting, with Join. Ref: app, video.
+- [x] **V27 Update banner.** A background check downloads the update quietly, then a small card at the bottom of
+  the sidebar says the version is ready with a Restart capsule (white on light, black on dark, Arc's updater-button
+  colours). Ref: app (updater button colours).
+- [x] **V28 Next meeting bar.** The same compact card at the sidebar bottom before a meeting: calendar icon, title
+  and time, a Join capsule. Ref: app, video.
 
 ## Command bar and navigation
 

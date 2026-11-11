@@ -2805,6 +2805,16 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       SettingSetBool(kSettingCalendar, YES);
       [w setCalendarEventsForTest:events now:now];
       BOOL bar = [w.meetingBarText hasPrefix:@"Standup"] && [w.meetingBarText containsString:@"in 5 min"] && w.meetingJoinShown;
+      {  // Visual parity V27/V28: Arc's sidebar cards; the update banner appears on the ready notice, below the tabs
+        [NSNotificationCenter.defaultCenter postNotificationName:UpdaterUpdateReadyNotification object:nil
+                                                        userInfo:@{@"version" : @"9.9.9", @"staged" : @"/nonexistent"}];
+        [w restartToUpdate:nil];  // memory-only in tests: counted, never quits
+        NSString* ub = w.updateBannerState;
+        BOOL look = [ub isEqual:@"shown=1 text=NotArc 9.9.9 is ready button=Restart belowTabs=1 clicks=1"];
+        std::printf("SELFTEST-UPDATEBANNER arcStyle=%d\n", look);
+        if (!look) std::printf("SELFTEST-UPDATEBANNER-DEBUG %s\n", ub.UTF8String);
+        [w hideUpdateBannerForTest];
+      }
       SettingSetBool(kSettingCalendar, NO);
       [w setCalendarEventsForTest:events now:now];
       BOOL off = w.meetingBarText == nil;

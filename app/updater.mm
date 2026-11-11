@@ -63,9 +63,12 @@ static int Run(NSString* tool, NSArray<NSString*>* args, NSString** output) {
 @implementation UpdateInfo
 @end
 
+NSString* const UpdaterUpdateReadyNotification = @"NotArcUpdateReady";
+
 @implementation Updater {
   NSTimer* _timer;
   BOOL _busy;
+  NSString* _readyStaged;
 }
 
 + (instancetype)shared {
@@ -186,6 +189,16 @@ static int Run(NSString* tool, NSArray<NSString*>* args, NSString** output) {
     }
     if (!interactive && [[NSUserDefaults.standardUserDefaults stringForKey:kSkipVersionKey] isEqualToString:info.version])
       return;
+    if (!interactive) {  // Arc: a background check gets the update ready quietly, then the sidebar offers a restart
+      if ([self->_readyVersion isEqualToString:info.version]) return;
+      self->_busy = YES;
+      [self prepareUpdate:info done:^(NSString* staged, NSError* err) {
+        self->_busy = NO;
+        if (!staged) return;
+        [self announceReady:info.version staged:staged];
+      }];
+      return;
+    }
     NSAlert* a = [NSAlert new];
     a.messageText = [NSString stringWithFormat:@"NotArc %@ is available", info.version];
     a.informativeText = [NSString stringWithFormat:@"You have %@. Your tabs and Spaces are kept.\n\n%@", current,
@@ -206,6 +219,18 @@ static int Run(NSString* tool, NSArray<NSString*>* args, NSString** output) {
       [f runModal];
     }];
   }];
+}
+
+- (void)announceReady:(NSString*)version staged:(NSString*)staged {
+  _readyVersion = [version copy];
+  _readyStaged = [staged copy];
+  [NSNotificationCenter.defaultCenter postNotificationName:UpdaterUpdateReadyNotification
+                                                    object:self
+                                                  userInfo:@{@"version" : version, @"staged" : staged}];
+}
+
+- (void)installReadyUpdate {
+  if (_readyStaged) [self installStagedApp:_readyStaged];
 }
 
 - (void)scheduleDailyChecks {

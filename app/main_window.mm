@@ -450,6 +450,51 @@ static NSImage* SadPageGlyph() {
   return glyph;
 }
 
+// A card for the bottom of the sidebar: icon, one line (tag 1) and a capsule button (tag 2).
+static NSBox* SidebarBannerCard(NSString* symbol, id target, SEL action, NSString* button) {
+  const CGFloat W = kSidebarWidth - 17, H = 36;
+  NSBox* card = [[NSBox alloc] initWithFrame:NSMakeRect(8, 44, W, H)];
+  card.boxType = NSBoxCustom;
+  card.borderWidth = 0;
+  card.cornerRadius = 8;
+  card.contentViewMargins = NSZeroSize;
+  card.fillColor = [NSColor colorWithName:nil dynamicProvider:^NSColor*(NSAppearance* ap) {
+    BOOL dark = [ap bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] == NSAppearanceNameDarkAqua;
+    return [NSColor colorWithWhite:dark ? 1 : 0 alpha:dark ? 0.10 : 0.06];
+  }];
+  NSImageView* icon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil]];
+  icon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:13 weight:NSFontWeightMedium];
+  icon.frame = NSMakeRect(10, 10, 16, 16);
+  icon.contentTintColor = NSColor.secondaryLabelColor;
+  NSTextField* title = [NSTextField labelWithString:@""];
+  title.tag = 1;
+  title.lineBreakMode = NSLineBreakByTruncatingTail;
+  title.font = [NSFont systemFontOfSize:12 weight:NSFontWeightMedium];
+  title.textColor = NSColor.labelColor;
+  NSButton* b = [NSButton buttonWithTitle:button target:target action:action];
+  b.tag = 2;
+  b.bordered = NO;
+  b.wantsLayer = YES;
+  b.font = [NSFont systemFontOfSize:11 weight:NSFontWeightSemibold];
+  b.attributedTitle = [[NSAttributedString alloc]
+      initWithString:button
+          attributes:@{NSFontAttributeName : b.font, NSForegroundColorAttributeName : NSColor.labelColor}];
+  CGFloat bw = ceil([button sizeWithAttributes:@{NSFontAttributeName : b.font}].width) + 20;
+  b.frame = NSMakeRect(W - 7 - bw, 7, bw, 22);
+  NSBox* pill = [[NSBox alloc] initWithFrame:b.frame];  // the capsule behind the button, following light / dark
+  pill.boxType = NSBoxCustom;
+  pill.borderWidth = 0;
+  pill.cornerRadius = 11;
+  pill.fillColor = [NSColor colorWithName:nil dynamicProvider:^NSColor*(NSAppearance* ap) {
+    BOOL dark = [ap bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] == NSAppearanceNameDarkAqua;
+    return dark ? NSColor.blackColor : NSColor.whiteColor;
+  }];
+  pill.identifier = @"bannerPill";
+  title.frame = NSMakeRect(32, 10, NSMinX(b.frame) - 6 - 32, 16);
+  for (NSView* v in @[ icon, title, pill, b ]) [card.contentView addSubview:v];
+  return card;
+}
+
 // Arc's folder glyphs (drawn here, 16 pt templates): a closed folder, and an open one whose front leans forward.
 static NSImage* FolderGlyph(BOOL open) {
   static NSImage* glyphs[2];
@@ -1172,6 +1217,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSView* _commandScrim;
   NSButton* _navBack;
   NSView* _peekScrim;
+  NSBox* _updateBanner;
+  NSInteger _restartToUpdateClicks;
   BOOL _sidebarPeeking;      // the hidden sidebar shown floating over the page (pointer at the left edge)
   NSView* _edgeStrip;        // 6 pt strip at the window's left edge while the sidebar is hidden
   HoverTracker* _edgeTracker;
@@ -1432,23 +1479,17 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _mediaBar.hidden = YES;
   [sidebar addSubview:_mediaBar];
   // Arc's next-meeting bar (#56): title, when, and Join for a video-call link; from the Mac's Calendar.
-  _meetingBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 44, kSidebarWidth - 16, 34)];
-  _meetingBar.wantsLayer = YES;
-  _meetingBar.layer.cornerRadius = 8;
-  _meetingBar.layer.backgroundColor = [NSColor.labelColor colorWithAlphaComponent:0.08].CGColor;
-  NSImageView* calIcon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"calendar" accessibilityDescription:nil]];
-  calIcon.frame = NSMakeRect(8, 8, 18, 18);
-  calIcon.contentTintColor = NSColor.secondaryLabelColor;
-  _meetingTitle = [NSTextField labelWithString:@""];
-  _meetingTitle.lineBreakMode = NSLineBreakByTruncatingTail;
-  _meetingTitle.font = [NSFont systemFontOfSize:12];
-  _meetingTitle.frame = NSMakeRect(32, 8, kSidebarWidth - 16 - 32 - 52, 18);
-  _meetingJoin = [NSButton buttonWithTitle:@"Join" target:self action:@selector(joinMeeting:)];
-  _meetingJoin.bezelStyle = NSBezelStyleRounded;
-  _meetingJoin.controlSize = NSControlSizeSmall;
-  _meetingJoin.font = [NSFont systemFontOfSize:11];
-  _meetingJoin.frame = NSMakeRect(kSidebarWidth - 16 - 52, 5, 46, 24);
-  for (NSView* v in @[ calIcon, _meetingTitle, _meetingJoin ]) [_meetingBar addSubview:v];
+  // Arc's sidebar cards above the bottom bar (next meeting, update ready): a soft rounded card with an icon, one line
+  // and a small capsule button in Arc's updater-button colours (white on light, black on dark).
+  _meetingBar = SidebarBannerCard(@"calendar", self, @selector(joinMeeting:), @"Join");
+  _meetingTitle = [_meetingBar viewWithTag:1];
+  _meetingJoin = [_meetingBar viewWithTag:2];
+  _updateBanner = SidebarBannerCard(@"arrow.down.circle.fill", self, @selector(restartToUpdate:), @"Restart");
+  _updateBanner.hidden = YES;
+  _updateBanner.toolTip = @"Restart NotArc to finish updating; your tabs come back";
+  [sidebar addSubview:_updateBanner];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateReady:)
+                                             name:UpdaterUpdateReadyNotification object:nil];
   _meetingBar.hidden = YES;
   [sidebar addSubview:_meetingBar];
 
@@ -1691,6 +1732,10 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   mf.origin.y = bottom + 2;
   _meetingBar.frame = mf;
   if (!_meetingBar.hidden) bottom += 40;
+  NSRect uf = _updateBanner.frame;
+  uf.origin.y = bottom + 2;
+  _updateBanner.frame = uf;
+  if (!_updateBanner.hidden) bottom += 40;
   _sidebarScroll.frame = NSMakeRect(8, bottom, w, MAX(0, H - top - bottom));
   // The Library takes the place of Favorites, the Space title and the tabs, between the address pill and the bars.
   _library.hidden = !_libraryShown;
@@ -3201,6 +3246,16 @@ static NSString* const kCallHookJS =
   refresh();
   _meetingTimer = [NSTimer scheduledTimerWithTimeInterval:60 repeats:YES block:^(NSTimer*) { refresh(); }];
 }
+- (void)showMeetingForVisualShots {  // --visual-shots only (memory-only settings)
+  NSDate* now = [NSDate date];
+  CalendarEvent* e = [CalendarEvent new];
+  e.title = @"Design review";
+  e.start = [now dateByAddingTimeInterval:300];
+  e.end = [now dateByAddingTimeInterval:1800];
+  e.meetingURL = @"https://meet.google.com/abc-defg-hij";
+  SettingSetBool(kSettingCalendar, YES);
+  [self setCalendarEventsForTest:@[ e ] now:now];
+}
 - (void)setCalendarEventsForTest:(NSArray<CalendarEvent*>*)events now:(NSDate*)now {
   _todayEvents = events;
   _calendarTestNow = now;
@@ -3218,6 +3273,31 @@ static NSString* const kCallHookJS =
   if (_meetingBar.hidden == !e) return;
   _meetingBar.hidden = !e;
   [self layoutSidebar];
+}
+- (void)updateReady:(NSNotification*)n {
+  NSString* version = n.userInfo[@"version"];
+  ((NSTextField*)[_updateBanner viewWithTag:1]).stringValue = [NSString stringWithFormat:@"NotArc %@ is ready", version ?: @""];
+  _updateBanner.hidden = NO;
+  [self layoutSidebar];
+}
+- (void)hideUpdateBannerForTest {
+  _updateBanner.hidden = YES;
+  _restartToUpdateClicks = 0;
+  [self layoutSidebar];
+}
+- (IBAction)restartToUpdate:(id)sender {
+  if (self.selfTestProfiles) {  // tests count the click; they never quit
+    ++_restartToUpdateClicks;
+    return;
+  }
+  [[Updater shared] installReadyUpdate];
+}
+- (NSString*)updateBannerState {  // tests (V27)
+  NSRect sb = _sidebarScroll.frame;
+  return [NSString stringWithFormat:@"shown=%d text=%@ button=%@ belowTabs=%d clicks=%ld", !_updateBanner.hidden,
+                                    ((NSTextField*)[_updateBanner viewWithTag:1]).stringValue,
+                                    ((NSButton*)[_updateBanner viewWithTag:2]).title,
+                                    _updateBanner.hidden || NSMaxY(_updateBanner.frame) <= NSMinY(sb), (long)_restartToUpdateClicks];
 }
 - (NSString*)meetingBarText { return _meetingBar.hidden ? nil : _meetingTitle.stringValue; }  // tests
 - (BOOL)meetingJoinShown { return !_meetingBar.hidden && !_meetingJoin.hidden; }

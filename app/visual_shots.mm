@@ -209,6 +209,12 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
         t.audioMuted = [cmd isEqual:@"muted"];
         [c reloadSidebarItemForTest:t];
       }
+    } else if ([cmd isEqual:@"update-ready"]) {
+      [NSNotificationCenter.defaultCenter postNotificationName:@"NotArcUpdateReady" object:nil
+                                                      userInfo:@{@"version" : arg.length ? arg : @"0.27.0", @"staged" : @"/nonexistent"}];
+    } else if ([cmd isEqual:@"meeting"]) {  // a fake "Standup in 5 min" card (memory-only settings)
+      SEL s = NSSelectorFromString(@"showMeetingForVisualShots");
+      if ([c respondsToSelector:s]) ((void (*)(id, SEL))[c methodForSelector:s])(c, s);
     } else if ([cmd isEqual:@"hovercard"]) {
       ArcItem* t = FindTab(c.currentSpace, arg);
       if (t) [c showHoverCardForItem:t];

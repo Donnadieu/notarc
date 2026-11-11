@@ -479,6 +479,9 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (NSString*)littleWindowStyle;                 // tests (V38)
 - (NSString*)speakerStateForItem:(ArcItem*)item;  // tests (V26)
 - (NSString*)crashViewStyleForItem:(ArcItem*)item;  // tests (V10)
+- (NSString*)updateBannerState;                 // tests (V27)
+- (void)hideUpdateBannerForTest;
+- (IBAction)restartToUpdate:(id)sender;
 - (NSString*)findBarStyle;                      // tests (V35)
 - (IBAction)closeFindBar:(id)sender;
 - (NSString*)splitRowStateForItem:(ArcItem*)split;  // tests (V19)
