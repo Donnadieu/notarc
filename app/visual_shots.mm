@@ -215,6 +215,25 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
     } else if ([cmd isEqual:@"meeting"]) {  // a fake "Standup in 5 min" card (memory-only settings)
       SEL s = NSSelectorFromString(@"showMeetingForVisualShots");
       if ([c respondsToSelector:s]) ((void (*)(id, SEL))[c methodForSelector:s])(c, s);
+    } else if ([cmd isEqual:@"snap"]) {  // snap <tab>: show it and keep a copy of the page as its picture
+      ArcItem* t = FindTab(c.currentSpace, arg);
+      if (t) {
+        [c showItem:t];
+        [[NSRunLoop currentRunLoop] runUntilDate:[NSDate dateWithTimeIntervalSinceNow:1.5]];
+        CGImageRef img = CopyWindowImage(c.window);
+        NSView* content = [c valueForKey:@"_content"];
+        if (img) {
+          CGFloat sc = CGImageGetWidth(img) / c.window.frame.size.width;
+          NSRect r = [content convertRect:content.bounds toView:nil];
+          CGRect crop = CGRectMake(r.origin.x * sc, (c.window.frame.size.height - NSMaxY(r)) * sc, r.size.width * sc, r.size.height * sc);
+          CGImageRef part = CGImageCreateWithImageInRect(img, crop);
+          if (part) {
+            t.thumbnail = [[NSImage alloc] initWithCGImage:part size:NSMakeSize(r.size.width / 3, r.size.height / 3)];
+            CGImageRelease(part);
+          }
+          CGImageRelease(img);
+        }
+      }
     } else if ([cmd isEqual:@"hovercard"]) {
       ArcItem* t = FindTab(c.currentSpace, arg);
       if (t) [c showHoverCardForItem:t];

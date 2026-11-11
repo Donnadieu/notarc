@@ -3,6 +3,13 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- The sidebar's + menu has an icon on every row and Arc's items in Arc's order, including New Split View, New Boost
+  and New Profile.
+- The Ctrl+Tab switcher is a dark panel of page pictures with soft shadows, each with its site's icon and title; the
+  chosen one sits on a light plate.
+- Hover cards show the page's picture edge to edge on top, then the title and the site.
+
 ## 0.27.0
 - Updates found by the daily check download quietly; a card at the bottom of the sidebar then offers Restart (as in
   Arc) instead of a dialog. Check for Updates in the menu still asks first.
