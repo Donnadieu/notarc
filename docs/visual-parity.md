@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-40 done of 66 items.
+42 done of 66 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -132,11 +132,12 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
 
 ## Library and content
 
-- [ ] **V41 Library panel.** The Library button turns the sidebar into the Library: Spaces, Archive, Downloads,
-  Media/Captures, Easels, Notes and Boosts, each a section you open in place. Ref: app (Library sections), help.
-- [ ] **V42 Downloads.** Downloads live in the Library and in a small panel by the Library button; each item a card
-  with an icon, name, progress and a hover fill; a new download flies into the Library button. Ref: app (download
-  item colours), video.
+- [x] **V41 Library panel.** The Library button turns the sidebar into the Library: a Spaces list, then Archive,
+  Downloads, Media (image and video downloads plus captures), Easels, Notes and Boosts with counts; each opens in
+  place with Back and its own search. Ref: app (Library data: files, links, captures), help.
+- [x] **V42 Downloads.** Downloads live in the Library as cards (file icon, name, status, a thin progress bar while
+  downloading, a hover fill); a new download's icon flies from the page into the Library button and a small tray of
+  recent download cards opens beside it in Arc's download-item colours. Ref: app (download item colours), video.
 - [ ] **V43 Easels.** Canvas on a dotted background, floating tool bar with pointer, pen, shapes, text and image
   tools, capture button. Ref: app (Easel tools), video.
 - [ ] **V44 Notes.** Note page with a large title, reading column and a floating format bar. Ref: app, video.

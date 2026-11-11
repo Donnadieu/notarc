@@ -4,6 +4,10 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- The Library button opens Arc's Library in the sidebar: your Spaces, then Archive, Downloads, Media, Easels, Notes
+  and Boosts, each opened in place with its own search. File > Show Archive still goes straight to Archive.
+- Downloads are cards with a progress bar; a new download flies into the Library button and a small tray of recent
+  downloads opens beside it.
 - Sidebar right-click menus show an icon on every row; pinned-URL actions are under "Edit Pinned Page", and split
   rows can flip their layout or separate all their tabs.
 - The site button opens Arc's site control center: round actions (copy, share, capture, full-page capture, new

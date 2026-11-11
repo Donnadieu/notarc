@@ -11038,7 +11038,9 @@ static BOOL LibraryIsMediaFile(NSString* path) {
     for (DownloadEntry* d in DownloadManager.shared.entries) {
       if (media && !LibraryIsMediaFile(d.path ?: d.fileName)) continue;
       NSString* path = d.path;
-      NSImage* icon = path.length ? [NSWorkspace.sharedWorkspace iconForFile:path] : nil;
+      UTType* ft = path.pathExtension.length ? [UTType typeWithFilenameExtension:path.pathExtension] : nil;
+      NSImage* icon = path.length && [NSFileManager.defaultManager fileExistsAtPath:path] ? [NSWorkspace.sharedWorkspace iconForFile:path]
+                      : ft ? [NSWorkspace.sharedWorkspace iconForContentType:ft] : nil;
       LibraryEntry* e = [LibraryEntry entry:d.fileName detail:d.state == DownloadInProgress ? d.statusText
                                                                                          : (d.total > 0 ? LibrarySize(d.total) : d.statusText)
                                        icon:icon
@@ -11127,8 +11129,9 @@ static BOOL LibraryIsMediaFile(NSString* path) {
   NSView* root = self.window.contentView;
   if (!root || _libraryButton.hidden || !_libraryButton.window) return;
   ++_downloadFlights;
-  NSImage* icon = d.path.length ? [NSWorkspace.sharedWorkspace iconForFileType:d.path.pathExtension ?: @""]
-                                : [NSImage imageWithSystemSymbolName:@"arrow.down.circle.fill" accessibilityDescription:nil];
+  UTType* type = d.path.pathExtension.length ? [UTType typeWithFilenameExtension:d.path.pathExtension] : nil;
+  NSImage* icon = type ? [NSWorkspace.sharedWorkspace iconForContentType:type]
+                       : [NSImage imageWithSystemSymbolName:@"arrow.down.circle.fill" accessibilityDescription:nil];
   NSRect c = _content.frame;
   NSPoint from = NSMakePoint(NSMidX(c), NSMidY(c));
   NSRect lb = [_libraryButton convertRect:_libraryButton.bounds toView:root];

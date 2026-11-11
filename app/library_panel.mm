@@ -26,6 +26,11 @@ NSString* ArchiveGroupTitle(NSDate* when, NSDate* now, NSCalendar* cal) {
 
 NSString* const kLibraryHome = @"home";
 
+static BOOL PanelIsDark(NSView* v) {
+  return [v.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
+         NSAppearanceNameDarkAqua;
+}
+
 @implementation LibraryEntry
 - (instancetype)init {
   if ((self = [super init])) _progress = -1;
@@ -131,10 +136,6 @@ NSString* const kLibraryHome = @"home";
 @implementation LibrarySectionRow
 @end
 
-static BOOL PanelIsDark(NSView* v) {
-  return [v.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
-         NSAppearanceNameDarkAqua;
-}
 
 // Same scroller rule as the sidebar: never a track.
 @interface LibraryScrollView : NSScrollView
