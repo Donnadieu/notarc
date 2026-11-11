@@ -3,7 +3,7 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.27.0
 - Updates found by the daily check download quietly; a card at the bottom of the sidebar then offers Restart (as in
   Arc) instead of a dialog. Check for Updates in the menu still asks first.
 - The next-meeting bar uses the same Arc-style card with a Join capsule.
