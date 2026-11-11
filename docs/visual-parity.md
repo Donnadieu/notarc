@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-37 done of 66 items.
+40 done of 66 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -146,12 +146,15 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
 
 ## Menus and panels
 
-- [ ] **V47 Sidebar right-click menu.** Native menu with Arc's labels and order, section dividers, split icons. Ref:
-  app (context menus).
-- [ ] **V48 Page right-click menu.** Links, images and selected text with Arc's extra items (Open in Split View, Peek,
-  Little Window, Copy as Markdown). Ref: app.
-- [ ] **V49 Site controls.** The site button in the address pill opens a popover: address with copy, Boost, Capture,
-  permissions with Ask/Allow/Block, Clear Cookies. Ref: app (site control center).
+- [x] **V47 Sidebar right-click menu.** Native menu with Arc's labels, section dividers and an icon on every row
+  (split rows with split icons); pinned-URL actions sit under "Edit Pinned Page", and a split row offers flipping the
+  layout and "Separate All Tabs". Ref: app (context menus, split icons).
+- [x] **V48 Page right-click menu.** Links, images and selected text get Arc's extra items on top of Chromium's
+  menu (Open Link in Split View, Peek, Little Window, Copy Link as Markdown; image and page actions). Ref: app.
+- [x] **V49 Site controls.** The site button opens Arc's site control center: the domain, a row of round actions
+  (Copy URL, Share, Capture a portion, Capture the full page, New Boost), the connection, a Boosts section and Site
+  Settings rows (icon tile, title, Ask / Allowed / Blocked, switches), then Clear Cookies and Reset Permissions.
+  Ref: app (site control center).
 - [ ] **V50 Extensions menu.** Puzzle button in the pill; popups appear as bubbles under it. Ref: app, video.
 - [ ] **V51 Permission prompts.** Requests drop down from the address pill, not as window sheets. Ref: app
   (permission request state on the top bar), video.

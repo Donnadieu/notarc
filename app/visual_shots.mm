@@ -234,6 +234,8 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
           CGImageRelease(img);
         }
       }
+    } else if ([cmd isEqual:@"site-controls"]) {
+      [c showSiteSettings:nil];
     } else if ([cmd isEqual:@"hovercard"]) {
       ArcItem* t = FindTab(c.currentSpace, arg);
       if (t) [c showHoverCardForItem:t];

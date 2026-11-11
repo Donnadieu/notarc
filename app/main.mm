@@ -4055,6 +4055,13 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         NSArray* rows = w.siteSettingsRows;
         BOOL rowsOK = [rows containsObject:@"camera=block"] && [rows containsObject:@"microphone=ask"] &&
                       [rows containsObject:@"secure=1"];
+        {  // Visual parity V49: Arc's site control center (round actions, sectioned rows, clean-up footer)
+          NSString* sc = w.siteControlsStyle;
+          BOOL look = [sc hasPrefix:@"actions=5 "] && [sc containsString:@" sections=2 "] &&
+                      [[sc componentsSeparatedByString:@"rows="].lastObject intValue] >= 7 && ![sc hasSuffix:@"footer=0"];
+          std::printf("SELFTEST-SITECONTROLS arcStyle=%d\n", look);
+          if (!look) std::printf("SELFTEST-SITECONTROLS-DEBUG %s\n", sc.UTF8String);
+        }
         [w setSitePermission:@"location" value:@YES forOrigin:@"https://example.org"];
         BOOL stored = [[w sitePermissionsForOrigin:@"https://example.org"][@"location"] boolValue] &&
                       [w.siteSettingsRows containsObject:@"location=allow"];
@@ -4271,6 +4278,22 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       for (NSMenuItem* mi in [w sidebarMenuForItem:b].itemArray) if (mi.title.length) [titles addObject:mi.title];
       BOOL menuOK = [titles containsObject:@"Rename..."] && [titles containsObject:@"Archive Tabs Below"] &&
                     [titles containsObject:@"Move to"] && [titles containsObject:@"Pin"];
+      {  // Visual parity V47: an icon on every row, submenus too
+        __block NSMutableArray* bare = [NSMutableArray array];
+        __block void (^scan)(NSMenu*);
+        void (^s)(NSMenu*) = ^(NSMenu* mm) {
+          for (NSMenuItem* mi in mm.itemArray) {
+            if (mi.isSeparatorItem) continue;
+            if (!mi.image) [bare addObject:mi.title];
+            if (mi.submenu) scan(mi.submenu);
+          }
+        };
+        scan = s;
+        scan([w sidebarMenuForItem:b]);
+        scan = nil;
+        std::printf("SELFTEST-MENULOOK icons=%d\n", bare.count == 0);
+        if (bare.count) std::printf("SELFTEST-MENULOOK-DEBUG %s\n", [bare componentsJoinedByString:@","].UTF8String);
+      }
       [w renameItem:b to:@"Renamed Tab"];
       BOOL renamed = [b.displayTitle isEqualToString:@"Renamed Tab"];
       ArcItem* dup = [w duplicateItem:b];
