@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-46 done of 66 items.
+50 done of 65 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -102,11 +102,12 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
 - [x] **V29 Command bar on the address pill (Cmd+L).** Opens in place: its top-left on the address pill, reaching out
   over the page (up to 640 pt), the current address selected, no dimming; with the sidebar hidden it opens centred.
   Ref: app (top-left placement).
-- [ ] **V30 Command bar rows.** Open tabs ("Switch to Tab"), history, search suggestions, Spaces and actions, each with
-  its icon; the empty state shows recent tabs and actions rather than a plain "Top Site" list. Ref: app, help.
-- [ ] **V31 Command bar keyboard.** Up/Down move the pill, Tab completes, Enter opens, Shift+Enter opens a Little
-  Window, Cmd+Enter keeps it in the background, Esc closes; typing a site's name then Tab starts Site Search with a
-  capsule. Ref: help (Site Search, Actions), app.
+- [x] **V30 Command bar rows.** Open tabs ("Switch to Tab"), history, search suggestions, Spaces and actions, each with
+  its icon; the empty bar shows recent tabs, a few actions (New Split View, New Little Window, Capture Area) and then
+  top sites. Ref: app, help.
+- [x] **V31 Command bar keyboard.** Up/Down move the pill, Tab completes, Enter opens, Shift+Enter opens a Little
+  Window, Cmd+Enter opens a background tab, Esc closes; a site's name then Tab starts Site Search with a "Search
+  <site>" capsule in the Space colour (Backspace on an empty field removes it). Ref: help (Site Search, Actions), app.
 - [x] **V32 Command bar text and colours.** Text white 80% / 33%, row hover 5%, hairline 10%, placeholder 60%,
   accessory chips 5%; light mode mirrored in black. Ref: colours.
 - [x] **V33 Ctrl+Tab switcher.** A centred dark HUD of recent tabs as page pictures with a soft shadow, the site's
@@ -128,7 +129,6 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   bar with the site's domain and an "Open in" capsule; no sidebar. Ref: help (Little Arc), app, video.
 - [x] **V39 Peek.** Links open in a large rounded card (10 pt corners, deep shadow, no title bar) floating over the
   dimmed page card, with round Open as Tab and close buttons above its top-right corner. Ref: help (Peek), video.
-- [ ] **V40 Picture in picture.** Video PiP and the document PiP for calls with a thin top bar. Ref: app (PiP top bar).
 
 ## Library and content
 
@@ -160,9 +160,11 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   (Copy URL, Share, Capture a portion, Capture the full page, New Boost), the connection, a Boosts section and Site
   Settings rows (icon tile, title, Ask / Allowed / Blocked, switches), then Clear Cookies and Reset Permissions.
   Ref: app (site control center).
-- [ ] **V50 Extensions menu.** Puzzle button in the pill; popups appear as bubbles under it. Ref: app, video.
-- [ ] **V51 Permission prompts.** Requests drop down from the address pill, not as window sheets. Ref: app
-  (permission request state on the top bar), video.
+- [x] **V50 Extensions menu.** Puzzle button in the pill (shown while Chrome-style pages are on); each extension's
+  popup appears as a bubble under it. Ref: app, video.
+- [x] **V51 Permission prompts.** Requests drop down from the address pill as a small card (title, Remember for this
+  site, Don't Allow / Allow), never a window sheet; with the sidebar hidden they drop from the page's top-left. Ref:
+  app (permission request state on the top bar), video.
 
 ## Spaces and themes
 
@@ -211,3 +213,5 @@ Not built on purpose; not counted.
 - Arc Max banners and Ask Arc's cloud chat screens: NotArc's AI runs on the Mac and has its own simpler screens.
 - Sharing screens (share links for Spaces, folders, Easels): there is no server to host links.
 - Arc's mobile sidebar icons and Windows-only screens: NotArc is a Mac app.
+- Arc's own picture-in-picture windows (its thin PiP top bar, the call window): under CEF, Chromium draws the video
+  and document picture-in-picture windows itself, so NotArc can't restyle them; PiP and auto-PiP work as Chromium's.

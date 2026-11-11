@@ -27,6 +27,8 @@ NSInteger PageDropSide(NSPoint p, NSSize s);  // 0 right, 1 left, 2 bottom, 3 to
 NSString* FavoritePreviewKind(NSString* url);  // "gmail", "calendar" or nil (#57)
 BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd+Option+click on a link (#42)
 
+NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed name stands for, or nil
+
 @interface MainWindowController : NSWindowController <NSWindowDelegate>
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID;
 // Self-test: Space profiles live in separate "SelfTest Space ..." folders and Arc cookies are not imported,
@@ -492,6 +494,9 @@ BOOL OpensLittleWindowForClick(NSEventModifierFlags mods, BOOL gesture);  // Cmd
 - (NSString*)downloadsTrayState;               // tests (V42)
 - (void)closeDownloadsTrayForTest;
 - (NSString*)captureCardState;                  // tests (V46)
+- (NSString*)siteSearchState;                   // tests (V31)
+- (NSString*)sitePromptStyle;                   // tests (V51)
+- (BOOL)commandBarHandleSelectorForTest:(SEL)sel;
 - (void)hideUpdateBannerForTest;
 - (IBAction)restartToUpdate:(id)sender;
 - (NSString*)findBarStyle;                      // tests (V35)
