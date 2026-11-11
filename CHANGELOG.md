@@ -3,7 +3,7 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.28.0
 - Command bar: the empty bar shows your recent tabs and a few actions before top sites; Tab completes the selected
   row; a site's name then Tab starts Site Search ("Search Wikipedia" capsule); Shift+Return opens a Little Window
   and Cmd+Return a background tab.
