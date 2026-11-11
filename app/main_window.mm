@@ -417,6 +417,39 @@ static NSColor* SpaceDotColor(BOOL current) {
   }];
 }
 
+// NotArc's crashed-page drawing: a page with a folded corner, torn across by a zig-zag.
+static NSImage* SadPageGlyph() {
+  static NSImage* glyph;
+  if (glyph) return glyph;
+  glyph = [NSImage imageWithSize:NSMakeSize(72, 80) flipped:NO drawingHandler:^BOOL(NSRect) {
+    [NSColor.blackColor setStroke];
+    NSBezierPath* page = [NSBezierPath bezierPath];
+    page.lineWidth = 5;
+    page.lineJoinStyle = NSLineJoinStyleRound;
+    page.lineCapStyle = NSLineCapStyleRound;
+    [page moveToPoint:NSMakePoint(8, 6)];
+    [page lineToPoint:NSMakePoint(8, 74)];
+    [page lineToPoint:NSMakePoint(46, 74)];
+    [page lineToPoint:NSMakePoint(64, 56)];
+    [page lineToPoint:NSMakePoint(64, 6)];
+    [page closePath];
+    [page moveToPoint:NSMakePoint(46, 74)];
+    [page lineToPoint:NSMakePoint(46, 56)];
+    [page lineToPoint:NSMakePoint(64, 56)];
+    [page stroke];
+    NSBezierPath* tear = [NSBezierPath bezierPath];
+    tear.lineWidth = 4;
+    tear.lineJoinStyle = NSLineJoinStyleRound;
+    tear.lineCapStyle = NSLineCapStyleRound;
+    [tear moveToPoint:NSMakePoint(8, 30)];
+    for (int k = 1; k <= 6; ++k) [tear lineToPoint:NSMakePoint(8 + k * 56.0 / 6, (k % 2) ? 38 : 28)];
+    [tear stroke];
+    return YES;
+  }];
+  [glyph setTemplate:YES];
+  return glyph;
+}
+
 // Arc's folder glyphs (drawn here, 16 pt templates): a closed folder, and an open one whose front leans forward.
 static NSImage* FolderGlyph(BOOL open) {
   static NSImage* glyphs[2];
@@ -617,9 +650,16 @@ NSString* MediaBarTitle(NSString* pageTitle) {
     BOOL show = b.applies && self.hovered;  // Arc's own videos: the selected row shows no cross until hovered
     b.hidden = !show;
     if (!b.applies) continue;
+    NSButton* speaker = [cell viewWithTag:84];  // the speaker sits left of the cross while it shows
+    BOOL sound = speaker && !speaker.hidden;
+    if (sound) {
+      NSRect sf = speaker.frame;
+      sf.origin.x = show ? NSMinX(b.frame) - 22 : cell.bounds.size.width - 34;
+      speaker.frame = sf;
+    }
     NSTextField* label = ((NSTableCellView*)cell).textField;
     NSRect lf = label.frame;
-    CGFloat right = show ? NSMinX(b.frame) - 2 : cell.bounds.size.width - 8;
+    CGFloat right = sound ? NSMinX(speaker.frame) - 2 : show ? NSMinX(b.frame) - 2 : cell.bounds.size.width - 8;
     lf.size.width = MAX(0, right - lf.origin.x);
     if (lf.size.width != label.frame.size.width) label.frame = lf;
   }
@@ -2739,6 +2779,27 @@ static NSString* const kPiPExitJS =
   close.applies = !a.isSection && !a.isFolder && !newTab && (a.url.length || a.isSplit || a.noteID || a.easelID);
   close.contentTintColor = indigo ? [ArcDefaultTabText() colorWithAlphaComponent:0.7] : NSColor.secondaryLabelColor;
   close.hidden = YES;
+  // Arc keeps the site icon on a tab that plays sound and adds a speaker button at the row's right; a click mutes it.
+  NSButton* speaker = [cell viewWithTag:84];
+  BOOL audible = !a.isSection && !a.isFolder && !newTab && !a.crashed && (a.mediaPlaying || a.audioMuted);
+  if (audible && !speaker) {
+    speaker = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"speaker.wave.2.fill" accessibilityDescription:@"Mute Tab"]
+                                 target:self action:@selector(rowSpeakerClicked:)];
+    speaker.tag = 84;
+    speaker.bordered = NO;
+    speaker.imagePosition = NSImageOnly;
+    speaker.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightMedium];
+    speaker.frame = NSMakeRect(cell.bounds.size.width - 34, 8.5, 24, 24);
+    speaker.autoresizingMask = NSViewMinXMargin | NSViewMaxYMargin;
+    [cell addSubview:speaker];
+  }
+  if (speaker) {
+    speaker.hidden = !audible;
+    speaker.image = [NSImage imageWithSystemSymbolName:a.audioMuted ? @"speaker.slash.fill" : @"speaker.wave.2.fill"
+                              accessibilityDescription:a.audioMuted ? @"Unmute Tab" : @"Mute Tab"];
+    speaker.toolTip = a.audioMuted ? @"Unmute Tab" : @"Mute Tab";
+    speaker.contentTintColor = indigo ? [ArcDefaultTabText() colorWithAlphaComponent:0.7] : NSColor.secondaryLabelColor;
+  }
   if ([cell.superview isKindOfClass:SidebarRowView.class]) [(SidebarRowView*)cell.superview syncCloseButton];
   // Arc's split row: each pane's icon and title side by side, split by a thin slash; the pane on screen is brighter.
   NSView* segs = nil;
@@ -2834,8 +2895,6 @@ static NSString* const kPiPExitJS =
                                   : (a.noteID ? @"note.text" : (a.easelID ? @"scribble.variable" : nil));
     if (a.isSplit) symbol = a.splitHorizontal ? @"rectangle.split.1x2" : @"rectangle.split.2x1";
     if (a.crashed) symbol = @"exclamationmark.triangle";
-    else if (a.audioMuted) symbol = @"speaker.slash.fill";
-    else if (a.mediaPlaying) symbol = @"speaker.wave.2.fill";
     image = symbol ? [NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil] : [self iconImageForItem:a];
     cell.imageView.contentTintColor = indigo ? [ArcDefaultTabText() colorWithAlphaComponent:0.85] : NSColor.secondaryLabelColor;
     if (a.isFolder && !a.liveKind) {
@@ -3399,6 +3458,17 @@ NSString* FavoritePreviewKind(NSString* url) {
 }
 
 - (IBAction)toggleMuteCurrentTab:(id)sender { if (_shown) [self toggleMuteItem:_shown]; }
+- (void)rowSpeakerClicked:(NSButton*)sender {
+  NSInteger row = [_outline rowForView:sender];
+  ArcItem* item = row >= 0 ? [_outline itemAtRow:row] : nil;
+  if (item) [self toggleMuteItem:item];
+}
+- (NSString*)speakerStateForItem:(ArcItem*)item {  // tests (V26)
+  NSInteger row = [_outline rowForItem:item];
+  NSTableCellView* cell = row >= 0 ? [_outline viewAtColumn:0 row:row makeIfNecessary:YES] : nil;
+  NSButton* s = [cell viewWithTag:84];
+  return [NSString stringWithFormat:@"speaker=%d muted=%d", s && !s.hidden, [s.toolTip isEqual:@"Unmute Tab"]];
+}
 - (void)mediaBarPlay:(id)sender { if (_mediaItem) [self togglePlayItem:_mediaItem]; }
 - (void)mediaBarMute:(id)sender { if (_mediaItem) [self toggleMuteItem:_mediaItem]; }
 - (void)mediaBarPrevious:(id)sender { if (_mediaItem) [self runJS:MediaActionJS(@"previoustrack") inItem:_mediaItem]; }
@@ -3811,40 +3881,65 @@ static NSString* AdBlockSiteKey(NSString* host) {
   if (!web) return;
   if (!_crashViews) _crashViews = [NSMutableDictionary dictionary];
   [_crashViews[@(item.browserId)] removeFromSuperview];
-  NSView* v = [[NSView alloc] initWithFrame:web.bounds];
+  // Arc's sad tab: the page card turns plain with one centred drawing, a single line, and "Reload" as a link in it.
+  NSBox* v = [[NSBox alloc] initWithFrame:web.bounds];  // a box's fill follows light / dark as it changes
+  v.boxType = NSBoxCustom;
+  v.borderWidth = 0;
+  v.contentViewMargins = NSZeroSize;
+  v.fillColor = NSColor.textBackgroundColor;
   v.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-  v.wantsLayer = YES;
-  v.layer.backgroundColor = NSColor.windowBackgroundColor.CGColor;
-  NSImageView* icon = [NSImageView imageViewWithImage:[NSImage imageWithSystemSymbolName:@"exclamationmark.triangle"
-                                                                 accessibilityDescription:nil]];
-  icon.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:36 weight:NSFontWeightRegular];
-  icon.contentTintColor = NSColor.secondaryLabelColor;
-  NSTextField* title = [NSTextField labelWithString:@"This page crashed"];
-  title.font = [NSFont boldSystemFontOfSize:18];
+  NSImageView* icon = [NSImageView imageViewWithImage:SadPageGlyph()];
+  icon.contentTintColor = NSColor.tertiaryLabelColor;
+  icon.identifier = @"sadGlyph";
+  [icon.widthAnchor constraintEqualToConstant:72].active = YES;
+  [icon.heightAnchor constraintEqualToConstant:80].active = YES;
   // 2 = killed, 3 = crashed, 4 = out of memory (cef_termination_status_t).
-  NSString* why = status == 4 ? @"It ran out of memory." : (status == 2 ? @"Its process was stopped." : @"Something went wrong while showing it.");
-  NSTextField* detail = [NSTextField wrappingLabelWithString:[why stringByAppendingFormat:@"\n%@", item.url ?: @""]];
-  detail.alignment = NSTextAlignmentCenter;
-  detail.textColor = NSColor.secondaryLabelColor;
-  detail.preferredMaxLayoutWidth = 420;
+  NSString* why = status == 4 ? @"This page ran out of memory." : (status == 2 ? @"This page was stopped." : @"This page stopped working.");
+  NSTextField* line = [NSTextField labelWithString:why];
+  line.font = [NSFont systemFontOfSize:14 weight:NSFontWeightMedium];
+  line.textColor = NSColor.secondaryLabelColor;
+  line.identifier = @"sadLine";
   NSButton* reload = [NSButton buttonWithTitle:@"Reload" target:self action:@selector(crashReloadClicked:)];
-  reload.bezelColor = NSColor.controlAccentColor;
+  reload.bordered = NO;
+  reload.attributedTitle = [[NSAttributedString alloc]
+      initWithString:@"Reload"
+          attributes:@{NSForegroundColorAttributeName : NSColor.linkColor,
+                       NSFontAttributeName : [NSFont systemFontOfSize:14 weight:NSFontWeightSemibold]}];
   reload.keyEquivalent = @"\r";
   reload.tag = item.browserId;
-  NSStackView* stack = [NSStackView stackViewWithViews:@[ icon, title, detail, reload ]];
+  reload.identifier = @"sadReload";
+  NSStackView* row = [NSStackView stackViewWithViews:@[ line, reload ]];
+  row.spacing = 4;
+  NSStackView* stack = [NSStackView stackViewWithViews:@[ icon, row ]];
   stack.orientation = NSUserInterfaceLayoutOrientationVertical;
-  stack.spacing = 10;
+  stack.spacing = 18;
   stack.translatesAutoresizingMaskIntoConstraints = NO;
-  [v addSubview:stack];
+  [v.contentView addSubview:stack];
   [NSLayoutConstraint activateConstraints:@[
-    [stack.centerXAnchor constraintEqualToAnchor:v.centerXAnchor],
-    [stack.centerYAnchor constraintEqualToAnchor:v.centerYAnchor]
+    [stack.centerXAnchor constraintEqualToAnchor:v.contentView.centerXAnchor],
+    [stack.centerYAnchor constraintEqualToAnchor:v.contentView.centerYAnchor constant:-20]
   ]];
   [web addSubview:v positioned:NSWindowAbove relativeTo:nil];
   _crashViews[@(item.browserId)] = v;
   if ([_outline rowForItem:item] >= 0) [_outline reloadItem:item];
 }
 
+- (NSString*)crashViewStyleForItem:(ArcItem*)item {  // tests (V10)
+  NSView* v = _crashViews[@(item.browserId)];
+  if (!v) return @"none";
+  __block int glyph = 0, line = 0, link = 0;
+  __block void (^walk)(NSView*) = nil;
+  void (^w)(NSView*) = ^(NSView* x) {
+    if ([x.identifier isEqual:@"sadGlyph"]) glyph = 1;
+    if ([x.identifier isEqual:@"sadLine"]) line = 1;
+    if ([x.identifier isEqual:@"sadReload"] && !((NSButton*)x).bordered) link = 1;
+    for (NSView* s in x.subviews) walk(s);
+  };
+  walk = w;
+  walk(v);
+  walk = nil;
+  return [NSString stringWithFormat:@"glyph=%d line=%d link=%d", glyph, line, link];
+}
 - (void)crashReloadClicked:(NSButton*)sender {
   ArcItem* item = [self itemForBrowserId:(int)sender.tag];
   if (item) [self reloadCrashedItem:item];
