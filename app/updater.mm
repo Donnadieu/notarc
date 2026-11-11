@@ -1,4 +1,5 @@
 #import "app/updater.h"
+#import "app/arc_alert.h"
 
 #import <Cocoa/Cocoa.h>
 #include <CommonCrypto/CommonDigest.h>
@@ -180,7 +181,7 @@ NSString* const UpdaterUpdateReadyNotification = @"NotArcUpdateReady";
     NSString* current = UpdaterCurrentVersion();
     if (!info || UpdaterCompareVersions(info.version, current) <= 0) {
       if (!interactive) return;
-      NSAlert* a = [NSAlert new];
+      ArcAlert* a = [ArcAlert new];
       a.messageText = info || !error ? @"NotArc is up to date." : @"Couldn't check for updates.";
       a.informativeText = info ? [NSString stringWithFormat:@"You have version %@, the newest available.", current]
                                : error.localizedDescription ?: @"";
@@ -199,7 +200,7 @@ NSString* const UpdaterUpdateReadyNotification = @"NotArcUpdateReady";
       }];
       return;
     }
-    NSAlert* a = [NSAlert new];
+    ArcAlert* a = [ArcAlert new];
     a.messageText = [NSString stringWithFormat:@"NotArc %@ is available", info.version];
     a.informativeText = [NSString stringWithFormat:@"You have %@. Your tabs and Spaces are kept.\n\n%@", current,
                                                    info.notes.length > 600 ? [[info.notes substringToIndex:600] stringByAppendingString:@"…"] : info.notes ?: @""];
@@ -213,7 +214,7 @@ NSString* const UpdaterUpdateReadyNotification = @"NotArcUpdateReady";
     [self prepareUpdate:info done:^(NSString* staged, NSError* err) {
       self->_busy = NO;
       if (staged) return [self installStagedApp:staged];
-      NSAlert* f = [NSAlert new];
+      ArcAlert* f = [ArcAlert new];
       f.messageText = @"The update couldn't be installed.";
       f.informativeText = err.localizedDescription ?: @"";
       [f runModal];

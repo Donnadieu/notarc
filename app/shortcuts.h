@@ -16,4 +16,6 @@ NSMenuItem* MenuItemAtPath(NSMenu* mainMenu, NSString* path);
 
 @interface ShortcutsWindowController : NSWindowController
 + (instancetype)shared;
+// The editor, moved into Settings > Shortcuts (Arc keeps shortcuts there). Call once.
+- (NSView*)contentForSettingsPane;
 @end

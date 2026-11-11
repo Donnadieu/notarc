@@ -1,5 +1,8 @@
 #import <QuartzCore/QuartzCore.h>
 #import "app/main_window.h"
+#import "app/arc_alert.h"
+#import "app/theme_picker.h"
+#import "app/welcome.h"
 #import "app/autofill.h"
 #import "app/password_store.h"
 #import "app/sidebar_store.h"
@@ -144,14 +147,8 @@ static NSColor* ColorFromHex(NSString* hex) {
   return [NSColor colorWithSRGBRed:((v >> 16) & 0xFF) / 255.0 green:((v >> 8) & 0xFF) / 255.0 blue:(v & 0xFF) / 255.0 alpha:1];
 }
 
-static NSString* HexFromColor(NSColor* c) {
-  NSColor* s = [c colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
-  if (!s) return nil;
-  return [NSString stringWithFormat:@"#%02X%02X%02X", (int)lround(s.redComponent * 255), (int)lround(s.greenComponent * 255),
-                                    (int)lround(s.blueComponent * 255)];
-}
-
 static const CGFloat kToolbarHeight = 38;
+static const CGFloat kCommandFieldSize = 20;  // Arc: 20 pt input (V63)
 static const CGFloat kSuggestionRow = 50;  // Arc: 50 pt rows (46 pt pill) under a 64 pt input row
 static const NSUInteger kMaxSuggestions = 8;
 
@@ -717,6 +714,8 @@ NSString* MediaBarTitle(NSString* pageTitle) {
   if (self.selected && self.multi)
     return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.10] : [NSColor colorWithWhite:0 alpha:0.10];
   if (self.selected) return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.20] : [NSColor colorWithWhite:1 alpha:0.85];
+  if (self.targetForDropOperation)  // V21: a folder under a dragged tab lights up (SidebarItemHoveredBackground)
+    return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.15] : [NSColor colorWithSRGBRed:0.055 green:0.059 blue:0.063 alpha:0.10];
   if (self.hovered) return dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:0.12] : [NSColor colorWithWhite:1 alpha:0.50];
   return nil;
 }
@@ -739,6 +738,13 @@ NSString* MediaBarTitle(NSString* pageTitle) {
   [c setFill];
   [path fill];
 }
+// Arc draws no system blue drop ring: the target folder's own pill lights up instead (see -fill).
+- (void)drawDraggingDestinationFeedbackInRect:(NSRect)dirtyRect { [self drawPill]; }
+- (void)setTargetForDropOperation:(BOOL)t {
+  [super setTargetForDropOperation:t];
+  self.needsDisplay = YES;
+}
+- (BOOL)dropHighlightShown { return self.targetForDropOperation && [self fill] != nil; }  // tests (V21)
 // The row view includes the 2 pt gap between rows; the pill itself is 36 pt, as in Arc.
 - (NSRect)pillRect {
   if (self.newTabRow) {  // the bottom kRowPitch of the header row
@@ -781,9 +787,171 @@ NSString* MediaBarTitle(NSString* pageTitle) {
 @end
 
 // Arc doesn't indent top-level tabs under the Pinned/Today headers; only folder contents are indented.
+// Visual parity V65: a new tab's row grows in from nothing, a closed one shrinks away while the rows below slide up,
+// and an archived one flies toward the Library button. Done here, around every reload, so each path gets it.
 @interface SidebarOutlineView : NSOutlineView
+@property(nonatomic, copy) BOOL (^animationsAllowed)(void);
+@property(nonatomic, copy) NSPoint (^libraryPoint)(void);  // the Library button, in this view's coordinates
+@property(nonatomic) BOOL nextRemovalToLibrary;           // set just before an archive reload
+@property(nonatomic, readonly) NSString* lastRowMotion;    // tests: "grow=N slideUp=N ghosts=N library=0|1"
+- (BOOL)isGrowing:(id)item;
+- (NSUInteger)flyItemsToLibrary:(NSArray*)items;
 @end
-@implementation SidebarOutlineView
+@implementation SidebarOutlineView {
+  NSHashTable* _growing;
+  NSString* _lastRowMotion;
+  BOOL _rowsFlown;
+}
+- (NSString*)lastRowMotion { return _lastRowMotion ?: @""; }
+- (BOOL)isGrowing:(id)item { return [_growing containsObject:item]; }
+
+// Every item the data source holds now (expanded or not), to tell which rows a reload is about to drop.
+- (NSHashTable*)modelItems {
+  NSHashTable* out = [NSHashTable hashTableWithOptions:NSPointerFunctionsObjectPointerPersonality];
+  NSMutableArray* stack = [NSMutableArray arrayWithObject:NSNull.null];
+  while (stack.count) {
+    id parent = stack.lastObject;
+    [stack removeLastObject];
+    id p = parent == NSNull.null ? nil : parent;
+    NSInteger n = [self.dataSource outlineView:self numberOfChildrenOfItem:p];
+    for (NSInteger i = 0; i < n; ++i) {
+      id c = [self.dataSource outlineView:self child:i ofItem:p];
+      if (!c) continue;
+      [out addObject:c];
+      [stack addObject:c];
+    }
+  }
+  return out;
+}
+// A picture of the row as drawn now, left where the row was: it squashes away, or flies to the Library button.
+- (BOOL)ghostRow:(NSInteger)row toLibrary:(BOOL)toLibrary {
+  NSView* rv = [self rowViewAtRow:row makeIfNecessary:NO];
+  NSRect r = [self rectOfRow:row];
+  if (!rv || NSIsEmptyRect(r)) return NO;
+  NSBitmapImageRep* rep = [rv bitmapImageRepForCachingDisplayInRect:rv.bounds];
+  if (!rep) return NO;
+  [rv cacheDisplayInRect:rv.bounds toBitmapImageRep:rep];
+  self.wantsLayer = YES;
+  CALayer* ghost = [CALayer layer];
+  ghost.frame = r;
+  ghost.contents = (__bridge id)rep.CGImage;
+  ghost.contentsGravity = kCAGravityResize;
+  ghost.zPosition = 5;
+  [self.layer addSublayer:ghost];
+  CAAnimationGroup* g = [CAAnimationGroup animation];
+  CABasicAnimation* fade = [CABasicAnimation animationWithKeyPath:@"opacity"];
+  fade.fromValue = @1;
+  fade.toValue = @0;
+  if (toLibrary && self.libraryPoint) {
+    CABasicAnimation* move = [CABasicAnimation animationWithKeyPath:@"position"];
+    move.fromValue = [NSValue valueWithPoint:NSMakePoint(NSMidX(r), NSMidY(r))];
+    move.toValue = [NSValue valueWithPoint:self.libraryPoint()];
+    CABasicAnimation* shrink = [CABasicAnimation animationWithKeyPath:@"transform.scale"];
+    shrink.fromValue = @1;
+    shrink.toValue = @0.2;
+    g.animations = @[ move, shrink, fade ];
+    g.duration = 0.42;
+    g.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseIn];
+  } else {
+    CABasicAnimation* squash = [CABasicAnimation animationWithKeyPath:@"transform.scale.y"];
+    squash.fromValue = @1;
+    squash.toValue = @0.01;
+    g.animations = @[ squash, fade ];
+    g.duration = 0.2;
+    g.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+  }
+  g.removedOnCompletion = NO;
+  g.fillMode = kCAFillModeForwards;
+  [CATransaction begin];
+  [CATransaction setCompletionBlock:^{ [ghost removeFromSuperlayer]; }];
+  [ghost addAnimation:g forKey:@"rowGone"];
+  [CATransaction commit];
+  return YES;
+}
+- (BOOL)rowAnimationsOn {
+  return self.window && !self.isHiddenOrHasHiddenAncestor && self.animationsAllowed && self.animationsAllowed() &&
+         !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion && self.numberOfRows > 0;
+}
+// Clear and auto-archive: the rows fly to the Library button before they go (call before changing the model).
+- (NSUInteger)flyItemsToLibrary:(NSArray*)items {
+  if (![self rowAnimationsOn]) return 0;
+  NSUInteger n = 0;
+  for (id it in items) {
+    NSInteger r = [self rowForItem:it];
+    if (r >= 0 && n < 16 && [self ghostRow:r toLibrary:YES]) n++;
+  }
+  _lastRowMotion = [NSString stringWithFormat:@"grow=0 slideUp=0 ghosts=%lu library=%d", (unsigned long)n, n > 0];
+  _rowsFlown = n > 0;
+  return n;
+}
+- (void)reloadData {
+  [self animatedReload:^{ [super reloadData]; }];
+}
+- (void)reloadItem:(id)item reloadChildren:(BOOL)reloadChildren {
+  if (!reloadChildren) return [super reloadItem:item reloadChildren:NO];
+  [self animatedReload:^{ [super reloadItem:item reloadChildren:YES]; }];
+}
+- (void)animatedReload:(void (^)(void))reload {
+  BOOL animate = [self rowAnimationsOn];
+  BOOL toLibrary = self.nextRemovalToLibrary;
+  self.nextRemovalToLibrary = NO;
+  BOOL flown = _rowsFlown;  // Clear / auto-archive already sent pictures of these rows to the Library
+  _rowsFlown = NO;
+  if (!animate) return reload();
+  NSMutableArray* oldItems = [NSMutableArray array];
+  NSMutableArray<NSNumber*>* oldY = [NSMutableArray array];
+  NSHashTable* model = [self modelItems];
+  NSMutableArray<NSNumber*>* goneRows = [NSMutableArray array];
+  for (NSInteger r = 0; r < self.numberOfRows; ++r) {
+    id item = [self itemAtRow:r];
+    if (!item) continue;
+    [oldItems addObject:item];
+    [oldY addObject:@(NSMinY([self rectOfRow:r]))];
+    if (![model containsObject:item]) [goneRows addObject:@(r)];
+  }
+  NSUInteger ghosts = 0;
+  if (goneRows.count && goneRows.count <= 3 && !flown)
+    for (NSNumber* r in goneRows) ghosts += [self ghostRow:r.integerValue toLibrary:toLibrary];
+  reload();
+  NSHashTable* oldSet = [NSHashTable hashTableWithOptions:NSPointerFunctionsObjectPointerPersonality];
+  for (id it in oldItems) [oldSet addObject:it];
+  NSMutableIndexSet* added = [NSMutableIndexSet indexSet];
+  for (NSInteger r = 0; r < self.numberOfRows; ++r)
+    if (![oldSet containsObject:[self itemAtRow:r]]) [added addIndex:(NSUInteger)r];
+  if (added.count + goneRows.count == 0 || added.count > 3 || goneRows.count > 3 || flown) return;  // nothing, or a new list
+  // Rows under a closed row slide up from where they were.
+  NSUInteger slid = 0;
+  if (goneRows.count)
+    for (NSUInteger i = 0; i < oldItems.count; ++i) {
+      NSInteger r = [self rowForItem:oldItems[i]];
+      if (r < 0) continue;
+      CGFloat d = oldY[i].doubleValue - NSMinY([self rectOfRow:r]);
+      if (fabs(d) < 0.5) continue;
+      NSView* rv = [self rowViewAtRow:r makeIfNecessary:YES];
+      rv.wantsLayer = YES;
+      CABasicAnimation* a = [CABasicAnimation animationWithKeyPath:@"transform.translation.y"];
+      a.fromValue = @(d);
+      a.toValue = @0;
+      a.duration = 0.2;
+      a.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+      [rv.layer addAnimation:a forKey:@"rowSlide"];
+      slid++;
+    }
+  // New rows start flat and grow to full height; the rows under them move down with them.
+  if (added.count) {
+    if (!_growing) _growing = [NSHashTable hashTableWithOptions:NSPointerFunctionsObjectPointerPersonality];
+    [added enumerateIndexesUsingBlock:^(NSUInteger r, BOOL*) { [self->_growing addObject:[self itemAtRow:(NSInteger)r]]; }];
+    [self noteHeightOfRowsWithIndexesChanged:added];
+    [_growing removeAllObjects];
+    [NSAnimationContext runAnimationGroup:^(NSAnimationContext* ctx) {
+      ctx.duration = 0.22;
+      ctx.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+      [self noteHeightOfRowsWithIndexesChanged:added];
+    }];
+  }
+  _lastRowMotion = [NSString stringWithFormat:@"grow=%lu slideUp=%lu ghosts=%lu library=%d", (unsigned long)added.count,
+                                              (unsigned long)slid, (unsigned long)ghosts, toLibrary && ghosts > 0];
+}
 // Rows are exactly as wide as the visible sidebar (no hidden scroller gutter), so the pill's right corners show.
 - (void)setFrameSize:(NSSize)size {
   NSClipView* clip = (NSClipView*)self.superview;
@@ -1287,7 +1455,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSButton* _callCam;
   NSMutableDictionary<NSNumber*, NSView*>* _crashViews;
   ArcItem* _hungItem;
-  NSAlert* _hungAlert;
+  ArcAlert* _hungAlert;
   NSTextField* _mediaTitle;
   NSButton* _mediaPlay;
   NSButton* _mediaMute;
@@ -1301,8 +1469,11 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSTimer* _mediaTimer;
   ArcItem* _hoverItem;
   NSTimer* _hoverTimer;
-  void (^_themePreview)(void);
-  NSPopUpButton* _themePalette;
+  NSPopover* _themePopover;  // Arc's theme picker (V52)
+  ArcAlert* _newSpaceCard;   // Arc's New Space card (V54)
+  WelcomeView* _welcome;     // first-launch welcome (V56, V57)
+  NSDictionary* _newSpaceFields;
+  NSUInteger _newSpaceSwatch;
   NSUndoManager* _undo;
   BOOL _sidebarWasHidden;
   NSPanel* _findBar;
@@ -1369,6 +1540,9 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSMutableDictionary<NSString*, NSString*>* _profileNames;  // profile folder -> name
   NSTextField* _spaceHeaderTitle;
   NSString* _lastSpaceSlide;   // tests: "left" / "right" / "none"
+  NSString* _lastSidebarMotion;  // tests (V66)
+  NSUInteger _liftedDrags;
+  __weak ArcSpace* _rowAnimationSpace;  // V65: the Space the sidebar rows were last drawn for
   NSMutableArray<Boost*>* _boosts;
   NSPanel* _boostPanel;
   Boost* _boostEditing;
@@ -1564,6 +1738,24 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _sidebarScroll = scroll;
 
   _outline = [[SidebarOutlineView alloc] initWithFrame:scroll.bounds];
+  {  // V65: row animations only for changes within the same Space and while the Library isn't covering the list
+    SidebarOutlineView* ov = (SidebarOutlineView*)_outline;
+    __weak MainWindowController* weakMe = self;
+    ov.animationsAllowed = ^BOOL {
+      MainWindowController* me = weakMe;
+      if (!me) return NO;
+      BOOL same = me->_rowAnimationSpace == me->_space && me->_space != nil;
+      me->_rowAnimationSpace = me->_space;
+      return same && !me->_libraryShown;
+    };
+    ov.libraryPoint = ^NSPoint {
+      MainWindowController* me = weakMe;
+      NSButton* lib = me ? me->_libraryButton : nil;
+      if (!lib.window) return NSZeroPoint;
+      NSRect r = [lib convertRect:lib.bounds toView:me->_outline];
+      return NSMakePoint(NSMidX(r), NSMidY(r));
+    };
+  }
   NSTableColumn* col = [[NSTableColumn alloc] initWithIdentifier:@"item"];
   col.width = kSidebarWidth - 17;
   col.resizingMask = NSTableColumnAutoresizingMask;
@@ -1583,6 +1775,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _outline.target = self;
   _outline.action = @selector(sidebarClicked:);
   [_outline registerForDraggedTypes:@[ kSidebarItemPasteboardType ]];
+  // V21: rows slide apart to open a gap where the dragged tab will land, as in Arc.
+  _outline.draggingDestinationFeedbackStyle = NSTableViewDraggingDestinationFeedbackStyleGap;
   [_outline addTrackingArea:[[NSTrackingArea alloc]
                                 initWithRect:NSZeroRect
                                      options:NSTrackingMouseMoved | NSTrackingMouseEnteredAndExited |
@@ -2649,6 +2843,7 @@ static NSString* const kPiPExitJS =
 }
 
 - (CGFloat)outlineView:(NSOutlineView*)ov heightOfRowByItem:(id)item {
+  if ([ov isKindOfClass:SidebarOutlineView.class] && [(SidebarOutlineView*)ov isGrowing:item]) return 1;  // V65: grows in
   ArcItem* a = item;
   if (a == _space.unpinned) return kNewTabHeaderHeight;
   if (a.isSection) return kPinnedHeaderHeight;
@@ -3705,7 +3900,7 @@ static NSString* OriginKey(NSString* origin) {
 - (void)showNextSitePrompt {
   NSDictionary* p = _sitePrompts.firstObject;
   if (!p || _siteAlert) return;
-  if (_hungAlert || self.window.attachedSheet) {  // wait for the other sheet
+  if (_hungAlert || self.window.attachedSheet || ArcAlertShownOn(self.window)) {  // wait for the other sheet
     __weak MainWindowController* weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ [weakSelf showNextSitePrompt]; });
     return;
@@ -4263,7 +4458,7 @@ static NSString* AdBlockSiteKey(NSString* host) {
 - (void)showHungSheetFor:(ArcItem*)item {
   if (_hungAlert) return;
   _hungItem = item;
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = @"Page Unresponsive";
   a.informativeText = [NSString stringWithFormat:@"\"%@\" isn't responding. You can wait for it or exit the page.",
                                                  item.displayTitle ?: item.url ?: @"This page"];
@@ -4283,17 +4478,17 @@ static NSString* AdBlockSiteKey(NSString* host) {
 }
 
 - (void)dismissHungSheet {
-  NSAlert* a = _hungAlert;
+  ArcAlert* a = _hungAlert;
   _hungAlert = nil;
   _hungItem = nil;
-  if (a) [self.window endSheet:a.window returnCode:NSModalResponseAbort];
+  if (a) [a dismissWithResponse:NSModalResponseAbort];
 }
 
 // Self-test hook: press a button of the open Wait/Exit sheet.
 - (void)answerHungSheet:(BOOL)exitPage {
   if (!_hungAlert) return;
-  NSAlert* a = _hungAlert;
-  [self.window endSheet:a.window returnCode:exitPage ? NSAlertSecondButtonReturn : NSAlertFirstButtonReturn];
+  ArcAlert* a = _hungAlert;
+  [a dismissWithResponse:exitPage ? NSAlertSecondButtonReturn : NSAlertFirstButtonReturn];
 }
 
 #pragma mark Hover cards
@@ -5231,7 +5426,7 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
 }
 - (IBAction)removeExtension:(NSMenuItem*)sender {
   NotArcExtension* x = sender.representedObject;
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = [NSString stringWithFormat:@"Remove %@?", x.name];
   a.informativeText = @"It's deleted from NotArc and stops when NotArc relaunches.";
   [a addButtonWithTitle:@"Remove"];
@@ -5264,7 +5459,7 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
 
 - (void)reportExtensionInstall:(NSString*)name error:(NSError*)error {
   if (!name) {
-    NSAlert* a = [NSAlert new];
+    ArcAlert* a = [ArcAlert new];
     a.messageText = @"Couldn't install the extension";
     a.informativeText = error.localizedDescription ?: @"";
     [a beginSheetModalForWindow:self.window completionHandler:nil];
@@ -5299,7 +5494,7 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   [self hideToast];
   NSUInteger active = [DownloadManager shared].inProgressCount;
   if (active) {  // ask before quitting cancels them; once asked, the relaunch can't be called off halfway
-    NSAlert* a = [NSAlert new];
+    ArcAlert* a = [ArcAlert new];
     a.messageText = active == 1 ? @"A download is in progress." : [NSString stringWithFormat:@"%lu downloads are in progress.", (unsigned long)active];
     a.informativeText = @"Relaunching NotArc will cancel them.";
     [a addButtonWithTitle:@"Relaunch"];
@@ -5335,7 +5530,7 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
 }
 
 - (IBAction)installExtension:(id)sender {
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = @"Install Extension";
   a.informativeText = @"Paste a Chrome Web Store link or an extension ID. NotArc downloads the extension from the "
                       @"Chrome Web Store and checks its signature before installing it.";
@@ -5375,7 +5570,7 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
 
 - (IBAction)importArcExtensionsFromMenu:(id)sender {
   if (!SettingBool(kSettingChromePages)) {
-    NSAlert* ask = [NSAlert new];
+    ArcAlert* ask = [ArcAlert new];
     ask.messageText = @"Import Extensions from Arc";
     ask.informativeText = [self chromePagesNeededText:@"Importing"];
     [ask addButtonWithTitle:@"Turn On and Import"];
@@ -5395,7 +5590,7 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
                                   fromArcUserData:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]];
   NSMutableArray* names = [NSMutableArray array], *skipped = [NSMutableArray array];
   for (ArcExtensionCopy* c in copies) [(c.skippedMV2 ? skipped : names) addObject:c.name];
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = names.count ? [NSString stringWithFormat:@"%lu extensions copied from Arc", (unsigned long)names.count]
                               : @"No extensions to copy";
   NSMutableString* info = [NSMutableString stringWithString:[names componentsJoinedByString:@", "]];
@@ -5456,10 +5651,25 @@ NSString* ArcImportSummary(NSDictionary* n, NSDictionary* cookies) {
 }
 
 - (IBAction)importEverythingFromArcMenu:(id)sender {
+  __weak MainWindowController* weakSelf = self;
+  [self importEverythingFromArcThen:^(NSString* summary, BOOL ok) {
+    MainWindowController* me = weakSelf;
+    if (!me) return;
+    ArcAlert* a = [ArcAlert new];
+    a.messageText = ok ? @"Everything from Arc is here" : @"Some things couldn't come over from Arc";
+    a.informativeText = summary;
+    [a beginSheetModalForWindow:me.window completionHandler:^(NSModalResponse r) {
+      dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf offerDefaultBrowserIfFirstLaunch]; });
+    }];
+  }];
+}
+
+- (void)importEverythingFromArcThen:(void (^)(NSString* summary, BOOL ok))finished {
   if (_importingFromArc) return;
   _importingFromArc = YES;
   NSString* userData = [ArcDataDirectory() stringByAppendingPathComponent:@"User Data"];
   __weak MainWindowController* weakSelf = self;
+  void (^done)(NSString*, BOOL) = [finished copy];
   // One Keychain read for passwords and cookies, off the main thread (macOS may ask once).
   dispatch_async(ArcImportQueue(), ^{
     NSError* keyError = nil;
@@ -5479,25 +5689,116 @@ NSString* ArcImportSummary(NSDictionary* n, NSDictionary* cookies) {
         MainWindowController* me2 = weakSelf;
         if (!me2) return;
         me2->_importingFromArc = NO;
-        [NSUserDefaults.standardUserDefaults setObject:[NSDate date] forKey:kArcImportCompletedKey];
-        NSAlert* a = [NSAlert new];
-        a.messageText = key ? @"Everything from Arc is here" : @"Some things couldn't come over from Arc";
-        a.informativeText = ArcImportSummary(n, cookies);
-        [a beginSheetModalForWindow:me2.window completionHandler:^(NSModalResponse r) {
-          dispatch_async(dispatch_get_main_queue(), ^{ [weakSelf offerDefaultBrowserIfFirstLaunch]; });
-        }];
+        SettingSetObject(kArcImportCompletedKey, [NSDate date]);
+        if (done) done(ArcImportSummary(n, cookies), key != nil);
       }];
     });
   });
+}
+
+#pragma mark Welcome (V56, V57)
+
+// Browsers the welcome can bring things over from: Arc (everything), then other browsers' history and bookmarks.
+- (NSArray<NSDictionary*>*)welcomeBrowsers {
+  NSMutableArray* out = [NSMutableArray array];
+  if ([NSFileManager.defaultManager fileExistsAtPath:[ArcDataDirectory() stringByAppendingPathComponent:@"User Data"]])
+    [out addObject:@{ @"name" : @"Arc", @"kind" : @"arc" }];
+  NSMutableSet* seen = [NSMutableSet setWithObject:@"Arc"];
+  for (NSArray* s in DetectedHistorySources()) {
+    NSString* name = [s[0] componentsSeparatedByString:@" ("].firstObject;  // "Chrome (Profile 1)" -> one card per browser
+    if ([seen containsObject:name] || [s[2] isEqual:@"safari"] || [name hasPrefix:@"Arc"]) continue;
+    [seen addObject:name];
+    [out addObject:@{ @"name" : name, @"kind" : @"chromium", @"history" : s }];
+  }
+  return out;
+}
+
+- (void)showWelcome {
+  if (_welcome) return;
+  NSView* root = self.window.contentView;
+  WelcomeView* w = [[WelcomeView alloc] initWithFrame:root.bounds];
+  w.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  w.browsers = [self welcomeBrowsers];
+  __weak MainWindowController* weakSelf = self;
+  w.importChosen = ^(NSDictionary* browser, void (^done)(NSString*, BOOL)) { [weakSelf welcomeImport:browser done:done]; };
+  w.finished = ^(BOOL makeDefault) { [weakSelf finishWelcome:makeDefault]; };
+  [root addSubview:w positioned:NSWindowAbove relativeTo:nil];
+  _welcome = w;
+  [self.window makeFirstResponder:w];
+}
+
+- (void)welcomeImport:(NSDictionary*)browser done:(void (^)(NSString*, BOOL))done {
+  if ([browser[@"kind"] isEqual:@"arc"]) {
+    [self importEverythingFromArcThen:^(NSString* summary, BOOL ok) { done(summary, ok); }];
+    return;
+  }
+  NSArray* h = browser[@"history"];
+  NSUInteger visits = h ? [self importHistoryFromFile:h[1] browser:h[0] kind:h[2]] : 0;
+  NSUInteger marks = 0;
+  for (NSArray* s in DetectedBookmarkSources())
+    if ([s[0] hasPrefix:browser[@"name"]]) {
+      NSUInteger n = 0;
+      ArcItem* folder = BookmarksFromChromiumFile(s[1], [@"Bookmarks from " stringByAppendingString:s[0]], &n);
+      if (folder && n) {
+        [self addImportedBookmarks:folder];
+        marks += n;
+      }
+      break;
+    }
+  BOOL ok = visits != NSNotFound;
+  done([NSString stringWithFormat:@"From %@: %lu visits in History and %lu bookmarks in a Pinned folder.", browser[@"name"],
+                                  (unsigned long)(ok ? visits : 0), (unsigned long)marks], ok);
+}
+
+- (void)finishWelcome:(BOOL)makeDefault {
+  SettingSetBool(@"welcomeCompleted", YES);
+  SettingSetBool(@"defaultBrowserOffered", YES);
+  if (!SettingObject(kArcImportCompletedKey)) SettingSetBool(kArcImportDeclinedKey, YES);  // don't ask again at launch
+  if (makeDefault && !self.selfTestProfiles && !NotArcIsDefaultBrowser()) MakeNotArcDefaultBrowser(nil);
+  WelcomeView* w = _welcome;
+  _welcome = nil;
+  [NSAnimationContext runAnimationGroup:^(NSAnimationContext* ctx) {
+    ctx.duration = ReduceMotion() ? 0 : 0.3;
+    w.animator.alphaValue = 0;
+  } completionHandler:^{ [w removeFromSuperview]; }];
+}
+
+- (WelcomeView*)welcomeViewForTest { return _welcome; }
+
+// Visual parity V63/V64: the type and the measurements as laid out right now (Arc 1.169: 273 pt sidebar, 8 pt side
+// insets, 36 pt pill and rows, 10 pt pill and tile corners, 8 pt row and card corners; tab titles 14 medium, Space
+// title 13 semibold, command bar input 20, rows 13-14).
+static NSString* FontDesc(NSFont* f) {
+  CGFloat w = [[f.fontDescriptor objectForKey:NSFontTraitsAttribute][NSFontWeightTrait] doubleValue];
+  NSString* name = w >= 0.35 ? @"bold" : w >= 0.27 ? @"semibold" : w >= 0.2 ? @"medium" : @"regular";
+  return [NSString stringWithFormat:@"%.0f-%@", f.pointSize, name];
+}
+- (NSString*)layoutMetricsForTest {
+  NSString* tabFont = @"-";
+  for (NSInteger r = 0; r < _outline.numberOfRows; ++r) {
+    ArcItem* it = [_outline itemAtRow:r];
+    if (!it.url.length || it.isSplit) continue;
+    NSTableCellView* cell = [_outline viewAtColumn:0 row:r makeIfNecessary:YES];
+    if (cell.textField.font) { tabFont = FontDesc(cell.textField.font); break; }
+  }
+  NSRect pill = _addressPill.frame;
+  CGFloat rowH = kRowHeight;
+  return [NSString stringWithFormat:@"sidebar=%.0f inset=%.0f pill=%.0f pillRadius=%.0f row=%.0f pitch=%.0f rowRadius=%.0f "
+                                    @"card=%.0f favRadius=%.0f tab=%@ space=%@ address=%@ command=%.0f",
+                                    NSWidth(_sidebar.frame), NSMinX(pill), NSHeight(pill), _addressPill.layer.cornerRadius, rowH,
+                                    kRowPitch, kRowRadius, _content.layer.cornerRadius, kFavRadius, tabFont,
+                                    FontDesc(_spaceHeaderTitle.font), FontDesc(_addressPillText.font), kCommandFieldSize];
 }
 
 // Arc acceptance: one button the first time NotArc opens, then you keep working like you never moved.
 // Arc's onboarding step: asked once, after the import question; macOS then shows its own confirmation.
 - (void)offerDefaultBrowserIfFirstLaunch {
   NSUserDefaults* d = NSUserDefaults.standardUserDefaults;
-  if ([d boolForKey:@"defaultBrowserOffered"] || NotArcIsDefaultBrowser() || self.window.attachedSheet) return;
+  if ([d boolForKey:@"defaultBrowserOffered"] || NotArcIsDefaultBrowser() || self.window.attachedSheet ||
+      ArcAlertShownOn(self.window))
+    return;
   [d setBool:YES forKey:@"defaultBrowserOffered"];
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = @"Make NotArc your default browser?";
   a.informativeText = @"Links you click in other apps will open here, routed by your Air Traffic Control rules. "
                       @"You can change this later in Settings.";
@@ -5524,14 +5825,14 @@ BOOL ArcImportOfferDue(NSDictionary* prefs, BOOL arcDataExists) {
     [self offerDefaultBrowserIfFirstLaunch];
     return;
   }
-  if (self.window.attachedSheet || !self.window.visible) {  // another sheet first, or the window isn't up yet
+  if (self.window.attachedSheet || ArcAlertShownOn(self.window) || !self.window.visible) {  // another sheet first, or the window isn't up yet
     __weak MainWindowController* weakSelf = self;
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [weakSelf offerArcImportIfFirstLaunch];
     });
     return;
   }
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = @"Bring everything over from Arc?";
   a.informativeText = @"Your Spaces and tabs are already here. This adds your logins, so you stay signed in to your "
                       @"sites, plus your history, extensions, saved passwords, addresses and cards. macOS asks once "
@@ -5552,7 +5853,7 @@ BOOL ArcImportOfferDue(NSDictionary* prefs, BOOL arcDataExists) {
 
 - (IBAction)importArcHistoryFromMenu:(id)sender {
   NSUInteger n = [self importArcHistory];
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = n ? @"History imported from Arc" : @"No new history to import";
   a.informativeText = n ? [NSString stringWithFormat:@"%lu visits added. Open History with Cmd+Y.", (unsigned long)n]
                         : @"Everything from Arc is already here.";
@@ -6495,7 +6796,7 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 
 - (IBAction)importHistoryFromMenu:(id)sender {
   NSArray* sources = DetectedHistorySources();
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = @"Import History";
   if (!sources.count) {
     a.informativeText = @"No browser history was found on this Mac.";
@@ -6524,7 +6825,7 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
       MainWindowController* me = weakSelf;
       if (!me || !src) return;
       NSUInteger n = [me importHistoryFromFile:src[1] browser:src[0] kind:src[2]];
-      NSAlert* done = [NSAlert new];
+      ArcAlert* done = [ArcAlert new];
       if (n == NSNotFound) {
         done.messageText = [NSString stringWithFormat:@"Couldn't read %@ history", src[0]];
         if ([src[2] isEqualToString:@"safari"])
@@ -6539,7 +6840,7 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 }
 
 - (IBAction)importBookmarksFromMenu:(id)sender {
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = @"Import Bookmarks";
   a.informativeText = @"Bookmarks go into a folder in this Space's Pinned tabs. From Safari or Firefox, export a "
                       @"bookmarks HTML file there (Safari: File > Export > Bookmarks) and choose it here.";
@@ -6569,7 +6870,7 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
         if ([p runModal] != NSModalResponseOK) return;
         folder = BookmarksFromHTMLFile(p.URL.path, @"Imported Bookmarks", &n);
       }
-      NSAlert* done = [NSAlert new];
+      ArcAlert* done = [ArcAlert new];
       done.messageText = folder && n ? [NSString stringWithFormat:@"%lu bookmarks imported", (unsigned long)n]
                                      : @"No bookmarks found";
       if (folder && n) [me addImportedBookmarks:folder];
@@ -7303,8 +7604,16 @@ static ArcItem* NewSection(NSString* title) {
 - (void)applyTheme {
   [self applyColorScheme];
   NSMutableArray* cg = [NSMutableArray array];
+  // Visual parity V53/V61/V62: like Arc, a theme colour is shaded for the mode: deeper in dark mode (white text stays
+  // readable on a pastel), softer in light mode (black text stays readable on a deep colour).
+  BOOL darkScheme = IsDark(_sidebarScroll ?: self.window.contentView);
+  NSColor* darkBase = [NSColor colorWithSRGBRed:0.05 green:0.05 blue:0.09 alpha:1];
   for (NSString* hex in _space.themeColors)
-    if (NSColor* c = ColorFromHex(hex)) [cg addObject:(id)c.CGColor];
+    if (NSColor* c = ColorFromHex(hex)) {
+      NSColor* shaded = darkScheme ? [c blendedColorWithFraction:0.5 ofColor:darkBase]
+                                   : [c blendedColorWithFraction:0.35 ofColor:NSColor.whiteColor];
+      [cg addObject:(id)(shaded ?: c).CGColor];
+    }
   BOOL fallback = cg.count == 0 && [self usingDefaultTheme];
   if (fallback) {  // Arc's default dark Space
     [cg addObject:(id)ColorFromHex(@"#120C39").CGColor];
@@ -7324,7 +7633,7 @@ static ArcItem* NewSection(NSString* title) {
 }
 
 - (void)setTheme:(NSArray<NSString*>*)colors intensity:(double)intensity forSpace:(ArcSpace*)space {
-  space.themeColors = colors.count ? [colors subarrayWithRange:NSMakeRange(0, MIN(colors.count, (NSUInteger)2))] : nil;
+  space.themeColors = colors.count ? [colors subarrayWithRange:NSMakeRange(0, MIN(colors.count, (NSUInteger)3))] : nil;
   space.themeIntensity = intensity;
   if (space == _space) [self applyTheme];
   [self scheduleSave];
@@ -7811,7 +8120,7 @@ static NSArray<NSNumber*>* BoostZoomSteps() { return @[ @0.8, @0.9, @1.0, @1.1, 
 - (void)editBoostCode:(BOOL)js {
   Boost* b = _boostEditing ?: [self boostForCurrentSiteCreate:YES];
   if (!b) return;
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = js ? [NSString stringWithFormat:@"JavaScript for %@", b.host] : [NSString stringWithFormat:@"CSS for %@", b.host];
   a.informativeText = js ? @"Runs on every page of this site after it loads." : @"Added to every page of this site.";
   NSScrollView* sv = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, 420, 220)];
@@ -7851,92 +8160,48 @@ static NSArray<NSNumber*>* BoostZoomSteps() { return @[ @0.8, @0.9, @1.0, @1.1, 
 }
 - (float)themeGrainOpacity { return _themeView.hidden ? 0 : _themeGrain.opacity; }  // tests
 
+// Visual parity V52: Arc's theme picker drops from the Space title as a popover; every change applies at once.
 - (IBAction)editThemeColor:(id)sender {
   ArcSpace* space = _space;
   if (!space) return;
-  NSArray* oldColors = space.themeColors;
-  double oldIntensity = space.themeIntensity;
-  double oldGrain = space.themeGrain;
-  NSArray* presets = @[
-    @[ @"None", @[] ], @[ @"Lavender", @[ @"#B9A8FF", @"#8B7CF6" ] ], @[ @"Ocean", @[ @"#5EC8F2", @"#2F6FDE" ] ],
-    @[ @"Mint", @[ @"#9BF0C9", @"#3BB58A" ] ], @[ @"Peach", @[ @"#FFC3A0", @"#FF7A7A" ] ],
-    @[ @"Sunset", @[ @"#FFB347", @"#E84A7F" ] ], @[ @"Forest", @[ @"#7FB77E", @"#2E5E3E" ] ],
-    @[ @"Graphite", @[ @"#8E8E93", @"#3A3A3C" ] ], @[ @"Rose", @[ @"#FFB3C7", @"#D9468F" ] ],
-    @[ @"Custom", @[] ]
-  ];
-  NSAlert* a = [NSAlert new];
-  a.messageText = [NSString stringWithFormat:@"Edit Theme Color: %@", space.title ?: @"Space"];
-  NSView* box = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 300, 96)];
-  NSTextField* grainLabel = [NSTextField labelWithString:@"Grain"];
-  grainLabel.frame = NSMakeRect(0, 6, 70, 20);
-  NSSlider* grain = [NSSlider sliderWithValue:oldGrain minValue:0 maxValue:1 target:self action:@selector(themeControlChanged:)];
-  grain.frame = NSMakeRect(74, 4, 212, 24);
-  grain.continuous = YES;
-  [box addSubview:grainLabel];
-  [box addSubview:grain];
-  NSPopUpButton* palette = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(0, 68, 180, 26) pullsDown:NO];
-  for (NSArray* p in presets) [palette addItemWithTitle:p[0]];
-  NSColorWell* top = [[NSColorWell alloc] initWithFrame:NSMakeRect(190, 68, 44, 26)];
-  NSColorWell* bottom = [[NSColorWell alloc] initWithFrame:NSMakeRect(242, 68, 44, 26)];
-  top.color = ColorFromHex(oldColors.firstObject) ?: [NSColor colorWithSRGBRed:0.73 green:0.66 blue:1 alpha:1];
-  bottom.color = ColorFromHex(oldColors.lastObject) ?: top.color;
-  NSTextField* label = [NSTextField labelWithString:@"Intensity"];
-  label.frame = NSMakeRect(0, 36, 70, 20);
-  NSSlider* intensity = [NSSlider sliderWithValue:(oldColors.count ? oldIntensity : 0.5) minValue:0.1 maxValue:1 target:nil action:nil];
-  intensity.frame = NSMakeRect(74, 34, 212, 24);
-  NSInteger sel = oldColors.count ? presets.count - 1 : 0;
-  for (NSUInteger i = 1; i + 1 < presets.count; ++i)
-    if ([presets[i][1] isEqualToArray:oldColors ?: @[]]) sel = i;
-  [palette selectItemAtIndex:sel];
-  for (NSView* v in @[ palette, top, bottom, label, intensity ]) [box addSubview:v];
-  a.accessoryView = box;
-  [a addButtonWithTitle:@"Done"];
-  [a addButtonWithTitle:@"Cancel"];
+  [_themePopover close];
+  ThemePickerController* picker = [[ThemePickerController alloc] initWithColors:space.themeColors
+                                                                      intensity:space.themeIntensity
+                                                                          grain:space.themeGrain
+                                                                         scheme:space.colorScheme ?: @"auto"];
   __weak MainWindowController* weakSelf = self;
-  __block BOOL fromPreset = NO;
-  void (^preview)(void) = ^{
-    NSInteger i = palette.indexOfSelectedItem;
-    NSArray* colors = presets[i][1];
-    if (i == (NSInteger)presets.count - 1) colors = @[ HexFromColor(top.color) ?: @"#B9A8FF", HexFromColor(bottom.color) ?: @"#8B7CF6" ];
-    else if (colors.count && !fromPreset) {
-      fromPreset = YES;
-      top.color = ColorFromHex(colors[0]);
-      bottom.color = ColorFromHex(colors[1]);
-      fromPreset = NO;
-    }
-    [weakSelf setTheme:colors intensity:intensity.doubleValue forSpace:space];
-    [weakSelf setThemeGrain:grain.doubleValue forSpace:space];
+  picker.themeChanged = ^(NSArray<NSString*>* colors, double intensity, double grain) {
+    [weakSelf setTheme:colors intensity:intensity forSpace:space];
+    [weakSelf setThemeGrain:grain forSpace:space];
   };
-  _themePreview = [preview copy];
-  palette.target = self;
-  palette.action = @selector(themeControlChanged:);
-  intensity.target = self;
-  intensity.action = @selector(themeControlChanged:);
-  intensity.continuous = YES;
-  for (NSColorWell* w in @[ top, bottom ]) {
-    w.target = self;
-    w.action = @selector(themeWellChanged:);
-  }
-  _themePalette = palette;
-  if ([a runModal] != NSAlertFirstButtonReturn) {
-    [self setTheme:oldColors intensity:oldIntensity forSpace:space];
-    [self setThemeGrain:oldGrain forSpace:space];
-  }
-  _themePreview = nil;
-  _themePalette = nil;
-  [NSColorPanel.sharedColorPanel orderOut:nil];
+  picker.schemeChanged = ^(NSString* scheme) { [weakSelf setColorScheme:scheme forSpace:space]; };
+  NSPopover* pop = [NSPopover new];
+  pop.contentViewController = picker;
+  pop.behavior = NSPopoverBehaviorTransient;
+  pop.animates = !ReduceMotion() && !self.selfTestProfiles;
+  _themePopover = pop;
+  NSView* anchor = _spaceHeader.hidden || _spaceHeader.alphaValue < 0.5 ? _sidebar : _spaceHeader;
+  NSRect at = anchor == _spaceHeader ? anchor.bounds : NSMakeRect(20, NSHeight(_sidebar.bounds) - 60, 40, 20);
+  BOOL wasKey = self.window.isKeyWindow;
+  [pop showRelativeToRect:at ofView:anchor preferredEdge:NSRectEdgeMaxX];
+  if (self.window.alphaValue < 0.05) picker.view.window.alphaValue = self.window.alphaValue;  // hidden test window
+  // The page keeps the keyboard (and Chromium its focus): the picker only takes clicks and drags.
+  if (wasKey && !self.window.isKeyWindow) [self.window makeKeyWindow];
 }
-
-- (void)themeControlChanged:(id)sender { if (_themePreview) _themePreview(); }
-- (void)themeWellChanged:(id)sender {
-  [_themePalette selectItemAtIndex:_themePalette.numberOfItems - 1];  // touching a colour = Custom
-  if (_themePreview) _themePreview();
+- (ThemePickerController*)themePickerForTest {
+  return [_themePopover.contentViewController isKindOfClass:ThemePickerController.class]
+             ? (ThemePickerController*)_themePopover.contentViewController : nil;
+}
+- (BOOL)themePickerShown { return _themePopover.isShown; }
+- (void)closeThemePicker {
+  [_themePopover close];
+  _themePopover = nil;
 }
 
 - (IBAction)changeSpaceIcon:(id)sender {
   ArcSpace* space = _space;
   if (!space) return;
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = @"Change Space Icon";
   a.informativeText = @"Type or paste an emoji (Ctrl+Cmd+Space opens the emoji picker). Leave empty for no icon.";
   NSTextField* f = [[NSTextField alloc] initWithFrame:NSMakeRect(0, 0, 80, 28)];
@@ -7952,6 +8217,11 @@ static NSArray<NSNumber*>* BoostZoomSteps() { return @[ @0.8, @0.9, @1.0, @1.1, 
 // Arc slides the sidebar sideways when switching Spaces (next Space comes in from the right), and the page card
 // "pops" (a quick scale-in) when its contents change. Both are skipped when Reduce Motion is on.
 static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion; }
+// Visual parity V55: the Space's sidebar pages in with a little spring overshoot (Arc's pager), and the window's theme
+// colours cross-fade from the old Space to the new one.
+static CAMediaTimingFunction* SpringTiming() {  // overshoots a touch past the end, then settles
+  return [CAMediaTimingFunction functionWithControlPoints:0.25 :1.18 :0.45 :1.0];
+}
 - (void)slideSidebarFromRight:(BOOL)fromRight {
   _lastSpaceSlide = ReduceMotion() ? @"none" : (fromRight ? @"right" : @"left");
   if (ReduceMotion()) return;
@@ -7959,10 +8229,32 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   CATransition* t = [CATransition animation];
   t.type = kCATransitionPush;
   t.subtype = fromRight ? kCATransitionFromRight : kCATransitionFromLeft;
-  t.duration = 0.22;
-  t.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseOut];
+  t.duration = 0.34;
+  t.timingFunction = SpringTiming();
   [_sidebarScroll.layer addAnimation:t forKey:@"spaceSlide"];
   [_spaceHeader.layer ?: (_spaceHeader.wantsLayer = YES, _spaceHeader.layer) addAnimation:[t copy] forKey:@"spaceSlide"];
+}
+- (void)crossFadeThemeFrom:(NSArray*)oldColors opacity:(float)oldOpacity wasHidden:(BOOL)wasHidden {
+  if (ReduceMotion() || _themeView.hidden) return;
+  CABasicAnimation* c = [CABasicAnimation animationWithKeyPath:@"colors"];
+  c.fromValue = wasHidden || !oldColors.count ? _themeGradient.colors : oldColors;
+  c.toValue = _themeGradient.colors;
+  CABasicAnimation* o = [CABasicAnimation animationWithKeyPath:@"opacity"];
+  o.fromValue = @(wasHidden ? 0.0f : oldOpacity);
+  o.toValue = @(_themeGradient.opacity);
+  CAAnimationGroup* g = [CAAnimationGroup animation];
+  g.animations = @[ c, o ];
+  g.duration = 0.3;
+  g.timingFunction = [CAMediaTimingFunction functionWithName:kCAMediaTimingFunctionEaseInEaseOut];
+  [_themeGradient addAnimation:g forKey:@"themeFade"];
+}
+- (NSString*)spaceSwitchMotion {  // tests (V55)
+  CATransition* t = (CATransition*)([_sidebarScroll.layer animationForKey:kCATransition]  // transitions live under this key
+                                        ?: [_sidebarScroll.layer animationForKey:@"spaceSlide"]);
+  float p[2] = {0, 0};
+  [t.timingFunction getControlPointAtIndex:1 values:p];
+  return [NSString stringWithFormat:@"push=%d spring=%d crossfade=%d", [t.type isEqual:kCATransitionPush], p[1] > 1.0f,
+                                    [_themeGradient animationForKey:@"themeFade"] != nil];
 }
 - (void)popPageCard {
   if (ReduceMotion() || _sidebar.hidden) return;
@@ -7990,11 +8282,15 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   [_extensionPopup closeBecause:@"space"];  // the popup runs in the old Space's profile
   NSUInteger from = _space ? [_spaces indexOfObject:_space] : 0, to = [_spaces indexOfObject:space];
   [self slideSidebarFromRight:to > from];
+  NSArray* oldColors = _themeGradient.colors;
+  float oldOpacity = _themeGradient.opacity;
+  BOOL themeWasHidden = _themeView.hidden;
   _space = space;
   _splitItems = nil;
   [_spacePicker selectItemAtIndex:[_spaces indexOfObject:space]];
   [self reloadSidebar];
   [self applyTheme];
+  [self crossFadeThemeFrom:oldColors opacity:oldOpacity wasHidden:themeWasHidden];
   [self rebuildSpaceBar];
   [self updateSpaceHeader];
   [self scheduleSave];
@@ -8080,7 +8376,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 }
 
 - (NSString*)askForSpaceName:(NSString*)message initial:(NSString*)initial {
-  NSAlert* alert = [NSAlert new];
+  ArcAlert* alert = [ArcAlert new];
   alert.messageText = message;
   [alert addButtonWithTitle:@"OK"];
   [alert addButtonWithTitle:@"Cancel"];
@@ -8092,9 +8388,109 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
   return [field.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
 }
 
+// Visual parity V54: Arc makes a Space from one card: icon and name, profile, and a theme colour.
+static NSArray<NSString*>* NewSpaceSwatches() {
+  return @[ @"", @"#F29BBB", @"#A6729D", @"#F25E6B", @"#FF3C19", @"#F2D66D", @"#73E59C", @"#7EB8D6", @"#66678A" ];
+}
 - (IBAction)newSpace:(id)sender {
-  NSString* name = [self askForSpaceName:@"New Space" initial:@""];
-  if (name) [self createSpaceNamed:name];
+  if (_newSpaceCard.isShown) return;
+  ArcAlert* card = [ArcAlert new];
+  card.messageText = @"New Space";
+  card.informativeText = @"Each Space has its own tabs, theme and icon. Spaces in the same profile share logins.";
+  const CGFloat W = 340;
+  NSView* box = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, W, 132)];
+  NSTextField* emoji = [NSTextField textFieldWithString:@""];
+  emoji.placeholderString = @"\u2726";
+  emoji.font = [NSFont systemFontOfSize:20];
+  emoji.alignment = NSTextAlignmentCenter;
+  emoji.frame = NSMakeRect(0, 94, 38, 34);
+  emoji.toolTip = @"Space icon: type or paste an emoji (Ctrl+Cmd+Space)";
+  NSTextField* name = [NSTextField textFieldWithString:@""];
+  name.placeholderString = @"Space name";
+  name.font = [NSFont systemFontOfSize:15];
+  name.frame = NSMakeRect(46, 96, W - 46, 30);
+  NSTextField* profileLabel = [NSTextField labelWithString:@"Profile"];
+  profileLabel.frame = NSMakeRect(0, 58, 70, 20);
+  NSPopUpButton* profile = [[NSPopUpButton alloc] initWithFrame:NSMakeRect(74, 54, W - 74, 26) pullsDown:NO];
+  for (NSString* dir in [self profileDirectories]) {
+    [profile addItemWithTitle:[self nameOfProfile:dir]];
+    profile.lastItem.representedObject = dir;
+  }
+  [profile.menu addItem:NSMenuItem.separatorItem];
+  [profile addItemWithTitle:@"New Profile for This Space"];
+  profile.lastItem.representedObject = @"";
+  NSUInteger mine = [[self profileDirectories] indexOfObject:_space.profileDirectory ?: @"Default"];
+  if (mine != NSNotFound) [profile selectItemAtIndex:(NSInteger)mine];
+  NSTextField* themeLabel = [NSTextField labelWithString:@"Theme"];
+  themeLabel.frame = NSMakeRect(0, 14, 70, 20);
+  NSMutableArray* swatches = [NSMutableArray array];
+  NSArray* hexes = NewSpaceSwatches();
+  for (NSUInteger i = 0; i < hexes.count; ++i) {
+    NSButton* b = [NSButton buttonWithTitle:@"" target:self action:@selector(newSpaceSwatchClicked:)];
+    b.bordered = NO;
+    b.tag = (NSInteger)i;
+    b.wantsLayer = YES;
+    b.layer.cornerRadius = 11;
+    b.layer.backgroundColor = i ? ColorFromHex(hexes[i]).CGColor : NSColor.clearColor.CGColor;
+    b.layer.borderColor = [NSColor colorWithWhite:0.5 alpha:0.5].CGColor;
+    b.layer.borderWidth = i ? 0 : 1;  // the first one is "no colour" (the default theme)
+    b.toolTip = i ? hexes[i] : @"Default";
+    b.frame = NSMakeRect(74 + i * 29, 13, 22, 22);
+    [swatches addObject:b];
+    [box addSubview:b];
+  }
+  for (NSView* v in @[ emoji, name, profileLabel, profile, themeLabel ]) [box addSubview:v];
+  card.accessoryView = box;
+  card.window.initialFirstResponder = name;
+  [card addButtonWithTitle:@"Create Space"];
+  [card addButtonWithTitle:@"Cancel"];
+  _newSpaceCard = card;
+  _newSpaceFields = @{ @"emoji" : emoji, @"name" : name, @"profile" : profile, @"swatches" : swatches };
+  _newSpaceSwatch = 0;
+  [self newSpaceSwatchClicked:swatches.firstObject];
+  __weak MainWindowController* weakSelf = self;
+  [card beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
+    MainWindowController* me = weakSelf;
+    if (!me) return;
+    if (r == NSAlertFirstButtonReturn) [me createSpaceFromCard];
+    me->_newSpaceCard = nil;
+    me->_newSpaceFields = nil;
+  }];
+}
+- (void)newSpaceSwatchClicked:(NSButton*)sender {
+  _newSpaceSwatch = (NSUInteger)sender.tag;
+  for (NSButton* b in _newSpaceFields[@"swatches"]) {
+    BOOL on = b.tag == sender.tag;
+    b.layer.borderWidth = on ? 2.5 : (b.tag ? 0 : 1);
+    b.layer.borderColor = on ? NSColor.controlAccentColor.CGColor : [NSColor colorWithWhite:0.5 alpha:0.5].CGColor;
+  }
+}
+- (ArcSpace*)createSpaceFromCard {
+  NSString* name = [((NSTextField*)_newSpaceFields[@"name"]).stringValue
+      stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+  NSString* emoji = ((NSTextField*)_newSpaceFields[@"emoji"]).stringValue;
+  NSString* dir = ((NSPopUpButton*)_newSpaceFields[@"profile"]).selectedItem.representedObject;
+  NSString* hex = NewSpaceSwatches()[MIN(_newSpaceSwatch, NewSpaceSwatches().count - 1)];
+  ArcSpace* space = [self createSpaceNamed:name];
+  if (emoji.length) [self setIcon:emoji forSpace:space];
+  if ([dir isEqual:@""]) dir = [self createProfileNamed:space.title];
+  if (dir.length && ![dir isEqual:space.profileDirectory]) [self assignSpace:space toProfile:dir];
+  if (hex.length) [self setTheme:@[ hex ] intensity:0.6 forSpace:space];
+  return space;
+}
+// Tests (V54): the card's parts, and filling it as a person would.
+- (NSString*)newSpaceCardLook {
+  return [NSString stringWithFormat:@"card=%d emoji=%d name=%d profiles=%ld swatches=%lu", _newSpaceCard.isShown,
+                                    _newSpaceFields[@"emoji"] != nil, _newSpaceFields[@"name"] != nil,
+                                    (long)((NSPopUpButton*)_newSpaceFields[@"profile"]).numberOfItems,
+                                    (unsigned long)[_newSpaceFields[@"swatches"] count]];
+}
+- (ArcAlert*)newSpaceCardForTest { return _newSpaceCard; }
+- (void)fillNewSpaceCard:(NSString*)name emoji:(NSString*)emoji swatch:(NSUInteger)swatch {
+  ((NSTextField*)_newSpaceFields[@"name"]).stringValue = name ?: @"";
+  ((NSTextField*)_newSpaceFields[@"emoji"]).stringValue = emoji ?: @"";
+  NSArray* sw = _newSpaceFields[@"swatches"];
+  if (swatch < sw.count) [self newSpaceSwatchClicked:sw[swatch]];
 }
 
 - (IBAction)renameCurrentSpace:(id)sender {
@@ -8107,7 +8503,7 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
     NSBeep();
     return;
   }
-  NSAlert* alert = [NSAlert new];
+  ArcAlert* alert = [ArcAlert new];
   alert.messageText = [NSString stringWithFormat:@"Delete \u201c%@\u201d?", _space.title];
   alert.informativeText = @"Its tabs move to the Archive, so you can reopen them later.";
   [alert addButtonWithTitle:@"Delete"];
@@ -8128,13 +8524,70 @@ static BOOL ReduceMotion() { return NSWorkspace.sharedWorkspace.accessibilityDis
 
 #pragma mark Arc shortcuts
 
+// Visual parity V66: Cmd+S slides the sidebar out to the left (or back in) while the page card grows into the room
+// it leaves (or shrinks back), both on a spring. Nothing moves with Reduce Motion.
 - (IBAction)toggleSidebar:(id)sender {
   if (_sidebarPeeking) [self endSidebarPeek];
+  BOOL hiding = !_sidebar.hidden;
+  NSRect oldCard = _content.frame;
+  CALayer* ghost = nil;
+  if (hiding && !ReduceMotion() && self.window.contentView.layer) {  // a picture of the sidebar slides out
+    NSBitmapImageRep* rep = [_sidebar bitmapImageRepForCachingDisplayInRect:_sidebar.bounds];
+    if (rep) {
+      [_sidebar cacheDisplayInRect:_sidebar.bounds toBitmapImageRep:rep];
+      ghost = [CALayer layer];
+      ghost.frame = _sidebar.frame;
+      ghost.contents = (__bridge id)rep.CGImage;
+      ghost.contentsScale = self.window.backingScaleFactor;
+      ghost.zPosition = 10;
+    }
+  }
   _sidebar.hidden = !_sidebar.hidden;
   [self layoutContentArea];
   [self positionWindowButtons];
   [self updateEdgeStrip];
+  _lastSidebarMotion = @"none";
+  if (ReduceMotion()) return;
+  CASpringAnimation* (^spring)(NSString*, id, id) = ^CASpringAnimation*(NSString* key, id from, id to) {
+    CASpringAnimation* a = [CASpringAnimation animationWithKeyPath:key];
+    a.fromValue = from;
+    a.toValue = to;
+    a.damping = 26;
+    a.stiffness = 260;
+    a.mass = 1;
+    a.duration = a.settlingDuration;
+    return a;
+  };
+  CGFloat w = NSWidth(_sidebar.frame) ?: kSidebarWidth;
+  BOOL slid = NO;
+  if (ghost) {
+    [self.window.contentView.layer addSublayer:ghost];
+    CASpringAnimation* out = spring(@"transform.translation.x", @0, @(-w));
+    out.removedOnCompletion = NO;
+    out.fillMode = kCAFillModeForwards;
+    [CATransaction begin];
+    [CATransaction setCompletionBlock:^{ [ghost removeFromSuperlayer]; }];
+    [ghost addAnimation:out forKey:@"sidebarOut"];
+    [CATransaction commit];
+    slid = YES;
+  } else if (!hiding) {
+    _sidebar.wantsLayer = YES;
+    [_sidebar.layer addAnimation:spring(@"transform.translation.x", @(-w), @0) forKey:@"sidebarIn"];
+    slid = YES;
+  }
+  // The card: from its old place and size to the new one (the page itself is laid out at the end size already).
+  NSRect newCard = _content.frame;
+  if (_content.layer && NSWidth(newCard) > 0) {
+    CGFloat sx = NSWidth(oldCard) / NSWidth(newCard);
+    CGFloat dx = NSMinX(oldCard) - NSMinX(newCard) + (NSWidth(oldCard) - NSWidth(newCard)) / 2;
+    CATransform3D from = CATransform3DScale(CATransform3DMakeTranslation(dx, 0, 0), sx, NSHeight(oldCard) / MAX(1, NSHeight(newCard)), 1);
+    [_content.layer addAnimation:spring(@"transform", [NSValue valueWithCATransform3D:from],
+                                        [NSValue valueWithCATransform3D:CATransform3DIdentity]) forKey:@"cardGrow"];
+  }
+  _lastSidebarMotion = [NSString stringWithFormat:@"slide=%d card=%d", slid, [_content.layer animationForKey:@"cardGrow"] != nil];
 }
+- (NSString*)lastSidebarMotion { return _lastSidebarMotion ?: @""; }  // tests (V66)
+- (NSString*)sidebarRowMotion { return ((SidebarOutlineView*)_outline).lastRowMotion; }  // tests (V65)
 // The sidebar takes no room: hidden, or only floating over the page.
 - (BOOL)sidebarCollapsed { return _sidebar.hidden || _sidebarPeeking; }
 
@@ -8856,6 +9309,10 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
 
 // Archives every Today tab in the current Space (Arc: "Clear unpinned tabs").
 - (IBAction)clearToday:(id)sender {
+  NSMutableArray* flying = [NSMutableArray array];  // V65: archived rows fly to the Library button
+  for (ArcItem* item in _space.unpinned.children)
+    if (!item.isFolder) [flying addObject:item];
+  [(SidebarOutlineView*)_outline flyItemsToLibrary:flying];
   for (ArcItem* item in [_space.unpinned.children copy]) {
     if (item.isFolder) continue;
     if (item.isSplit) {
@@ -9589,7 +10046,7 @@ static void ApplyArcMenuIcons(NSMenu* menu) {
     _commandIcon.contentTintColor = [NSColor.labelColor colorWithAlphaComponent:0.33];
     [_commandBar.contentView addSubview:_commandIcon];
     _commandField = [[NSTextField alloc] initWithFrame:NSMakeRect(48, 17, 576, 26)];
-    _commandField.font = [NSFont systemFontOfSize:20];
+    _commandField.font = [NSFont systemFontOfSize:kCommandFieldSize];
     _commandField.bezeled = NO;
     _commandField.focusRingType = NSFocusRingTypeNone;
     _commandField.drawsBackground = NO;
@@ -10462,7 +10919,7 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
   return f;
 }
 - (NSString*)askLiveFolderSource:(NSString*)message info:(NSString*)info placeholder:(NSString*)placeholder value:(NSString*)value {
-  NSAlert* alert = [NSAlert new];
+  ArcAlert* alert = [ArcAlert new];
   alert.messageText = message;
   alert.informativeText = info;
   [alert addButtonWithTitle:@"Create"];
@@ -10526,7 +10983,7 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
       NSString* cid = channelID ?: source;  // a /channel/ address still works if its page couldn't be read
       if (!me || !cid) {
         if (me && !me.selfTestProfiles) {
-          NSAlert* a = [NSAlert new];
+          ArcAlert* a = [ArcAlert new];
           a.messageText = @"Couldn't find that YouTube channel";
           a.informativeText = error ?: @"";
           [a runModal];
@@ -11100,6 +11557,90 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
   return pb;
 }
 
+// V21: the dragged row lifts off the list: its own pill, a little larger, with a soft shadow under it.
+- (NSImage*)liftedDragImageForRow:(NSInteger)row {
+  NSView* rv = [_outline rowViewAtRow:row makeIfNecessary:YES];
+  if (!rv || NSIsEmptyRect(rv.bounds)) return nil;
+  NSBitmapImageRep* rep = [rv bitmapImageRepForCachingDisplayInRect:rv.bounds];
+  if (!rep) return nil;
+  [rv cacheDisplayInRect:rv.bounds toBitmapImageRep:rep];
+  NSImage* rowImage = [[NSImage alloc] initWithSize:rv.bounds.size];
+  [rowImage addRepresentation:rep];
+  const CGFloat pad = 12, scale = 1.04;
+  NSSize sz = NSMakeSize(ceil(rv.bounds.size.width * scale) + 2 * pad, ceil(rv.bounds.size.height * scale) + 2 * pad);
+  BOOL dark = IsDark(_outline);
+  return [NSImage imageWithSize:sz flipped:NO drawingHandler:^BOOL(NSRect r) {
+    NSRect pill = NSMakeRect(pad, pad, sz.width - 2 * pad, sz.height - 2 * pad);
+    NSBezierPath* p = [NSBezierPath bezierPathWithRoundedRect:pill xRadius:kRowRadius yRadius:kRowRadius];
+    [NSGraphicsContext saveGraphicsState];
+    NSShadow* sh = [NSShadow new];
+    sh.shadowColor = [NSColor colorWithWhite:0 alpha:0.35];
+    sh.shadowBlurRadius = 10;
+    sh.shadowOffset = NSMakeSize(0, -4);
+    [sh set];
+    [(dark ? [NSColor colorWithSRGBRed:0.2 green:0.2 blue:0.26 alpha:0.96] : [NSColor colorWithWhite:1 alpha:0.97]) setFill];
+    [p fill];
+    [NSGraphicsContext restoreGraphicsState];
+    [p addClip];
+    [rowImage drawInRect:pill];
+    return YES;
+  }];
+}
+- (void)outlineView:(NSOutlineView*)ov draggingSession:(NSDraggingSession*)session willBeginAtPoint:(NSPoint)screenPoint
+           forItems:(NSArray*)draggedItems {
+  session.animatesToStartingPositionsOnCancelOrFail = YES;
+  [session enumerateDraggingItemsWithOptions:0 forView:ov classes:@[ NSPasteboardItem.class ] searchOptions:@{}
+                                  usingBlock:^(NSDraggingItem* d, NSInteger idx, BOOL* stop) {
+    NSInteger row = idx < (NSInteger)draggedItems.count ? [ov rowForItem:draggedItems[(NSUInteger)idx]] : -1;
+    NSImage* img = row >= 0 ? [self liftedDragImageForRow:row] : nil;
+    if (!img) return;
+    NSRect rr = [ov rectOfRow:row];
+    NSRect f = NSMakeRect(NSMinX(rr) - (img.size.width - NSWidth(rr)) / 2, NSMinY(rr) - (img.size.height - NSHeight(rr)) / 2,
+                          img.size.width, img.size.height);
+    [d setDraggingFrame:f contents:img];
+  }];
+  _liftedDrags++;
+}
+- (NSString*)dragLookDebugForTest {
+  NSMutableString* s = [NSMutableString string];
+  for (NSInteger r = 0; r < _outline.numberOfRows && r < 12; ++r) {
+    ArcItem* it = [_outline itemAtRow:r];
+    NSView* rv = [_outline rowViewAtRow:r makeIfNecessary:YES];
+    NSImage* img = it.url.length ? [self liftedDragImageForRow:r] : nil;
+    [s appendFormat:@"%ld:%d:%.0fx%.0f:%.0fx%.0f ", (long)r, it.url.length > 0, NSWidth(rv.bounds), NSHeight(rv.bounds), img.size.width,
+                    img.size.height];
+  }
+  return s;
+}
+- (NSString*)dragLookForTest {  // V21
+  NSInteger row = -1;
+  for (NSInteger r = 0; r < _outline.numberOfRows; ++r) {
+    ArcItem* it = [_outline itemAtRow:r];  // a settled tab row (not one still growing in, V65)
+    NSView* rowView = it.url.length ? [_outline rowViewAtRow:r makeIfNecessary:YES] : nil;
+    if (rowView && NSHeight(rowView.bounds) >= kRowHeight && ![(SidebarOutlineView*)_outline isGrowing:it]) {
+      row = r;
+      break;
+    }
+  }
+  NSImage* img = row >= 0 ? [self liftedDragImageForRow:row] : nil;
+  NSRect rr = row >= 0 ? [_outline rowViewAtRow:row makeIfNecessary:YES].bounds : NSZeroRect;
+  BOOL lifted = img && img.size.width > NSWidth(rr) + 10 && img.size.height > NSHeight(rr) + 10;
+  NSInteger folderRow = -1;
+  for (NSInteger r = 0; r < _outline.numberOfRows; ++r)
+    if (((ArcItem*)[_outline itemAtRow:r]).isFolder) { folderRow = r; break; }
+  BOOL highlight = YES;
+  if (folderRow >= 0) {
+    SidebarRowView* rv = (SidebarRowView*)[_outline rowViewAtRow:folderRow makeIfNecessary:YES];
+    BOOL was = rv.targetForDropOperation;
+    rv.targetForDropOperation = YES;
+    highlight = [rv respondsToSelector:@selector(dropHighlightShown)] && [rv dropHighlightShown];
+    rv.targetForDropOperation = was;
+  }
+  return [NSString stringWithFormat:@"gap=%d lifted=%d folderHighlight=%d pageSplit=%d",
+                                    _outline.draggingDestinationFeedbackStyle == NSTableViewDraggingDestinationFeedbackStyleGap,
+                                    lifted, highlight, [_content isKindOfClass:PageDropView.class]];
+}
+
 - (ArcItem*)itemWithID:(NSString*)itemID under:(ArcItem*)root {
   if ([root.itemID isEqualToString:itemID]) return root;
   for (ArcItem* child in root.children) {
@@ -11168,6 +11709,7 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
     }
   }
   if (archived) {
+    ((SidebarOutlineView*)_outline).nextRemovalToLibrary = YES;  // V65: archived rows fly to the Library button
     [_outline reloadData];
     [self reloadSidebar];
     [self scheduleSave];
@@ -11593,7 +12135,7 @@ static BOOL LibraryIsMediaFile(NSString* path) {
 }
 
 - (IBAction)clearBrowsingData:(id)sender {
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = @"Clear Browsing Data";
   a.informativeText = @"Applies to every Space. Your tabs, Spaces and Archive are not affected.";
   NSView* box = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 300, 110)];
@@ -11682,7 +12224,7 @@ static BOOL LibraryIsMediaFile(NSString* path) {
 
 - (IBAction)clearHistory:(id)sender {
   if (sender) {
-    NSAlert* a = [NSAlert new];
+    ArcAlert* a = [ArcAlert new];
     a.messageText = @"Clear all browsing history?";
     a.informativeText = @"Your tabs, Spaces and Archive are not affected.";
     [a addButtonWithTitle:@"Clear History"];

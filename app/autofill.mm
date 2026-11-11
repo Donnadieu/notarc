@@ -1,4 +1,5 @@
 #import "app/autofill.h"
+#import "app/arc_alert.h"
 
 #import <LocalAuthentication/LocalAuthentication.h>
 #import <UniformTypeIdentifiers/UniformTypeIdentifiers.h>
@@ -356,7 +357,7 @@ static NSString* DisplayHost(NSString* origin) {
 - (void)deleteClicked:(id)sender {
   NSInteger row = _table.selectedRow;
   if (row < 0) return;
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = @"Delete this item?";
   a.informativeText = [self titleAtRow:row] ?: @"";
   [a addButtonWithTitle:@"Delete"];
@@ -419,7 +420,7 @@ static NSString* DisplayHost(NSString* origin) {
   grid.rowSpacing = 6;
   [grid columnAtIndex:0].xPlacement = NSGridCellPlacementTrailing;
   grid.frame = NSMakeRect(0, 0, 320, spec.count * 28);
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   NSInteger s = _sections.selectedSegment;
   a.messageText = s == 0 ? @"Add a password" : s == 1 ? @"Add an address" : @"Add a card";
   a.informativeText = s == 2 ? @"NotArc never stores the security code." : @"";
@@ -659,7 +660,7 @@ static NSString* DisplayHost(NSString* origin) {
 
 - (void)importPasswordsFromMenu {
   NSWindow* window = _host.window;
-  NSAlert* a = [NSAlert new];
+  ArcAlert* a = [ArcAlert new];
   a.messageText = @"Import Passwords";
   a.informativeText = @"Saved passwords, addresses and cards are copied into NotArc; the other browser isn't changed. "
                       @"macOS asks once for each browser's own Keychain key.";
@@ -686,7 +687,7 @@ static NSString* DisplayHost(NSString* origin) {
 - (void)importFrom:(id)src {
   NSWindow* window = _host.window;
   PasswordStore* store = [PasswordStore shared];
-  NSAlert* done = [NSAlert new];
+  ArcAlert* done = [ArcAlert new];
   if (!store.usable) {
     done.messageText = @"NotArc couldn't open its password store";
     done.informativeText = @"It is locked with the \"NotArc Safe Storage\" item in your Keychain, which NotArc couldn't read.";
