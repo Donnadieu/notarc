@@ -310,6 +310,8 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
     } else if ([cmd isEqual:@"hover"]) {
       ArcItem* t = arg.length ? FindTab(c.currentSpace, arg) : nil;
       [c hoverSidebarItem:t];
+    } else if ([cmd isEqual:@"pill-hover"]) {  // show the address pill's hover row (V69)
+      [c setPillHoveredForTest:arg.length == 0 || arg.boolValue];
     } else if ([cmd isEqual:@"js"]) {  // run a script in the shown tab
       if (c.shownItem) [c runJS:arg inItem:c.shownItem];
     } else if ([cmd isEqual:@"poll-media"]) {

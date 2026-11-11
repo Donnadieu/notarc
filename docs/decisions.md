@@ -540,3 +540,38 @@ trackpad; everything else is checked by the hidden self-test.
     (as File > Import Everything from Arc); other Chromium browsers bring history and bookmarks. The welcome text is
     NotArc's own.
 
+## 2026-11-11: address pill, dropdown, extensions in the pill (Omar's report)
+
+136. **Which pictures were Arc.** Omar's six screenshots were three pairs. Arc 1.169: the small dropdown under the
+    pill, the pill with two extension icons + link + controls, and (by elimination) the plain "github.com" pill.
+    NotArc 0.29.0: the 640 pt bar over the page, the pill with Boost + link + controls, and the site control center
+    (its wording is NotArc's own code word for word, and it hung from the page's corner). Arc wasn't launched; its
+    bundle strings and the earlier reference frames were read instead.
+137. **The pill opens Arc's compact dropdown (V67),** measured at 1x from Omar's Arc screenshot: 348 pt wide (the
+    256 pt pill plus 92), top-left on the pill, 50 pt rows, five at most, title only. Arc's real width rule isn't
+    known; "pill + 92" matches the screenshot and keeps the same look if the sidebar width changes.
+138. **Any click outside closes it, and the click still goes where it was aimed** (a page link, a tab row), except on
+    the pill itself, which only closes it. Losing focus closes it only after it had focus, so hidden test windows
+    (which never take focus) aren't affected.
+139. **Pinned extensions (V69).** Never chosen: every extension that's on is pinned (Arc's analytics count newly pinned
+    extensions, so new ones are pinned there too); the pill shows the first two, the rest are under More. Import from
+    Arc takes Arc's pins from Chromium's `extensions.pinned_extensions` in each Arc profile's Preferences when they're
+    there; whether Arc keeps its pins in that key wasn't checked on Omar's Arc data (unreadable here), so his pill may
+    show 1Password and Bitwarden first until he pins Claude.
+140. **Extension icons in the pill don't need Chrome-style pages.** The popup bubble is a Chrome-style page of its own
+    (decision 94), so pinned icons and More show whenever an extension is installed; content scripts on tabs still
+    need Chrome-style pages.
+141. **Import Everything from Arc turns Chrome-style pages on when it copies an extension** (replaces the exception in
+    93). Omar's import copied five extensions that never loaded because the setting stayed off.
+142. **The command bar card is see-through (V71):** NSVisualEffectView blur plus a tint at the alpha measured from
+    Arc (dark ~80 %, light ~92 %), 10 pt corners, a 20 % white hairline in dark mode. Only the command bar uses it; the
+    find bar and capture card keep the opaque card. Hidden renders can't show the blur of what's behind the window,
+    so the exact look over a busy page is a taste call for Omar.
+143. **Site control center (V72):** anchored to the pill's controls button; an Extensions section with a pin button per
+    extension and +; footer Clear Cookies, Clear Cache and a ... menu with Arc's footer menu items. Arc's exact footer
+    layout isn't known (only its menu item names are), so the two text buttons plus ... are NotArc's call. Clear Cache
+    clears the site's Cache Storage, service workers and shader cache and reloads past the HTTP cache (CEF can't empty
+    one site's HTTP cache). All Site Settings opens chrome://settings/content/all and needs Chrome-style pages.
+144. **Settings window (item 5) unchanged:** it already has Arc's toolbar tabs and panes (V58), and there's no Arc
+    settings picture to compare against, so nothing was changed blind.
+

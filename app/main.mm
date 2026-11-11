@@ -100,12 +100,21 @@ static BOOL gCrashTestDone = NO;
 static BOOL gMaxTestDone = NO;    // self-test: the Arc Max checks (#58, #59) printed
 // Self-test fixture extension (#66): popup and options pages with known titles, no scripts.
 static NSString* gTestExtensionID;  // installed and loaded at launch in every test run
+static NSData* TestExtensionIconPNG(void) {  // a 16 px blue square: the fixture's own toolbar icon (V69)
+  NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:16 pixelsHigh:16 bitsPerSample:8
+                                                             samplesPerPixel:4 hasAlpha:YES isPlanar:NO
+                                                              colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+  for (int y = 0; y < 16; ++y)
+    for (int x = 0; x < 16; ++x) [rep setColor:[NSColor colorWithDeviceRed:0.2 green:0.4 blue:0.9 alpha:1] atX:x y:y];
+  return [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+}
 static NSDictionary<NSString*, NSData*>* TestExtensionFiles(NSString* name, int manifestVersion) {
-  NSString* manifest = [NSString stringWithFormat:@"{\"manifest_version\":%d,\"name\":\"%@\",\"version\":\"1.2\","
+  NSString* manifest = [NSString stringWithFormat:@"{\"manifest_version\":%d,\"name\":\"%@\",\"version\":\"1.2\",\"icons\":{\"16\":\"icon.png\"},"
                                                   @"\"action\":{\"default_popup\":\"popup.html\"},\"options_page\":\"options.html\"}",
                                                   manifestVersion, name];
   return @{
     @"manifest.json" : [manifest dataUsingEncoding:NSUTF8StringEncoding],
+    @"icon.png" : TestExtensionIconPNG(),
     @"popup.html" : [@"<!doctype html><title>NotArc Extension Popup</title><div style=\"width:240px;height:120px\">popup</div>"
                       dataUsingEncoding:NSUTF8StringEncoding],
     @"options.html" : [@"<!doctype html><title>NotArc Extension Options</title><p>options</p>" dataUsingEncoding:NSUTF8StringEncoding],
@@ -2527,6 +2536,40 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         });
       });
     });
+    // Omar, Nov 11 (V69): the address pill's hover row is Arc's: this profile's pinned extensions (their own icons),
+    // the puzzle (More) for the rest, Copy URL, then the site control center; Boost only while the site has one on.
+    // Pin / Unpin round-trips, and clicking a pinned icon opens its popup under that icon.
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 53 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      MainWindowController* w = self.window;
+      NSString* fx = gTestExtensionID ?: @"-";
+      NSString* (^order)(void) = ^NSString*(void) {
+        NSMutableArray* parts = [[w.pillButtonOrder componentsSeparatedByString:@","] mutableCopy];
+        [parts removeObject:@"devtools"];
+        if (![w.boostIndicatorState isEqual:@"on"]) return [parts componentsJoinedByString:@","];
+        [parts removeObject:@"boost"];
+        return [parts componentsJoinedByString:@","];
+      };
+      [w setPillHoveredForTest:YES];
+      NSString* pinned = order();
+      BOOL arcOrder = [pinned isEqual:[NSString stringWithFormat:@"ext:%@,more,copy,site", fx]];
+      BOOL noBoost = ![w.pillButtonOrder containsString:@"boost"] || [w.boostIndicatorState isEqual:@"on"];
+      BOOL ownIcon = [w pillExtensionHasOwnIcon:fx];
+      [w setExtension:fx pinned:NO];
+      NSString* unpinned = order();
+      NSMenu* picker = [w extensionPickerMenuForURL:nil];
+      BOOL pinItem = [[picker itemWithTitle:@"NotArc Test Extension"].submenu itemWithTitle:@"Pin"] != nil;
+      [w setExtension:fx pinned:YES];
+      BOOL pinRoundTrip = [unpinned isEqual:@"more,copy,site"] && pinItem && [order() isEqual:pinned] && [w extensionIsPinned:fx];
+      ExtensionPopup* pop = [w clickPillExtensionForTest:fx];
+      NSView* anchor = [w extensionPopupAnchor];
+      BOOL opensUnderIcon = pop != nil && [anchor isKindOfClass:NSButton.class] && [anchor.identifier isEqual:[@"ext:" stringByAppendingString:fx]];
+      if (pop.isOpen) [pop closeBecause:@"test"];
+      [w setPillHoveredForTest:NO];
+      BOOL anchorBack = [w extensionPopupAnchor] == nil || ![[w extensionPopupAnchor].identifier hasPrefix:@"ext:"];
+      std::printf("SELFTEST-PILLROW arcOrder=%d noBoost=%d ownIcon=%d pinRoundTrip=%d opensUnderIcon=%d anchorBack=%d\n", arcOrder,
+                  noBoost, ownIcon, pinRoundTrip, opensUnderIcon, anchorBack);
+      if (!arcOrder || !pinRoundTrip) std::printf("SELFTEST-PILLROW-DEBUG pinned=%s unpinned=%s ext=%s\n", pinned.UTF8String, unpinned.UTF8String, fx.UTF8String);
+    });
     // Chrome extensions (#66). First the action popup as a bubble (both settings: self-test runs always load the fixture
     // extension, installed at startup through the real CRX install path, and the bubble is a Chrome-style page of its
     // own): the picker's Open shows chrome-extension://<id>/popup.html in a panel under the picker button (or the
@@ -3163,7 +3206,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                       [style containsString:@"cell=NSTableCellView"];
         if (!styled) std::printf("SELFTEST-CMDSTYLE-DEBUG %s\n", style.UTF8String);
         {  // Visual parity V5: Arc's big centred bar: opaque card, 20 pt input, 40 pt rows, Return's action on the pill.
-          BOOL card = [style containsString:@"card=CommandCardView"] && [style containsString:@"font=20"] &&
+          BOOL card = [style containsString:@"card=CommandBarCardView"] && [style containsString:@"font=20"] &&
                       [style containsString:@"row=50"] && [style containsString:@"scrim=1"];
           BOOL centred = [style hasSuffix:@"centred=1"];
           BOOL hint = ![style containsString:@"hint=-"];
@@ -3177,6 +3220,44 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           std::printf("SELFTEST-CMDBARLOOK card=%d centred=%d hint=%d wide=%d onPill=%d\n", card, centred, hint, wide, onPill);
           if (!onPill) std::printf("SELFTEST-CMDBARLOOK-DEBUG cmdL %s\n", inPlace.UTF8String);
           if (!card || !centred || !hint || !wide) std::printf("SELFTEST-CMDBARLOOK-DEBUG %s\n", style.UTF8String);
+        }
+        {  // Omar, Nov 11 (V67, V68): the pill opens Arc's compact dropdown (348 pt, over the pill, 50 pt rows, at most
+           // five, 13 pt text, no dimming); a click outside, Esc or losing focus closes it without navigating.
+          NSString* before = w.shownItem.url;
+          [w showCommandBarForNewTab:NO];
+          NSString* geo = w.commandBarGeometry;
+          NSRange rr = [geo rangeOfString:@" rows="];
+          int rows = rr.location == NSNotFound ? 99 : [[geo substringFromIndex:NSMaxRange(rr)] intValue];
+          BOOL compact = [geo hasPrefix:@"compact=1 onPill=1 width=348 "] && rows >= 1 && rows <= 5 &&
+                         [geo containsString:@" rowH=50 font=13 scrim=0"];
+          NSWindow* bar = w.commandBarWindow;
+          NSEvent* (^click)(NSWindow*) = ^NSEvent*(NSWindow* in) {
+            return [NSEvent mouseEventWithType:NSEventTypeLeftMouseDown location:NSMakePoint(NSWidth(in.frame) - 30, 30)
+                                 modifierFlags:0 timestamp:0 windowNumber:in.windowNumber context:nil eventNumber:0
+                                    clickCount:1 pressure:1];
+          };
+          [w commandBarFilterEvent:click(bar)];
+          BOOL insideKeeps = bar.isVisible;
+          [w commandBarFilterEvent:click(w.window)];
+          BOOL outsideCloses = !bar.isVisible && [w.shownItem.url isEqual:before];
+          [w showCommandBarForNewTab:NO];
+          [w commandBarHandleSelectorForTest:@selector(cancelOperation:)];
+          BOOL escCloses = !bar.isVisible && [w.shownItem.url isEqual:before];
+          [w showCommandBarForNewTab:NO];
+          [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidBecomeKeyNotification object:bar];
+          [NSNotificationCenter.defaultCenter postNotificationName:NSWindowDidResignKeyNotification object:bar];
+          BOOL focusCloses = !bar.isVisible && [w.shownItem.url isEqual:before];
+          [w hideCommandBar];
+          [w showCommandBarForNewTab:YES];
+          NSString* big = w.commandBarGeometry;
+          [w hideCommandBar];
+          BOOL bigForNewTab = [big hasPrefix:@"compact=0 "] && [big containsString:@" scrim=1"];
+          std::printf("SELFTEST-ADDRBAR compact=%d insideKeeps=%d outsideCloses=%d escCloses=%d focusCloses=%d bigForNewTab=%d\n",
+                      compact, insideKeeps, outsideCloses, escCloses, focusCloses, bigForNewTab);
+          if (!compact || !bigForNewTab) std::printf("SELFTEST-ADDRBAR-DEBUG compact: %s | big: %s\n", geo.UTF8String, big.UTF8String);
+          // Omar, Nov 11 (V71): Arc's command bar card is see-through (the Space's colour shows through) with 10 pt corners.
+          BOOL radius = [big containsString:@" radius=10 "], seeThrough = [big containsString:@" translucent=1"];
+          std::printf("SELFTEST-NEWTABLOOK radius=%d translucent=%d\n", radius, seeThrough);
         }
         {  // Visual parity V30/V31: empty bar shows recent tabs and actions; a site's name + Tab starts Site Search
           NSArray* empty = [w commandSuggestionsFor:@""];
@@ -4289,10 +4370,20 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
                       [rows containsObject:@"secure=1"];
         {  // Visual parity V49: Arc's site control center (round actions, sectioned rows, clean-up footer)
           NSString* sc = w.siteControlsStyle;
-          BOOL look = [sc hasPrefix:@"actions=5 "] && [sc containsString:@" sections=2 "] &&
-                      [[sc componentsSeparatedByString:@"rows="].lastObject intValue] >= 7 && ![sc hasSuffix:@"footer=0"];
+          BOOL look = [sc hasPrefix:@"actions=5 "] && ([sc containsString:@" sections=2 "] || [sc containsString:@" sections=3 "]) &&
+                      [[sc componentsSeparatedByString:@"rows="][1] intValue] >= 7 && ![sc containsString:@" footer=0"];
           std::printf("SELFTEST-SITECONTROLS arcStyle=%d\n", look);
           if (!look) std::printf("SELFTEST-SITECONTROLS-DEBUG %s\n", sc.UTF8String);
+          // Omar, Nov 11 (V72): it hangs from the pill's site button, lists this profile's extensions with a pin
+          // button each (and Add Extension), and the footer's ... menu holds Arc's clean-up and manage actions.
+          BOOL anchored = [sc containsString:@" anchor=site"] || w.sidebarHidden;
+          NSRange er = [sc rangeOfString:@" extensions="], pr = [sc rangeOfString:@" pins="];
+          int exts = er.location == NSNotFound ? 0 : [[sc substringFromIndex:NSMaxRange(er)] intValue];
+          int pins = pr.location == NSNotFound ? -1 : [[sc substringFromIndex:NSMaxRange(pr)] intValue];
+          BOOL extRows = exts >= 1 && pins == exts && [sc containsString:@" addExtension=1"];
+          BOOL footerMenu = [sc containsString:@" footerMenu=Clear Cache|Clear Cookies|Manage Extensions|Add Extension|"];
+          std::printf("SELFTEST-SITECONTROLCENTER anchored=%d extensions=%d footerMenu=%d\n", anchored, extRows, footerMenu);
+          if (!anchored || !extRows || !footerMenu) std::printf("SELFTEST-SITECONTROLCENTER-DEBUG %s\n", sc.UTF8String);
         }
         [w setSitePermission:@"location" value:@YES forOrigin:@"https://example.org"];
         BOOL stored = [[w sitePermissionsForOrigin:@"https://example.org"][@"location"] boolValue] &&
@@ -4492,10 +4583,23 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           std::printf("SELFTEST-ARCEXTENSIONS copied=%d newest=%d mv2Skipped=%d noMetadata=%d\n", loadable.count == 1,
                       [v isEqualToString:@"1.10_0"], mv2Skipped, noMeta);
           // One button: history (fake DB still set up above) + extensions, in one call.
+          // Omar, Nov 11 (V70): Arc's pinned extensions come along, and copying any turns Chrome-style pages on.
+          [@"{\"extensions\":{\"pinned_extensions\":[\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\"]}}"
+              writeToFile:[NSString stringWithFormat:@"%@/%@/Preferences", fake, prof] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+          BOOL pinsRead = [ArcPinnedExtensionIDs(fake, @[ prof ]) isEqual:@[ @"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" ]];
+          BOOL pagesBefore = SettingBool(kSettingChromePages);
+          id pinsBefore = SettingObject(kSettingPinnedExtensions);
+          SettingSetBool(kSettingChromePages, NO);
+          SettingSetObject(kSettingPinnedExtensions, nil);
           [w clearHistory:nil];
           NSDictionary* all = [w importEverythingFromArcInto:dest userData:fake];
-          std::printf("SELFTEST-IMPORTALL history=%d extensions=%d skipped=%d\n", [all[@"history"] intValue] == 2,
-                      [all[@"extensions"] intValue] == 1, [all[@"skipped"] intValue] == 1);
+          BOOL pagesOn = SettingBool(kSettingChromePages);
+          BOOL pinsKept = [SettingObject(kSettingPinnedExtensions) containsObject:@"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"];
+          SettingSetBool(kSettingChromePages, pagesBefore);
+          SettingSetObject(kSettingPinnedExtensions, pinsBefore);
+          std::printf("SELFTEST-IMPORTALL history=%d extensions=%d skipped=%d pagesOn=%d pinsRead=%d pinsKept=%d\n",
+                      [all[@"history"] intValue] == 2, [all[@"extensions"] intValue] == 1, [all[@"skipped"] intValue] == 1,
+                      pagesOn, pinsRead, pinsKept);
           [w clearHistory:nil];
           [fm removeItemAtPath:fake error:nil];
           [fm removeItemAtPath:dest error:nil];
@@ -5053,6 +5157,9 @@ static int RunSelfUpdateTest() {
 }
 
 int main(int argc, char* argv[]) {
+  // Self-test logs go to a file: line-buffer them, so a crash doesn't swallow the checks printed just before it.
+  for (int i = 1; i < argc; ++i)
+    if (std::string(argv[i]) == "--selftest") setvbuf(stdout, NULL, _IOLBF, 0);
   for (int i = 1; i < argc; ++i) {
     if (std::string(argv[i]) == "--self-update-test") return RunSelfUpdateTest();
     if (std::string(argv[i]) == "--check-arc-cookies") {  // decrypt Arc cookies; print counts only, never values

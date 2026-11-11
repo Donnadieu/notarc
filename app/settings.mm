@@ -253,6 +253,7 @@ NSString* SearchURLForQuery(NSString* q) {
 
 NSString* const kSettingSpaceAppearance = @"defaultSpaceAppearance";
 NSString* const kSettingChromePages = @"chromePages";
+NSString* const kSettingPinnedExtensions = @"pinnedExtensions";
 NSString* const kSettingDeveloperModeLocal = @"developerModeLocalSites";
 NSString* const kSettingDeveloperModeHosts = @"developerModeHosts";
 

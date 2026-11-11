@@ -64,6 +64,8 @@ double SettingDouble(NSString* key);
 extern NSString* const kSettingSpaceAppearance;     // "auto" | "light" | "dark", default "auto"
 NSString* DefaultSpaceAppearance(void);
 extern NSString* const kSettingChromePages;         // BOOL "chromePages", default NO; read once at launch
+// Extensions pinned to the address pill (V69), in order; unset = every extension (Arc pins new ones).
+extern NSString* const kSettingPinnedExtensions;    // NSArray of extension IDs, "pinnedExtensions"
 
 // Developer Mode (#68), per site as in Arc: shows the full address with its port in the sidebar pill, keeps the tab
 // from being auto-archived and puts Developer Tools in the pill. On by itself for local sites (localhost, *.localhost,

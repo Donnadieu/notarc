@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-65 done of 65 items.
+71 done of 71 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -39,6 +39,36 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   tabs; the selected row is filled with the Space's colour, a shade deeper (Arc blue on the default theme). Ref: app
   (centred, top-left, floating and full-window placements), colours, help (Command Bar Actions), video.
 
+## Reported by Omar (Nov 11)
+
+Omar compared his NotArc 0.29.0 with Arc 1.169 side by side: six screenshots (three of each). These were misses in
+V12, V29, V49 and V50 above.
+
+- [x] **V67 Address-pill dropdown.** Clicking the sidebar's address pill (or Cmd+L) opens Arc's small dropdown, not
+  the big bar: its top-left on the pill's, 348 pt wide (the pill plus 92), a 50 pt input row with the site's icon and
+  the address in 13 pt, then at most five 50 pt rows (icon and title only, 13 pt semibold, the selected one a Space
+  coloured pill 8 pt in), no dimming. The big centred bar stays for Cmd+T. Ref: shot (Omar's Arc, Nov 11, measured
+  at 1x), Omar's NotArc shot (640 pt bar reaching over the page).
+- [x] **V68 Closing the dropdown.** A click anywhere outside it, Esc, or another window or app taking focus closes it
+  and nothing is opened; a click on the pill itself just closes it. Ref: Omar (NotArc could only be closed by picking
+  a row).
+- [x] **V69 Pill hover row.** Hovering the pill shows this profile's pinned extensions with their own icons (up to
+  two; clicking one opens its popup under it, right-click for Options / Unpin), the puzzle (More) with every
+  extension and Pin / Unpin, then Copy URL and the site control center. No Boost button unless the site has a Boost
+  on. Ref: shot (Omar's Arc: two extension icons, link, controls), Omar's NotArc shot (Boost, link, controls, no
+  extensions).
+- [x] **V70 Arc's extensions show up.** Import Everything from Arc copied Omar's five extensions but left Chrome-style
+  pages off, so none loaded and the pill showed none. Copying any now turns them on (they start at the next launch,
+  and the summary says so), and Arc's toolbar pins come along. Ref: Omar's NotArc folder and settings (read only).
+- [x] **V71 Command bar card.** The card is see-through like Arc's: a blur of what's behind under a neutral tint (dark
+  ~#1A181B at 80 %, light near-white at 92 %), so the Space's colour shows through, with 10 pt corners (was opaque
+  grey with 14 pt corners). Ref: shot (Omar's Arc, measured), video (Arc's new-tab bar, measured at 2x).
+- [x] **V72 Site control center.** It hangs from the pill's site button (it hung from the page's corner), adds Arc's
+  Extensions section (each extension with its icon and a pin button, + to add one), and the footer is Clear Cookies,
+  Clear Cache and a ... menu with Arc's footer items (Clear Cache, Clear Cookies, Manage Extensions, Add Extension,
+  All Site Settings, Manage Boosts, New Boost) plus Reset Permissions. Ref: app (Arc's site control center views,
+  footer menu items and pin tooltips), Omar's NotArc shot.
+
 ## Window
 
 - [x] **V6 Window frame.** No title bar; the page is a rounded card (8 pt corners) inset 10/9/9 pt on the Space colour,
@@ -57,8 +87,9 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
 - [x] **V11 Top bar.** Sidebar toggle right of the traffic lights; back, forward and reload at the right, in the
   toolbar icon colour (white ~60%); back / forward dim to ~22% when there's nowhere to go. Ref: shot, colours.
 - [x] **V12 Address pill.** x 8-264, 36 pt tall, ~10 pt corners, white ~9% (dark); shows the domain only in 13 pt;
-  the site buttons (Boost, copy link, site controls, extensions) appear at its right only while the pointer is over
-  it (a site with a Boost on keeps that one); hover lightens it; click opens the command bar. Ref: shot, app.
+  the site buttons appear at its right only while the pointer is over it, in Arc's order since Nov 11 (V69): pinned
+  extensions, More, Copy URL, site controls (a site with a Boost on keeps its Boost button); hover lightens it; click
+  opens the dropdown (V67). Ref: shot, app.
 - [x] **V13 Favorites grid.** Tiles 3 to a row (79 x 47 pt, 9 pt gaps, ~10 pt corners, white ~8%), 16 pt icon centred;
   selected tile is brighter; unread badge at the corner; tiles widen when there are fewer per row. Ref: shot.
 - [x] **V14 Space title.** Space name (and its emoji icon) at x 18 in 12-13 pt semibold, white ~45%; "..." menu on hover.
@@ -99,9 +130,9 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
 
 ## Command bar and navigation
 
-- [x] **V29 Command bar on the address pill (Cmd+L).** Opens in place: its top-left on the address pill, reaching out
-  over the page (up to 640 pt), the current address selected, no dimming; with the sidebar hidden it opens centred.
-  Ref: app (top-left placement).
+- [x] **V29 Command bar on the address pill (Cmd+L).** Opens in place: its top-left on the address pill, the current
+  address selected, no dimming; with the sidebar hidden it opens centred. Since Nov 11 it's Arc's compact dropdown
+  (V67), not a 640 pt bar. Ref: app (top-left placement), shot.
 - [x] **V30 Command bar rows.** Open tabs ("Switch to Tab"), history, search suggestions, Spaces and actions, each with
   its icon; the empty bar shows recent tabs, a few actions (New Split View, New Little Window, Capture Area) and then
   top sites. Ref: app, help.
@@ -160,8 +191,8 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   (Copy URL, Share, Capture a portion, Capture the full page, New Boost), the connection, a Boosts section and Site
   Settings rows (icon tile, title, Ask / Allowed / Blocked, switches), then Clear Cookies and Reset Permissions.
   Ref: app (site control center).
-- [x] **V50 Extensions menu.** Puzzle button in the pill (shown while Chrome-style pages are on); each extension's
-  popup appears as a bubble under it. Ref: app, video.
+- [x] **V50 Extensions menu.** Puzzle button in the pill (shown when any extension is installed or Chrome-style pages
+  are on); each extension's popup appears as a bubble under it, or under its own pinned icon (V69). Ref: app, video.
 - [x] **V51 Permission prompts.** Requests drop down from the address pill as a small card (title, Remember for this
   site, Don't Allow / Allow), never a window sheet; with the sidebar hidden they drop from the page's top-left. Ref:
   app (permission request state on the top bar), video.

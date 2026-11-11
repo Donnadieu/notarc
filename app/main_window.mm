@@ -24,6 +24,7 @@
 #import "app/arc_cookies.h"
 #import "app/little_window.h"
 #import "app/settings.h"
+#import <objc/runtime.h>
 #import "app/boost_store.h"
 #import "app/boost_color_wheel.h"
 #import "app/easel.h"
@@ -151,6 +152,9 @@ static const CGFloat kToolbarHeight = 38;
 static const CGFloat kCommandFieldSize = 20;  // Arc: 20 pt input (V63)
 static const CGFloat kSuggestionRow = 50;  // Arc: 50 pt rows (46 pt pill) under a 64 pt input row
 static const NSUInteger kMaxSuggestions = 8;
+static const NSUInteger kCompactSuggestions = 5;  // Arc's dropdown under the pill (V67)
+static const CGFloat kCompactExtraWidth = 92;     // it reaches 92 pt past the pill: 348 pt with Arc's 256 pt pill
+static const CGFloat kCompactInputRow = 50;
 
 // Data source for the command bar's suggestion list (kept separate from the sidebar's outline delegate).
 // Arc: HoveredAndKeyboardSelectedBackground (0.161, 0.18, 0.757), a rounded pill.
@@ -184,8 +188,60 @@ static NSColor* gCommandPillColor;
 }
 @end
 
+// Omar, Nov 11 (V71): Arc's command bar card itself (the big new-tab bar and the pill's dropdown) is see-through: a
+// blur of what's behind under a neutral tint (dark ~#1A181B at 80%, light near-white at 92%), measured from Omar's
+// Arc 1.169 screenshot and Arc's own new-tab video, so the Space's colour shows through; 10 pt corners, a brighter
+// hairline in dark mode. Other cards (find bar, capture card) keep the opaque look.
+static const CGFloat kCommandCardRadius = 10;
+static char kSiteExtensionKey;  // site control center: the extension behind a row's pin button or click
+@interface CommandBarCardView : NSView
+@property(nonatomic, readonly) NSVisualEffectView* blur;
+@property(nonatomic, readonly) NSView* tint;
+@end
+@implementation CommandBarCardView
+- (instancetype)initWithFrame:(NSRect)f {
+  if ((self = [super initWithFrame:f])) {
+    self.wantsLayer = YES;
+    _blur = [[NSVisualEffectView alloc] initWithFrame:self.bounds];
+    _blur.material = NSVisualEffectMaterialPopover;
+    _blur.blendingMode = NSVisualEffectBlendingModeBehindWindow;
+    _blur.state = NSVisualEffectStateActive;
+    _blur.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [self addSubview:_blur];
+    _tint = [[NSView alloc] initWithFrame:self.bounds];
+    _tint.wantsLayer = YES;
+    _tint.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    [self addSubview:_tint];
+  }
+  return self;
+}
+- (BOOL)wantsUpdateLayer { return YES; }
+- (BOOL)isDark {
+  return [self.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]] ==
+         NSAppearanceNameDarkAqua;
+}
+- (NSColor*)tintColor {
+  return self.isDark ? [NSColor colorWithSRGBRed:0.102 green:0.094 blue:0.106 alpha:0.80]
+                     : [NSColor colorWithSRGBRed:0.988 green:0.984 blue:0.984 alpha:0.92];
+}
+- (void)updateLayer {
+  BOOL dark = self.isDark;
+  self.layer.cornerRadius = kCommandCardRadius;
+  self.layer.masksToBounds = YES;
+  self.layer.backgroundColor = NSColor.clearColor.CGColor;
+  self.layer.borderWidth = 1;
+  self.layer.borderColor = (dark ? [NSColor colorWithWhite:1 alpha:0.20] : [NSColor colorWithWhite:0 alpha:0.08]).CGColor;
+  _tint.layer.backgroundColor = self.tintColor.CGColor;
+}
+- (void)viewDidChangeEffectiveAppearance {
+  [super viewDidChangeEffectiveAppearance];
+  self.needsDisplay = YES;
+}
+@end
+
 @interface CommandSuggestionList : NSObject <NSTableViewDataSource, NSTableViewDelegate>
 @property(nonatomic, copy) NSArray<NSDictionary*>* items;
+@property(nonatomic) BOOL compact;  // the pill's dropdown: title only, 13 pt semibold (Omar's Arc screenshot)
 @property(nonatomic, copy) NSImage* (^iconForSuggestion)(NSDictionary* s);  // site icon for tabs, history, top sites
 @end
 @implementation CommandSuggestionList
@@ -232,6 +288,26 @@ static NSColor* gCommandPillColor;
                                   @"search" : @"magnifyingglass", @"chatgpt" : @"bubble.left.and.text.bubble.right" };
   BOOL sel = [t.selectedRowIndexes containsIndex:(NSUInteger)row];
   NSColor* primary = sel ? NSColor.whiteColor : [NSColor.labelColor colorWithAlphaComponent:0.80];
+  if (self.compact) {
+    // Arc's dropdown under the pill (measured, 1x): 16 pt icon 15 pt in from the pill, title at 43, no second part,
+    // no “Switch to Tab” hint.
+    cell.textField.attributedStringValue = [[NSAttributedString alloc]
+        initWithString:s[@"title"] ?: @""
+            attributes:@{NSFontAttributeName : [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold], NSForegroundColorAttributeName : primary}];
+    [cell viewWithTag:3].hidden = YES;
+    [cell viewWithTag:4].hidden = YES;
+    cell.imageView.frame = NSMakeRect(15, 16, 16, 16);
+    cell.textField.frame = NSMakeRect(43, 15, MAX(40, cell.bounds.size.width - 43 - 12), 18);
+    NSImage* site = self.iconForSuggestion ? self.iconForSuggestion(s) : nil;
+    static NSDictionary* cicons = @{ @"go" : @"magnifyingglass", @"tab" : @"square.on.square", @"space" : @"square.stack",
+                                     @"history" : @"clock", @"action" : @"command", @"site" : @"globe", @"search" : @"magnifyingglass",
+                                     @"chatgpt" : @"bubble.left.and.text.bubble.right" };
+    cell.imageView.image = site ?: [NSImage imageWithSystemSymbolName:cicons[s[@"kind"]] ?: @"globe" accessibilityDescription:nil];
+    cell.imageView.contentTintColor = sel ? NSColor.whiteColor : [NSColor.labelColor colorWithAlphaComponent:0.55];
+    return cell;
+  }
+  [cell viewWithTag:3].hidden = NO;
+  cell.imageView.frame = NSMakeRect(14, 17, 16, 16);
   NSColor* secondary = sel ? [NSColor colorWithWhite:1 alpha:0.70] : [NSColor.labelColor colorWithAlphaComponent:0.33];
   NSMutableAttributedString* a = [[NSMutableAttributedString alloc]
       initWithString:s[@"title"] ?: @""
@@ -1411,6 +1487,9 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   BOOL _todayHeaderHovered;
   NSButton* _navForward;
   BOOL _commandOpensNewTab;
+  BOOL _commandCompact;         // Arc's small dropdown over the address pill (clicking it, Cmd+L), not the big bar
+  BOOL _commandBarWasKey;       // it became key since it opened (losing focus then closes it)
+  id _commandClickMonitor;      // closes the bar on a click outside it
   BOOL _saveScheduled;
   NSMutableArray<ArchivedTab*>* _archive;
   NSTimer* _archiveTimer;
@@ -1526,7 +1605,16 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSView* _captureOverlay;
   NSString* _captureDirectory;
   NSButton* _boostButton;   // Arc: Boost indicator in the address pill
-  NSButton* _extensionsButton;  // puzzle piece in the address pill (Chrome-style pages only, #66)
+  NSButton* _extensionsButton;  // puzzle piece in the address pill: More (the rest of the extensions, #66, V69)
+  NSButton* _copyURLButton;     // Copy URL in the address pill's hover row
+  NSButton* _siteControlsButton;  // the site control center button (V49, V72)
+  NSArray<NSButton*>* _pinnedExtensionButtons;  // this profile's pinned extensions, own icons (V69)
+  NSString* _pillExtensionsProfile;  // the profile the pinned buttons were built for
+  __weak NSView* _extensionAnchorOverride;  // the pinned icon whose popup is open
+  NSDictionary<NSString*, NotArcExtension*>* _pillExtensions;  // by ID, for the pinned buttons
+  NSUInteger _pillInstalledCount;
+  NSArray<NSButton*>* _pillButtonOrder;  // left to right, as laid out
+  NSString* _sitePopoverAnchor;  // tests: "site" (the pill's button), "toolbar" or "page"
   NSInteger _relaunchRequests;
   ExtensionPopup* _extensionPopup;  // the open extension popup bubble, if any (#66)
   NSString* _boostIndicator; // tests: "on" / "off" / "none"
@@ -1825,32 +1913,31 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _addressPillText.lineBreakMode = NSLineBreakByTruncatingTail;
   _addressPillText.frame = NSMakeRect(12, 9, _addressPill.bounds.size.width - 12 - 60, 18);
   [_addressPill addSubview:_addressPillText];
-  NSMutableArray* pillButtons = [@[ @[ @"paintbrush.pointed", @"editBoost:", @"Boost This Site" ], @[ @"link", @"copyCurrentURL:", @"Copy URL" ],
-                                    @[ @"slider.horizontal.3", @"showSiteSettings:", @"Site Settings" ] ] mutableCopy];
-  // Arc's extension picker sits in the address pill; extensions only run in Chrome-style pages.
-  if (ChromePagesEnabled()) [pillButtons addObject:@[ @"puzzlepiece.extension", @"showExtensionPicker:", @"Extensions" ]];
-  _addressPillText.frame = NSMakeRect(11, 9, _addressPill.bounds.size.width - 11 - 8 - 26 * (CGFloat)pillButtons.count, 18);
-  CGFloat px = _addressPill.bounds.size.width - 6 - 26 * (CGFloat)pillButtons.count;
-  for (NSArray* n in pillButtons) {
-    NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:n[0] accessibilityDescription:n[2]]
-                                     target:self action:NSSelectorFromString(n[1])];
+  // Arc's hover row (Omar's Arc 1.169 screenshot, Nov 11): this profile's pinned extensions, the puzzle (More) for
+  // the rest, Copy URL, then the site control center. Boost shows only while the site has one on; Developer Mode
+  // sites get Developer Tools at the far left. Laid out by layoutPillButtons.
+  NSButton* (^pillButton)(NSString*, SEL, NSString*, NSString*) = ^NSButton*(NSString* symbol, SEL action, NSString* tip, NSString* ident) {
+    NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:tip] target:self action:action];
     b.bordered = NO;
-    b.toolTip = n[2];
+    b.toolTip = tip;
+    b.identifier = ident;
     b.contentTintColor = NSColor.secondaryLabelColor;
-    b.frame = NSMakeRect(px, 5, 26, 26);
-    if ([n[1] isEqualToString:@"editBoost:"]) _boostButton = b;
-    if ([n[1] isEqualToString:@"showExtensionPicker:"]) _extensionsButton = b;
+    b.frame = NSMakeRect(0, 5, 26, 26);
     b.tag = 90;  // site buttons: shown while the pointer is over the pill (updatePillButtons)
     [_addressPill addSubview:b];
-    px += 26;
-  }
-  // Developer Mode sites get a Developer Tools button left of the others (hidden otherwise).
+    return b;
+  };
+  _boostButton = pillButton(@"paintbrush.pointed", @selector(editBoost:), @"Boost This Site", @"boost");
+  _extensionsButton = pillButton(@"puzzlepiece.extension", @selector(showExtensionPicker:), @"Extensions", @"more");
+  _copyURLButton = pillButton(@"link", @selector(copyCurrentURL:), @"Copy URL", @"copy");
+  _siteControlsButton = pillButton(@"slider.horizontal.3", @selector(showSiteSettings:), @"Site Controls", @"site");
   _devToolsButton = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"hammer" accessibilityDescription:@"Developer Tools"]
                                        target:self action:@selector(toggleDevTools:)];
   _devToolsButton.bordered = NO;
+  _devToolsButton.identifier = @"devtools";
   _devToolsButton.toolTip = @"Developer Tools (Developer Mode)";
   _devToolsButton.contentTintColor = NSColor.secondaryLabelColor;
-  _devToolsButton.frame = NSMakeRect(_addressPill.bounds.size.width - 6 - 4 * 26, 5, 26, 26);
+  _devToolsButton.frame = NSMakeRect(0, 5, 26, 26);
   _devToolsButton.hidden = YES;
   [_addressPill addSubview:_devToolsButton];
   [sidebar addSubview:_addressPill];
@@ -4152,6 +4239,50 @@ static NSArray<NSArray*>* SiteSettingRows() {
     add.bezelStyle = NSBezelStyleInline;
     [views addObject:row(@"paintbrush.pointed", @"No Boost on this site", nil, add, nil)];
   }
+  // Extensions (Arc's site control center lists them with a pin button each, and Add Extension; V72, Omar Nov 11).
+  NSArray<NotArcExtension*>* exts = [self installedExtensions];
+  if (exts.count) {
+    NSButton* addExt = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"plus" accessibilityDescription:@"Add Extension"]
+                                          target:self action:@selector(siteSettingsAddExtension:)];
+    addExt.bordered = NO;
+    addExt.toolTip = @"Add Extension";
+    addExt.identifier = @"siteAddExtension";
+    addExt.contentTintColor = NSColor.tertiaryLabelColor;
+    addExt.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:10 weight:NSFontWeightBold];
+    NSView* hspacer = [NSView new];
+    [hspacer setContentHuggingPriority:1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+    NSStackView* extHeader = [NSStackView stackViewWithViews:@[ header(@"Extensions"), hspacer, addExt ]];
+    [extHeader.widthAnchor constraintEqualToConstant:W - 32].active = YES;
+    [views addObject:extHeader];
+    for (NotArcExtension* x in exts) {
+      BOOL pinned = [self extensionIsPinned:x.extensionID];
+      NSButton* pin = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:pinned ? @"pin.fill" : @"pin"
+                                                          accessibilityDescription:pinned ? @"Unpin" : @"Pin"]
+                                         target:self action:@selector(siteSettingsTogglePin:)];
+      pin.bordered = NO;
+      pin.identifier = @"sitePin";
+      pin.toolTip = pinned ? @"Unpin from the address bar" : @"Pin to the address bar";
+      pin.contentTintColor = pinned ? NSColor.labelColor : NSColor.tertiaryLabelColor;
+      pin.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:11 weight:NSFontWeightMedium];
+      objc_setAssociatedObject(pin, &kSiteExtensionKey, x, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+      NSView* r = row(@"puzzlepiece.extension.fill", x.name ?: x.extensionID, x.enabled ? nil : @"Off", pin, nil);
+      r.identifier = @"siteExtension";
+      NSImage* own = x.iconPath ? [[NSImage alloc] initWithContentsOfFile:x.iconPath] : nil;
+      NSView* tile = ((NSStackView*)r).views.firstObject;
+      NSImageView* iv = (NSImageView*)tile.subviews.firstObject;
+      if (own && [iv isKindOfClass:NSImageView.class]) {
+        own.size = NSMakeSize(16, 16);
+        iv.image = own;
+        iv.contentTintColor = nil;
+      }
+      if (x.popupPage.length && x.enabled) {  // clicking the row opens the extension, like its toolbar button
+        NSClickGestureRecognizer* g = [[NSClickGestureRecognizer alloc] initWithTarget:self action:@selector(siteSettingsOpenExtension:)];
+        [r addGestureRecognizer:g];
+        objc_setAssociatedObject(g, &kSiteExtensionKey, x, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+      }
+      [views addObject:r];
+    }
+  }
   // Site settings: one row per permission (Ask / Allow / Block), then the site's switches.
   [views addObject:header(@"Site Settings")];
   NSDictionary* saved = [self sitePermissionsForOrigin:_siteSettingsOrigin];
@@ -4194,10 +4325,10 @@ static NSArray<NSArray*>* SiteSettingRows() {
   line.boxType = NSBoxSeparator;
   [line.widthAnchor constraintEqualToConstant:W - 32].active = YES;
   [views addObject:line];
+  // Footer (Arc's footer view): the common clean-ups as text buttons, then a ... menu with Arc's footer menu items
+  // (clear cache, clear cookies, manage / add extensions, all site settings, manage / new Boost) plus NotArc's own.
   NSMutableArray* footer = [NSMutableArray array];
-  for (NSArray* f in @[ @[ @"Clear Cookies", @"siteSettingsClearCookies:" ], @[ @"Reset Permissions", @"siteSettingsReset:" ],
-                        @[ @"Manage Ad Blockers...", @"showManageAdBlockers:" ] ]) {
-    if ([f[1] isEqual:@"showManageAdBlockers:"] && !SettingBool(kSettingBlockAds)) continue;
+  for (NSArray* f in @[ @[ @"Clear Cookies", @"siteSettingsClearCookies:" ], @[ @"Clear Cache", @"siteSettingsClearCache:" ] ]) {
     NSButton* b = [NSButton buttonWithTitle:f[0] target:self action:NSSelectorFromString(f[1])];
     b.bordered = NO;
     b.font = [NSFont systemFontOfSize:12];
@@ -4205,8 +4336,20 @@ static NSArray<NSArray*>* SiteSettingRows() {
     b.identifier = @"siteFooter";
     [footer addObject:b];
   }
+  NSView* fspacer = [NSView new];
+  [fspacer setContentHuggingPriority:1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+  [footer addObject:fspacer];
+  NSButton* more = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"ellipsis" accessibilityDescription:@"More"]
+                                      target:self action:@selector(siteSettingsFooterMenu:)];
+  more.bordered = NO;
+  more.toolTip = @"More";
+  more.identifier = @"siteFooterMenu";
+  more.contentTintColor = NSColor.secondaryLabelColor;
+  more.menu = [self siteControlsFooterMenu];
+  [footer addObject:more];
   NSStackView* foot = [NSStackView stackViewWithViews:footer];
   foot.spacing = 14;
+  [foot.widthAnchor constraintEqualToConstant:W - 32].active = YES;
   [views addObject:foot];
   NSStackView* stack = [NSStackView stackViewWithViews:views];
   stack.orientation = NSUserInterfaceLayoutOrientationVertical;
@@ -4221,10 +4364,89 @@ static NSArray<NSArray*>* SiteSettingRows() {
   _sitePopover.appearance = self.window.effectiveAppearance;  // the Space's light / dark, not the app's
   _sitePopover.behavior = NSPopoverBehaviorTransient;
   _sitePopover.contentViewController = vc;
-  // Anchor: the address field when the toolbar is shown, else the top-left of the page.
+  // Anchor (Arc): the site control center button in the address pill, as Omar's screenshot showed it hanging from
+  // the page's corner instead (Nov 11); the toolbar's address field in toolbar mode; else the top-left of the page.
+  BOOL onPill = _toolbar.hidden && ![self sidebarCollapsed] && _siteControlsButton.window && !_siteControlsButton.isHiddenOrHasHiddenAncestor;
+  if (onPill) {
+    _sitePopoverAnchor = @"site";
+    // NSButton isn't flipped, so MinY is its bottom edge: the popover hangs below the button.
+    [_sitePopover showRelativeToRect:_siteControlsButton.bounds ofView:_siteControlsButton preferredEdge:NSRectEdgeMinY];
+    return;
+  }
   NSView* anchor = _toolbar.hidden ? _content : _address;
   NSRect r = _toolbar.hidden ? NSMakeRect(8, NSMaxY(_content.bounds) - 4, 1, 1) : NSMakeRect(8, 0, 20, _address.bounds.size.height);
+  _sitePopoverAnchor = _toolbar.hidden ? @"page" : @"toolbar";
   [_sitePopover showRelativeToRect:r ofView:anchor preferredEdge:_toolbar.hidden ? NSRectEdgeMinY : NSRectEdgeMaxY];
+}
+
+- (NSMenu*)siteControlsFooterMenu {
+  NSMenu* m = [[NSMenu alloc] initWithTitle:@"Site"];
+  m.autoenablesItems = NO;
+  for (NSArray* a in @[ @[ @"Clear Cache", @"siteSettingsClearCache:" ], @[ @"Clear Cookies", @"siteSettingsClearCookies:" ], @[ @"-" ],
+                        @[ @"Manage Extensions", @"siteSettingsManageExtensions:" ], @[ @"Add Extension", @"siteSettingsAddExtension:" ],
+                        @[ @"-" ], @[ @"All Site Settings", @"siteSettingsAll:" ], @[ @"Manage Boosts", @"siteSettingsManageBoosts:" ],
+                        @[ @"New Boost", @"siteSettingsNewBoost:" ], @[ @"-" ], @[ @"Reset Permissions", @"siteSettingsReset:" ],
+                        @[ @"Manage Ad Blockers...", @"showManageAdBlockers:" ] ]) {
+    if ([a[0] isEqual:@"-"]) {
+      [m addItem:NSMenuItem.separatorItem];
+      continue;
+    }
+    if ([a[1] isEqual:@"showManageAdBlockers:"] && !SettingBool(kSettingBlockAds)) continue;
+    NSMenuItem* mi = [m addItemWithTitle:a[0] action:NSSelectorFromString(a[1]) keyEquivalent:@""];
+    mi.target = self;
+    if ([a[1] isEqual:@"siteSettingsManageExtensions:"] || [a[1] isEqual:@"siteSettingsAll:"]) mi.enabled = ChromePagesEnabled();
+  }
+  return m;
+}
+- (void)siteSettingsFooterMenu:(NSButton*)sender {
+  [sender.menu popUpMenuPositioningItem:nil atLocation:NSMakePoint(0, NSHeight(sender.bounds) + 4) inView:sender];
+}
+- (void)siteSettingsClearCache:(id)sender {
+  [_sitePopover close];
+  CefRefPtr<CefBrowser> b = [self currentBrowser];
+  NSURL* u = [NSURL URLWithString:_shown.url ?: @""];
+  if (!b || !u.host.length) return;
+  // This site's caches (Cache Storage, service workers, shader cache), then a reload that skips the HTTP cache.
+  CefRefPtr<CefDictionaryValue> params = CefDictionaryValue::Create();
+  NSString* origin = [NSString stringWithFormat:@"%@://%@%@", u.scheme, u.host, u.port ? [NSString stringWithFormat:@":%@", u.port] : @""];
+  params->SetString("origin", origin.UTF8String);
+  params->SetString("storageTypes", "cache_storage,service_workers,shader_cache");
+  b->GetHost()->ExecuteDevToolsMethod(0, "Storage.clearDataForOrigin", params);
+  b->ReloadIgnoreCache();
+}
+- (void)siteSettingsManageExtensions:(id)sender {
+  [_sitePopover close];
+  [self manageExtensions:sender];
+}
+- (void)siteSettingsAddExtension:(id)sender {
+  [_sitePopover close];
+  [self installExtension:sender];
+}
+- (void)siteSettingsAll:(id)sender {
+  [_sitePopover close];
+  [self openInNewTab:@"chrome://settings/content/all"];
+}
+- (void)siteSettingsManageBoosts:(id)sender {
+  [_sitePopover close];
+  [self showLibrary:sender];
+}
+- (void)siteSettingsNewBoost:(id)sender {
+  [_sitePopover close];
+  [self editBoost:sender];
+}
+- (void)siteSettingsTogglePin:(NSButton*)sender {
+  NotArcExtension* x = objc_getAssociatedObject(sender, &kSiteExtensionKey);
+  if (!x) return;
+  BOOL pinned = ![self extensionIsPinned:x.extensionID];
+  [self setExtension:x.extensionID pinned:pinned];
+  sender.image = [NSImage imageWithSystemSymbolName:pinned ? @"pin.fill" : @"pin" accessibilityDescription:pinned ? @"Unpin" : @"Pin"];
+  sender.contentTintColor = pinned ? NSColor.labelColor : NSColor.tertiaryLabelColor;
+  sender.toolTip = pinned ? @"Unpin from the address bar" : @"Pin to the address bar";
+}
+- (void)siteSettingsOpenExtension:(NSClickGestureRecognizer*)g {
+  NotArcExtension* x = objc_getAssociatedObject(g, &kSiteExtensionKey);
+  [_sitePopover close];
+  if (x) [self showPopupOfExtension:x];
 }
 
 - (IBAction)showManageAdBlockers:(id)sender {
@@ -4331,7 +4553,25 @@ static NSString* AdBlockSiteKey(NSString* host) {
   walk = w;
   if (root) walk(root);
   walk = nil;
-  return [NSString stringWithFormat:@"actions=%d rows=%d sections=%d footer=%d", actions, rows, sections, footer];
+  __block int extRows = 0, pins = 0, addExt = 0;
+  __block NSString* footerMenu = @"-";
+  __block void (^walk2)(NSView*);
+  void (^w2)(NSView*) = ^(NSView* v) {
+    if ([v.identifier isEqual:@"siteExtension"]) ++extRows;
+    if ([v.identifier isEqual:@"sitePin"]) ++pins;
+    if ([v.identifier isEqual:@"siteAddExtension"]) ++addExt;
+    if ([v.identifier isEqual:@"siteFooterMenu"]) {
+      NSMutableArray* t = [NSMutableArray array];
+      for (NSMenuItem* mi in ((NSButton*)v).menu.itemArray) if (!mi.isSeparatorItem) [t addObject:mi.title];
+      footerMenu = [t componentsJoinedByString:@"|"];
+    }
+    for (NSView* s in v.subviews) walk2(s);
+  };
+  walk2 = w2;
+  if (root) walk2(root);
+  walk2 = nil;
+  return [NSString stringWithFormat:@"actions=%d rows=%d sections=%d footer=%d anchor=%@ extensions=%d pins=%d addExtension=%d footerMenu=%@",
+                                    actions, rows, sections, footer, _sitePopoverAnchor ?: @"-", extRows, pins, addExt, footerMenu];
 }
 
 - (void)siteSettingsClearCookies:(id)sender {
@@ -5257,7 +5497,20 @@ static NSString* ClipKey(NSString* dir, EaselObject* o) {
     NSString* p = s.profileDirectory.length ? s.profileDirectory : @"Default";
     if (![profiles containsObject:p]) [profiles addObject:p];
   }
-  return ArcCopyExtensions(userData, profiles, destination);
+  NSArray<ArcExtensionCopy*>* copies = ArcCopyExtensions(userData, profiles, destination);
+  // The ones pinned in Arc's toolbar stay pinned in the pill (V69, Omar Nov 11); with no saved pins in Arc, every
+  // extension is (NotArc's default). Pins already chosen in NotArc are kept, new copies added to them.
+  NSMutableSet* copied = [NSMutableSet set];
+  for (ArcExtensionCopy* c in copies) if (!c.skippedMV2 && c.extensionID) [copied addObject:c.extensionID];
+  NSMutableArray* arcPins = [NSMutableArray array];
+  for (NSString* ident in ArcPinnedExtensionIDs(userData, profiles)) if ([copied containsObject:ident]) [arcPins addObject:ident];
+  if (![SettingObject(kSettingPinnedExtensions) isKindOfClass:NSArray.class]) {
+    if (arcPins.count) SettingSetObject(kSettingPinnedExtensions, arcPins);
+  } else {
+    for (NSString* ident in arcPins) [self pinNewExtension:ident];
+  }
+  [self rebuildPillExtensions];
+  return copies;
 }
 
 // --- Chrome extensions (#66): picker, Install Extension..., on/off and Remove ---
@@ -5319,7 +5572,8 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
     if (x.popupPage) [sub addItem:[self pickerItem:@"Open" action:@selector(openExtensionPopup:) object:x]];
     if (x.optionsPage) [sub addItem:[self pickerItem:@"Options" action:@selector(openExtensionOptions:) object:x]];
     for (NSMenuItem* mi in sub.itemArray) mi.enabled = x.enabled && ChromePagesEnabled();
-    if (sub.numberOfItems) [sub addItem:NSMenuItem.separatorItem];
+    [sub addItem:[self pickerItem:[self extensionIsPinned:x.extensionID] ? @"Unpin" : @"Pin" action:@selector(togglePinExtension:) object:x]];
+    [sub addItem:NSMenuItem.separatorItem];
     if (x.managedByNotArc) {
       [sub addItem:[self pickerItem:x.enabled ? @"Turn Off" : @"Turn On" action:@selector(toggleExtension:) object:x]];
       [sub addItem:[self pickerItem:@"Update from Chrome Web Store" action:@selector(updateExtension:) object:x]];
@@ -5358,10 +5612,15 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   [self openInNewTab:[NSString stringWithFormat:@"chrome-extension://%@/%@", x.extensionID, rel]];
 }
 // An extension's popup shows in a bubble under the picker button (CEF has no extension toolbar of its own).
-- (IBAction)openExtensionPopup:(NSMenuItem*)sender { [self showPopupOfExtension:sender.representedObject]; }
+- (IBAction)openExtensionPopup:(NSMenuItem*)sender {
+  _extensionAnchorOverride = nil;  // from the picker: under the puzzle
+  [self showPopupOfExtension:sender.representedObject];
+}
 
 - (ExtensionPopup*)extensionPopup { return _extensionPopup.isOpen ? _extensionPopup : nil; }
 - (NSView*)extensionPopupAnchor {
+  NSView* pinned = _extensionAnchorOverride;  // opened from its pinned icon: the bubble hangs from that icon (V69)
+  if (pinned.window && !pinned.isHiddenOrHasHiddenAncestor) return pinned;
   return _extensionsButton && !_extensionsButton.isHiddenOrHasHiddenAncestor ? _extensionsButton : _addressPill;
 }
 
@@ -5389,7 +5648,10 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   };
   popup.onClose = ^{
     MainWindowController* me = weakSelf;
-    if (me && me->_extensionPopup == weakPopup) me->_extensionPopup = nil;
+    if (me && me->_extensionPopup == weakPopup) {
+      me->_extensionPopup = nil;
+      me->_extensionAnchorOverride = nil;
+    }
   };
   _extensionPopup = popup;
   return popup;
@@ -5408,6 +5670,7 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   if (!enabled) [off addObject:extensionID];
   SettingSetObject(kDisabledExtensionsKey, off);
   gExtensionsChanged = YES;
+  [self rebuildPillExtensions];
   return YES;
 }
 - (IBAction)toggleExtension:(NSMenuItem*)sender {
@@ -5422,6 +5685,7 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   [off removeObject:extensionID];
   SettingSetObject(kDisabledExtensionsKey, off);
   gExtensionsChanged = YES;
+  [self rebuildPillExtensions];
   return YES;
 }
 - (IBAction)removeExtension:(NSMenuItem*)sender {
@@ -5450,7 +5714,8 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   __weak MainWindowController* weakSelf = self;
   InstallExtensionFromWebStore(extID, [self extensionsDirectory], ^(NSString* installedID, NSString* name, NSError* error) {
     if (name) {
-      [weakSelf setExtension:installedID enabled:YES];  // a reinstall turns it back on
+      [weakSelf pinNewExtension:installedID];           // new extensions are pinned, as in Arc (V69)
+      [weakSelf setExtension:installedID enabled:YES];  // a reinstall turns it back on (and refreshes the pill)
       [weakSelf turnOnChromePagesForExtensions];
     }
     done(name, error);
@@ -5611,6 +5876,12 @@ static BOOL gExtensionsChanged = NO;  // installs, removals and on/off since lau
   NSUInteger copied = 0, skipped = 0;
   for (ArcExtensionCopy* c in [self importArcExtensionsInto:extensionsDir fromArcUserData:userData])
     c.skippedMV2 ? ++skipped : ++copied;
+  // Omar, Nov 11: Import Everything copied his Arc extensions but left Chrome-style pages off, so none of them ever
+  // loaded or showed. Copying any now turns them on (they start at the next launch), like Import Extensions does.
+  if (copied) {
+    [self turnOnChromePagesForExtensions];
+    gExtensionsChanged = YES;
+  }
   NSDictionary* pw = [self importArcPasswordsFromUserData:userData];
   NSMutableDictionary* out = [@{@"history" : @(history), @"extensions" : @(copied), @"skipped" : @(skipped),
                                 @"passwords" : pw[@"passwords"] ?: @(-1), @"addresses" : pw[@"addresses"] ?: @0,
@@ -5634,8 +5905,9 @@ NSString* ArcImportSummary(NSDictionary* n, NSDictionary* cookies) {
                          : @"Logins (cookies): none copied"];
   }
   [lines addObject:[NSString stringWithFormat:@"History: %@ visits added", n[@"history"]]];
-  [lines addObject:[NSString stringWithFormat:@"Extensions: %@ copied%@", n[@"extensions"],
-                                              [n[@"skipped"] intValue] ? [NSString stringWithFormat:@" (%@ too old for current Chromium)", n[@"skipped"]] : @""]];
+  [lines addObject:[NSString stringWithFormat:@"Extensions: %@ copied%@%@", n[@"extensions"],
+                                              [n[@"skipped"] intValue] ? [NSString stringWithFormat:@" (%@ too old for current Chromium)", n[@"skipped"]] : @"",
+                                              [n[@"extensions"] intValue] ? @"; they start when NotArc relaunches" : @""]];
   if (n[@"passwordError"]) {
     [lines addObject:[NSString stringWithFormat:@"Saved passwords, addresses and cards: not copied. %@", n[@"passwordError"]]];
   } else {
@@ -7702,6 +7974,7 @@ static ArcItem* NewSection(NSString* title) {
                                      : NSColor.secondaryLabelColor;
   _boostButton.toolTip = on ? @"Boost on: edit Boost" : (b ? @"Boost off: edit Boost" : @"Boost This Site");
   _boostIndicator = on ? @"on" : (b ? @"off" : @"none");
+  [self layoutPillButtons];
   [self updatePillButtons];
 }
 // Arc's address pill shows only the site until the pointer is over it; then copy link, site controls (and Boost,
@@ -7715,7 +7988,7 @@ static ArcItem* NewSection(NSString* title) {
 - (NSString*)pillButtonState {  // tests: how many site buttons show, out of how many
   NSUInteger shown = 0, all = 0;
   for (NSView* v in _addressPill.subviews)
-    if (v.tag == 90) {
+    if (v.tag == 90 && !v.hidden) {
       ++all;
       if (v.alphaValue > 0.5) ++shown;
     }
@@ -8739,10 +9012,9 @@ static NSArray<NSString*>* NewSpaceSwatches() {
   BOOL dev = _shown && !_shown.noteID && !_shown.easelID && DeveloperModeOnForURL(url);
   if (_devToolsButton.hidden == dev) {
     _devToolsButton.hidden = !dev;
-    NSRect f = _addressPillText.frame;
-    f.size.width = _addressPill.bounds.size.width - 11 - 86 - (dev ? 26 : 0);
-    _addressPillText.frame = f;
+    [self layoutPillButtons];
   }
+  if (![_pillExtensionsProfile isEqualToString:_space.profileDirectory ?: @""]) [self rebuildPillExtensions];  // per profile
   if (_shown.noteID) host = @"Note";
   if (_shown.easelID) host = @"Easel";
   _addressPillText.stringValue = host ?: @"";
@@ -10032,10 +10304,21 @@ static void ApplyArcMenuIcons(NSMenu* menu) {
     _commandBar.opaque = NO;
     _commandBar.hasShadow = YES;
     // Arc's command bar: a large opaque card floating over the page, with a hairline under the input row.
-    CommandCardView* card = [[CommandCardView alloc] initWithFrame:NSMakeRect(0, 0, 640, 60)];
-    card.wantsLayer = YES;
+    CommandBarCardView* card = [[CommandBarCardView alloc] initWithFrame:NSMakeRect(0, 0, 640, 60)];
     card.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
     [_commandBar.contentView addSubview:card];
+    // A click outside, Esc or another window (or app) taking focus closes it, as in Arc (Omar, Nov 11).
+    __weak MainWindowController* weakBar = self;
+    [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidBecomeKeyNotification object:_commandBar queue:nil
+                                                usingBlock:^(NSNotification*) {
+                                                  MainWindowController* me = weakBar;
+                                                  if (me) me->_commandBarWasKey = YES;
+                                                }];
+    [NSNotificationCenter.defaultCenter addObserverForName:NSWindowDidResignKeyNotification object:_commandBar queue:nil
+                                                usingBlock:^(NSNotification*) {
+                                                  MainWindowController* me = weakBar;
+                                                  if (me && me->_commandBarWasKey && me->_commandBar.isVisible) [me dismissCommandBar];
+                                                }];
     _commandDivider = [[NSBox alloc] initWithFrame:NSMakeRect(0, 0, 640, 1)];
     _commandDivider.boxType = NSBoxCustom;
     _commandDivider.borderWidth = 0;
@@ -10087,6 +10370,25 @@ static void ApplyArcMenuIcons(NSMenu* menu) {
   }
   _commandField.placeholderString = @"Search or Enter URL...";
   _commandField.stringValue = (!newTab && _shown.url) ? _shown.url : @"";
+  // Clicking the pill (or Cmd+L) with the sidebar showing opens Arc's compact dropdown over the pill; a new tab gets
+  // the big centred bar (Omar, Nov 11, from his Arc 1.169 screenshot).
+  _commandCompact = !newTab && ![self sidebarCollapsed] && _addressPill && !_addressPill.isHiddenOrHasHiddenAncestor;
+  _suggestionList.compact = _commandCompact;
+  _commandField.font = [NSFont systemFontOfSize:_commandCompact ? 13 : kCommandFieldSize
+                                         weight:_commandCompact ? NSFontWeightMedium : NSFontWeightRegular];
+  NSImage* siteIcon = _commandCompact && _shown ? [self iconImageForItem:_shown] : nil;
+  if (siteIcon.isTemplate) siteIcon = nil;
+  _commandIcon.image = siteIcon ?: [NSImage imageWithSystemSymbolName:@"magnifyingglass" accessibilityDescription:nil];
+  _commandBarWasKey = NO;
+  if (!_commandClickMonitor) {
+    __weak MainWindowController* weakMon = self;
+    _commandClickMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown |
+                                                                         NSEventMaskOtherMouseDown
+                                                                 handler:^NSEvent*(NSEvent* e) {
+                                                                   MainWindowController* me = weakMon;
+                                                                   return me ? [me commandBarFilterEvent:e] : e;
+                                                                 }];
+  }
   [self refreshSuggestions];
   [self.window addChildWindow:_commandBar ordered:NSWindowAbove];
   [_commandBar makeKeyAndOrderFront:nil];
@@ -10102,14 +10404,15 @@ static void ApplyArcMenuIcons(NSMenu* menu) {
   NSTextField* hint = [first viewWithTag:3];
   NSRect bf = _commandBar.frame, wf = self.window.frame;
   BOOL centred = _commandOpensNewTab ? fabs(NSMidX(bf) - NSMidX(wf)) <= 1 && NSMaxY(wf) - NSMaxY(bf) >= 80
-                                     : fabs(NSMinX(bf) - NSMinX(wf) - 4) <= 1 && fabs(NSMaxY(wf) - NSMaxY(bf) - 42) <= 1;
+                                     : [[self commandBarGeometry] containsString:@" onPill=1 "];  // over the pill (V67)
   NSView* card = _commandBar.contentView.subviews.firstObject;
+  NSString* cardClass = NSStringFromClass(card.class);
   return [NSString stringWithFormat:@"sel=%02X%02X%02X rowClass=%@ divider=%d placeholder=%@ cell=%@ width=%.0f font=%.0f card=%@ "
                                     @"row=%.0f hint=%@ scrim=%d centred=%d",
                                     (int)lround(c.redComponent * 255), (int)lround(c.greenComponent * 255),
                                     (int)lround(c.blueComponent * 255), NSStringFromClass(rv.class), !_commandDivider.hidden,
                                     _commandField.placeholderString, NSStringFromClass(first.class), NSWidth(bf),
-                                    _commandField.font.pointSize, NSStringFromClass(card.class), kSuggestionRow,
+                                    _commandField.font.pointSize, cardClass, kSuggestionRow,
                                     hint.stringValue.length ? hint.stringValue : @"-", _commandScrim && !_commandScrim.hidden, centred];
 }
 // Search suggestions (#31): the engine's own suggestions for what is typed, fetched shortly after typing stops.
@@ -10174,7 +10477,10 @@ static void ApplyArcMenuIcons(NSMenu* menu) {
 
 - (void)refreshSuggestions {
   [self fetchSearchSuggestions:_commandField.stringValue];
-  _suggestionList.items = [self commandSuggestionsFor:_commandField.stringValue];
+  NSArray* items = [self commandSuggestionsFor:_commandField.stringValue];
+  // Arc's dropdown under the pill lists at most five rows (Omar's Arc 1.169 screenshot).
+  if (_commandCompact && items.count > kCompactSuggestions) items = [items subarrayWithRange:NSMakeRange(0, kCompactSuggestions)];
+  _suggestionList.items = items;
   [_suggestionTable reloadData];
   if (_suggestionList.items.count) [_suggestionTable selectRowIndexes:[NSIndexSet indexSetWithIndex:0] byExtendingSelection:NO];
   // Arc: centred over the window, about a fifth of the way down; up to 680 pt wide; 60 pt input row with a 20 pt
@@ -10195,6 +10501,28 @@ static void ApplyArcMenuIcons(NSMenu* menu) {
     W = round(MIN(640, f.size.width - 16));
     left = NSMinX(pill) - 4;
     top = NSMaxY(pill) + 4;
+  }
+  if (_commandCompact) {
+    // Arc's dropdown (measured at 1x from Omar's screenshot): its top-left on the pill's, 348 pt wide (the pill plus
+    // 92), a 50 pt input row with the site's icon and the address in 13 pt, then 50 pt rows, 8 pt padding below.
+    NSRect pill = [self.window convertRectToScreen:[_addressPill convertRect:_addressPill.bounds toView:nil]];
+    W = round(MIN(NSWidth(pill) + kCompactExtraWidth, NSMaxX(f) - NSMinX(pill) - 8));
+    listH = _suggestionList.items.count * kSuggestionRow + (_suggestionList.items.count ? 8 : 0);
+    h = kCompactInputRow + listH;
+    [_commandBar setFrame:NSMakeRect(NSMinX(pill), NSMaxY(pill) - h, W, h) display:YES];
+    _commandIcon.frame = NSMakeRect(23, h - kCompactInputRow + 17, 16, 16);
+    _commandField.frame = NSMakeRect(49, h - kCompactInputRow + 15, W - 49 - 14, 20);
+    _suggestionScroll.frame = NSMakeRect(8, 8, W - 16, MAX(0, listH - 8));
+    _suggestionTable.tableColumns.firstObject.width = W - 16;
+    _suggestionScroll.hidden = listH == 0;
+    _commandDivider.hidden = YES;
+    _commandScrim.hidden = YES;
+    if (_siteSearch) {  // Site Search works here too: the capsule at the start of the input, the field after it
+      _siteCapsule.frame = NSMakeRect(49, NSMidY(_commandField.frame) - 11, _siteCapsule.frame.size.width, 22);
+      CGFloat fx = NSMaxX(_siteCapsule.frame) + 8;
+      _commandField.frame = NSMakeRect(fx, NSMinY(_commandField.frame), W - fx - 14, 20);
+    }
+    return;
   }
   [_commandBar setFrame:NSMakeRect(left, top - h, W, h) display:YES];
   _commandIcon.frame = NSMakeRect(18, h - 42, 20, 20);
@@ -10491,12 +10819,201 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
   NSText* editor = [self.window fieldEditor:YES forObject:_commandField];
   return [self control:_commandField textView:(NSTextView*)editor doCommandBySelector:sel];
 }
+- (NSWindow*)commandBarWindow { return _commandBar; }
+- (NSString*)commandBarGeometry {  // tests (V67, V71)
+  NSRect bf = _commandBar.frame;
+  BOOL onPill = NO;
+  if (_addressPill.window) {
+    NSRect pill = [self.window convertRectToScreen:[_addressPill convertRect:_addressPill.bounds toView:nil]];
+    onPill = fabs(NSMinX(bf) - NSMinX(pill)) <= 1 && fabs(NSMaxY(bf) - NSMaxY(pill)) <= 1;
+  }
+  CommandBarCardView* card = [_commandBar.contentView.subviews.firstObject isKindOfClass:CommandBarCardView.class]
+                                 ? (CommandBarCardView*)_commandBar.contentView.subviews.firstObject : nil;
+  [card updateLayer];
+  CGFloat alpha = card ? card.tintColor.alphaComponent : 1;
+  return [NSString stringWithFormat:@"compact=%d onPill=%d width=%.0f rows=%lu rowH=%.0f font=%.0f scrim=%d radius=%.0f translucent=%d",
+                                    _commandCompact, onPill, NSWidth(bf), (unsigned long)_suggestionList.items.count, kSuggestionRow,
+                                    _commandField.font.pointSize, _commandScrim && !_commandScrim.hidden,
+                                    card ? card.layer.cornerRadius : 0, card && alpha < 1 && card.blur != nil];
+}
+// The click-outside monitor: a click in any other window (the page, the sidebar, another panel) closes the bar
+// without navigating; a click on the address pill itself only closes it (it would reopen otherwise).
+- (NSEvent*)commandBarFilterEvent:(NSEvent*)e {
+  if (!_commandBar.isVisible || e.window == _commandBar) return e;
+  BOOL onPill = NO;
+  if (e.window == self.window && _addressPill.window == self.window) {
+    NSPoint p = [_addressPill convertPoint:e.locationInWindow fromView:nil];
+    onPill = NSPointInRect(p, _addressPill.bounds);
+  }
+  [self dismissCommandBar];
+  return onPill ? nil : e;
+}
+- (void)dismissCommandBar {  // closed without picking anything
+  _commandOpensSplit = NO;
+  _commandOpensLittle = NO;
+  _commandOpensIncognito = NO;
+  [self hideCommandBar];
+}
+// --- The address pill's hover row (Omar, Nov 11; V69) ---
+static const NSUInteger kPillMaxExtensions = 2;  // Arc showed two of Omar's extensions in the pill; the rest are under More
+- (NSArray<NotArcExtension*>*)pinnedExtensionsIn:(NSArray<NotArcExtension*>*)all {
+  NSArray* saved = SettingObject(kSettingPinnedExtensions);
+  NSMutableArray* out = [NSMutableArray array];
+  if (![saved isKindOfClass:NSArray.class]) {  // never chosen: every extension that's on (Arc pins new ones)
+    for (NotArcExtension* x in all) if (x.enabled) [out addObject:x];
+    return out;
+  }
+  for (NSString* ident in saved)
+    for (NotArcExtension* x in all) if (x.enabled && [x.extensionID isEqual:ident]) [out addObject:x];
+  return out;
+}
+- (BOOL)extensionIsPinned:(NSString*)ident {
+  NSArray* saved = SettingObject(kSettingPinnedExtensions);
+  return ![saved isKindOfClass:NSArray.class] || [saved containsObject:ident];
+}
+- (void)setExtension:(NSString*)ident pinned:(BOOL)pinned {
+  if (!ident.length) return;
+  NSArray* saved = SettingObject(kSettingPinnedExtensions);
+  NSMutableArray* list = [NSMutableArray array];
+  if ([saved isKindOfClass:NSArray.class]) [list addObjectsFromArray:saved];
+  else for (NotArcExtension* x in [self installedExtensions]) if (x.extensionID.length) [list addObject:x.extensionID];
+  [list removeObject:ident];
+  if (pinned) [list addObject:ident];
+  SettingSetObject(kSettingPinnedExtensions, list);
+  [self rebuildPillExtensions];
+}
+// A newly installed or copied extension is pinned, as in Arc (only matters once a pin list was saved).
+- (void)pinNewExtension:(NSString*)ident {
+  NSArray* saved = SettingObject(kSettingPinnedExtensions);
+  if ([saved isKindOfClass:NSArray.class] && ident.length && ![saved containsObject:ident])
+    SettingSetObject(kSettingPinnedExtensions, [saved arrayByAddingObject:ident]);
+}
+- (IBAction)togglePinExtension:(NSMenuItem*)sender {
+  NotArcExtension* x = sender.representedObject;
+  [self setExtension:x.extensionID pinned:![self extensionIsPinned:x.extensionID]];
+}
+
+- (NSMenu*)pillMenuForExtension:(NotArcExtension*)x {
+  NSMenu* m = [[NSMenu alloc] initWithTitle:x.name ?: @""];
+  m.autoenablesItems = NO;
+  if (x.popupPage) [m addItem:[self pickerItem:@"Open" action:@selector(openExtensionPopupFromPill:) object:x]];
+  if (x.optionsPage) [m addItem:[self pickerItem:@"Options" action:@selector(openExtensionOptions:) object:x]];
+  [m addItem:[self pickerItem:@"Unpin" action:@selector(togglePinExtension:) object:x]];
+  [m addItem:NSMenuItem.separatorItem];
+  [m addItem:[self pickerItem:@"Manage Extensions" action:@selector(manageExtensions:) object:nil]];
+  m.itemArray.lastObject.enabled = ChromePagesEnabled();
+  return m;
+}
+
+- (void)rebuildPillExtensions {
+  if (!_addressPill) return;
+  _pillExtensionsProfile = _space.profileDirectory ?: @"";
+  for (NSButton* b in _pinnedExtensionButtons) [b removeFromSuperview];
+  NSArray<NotArcExtension*>* all = [self installedExtensions];
+  _pillInstalledCount = all.count;
+  NSMutableArray<NSButton*>* buttons = [NSMutableArray array];
+  NSMutableDictionary* byID = [NSMutableDictionary dictionary];
+  for (NotArcExtension* x in [self pinnedExtensionsIn:all]) {
+    if (buttons.count >= kPillMaxExtensions || !x.extensionID.length) break;
+    NSImage* icon = x.iconPath ? [[NSImage alloc] initWithContentsOfFile:x.iconPath] : nil;
+    BOOL own = icon != nil;
+    if (!icon) icon = [NSImage imageWithSystemSymbolName:@"puzzlepiece.extension.fill" accessibilityDescription:x.name];
+    icon.size = NSMakeSize(16, 16);
+    NSButton* b = [NSButton buttonWithImage:icon target:self action:@selector(pillExtensionClicked:)];
+    b.bordered = NO;
+    b.imageScaling = NSImageScaleProportionallyDown;
+    b.toolTip = x.name;
+    b.identifier = [@"ext:" stringByAppendingString:x.extensionID];
+    b.tag = 90;
+    b.frame = NSMakeRect(0, 5, 26, 26);
+    if (!own) b.contentTintColor = NSColor.secondaryLabelColor;
+    b.menu = [self pillMenuForExtension:x];
+    [_addressPill addSubview:b];
+    [buttons addObject:b];
+    byID[x.extensionID] = x;
+  }
+  _pinnedExtensionButtons = buttons;
+  _pillExtensions = byID;
+  [self layoutPillButtons];
+  [self updatePillButtons];
+}
+
+- (void)layoutPillButtons {
+  if (!_addressPill) return;
+  _boostButton.hidden = ![_boostIndicator isEqual:@"on"];  // Arc: no Boost button unless the site has one on
+  _extensionsButton.hidden = !(ChromePagesEnabled() || _pillInstalledCount > 0);
+  NSMutableArray<NSButton*>* order = [NSMutableArray array];
+  if (!_devToolsButton.hidden) [order addObject:_devToolsButton];
+  if (!_boostButton.hidden) [order addObject:_boostButton];
+  [order addObjectsFromArray:_pinnedExtensionButtons ?: @[]];
+  if (!_extensionsButton.hidden) [order addObject:_extensionsButton];
+  if (_copyURLButton) [order addObject:_copyURLButton];
+  if (_siteControlsButton) [order addObject:_siteControlsButton];
+  CGFloat W = _addressPill.bounds.size.width, px = W - 6 - 26 * (CGFloat)order.count;
+  for (NSButton* b in order) {
+    b.frame = NSMakeRect(px, 5, 26, 26);
+    px += 26;
+  }
+  _pillButtonOrder = order;
+  NSRect f = _addressPillText.frame;
+  f.size.width = MAX(40, W - 11 - 8 - 26 * (CGFloat)order.count);
+  _addressPillText.frame = f;
+}
+
+- (NSString*)pillButtonOrder {  // tests (V69)
+  NSMutableArray* ids = [NSMutableArray array];
+  for (NSButton* b in _pillButtonOrder) if (!b.hidden && b.superview == _addressPill) [ids addObject:b.identifier ?: @"?"];
+  return [ids componentsJoinedByString:@","];
+}
+- (BOOL)pillExtensionHasOwnIcon:(NSString*)ident {
+  for (NSButton* b in _pinnedExtensionButtons)
+    if ([b.identifier isEqual:[@"ext:" stringByAppendingString:ident ?: @""]]) return b.image && !b.image.isTemplate;
+  return NO;
+}
+- (IBAction)pillExtensionClicked:(NSButton*)sender {
+  NotArcExtension* x = _pillExtensions[[sender.identifier substringFromIndex:4]];
+  if (!x) return;
+  if (x.popupPage.length) {
+    if (_extensionPopup.isOpen && _extensionAnchorOverride == sender) {  // a second click closes it, as in Arc
+      [_extensionPopup closeBecause:@"toggle"];
+      return;
+    }
+    _extensionAnchorOverride = sender;
+    if (![self showPopupOfExtension:x]) _extensionAnchorOverride = nil;
+  } else if (x.optionsPage.length) {
+    [self openExtensionPage:x.optionsPage of:x];
+  } else {
+    [self showExtensionPicker:sender];
+  }
+}
+- (IBAction)openExtensionPopupFromPill:(NSMenuItem*)sender {
+  NotArcExtension* x = sender.representedObject;
+  for (NSButton* b in _pinnedExtensionButtons)
+    if ([b.identifier isEqual:[@"ext:" stringByAppendingString:x.extensionID ?: @""]]) {
+      [self pillExtensionClicked:b];
+      return;
+    }
+  [self showPopupOfExtension:x];
+}
+- (ExtensionPopup*)clickPillExtensionForTest:(NSString*)ident {
+  for (NSButton* b in _pinnedExtensionButtons)
+    if ([b.identifier isEqual:[@"ext:" stringByAppendingString:ident ?: @""]]) {
+      [self pillExtensionClicked:b];
+      return _extensionPopup;
+    }
+  return nil;
+}
 - (void)hideCommandBar {
   if (_siteSearch) {
     _siteSearch = nil;
     _siteCapsule.hidden = YES;
   }
   _commandScrim.hidden = YES;
+  if (_commandClickMonitor) {
+    [NSEvent removeMonitor:_commandClickMonitor];
+    _commandClickMonitor = nil;
+  }
+  _commandBarWasKey = NO;
   [self.window removeChildWindow:_commandBar];
   [_commandBar orderOut:nil];
   [self.window makeKeyWindow];
@@ -10598,10 +11115,7 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     return YES;
   }
   if (command == @selector(cancelOperation:)) {
-    _commandOpensSplit = NO;
-    _commandOpensLittle = NO;
-    _commandOpensIncognito = NO;
-    [self hideCommandBar];
+    [self dismissCommandBar];
     return YES;
   }
   return NO;
