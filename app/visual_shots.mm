@@ -256,6 +256,16 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
       c.captureDirectory = NSTemporaryDirectory();
       __weak MainWindowController* wc = c;
       [c capture:@"visible" rect:NSZeroRect done:^(NSData* png) { [wc deliverCapture:png]; }];
+    } else if ([cmd isEqual:@"site-search"]) {  // site-search <name> [query]: the Site Search capsule in the bar
+      NSArray* a2 = [arg componentsSeparatedByString:@" "];
+      NSTextField* field = [c valueForKey:@"_commandField"];
+      field.stringValue = a2.firstObject ?: @"";
+      [c commandBarHandleSelectorForTest:@selector(insertTab:)];
+      if (a2.count > 1) {
+        field.stringValue = [[a2 subarrayWithRange:NSMakeRange(1, a2.count - 1)] componentsJoinedByString:@" "];
+        SEL r = NSSelectorFromString(@"refreshSuggestions");
+        ((void (*)(id, SEL))[c methodForSelector:r])(c, r);
+      }
     } else if ([cmd isEqual:@"library"]) {
       [c showLibrary:nil];
     } else if ([cmd isEqual:@"library-open"]) {

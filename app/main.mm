@@ -2978,6 +2978,25 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           if (!onPill) std::printf("SELFTEST-CMDBARLOOK-DEBUG cmdL %s\n", inPlace.UTF8String);
           if (!card || !centred || !hint || !wide) std::printf("SELFTEST-CMDBARLOOK-DEBUG %s\n", style.UTF8String);
         }
+        {  // Visual parity V30/V31: empty bar shows recent tabs and actions; a site's name + Tab starts Site Search
+          NSArray* empty = [w commandSuggestionsFor:@""];
+          BOOL recents = has(empty, @"tab", @"suggest-");
+          BOOL actions = NO;
+          for (NSDictionary* d in empty) actions |= [d[@"kind"] isEqual:@"action"];
+          BOOL pure = [SiteSearchFor(@"wiki")[@"name"] isEqual:@"Wikipedia"] && [SiteSearchFor(@"YouTube ")[@"name"] isEqual:@"YouTube"] &&
+                      SiteSearchFor(@"zq") == nil && SiteSearchFor(@"g") == nil;
+          [w showCommandBarForNewTab:YES];
+          NSTextField* field = [w valueForKey:@"_commandField"];
+          field.stringValue = @"wikipedia";
+          [w commandBarHandleSelectorForTest:@selector(insertTab:)];
+          NSString* capsule = w.siteSearchState;
+          BOOL started = [capsule isEqual:@"capsule=Search Wikipedia fieldAfter=1"] && field.stringValue.length == 0;
+          [w commandBarHandleSelectorForTest:@selector(deleteBackward:)];
+          BOOL dropped = [w.siteSearchState isEqual:@"none"];
+          [w hideCommandBar];
+          std::printf("SELFTEST-CMDBARKEYS recents=%d actions=%d sites=%d capsule=%d backspace=%d\n", recents, actions, pure, started, dropped);
+          if (!started) std::printf("SELFTEST-CMDBARKEYS-DEBUG %s\n", capsule.UTF8String);
+        }
         std::printf("SELFTEST-SUGGEST goFirst=%d tab=%d space=%d action=%d history=%d topSites=%d switched=%d learned=%d "
                     "styled=%d\n", first, tab, space, action, history, top, switched, learned, styled);
       });
@@ -2995,6 +3014,9 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         [w runJS:@"Notification.requestPermission().then(r => document.title = 'n1:' + r)" inItem:t];
         WaitUntil(^{ if (w.shownItem != t) [w showItem:t]; return (BOOL)(w.pendingSitePrompt.length > 0); }, 10, ^{
           firstPrompt = w.pendingSitePrompt;
+          NSString* promptLook = w.sitePromptStyle;  // Visual parity V51: drops down from the address pill, no sheet
+          std::printf("SELFTEST-PROMPTLOOK arcStyle=%d\n", [promptLook isEqual:@"popover=1 sheet=0 fromPill=1"]);
+          if (![promptLook isEqual:@"popover=1 sheet=0 fromPill=1"]) std::printf("SELFTEST-PROMPTLOOK-DEBUG %s\n", promptLook.UTF8String);
           [w answerSitePrompt:YES remember:YES];
           WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"n1:"]; }, 5, ^{
             NSString* t1 = t.liveTitle;

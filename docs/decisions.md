@@ -495,3 +495,10 @@ trackpad; everything else is checked by the hidden self-test.
     (Cmd+Shift+J) stays for filtering and cancelling.
 122. **The note format bar floats over the top of the note (V44),** matching the easel's bar placement; no Arc
     picture of a note was available, so the position is a taste call for Omar to check.
+123. **Site Search uses NotArc's own short list of sites (V31)** (Google, Wikipedia, YouTube, GitHub, Amazon, Maps,
+    Images, DuckDuckGo, Reddit, X) with their public search addresses; Arc's list isn't copied.
+124. **Arc's own picture-in-picture windows are out of scope.** Under CEF, Chromium draws the video and document PiP
+    windows itself; NotArc keeps Chromium's PiP (and auto-PiP) and can't add Arc's thin top bar. The checklist now
+    counts 65 items.
+125. **The extensions button stays behind Chrome-style pages (V50)** until Omar has looked at them on screen; the
+    bubble popups and the button already match Arc.

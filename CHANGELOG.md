@@ -4,6 +4,11 @@ All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc
 or later. From 0.5.0 on, NotArc updates itself.
 
 ## Unreleased
+- Command bar: the empty bar shows your recent tabs and a few actions before top sites; Tab completes the selected
+  row; a site's name then Tab starts Site Search ("Search Wikipedia" capsule); Shift+Return opens a Little Window
+  and Cmd+Return a background tab.
+- Site requests (camera, microphone, notifications, opening apps) drop down from the address pill as a small card
+  instead of a window sheet.
 - Easels: the floating tool bar gains Add Image and Capture buttons; the canvas shows no scrollbar track.
 - Notes: the format bar floats over the top of the note, and an empty note shows a large grey "Untitled".
 - Capture: a hint capsule at the top while you pick an area, a rounded outline with the size, and a result card with

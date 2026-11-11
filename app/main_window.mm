@@ -1224,6 +1224,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSButton* _navBack;
   NSView* _peekScrim;
   NSBox* _updateBanner;
+  NSDictionary* _siteSearch;
+  NSTextField* _siteCapsule;
   NSView* _captureCard;
   NSString* _lastCapturePath;
   NSPopover* _downloadsTray;
@@ -1325,7 +1327,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   AutofillController* _autofill;  // passwords and autofill (#67)
   NSView* _toolbar;
   NSMutableArray<NSDictionary*>* _sitePrompts;  // queue; first one is showing
-  NSAlert* _siteAlert;
+  NSPopover* _siteAlert;  // the site prompt that drops down from the address pill
+  NSButton* _sitePromptRemember;
   NSPopover* _sitePopover;
   NSString* _siteSettingsOrigin;
   NSTextField* _address;
@@ -3707,20 +3710,62 @@ static NSString* OriginKey(NSString* origin) {
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ [weakSelf showNextSitePrompt]; });
     return;
   }
-  NSAlert* a = [NSAlert new];
-  a.messageText = p[@"title"];
-  if (p[@"detail"]) a.informativeText = p[@"detail"];
-  [a addButtonWithTitle:p[@"allow"]];
-  [a addButtonWithTitle:p[@"deny"]];
-  a.showsSuppressionButton = YES;
-  a.suppressionButton.title = @"Remember for this site";
-  _siteAlert = a;
-  __weak MainWindowController* weakSelf = self;
-  [a beginSheetModalForWindow:self.window completionHandler:^(NSModalResponse r) {
-    MainWindowController* me = weakSelf;
-    if (!me || me->_siteAlert != a) return;
-    [me finishSitePrompt:r == NSAlertFirstButtonReturn remember:a.suppressionButton.state == NSControlStateValueOn];
-  }];
+  // Arc: site requests drop down from the address pill as a small card, not a window sheet.
+  const CGFloat W = 300;
+  NSTextField* title = [NSTextField wrappingLabelWithString:p[@"title"]];
+  title.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
+  title.preferredMaxLayoutWidth = W - 32;
+  NSMutableArray* views = [NSMutableArray arrayWithObject:title];
+  if (p[@"detail"]) {
+    NSTextField* detail = [NSTextField wrappingLabelWithString:p[@"detail"]];
+    detail.font = [NSFont systemFontOfSize:12];
+    detail.textColor = NSColor.secondaryLabelColor;
+    detail.preferredMaxLayoutWidth = W - 32;
+    [views addObject:detail];
+  }
+  NSButton* remember = [NSButton checkboxWithTitle:@"Remember for this site" target:nil action:nil];
+  remember.font = [NSFont systemFontOfSize:12];
+  [views addObject:remember];
+  NSButton* deny = [NSButton buttonWithTitle:p[@"deny"] target:self action:@selector(sitePromptButton:)];
+  deny.tag = 0;
+  NSButton* allow = [NSButton buttonWithTitle:p[@"allow"] target:self action:@selector(sitePromptButton:)];
+  allow.tag = 1;
+  allow.keyEquivalent = @"\r";
+  allow.bezelColor = NSColor.controlAccentColor;
+  NSView* spacer = [NSView new];
+  [spacer setContentHuggingPriority:1 forOrientation:NSLayoutConstraintOrientationHorizontal];
+  NSStackView* buttons = [NSStackView stackViewWithViews:@[ spacer, deny, allow ]];
+  [buttons.widthAnchor constraintEqualToConstant:W - 32].active = YES;
+  [views addObject:buttons];
+  NSStackView* stack = [NSStackView stackViewWithViews:views];
+  stack.orientation = NSUserInterfaceLayoutOrientationVertical;
+  stack.alignment = NSLayoutAttributeLeading;
+  stack.spacing = 10;
+  stack.edgeInsets = NSEdgeInsetsMake(14, 16, 12, 16);
+  NSViewController* vc = [NSViewController new];
+  vc.view = stack;
+  stack.frame = NSMakeRect(0, 0, W, stack.fittingSize.height);
+  NSPopover* pop = [NSPopover new];
+  pop.contentViewController = vc;
+  pop.behavior = NSPopoverBehaviorApplicationDefined;  // stays until answered, like Arc's request bubble
+  pop.appearance = self.window.effectiveAppearance;
+  pop.animates = !self.selfTestProfiles;
+  _siteAlert = pop;
+  _sitePromptRemember = remember;
+  BOOL pill = !_addressPill.hidden && _addressPill.window && ![self sidebarCollapsed];
+  NSView* anchor = pill ? _addressPill : _content;
+  NSRect r = pill ? NSMakeRect(14, 0, 24, _addressPill.bounds.size.height) : NSMakeRect(12, NSMaxY(_content.bounds) - 2, 1, 1);
+  [pop showRelativeToRect:r ofView:anchor preferredEdge:pill ? NSRectEdgeMinY : NSRectEdgeMinY];
+}
+- (void)sitePromptButton:(NSButton*)sender {
+  if (!_siteAlert) return;
+  BOOL remember = _sitePromptRemember.state == NSControlStateValueOn;
+  [_siteAlert close];
+  [self finishSitePrompt:sender.tag == 1 remember:remember];
+}
+- (NSString*)sitePromptStyle {  // tests (V51): a popover from the pill, never a sheet
+  return [NSString stringWithFormat:@"popover=%d sheet=%d fromPill=%d", _siteAlert.isShown, self.window.attachedSheet != nil,
+                                    _siteAlert.positioningRect.size.width == 24];
 }
 
 - (void)finishSitePrompt:(BOOL)allow remember:(BOOL)remember {
@@ -3740,11 +3785,8 @@ static NSString* OriginKey(NSString* origin) {
 }
 
 - (void)answerSitePrompt:(BOOL)allow remember:(BOOL)remember {
-  NSAlert* a = _siteAlert;
-  if (!a) return;
-  _siteAlert = nil;  // completion handler sees a stale alert and does nothing
-  [self.window endSheet:a.window];
-  _siteAlert = a;
+  if (!_siteAlert) return;
+  [_siteAlert close];
   [self finishSitePrompt:allow remember:remember];
 }
 
@@ -9700,7 +9742,9 @@ static void ApplyArcMenuIcons(NSMenu* menu) {
   [_commandBar setFrame:NSMakeRect(left, top - h, W, h) display:YES];
   _commandIcon.frame = NSMakeRect(18, h - 42, 20, 20);
   _commandIcon.contentTintColor = [NSColor colorWithWhite:IsDark(_commandBar.contentView) ? 1 : 0 alpha:0.33];
-  _commandField.frame = NSMakeRect(48, h - 45, W - 48 - 16, 26);
+  CGFloat fieldX = _siteSearch ? 48 + _siteCapsule.frame.size.width + 8 : 48;
+  _commandField.frame = NSMakeRect(fieldX, h - 45, W - fieldX - 16, 26);
+  if (_siteSearch) _siteCapsule.frame = NSMakeRect(48, NSMidY(_commandField.frame) - 12, _siteCapsule.frame.size.width, 24);
   _suggestionScroll.frame = NSMakeRect(8, 8, W - 16, MAX(0, listH - 16));
   _suggestionTable.tableColumns.firstObject.width = W - 16;
   _suggestionScroll.hidden = listH == 0;
@@ -9708,6 +9752,33 @@ static void ApplyArcMenuIcons(NSMenu* menu) {
   if (inPlace) _commandScrim.hidden = YES;
   else [self updateCommandScrim];
   _commandDivider.hidden = listH == 0;
+}
+
+// Site Search (Arc: type a site's name, then Tab). NotArc's own short list of sites and their public search URLs.
+static NSArray<NSDictionary*>* SiteSearches() {
+  static NSArray* list;
+  if (!list)
+    list = @[
+      @{@"name" : @"Google", @"keys" : @[ @"google" ], @"url" : @"https://www.google.com/search?q=%s"},
+      @{@"name" : @"Wikipedia", @"keys" : @[ @"wikipedia", @"wiki" ], @"url" : @"https://en.wikipedia.org/w/index.php?search=%s"},
+      @{@"name" : @"YouTube", @"keys" : @[ @"youtube", @"yt" ], @"url" : @"https://www.youtube.com/results?search_query=%s"},
+      @{@"name" : @"GitHub", @"keys" : @[ @"github", @"gh" ], @"url" : @"https://github.com/search?q=%s"},
+      @{@"name" : @"Amazon", @"keys" : @[ @"amazon" ], @"url" : @"https://www.amazon.com/s?k=%s"},
+      @{@"name" : @"Google Maps", @"keys" : @[ @"maps" ], @"url" : @"https://www.google.com/maps?q=%s"},
+      @{@"name" : @"Google Images", @"keys" : @[ @"images" ], @"url" : @"https://www.google.com/search?q=%s&tbm=isch"},
+      @{@"name" : @"DuckDuckGo", @"keys" : @[ @"duckduckgo", @"ddg" ], @"url" : @"https://duckduckgo.com/?q=%s"},
+      @{@"name" : @"Reddit", @"keys" : @[ @"reddit" ], @"url" : @"https://www.reddit.com/search/?q=%s"},
+      @{@"name" : @"X", @"keys" : @[ @"twitter", @"x.com" ], @"url" : @"https://x.com/search?q=%s"},
+    ];
+  return list;
+}
+NSDictionary* SiteSearchFor(NSString* typed) {  // pure, for tests
+  NSString* t = [typed stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet].lowercaseString;
+  if (t.length < 2) return nil;
+  for (NSDictionary* s in SiteSearches())
+    for (NSString* k in s[@"keys"])
+      if ([k isEqualToString:t] || ([k hasPrefix:t] && t.length >= 3)) return s;
+  return nil;
 }
 
 static NSString* HostOf(NSString* url) {
@@ -9751,8 +9822,33 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
   NSMutableSet<NSString*>* seenURLs = [NSMutableSet set];
   if (!_history && self.historyPath) _history = [[HistoryStore alloc] initWithPath:self.historyPath];
 
+  if (_siteSearch) {  // Site Search: one row, the query on that site (Return runs it)
+    if (q.length)
+      [out addObject:@{ @"kind" : @"search", @"title" : text, @"subtitle" : [@"Search " stringByAppendingString:_siteSearch[@"name"]],
+                        @"key" : @"go", @"text" : text }];
+    return out;
+  }
+  if (!q.length && !urlOnly) {
+    // Arc's empty bar: recent tabs (Switch to Tab), then a few actions, then top sites.
+    NSUInteger tabs = 0;
+    for (ArcItem* t in [self recentTabsForSwitcherMax:6]) {
+      if (t == _shown || !t.url.length || tabs >= 4) continue;
+      ArcSpace* sp = _space;
+      [out addObject:@{ @"kind" : @"tab", @"title" : t.displayTitle ?: t.url, @"subtitle" : HostOf(t.url),
+                        @"key" : [@"tab:" stringByAppendingString:t.itemID ?: t.url], @"item" : t, @"space" : sp }];
+      [seenURLs addObject:t.url];
+      ++tabs;
+    }
+    for (NSArray* a in @[ @[ @"New Split View", @"addVerticalSplit:" ], @[ @"New Little Window", @"newLittleWindow:" ],
+                          @[ @"Capture Area", @"captureArea:" ] ]) {
+      NSMenuItem* mi = [[NSMenuItem alloc] initWithTitle:a[0] action:NSSelectorFromString(a[1]) keyEquivalent:@""];
+      mi.target = self;
+      [out addObject:@{ @"kind" : @"action", @"title" : a[0], @"subtitle" : @"Action", @"key" : [@"action:" stringByAppendingString:a[1]],
+                        @"item" : mi }];
+    }
+  }
   if (!q.length) {
-    // Empty field: most visited sites.
+    // Then the most visited sites.
     NSCountedSet* hosts = [NSCountedSet set];
     NSMutableDictionary* lastURL = [NSMutableDictionary dictionary];
     for (ArchivedTab* v in _history.visits) {
@@ -9766,7 +9862,8 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
       return ca == cb ? [a compare:b] : (ca > cb ? NSOrderedAscending : NSOrderedDescending);
     }];
     for (NSString* h in top) {
-      if (out.count >= 6) break;
+      if (out.count >= kMaxSuggestions || (urlOnly && out.count >= 6)) break;
+      if ([seenURLs containsObject:lastURL[h]]) continue;
       [out addObject:@{ @"kind" : @"site", @"title" : h, @"subtitle" : @"", @"key" : [@"site:" stringByAppendingString:h],
                         @"url" : lastURL[h] }];
     }
@@ -9904,7 +10001,44 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     gCommandPillColor = nil;
   }
 }
+// The Site Search capsule sits at the start of the input ("Search Wikipedia"); the field moves right of it.
+- (void)setSiteSearch:(NSDictionary*)site {
+  _siteSearch = site;
+  if (!_siteCapsule) {
+    _siteCapsule = [NSTextField labelWithString:@""];
+    _siteCapsule.font = [NSFont systemFontOfSize:14 weight:NSFontWeightSemibold];
+    _siteCapsule.alignment = NSTextAlignmentCenter;
+    _siteCapsule.wantsLayer = YES;
+    _siteCapsule.layer.cornerRadius = 7;
+    _siteCapsule.identifier = @"siteCapsule";
+    [_commandField.superview addSubview:_siteCapsule];
+  }
+  if (site) {
+    _siteCapsule.stringValue = [@"Search " stringByAppendingString:site[@"name"]];
+    NSColor* pill = gCommandPillColor ?: [NSColor colorWithSRGBRed:0.161 green:0.18 blue:0.757 alpha:1];
+    _siteCapsule.textColor = NSColor.whiteColor;
+    _siteCapsule.layer.backgroundColor = pill.CGColor;
+    CGFloat w = ceil(_siteCapsule.attributedStringValue.size.width) + 18;
+    _siteCapsule.frame = NSMakeRect(48, 0, w, 24);
+    _commandField.stringValue = @"";
+  }
+  _siteCapsule.hidden = !site;
+  [self refreshSuggestions];
+}
+- (NSString*)siteSearchState {  // tests (V31)
+  return _siteSearch ? [NSString stringWithFormat:@"capsule=%@ fieldAfter=%d", _siteCapsule.stringValue,
+                                                  NSMinX(_commandField.frame) >= NSMaxX(_siteCapsule.frame)]
+                     : @"none";
+}
+- (BOOL)commandBarHandleSelectorForTest:(SEL)sel {
+  NSText* editor = [self.window fieldEditor:YES forObject:_commandField];
+  return [self control:_commandField textView:(NSTextView*)editor doCommandBySelector:sel];
+}
 - (void)hideCommandBar {
+  if (_siteSearch) {
+    _siteSearch = nil;
+    _siteCapsule.hidden = YES;
+  }
   _commandScrim.hidden = YES;
   [self.window removeChildWindow:_commandBar];
   [_commandBar orderOut:nil];
@@ -9924,6 +10058,29 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     }
     return NO;
   }
+  if (command == @selector(insertTab:)) {
+    // Arc: a site's name then Tab starts Site Search (a capsule in the bar); otherwise Tab completes the selection.
+    NSDictionary* site = _siteSearch ? nil : SiteSearchFor(_commandField.stringValue);
+    if (site) {
+      [self setSiteSearch:site];
+      return YES;
+    }
+    NSInteger r = _suggestionTable.selectedRow;
+    if (r >= 0 && r < (NSInteger)_suggestionList.items.count) {
+      NSDictionary* s = _suggestionList.items[r];
+      NSString* fill = s[@"url"] ?: ([s[@"kind"] isEqual:@"tab"] ? ((ArcItem*)s[@"item"]).url : s[@"text"] ?: s[@"title"]);
+      if (fill.length) {
+        _commandField.stringValue = fill;
+        textView.selectedRange = NSMakeRange(fill.length, 0);
+        [self refreshSuggestions];
+      }
+    }
+    return YES;
+  }
+  if (command == @selector(deleteBackward:) && _siteSearch && !_commandField.stringValue.length) {
+    [self setSiteSearch:nil];  // Backspace on an empty field drops the capsule
+    return YES;
+  }
   if (command == @selector(moveDown:) || command == @selector(moveUp:)) {
     NSInteger n = (NSInteger)_suggestionList.items.count;
     if (!n) return YES;
@@ -9932,6 +10089,33 @@ static double MatchScore(NSString* q, NSString* title, NSString* url) {
     [_suggestionTable selectRowIndexes:[NSIndexSet indexSetWithIndex:r] byExtendingSelection:NO];
     [_suggestionTable scrollRowToVisible:r];
     return YES;
+  }
+  if (command == @selector(insertNewline:) && _siteSearch) {
+    NSString* q = [_commandField.stringValue stringByTrimmingCharactersInSet:NSCharacterSet.whitespaceCharacterSet];
+    NSString* url = [_siteSearch[@"url"] stringByReplacingOccurrencesOfString:@"%s"
+                                                                   withString:[q stringByAddingPercentEncodingWithAllowedCharacters:
+                                                                                     NSCharacterSet.URLQueryAllowedCharacterSet] ?: @""];
+    BOOL newTab = _commandOpensNewTab;
+    [self hideCommandBar];
+    if (q.length) {
+      if (newTab) [self openInNewTab:url];
+      else [self navigateCurrentTab:url];
+    }
+    return YES;
+  }
+  // Arc: Shift+Return opens the choice in a Little Window, Cmd+Return opens it in a background tab.
+  NSEventModifierFlags mods = NSApp.currentEvent.modifierFlags;
+  if (command == @selector(insertNewline:) && (mods & (NSEventModifierFlagShift | NSEventModifierFlagCommand)) &&
+      !_commandOpensSplit && !_commandOpensIncognito) {
+    NSInteger r = _suggestionTable.selectedRow;
+    NSDictionary* s = r >= 0 && r < (NSInteger)_suggestionList.items.count ? _suggestionList.items[r] : nil;
+    NSString* target = [s[@"kind"] isEqual:@"tab"] ? ((ArcItem*)s[@"item"]).url : (s[@"url"] ?: s[@"text"] ?: _commandField.stringValue);
+    if (![s[@"kind"] isEqual:@"action"] && ![s[@"kind"] isEqual:@"space"] && target.length) {
+      [self hideCommandBar];
+      if (mods & NSEventModifierFlagShift) [self openLittleWindow:target];
+      else [self openInNewTab:target background:YES];
+      return YES;
+    }
   }
   if (command == @selector(insertNewline:) && _suggestionTable.selectedRow >= 0 &&
       _suggestionTable.selectedRow < (NSInteger)_suggestionList.items.count &&
