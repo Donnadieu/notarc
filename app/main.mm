@@ -821,6 +821,8 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         [self.window closeAllBrowsers];
       };
       if (self.selfTestReload) { finish(); return; }
+      // The page fills its card (white bar/border fix), then multiple windows; both resize or move the window.
+      [self runPageFitSelfTest:^{
       // Multiple windows (#39): runs last so no other check shares the screen with a second window.
       MainWindowController* w = self.window;
       // The crash-restore test expects the marker tab on screen when the run saves. Checks that end after it opened
@@ -875,6 +877,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           });
         });
       });
+      }];  // runPageFitSelfTest
      });
     });
   }
@@ -1341,7 +1344,106 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
   SettingSetObject(@"arcImportNotNow", nil);
 }
 
+// The page fills its card exactly (Omar, Nov 11: a white bar above the page and a white border around Google's sign-in
+// page, after resizing the window). A local page as wide as its viewport reports its size; after every window resize
+// and sidebar toggle the page, its Chrome-style page window (if any) and the white backing under the card must all
+// match the card, nothing may be wider than the viewport, and a finished load (here a single-page app that only
+// pushState()s) leaves no loading glow. Puts the window and the sidebar back when done.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-retain-cycles"  // broken by next = nil when done
+- (void)runPageFitSelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSWindow* win = w.window;
+  NSRect startFrame = win.frame;
+  BOOL startHidden = w.sidebarHidden;
+  static NSString* const kURL = @"https://pagefit.notarc.test/";
+  BrowserClient::SetTestResponse(kURL.UTF8String,
+      "<!doctype html><meta name=viewport content='width=device-width'><title>pagefit</title>"
+      "<style>html,body{margin:0;background:#123}#bar{width:100%;height:40px;background:#0a0}</style><div id=bar></div>"
+      "<script>function r(){document.title='fit:'+innerWidth+'x'+innerHeight+':'+document.documentElement.scrollWidth+':'+"
+      "document.documentElement.clientWidth}r();onresize=r;history.pushState({},'', '/app');</script>");
+  [w openInNewTab:kURL];
+  ArcItem* t = w.shownItem;
+  // Each step: what to do, then what the card and the page say. Sizes: Omar's case (wider and 10 pt shorter, so a
+  // stale backing sticks out at the top), a smaller window, the sidebar hidden and back, and the start size again.
+  NSArray<NSArray*>* steps = @[
+    @[ @"start", [NSValue valueWithRect:NSZeroRect] ],
+    @[ @"wider-shorter", [NSValue valueWithRect:NSMakeRect(NSMinX(startFrame), NSMinY(startFrame) + 10, NSWidth(startFrame) + 160, NSHeight(startFrame) - 10)] ],
+    @[ @"small", [NSValue valueWithRect:NSMakeRect(NSMinX(startFrame), NSMinY(startFrame), 1000, 700)] ],
+    @[ @"switch-tabs", @"switch" ],
+    @[ @"background-pages", @"background" ],  // pages made for tabs that aren't shown (as at launch) stay hidden
+    @[ @"sidebar-hidden", @"toggle" ],
+    @[ @"sidebar-shown", @"toggle" ],
+    @[ @"back", [NSValue valueWithRect:startFrame] ],
+  ];
+  __block NSUInteger stepIndex = 0;
+  __block BOOL edgeOK = YES, pageOK = YES, windowOK = YES, sizeOK = YES, noOverflow = YES, glowOK = YES, onlyShown = YES;
+  __block NSMutableArray<NSString*>* debug = [NSMutableArray array];
+  __block void (^next)(void);
+  void (^finish)(void) = ^{
+    if (w.sidebarHidden != startHidden) [w toggleSidebar:nil];
+    [win setFrame:startFrame display:YES];
+    BOOL loaded = t && !t.loading;
+    if (t && w.shownItem == t) [w closeCurrentTab];
+    BrowserClient::SetTestResponse(kURL.UTF8String, "");
+    std::printf("SELFTEST-PAGEFIT loaded=%d steps=%lu edge=%d page=%d pageWindow=%d viewportMatchesCard=%d nothingClipped=%d "
+                "noGlowAfterLoad=%d onlyShownPageWindow=%d\n", loaded, (unsigned long)stepIndex, edgeOK, pageOK, windowOK, sizeOK,
+                noOverflow, glowOK, onlyShown);
+    for (NSString* d in debug) std::printf("SELFTEST-PAGEFIT-DEBUG %s\n", d.UTF8String);
+    std::fflush(stdout);
+    dispatch_async(dispatch_get_main_queue(), ^{
+      next = nil;  // the block refers to itself; let it go on the next turn, not while it runs
+      if (done) done();
+    });
+  };
+  next = ^{
+    if (stepIndex >= steps.count) { finish(); return; }
+    NSArray* step = steps[stepIndex++];
+    if ([step[1] isEqual:@"toggle"]) [w toggleSidebar:nil];
+    else if ([step[1] isEqual:@"background"]) [w openTabsForSelfTest:3];
+    else if ([step[1] isEqual:@"switch"]) {  // away to another tab and back
+      for (ArcItem* other in w.currentSpace.allTabs)
+        if (other != t && other.browserId) { [w showItem:other]; break; }
+    }
+    else if (!NSIsEmptyRect([step[1] rectValue])) [win setFrame:[step[1] rectValue] display:YES];
+    if (w.shownItem != t) [w showItem:t];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.2 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      [w runJS:@"r()" inItem:t];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+        NSString* state = [w pageFitState];
+        NSString* title = t.liveTitle ?: @"";
+        NSRect card = w.pageCardFrame;
+        NSArray<NSString*>* p = [title hasPrefix:@"fit:"] ? [[title substringFromIndex:4] componentsSeparatedByString:@":"] : @[];
+        NSArray<NSString*>* wh = p.count == 3 ? [p[0] componentsSeparatedByString:@"x"] : @[];
+        BOOL size = wh.count == 2 && fabs(wh[0].doubleValue - NSWidth(card)) < 1 && fabs(wh[1].doubleValue - NSHeight(card)) < 1;
+        BOOL fits = p.count == 3 && p[1].integerValue <= p[2].integerValue && p[2].integerValue > 0;
+        edgeOK &= [state hasPrefix:@"edge=1"];
+        pageOK &= [state containsString:@" page=1"];
+        windowOK &= [state containsString:@" window=1"];
+        glowOK &= [state containsString:@" glow=1"] && !t.loading;
+        onlyShown &= [state containsString:@" others=1"];
+        sizeOK &= size;
+        noOverflow &= fits;
+        [debug addObject:[NSString stringWithFormat:@"%@ title=%@ %@", step[0], title, state]];
+        next();
+      });
+    });
+  };
+  WaitUntil(^{ return (BOOL)(t && [t.liveTitle hasPrefix:@"fit:"] && !t.loading); }, 20, ^{ next(); });
+}
+#pragma clang diagnostic pop
+
 - (void)runSelfTestActions {
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"pagefit"]) {  // quick local loop
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runPageFitSelfTest:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
+    });
+    return;
+  }
   [self runAlertLookSelfTest];
   [self runSpaceCardsSelfTest];
   [self runWelcomeSelfTest];

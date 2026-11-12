@@ -3,6 +3,14 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## 0.30.1
+- The page always fills its card. After resizing the window, the white backing under the card kept its old size and
+  showed as a white bar above the page (or a white border around it, as on Google's account chooser); it now follows
+  the card, and it's see-through in dark mode, so no white can show around a page.
+- A page made for a tab that isn't shown (tabs whose Space was still starting at launch, crash restore) starts hidden.
+  With Chrome-style pages on, such a page's own window stayed on top of the page you were looking at.
+- With the sidebar hidden, Chrome-style pages are square like the card instead of keeping rounded corners.
+
 ## 0.30.0
 - Clicking the address bar opens Arc's small dropdown right over it (five rows, the site's icon, 13 pt text) instead
   of the big command bar; Cmd+T still opens the big one. A click outside, Esc or switching apps closes it.
