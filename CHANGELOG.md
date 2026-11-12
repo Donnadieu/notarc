@@ -3,7 +3,7 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.30.3
 - A playing video you leave now floats like Arc's: a small window (222 pt wide, rounded corners) over the bottom-left of
   the sidebar that moves with the window and can be dragged, instead of Chromium's big window at the screen's corner.
   Under the pointer it shows Arc's controls: back to the tab, the site, minimize, close, a big play/pause and a

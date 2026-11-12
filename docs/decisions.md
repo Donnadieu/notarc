@@ -622,4 +622,11 @@ trackpad; everything else is checked by the hidden self-test.
 154. **Hidden runs keep every window 1% opaque from the moment it's ordered in.** Chromium's PiP window used to be
     faked in self-tests (the AUTOPIP check still stubs it); the new checks use the real window, so a test-only hook
     makes any window coming onto a screen nearly invisible and click-through before AppKit shows it.
+155. **Chromium's own site name is kept out of the float (V75).** Chromium 156 always draws the site's icon and name
+    at the top-left of its PiP window; Arc's float shows only the video. NotArc makes Chromium's window 34 pt taller
+    above and below, so Chromium letterboxes the video into the middle with its name in the top bar, and a rounded mask
+    lets only the video through. NotArc's own controls show the site on hover, as Arc's do.
+156. **The float stays with NotArc's window.** As a child of the browser window it sits over the sidebar and goes behind
+    other apps with it, instead of floating over every app the way Chromium's window did. Omar described it as part of
+    the window ("at the bottom left of NotArc"); if he wants it on top of other apps, only the window level changes.
 
