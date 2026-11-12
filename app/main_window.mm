@@ -4053,7 +4053,9 @@ static NSCache<NSString*, NSImage*>* MediaArtworkCache() {
 // Floating video and mini player (V75-V80).
 - (ArcItem*)floatingVideoItem { return _float.videoWindow.isVisible ? _floatItem : nil; }
 - (NSWindow*)floatingVideoWindow { return _float.videoWindow.isVisible ? _float.videoWindow : nil; }
-- (CGFloat)floatingVideoCornerRadius { return _float.videoWindow.contentView.layer.cornerRadius; }
+- (CGFloat)floatingVideoCornerRadius { return _float.cornerRadius; }
+- (NSRect)floatingVideoFrame { return _float ? _float.visibleFrame : NSZeroRect; }
+- (BOOL)floatingVideoHidesChromiumBar { return _float.hidesChromiumBar; }
 - (void)setFloatingControlsHoveredForTest:(BOOL)hovered { _float.hovered = hovered; }
 - (NSString*)floatingControlsState { return _float ? _float.stateDescription : @"none"; }
 - (void)pressFloatingControl:(NSString*)name { [_float press:name]; }

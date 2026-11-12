@@ -297,6 +297,8 @@ NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed 
 - (NSWindow*)floatingVideoWindow;                // shown float, or nil
 - (ArcItem*)floatingVideoItem;                   // its tab
 - (CGFloat)floatingVideoCornerRadius;            // tests
+- (NSRect)floatingVideoFrame;                    // where the video shows, in screen points
+- (BOOL)floatingVideoHidesChromiumBar;           // tests: Chromium's own site name isn't shown
 - (void)setFloatingControlsHoveredForTest:(BOOL)hovered;
 - (NSString*)floatingControlsState;              // tests: "hover=1 back=1 site=<host> play=1 ..."
 - (void)pressFloatingControl:(NSString*)name;    // "back", "playpause", "minimize", "close"

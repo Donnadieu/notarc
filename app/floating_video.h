@@ -3,6 +3,7 @@
 // bottom-left, and covers it with Arc's hover controls in a see-through window of its own (so the pointer reaches
 // NotArc's controls, never Chromium's): back to the tab, the site, play/pause, minimize, close and a progress bar.
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 
 extern const CGFloat kFloatingVideoWidth;   // 222 pt (Omar's Arc screenshot, 1x)
 extern const CGFloat kFloatingVideoRadius;  // 6 pt
@@ -21,6 +22,9 @@ NSWindow* FindPictureInPictureWindow(NSArray<NSWindow*>* windows, NSSet<NSWindow
 // "back", "playpause", "minimize", "close", or "seek" with the fraction as value.
 @property(nonatomic, copy) void (^onAction)(NSString* action, double value);
 - (void)placeOver:(NSWindow*)parent;  // Arc's size and spot (keeps a spot the user dragged it to)
+@property(nonatomic, readonly) NSRect visibleFrame;   // the video on screen (Chromium's window is taller)
+@property(nonatomic, readonly) CGFloat cornerRadius;  // tests
+@property(nonatomic, readonly) BOOL hidesChromiumBar;  // tests: Chromium's own site name is outside what shows
 @property(nonatomic) BOOL hovered;
 - (NSString*)stateDescription;  // tests
 - (void)press:(NSString*)name;  // tests: as if that control was clicked

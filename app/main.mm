@@ -1601,14 +1601,14 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
     WaitUntil(floating, 8, ^{
       // A. Leaving the playing tab floats the video: Arc's size, corners and place over the sidebar's bottom-left.
       NSWindow* fw = w.floatingVideoWindow;
-      NSRect f = fw.frame, m = w.window.frame;
+      NSRect f = w.floatingVideoFrame, m = w.window.frame;
       BOOL floated = playing && fw.isVisible && t.inPictureInPicture;
       BOOL size = fabs(NSWidth(f) - 222) <= 1 && fabs(NSHeight(f) - 125) <= 1;
       BOOL corner = fabs(w.floatingVideoCornerRadius - 6) < 0.01;
       BOOL anchored = fw && fw.parentWindow == w.window && fabs(NSMinX(f) - NSMinX(m) - 20) <= 1 && fabs(NSMinY(f) - NSMinY(m) - 98) <= 1;
       BOOL miniHidden = w.mediaBarItem != t;  // (another check's paused tab may still have the bar)
-      std::printf("SELFTEST-FLOATVIDEO floated=%d size=%d corner=%d anchored=%d miniHidden=%d\n", floated, size, corner, anchored,
-                  miniHidden);
+      std::printf("SELFTEST-FLOATVIDEO floated=%d size=%d corner=%d anchored=%d miniHidden=%d noChromiumName=%d\n", floated, size,
+                  corner, anchored, miniHidden, w.floatingVideoHidesChromiumBar);
       if (!(floated && size && anchored)) std::printf("FLOAT-DEBUG frame=%s main=%s playing=%d pip=%d\n", NSStringFromRect(f).UTF8String,
                                                       NSStringFromRect(m).UTF8String, playing, t.inPictureInPicture);
       // B. Hover controls: back to the tab, the site, play/pause, minimize, close and the progress bar; the pointer
