@@ -1654,6 +1654,11 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSHashTable* _sidebarDirtyFrom;  // windows whose sidebar change other windows haven't picked up yet
   BOOL _sidebarRefreshScheduled;
   BOOL _syncingSidebar;
+  BOOL _placingWindowButtons;       // positionWindowButtons is moving them (ignore their frame notes)
+  BOOL _windowButtonsFixPending;    // a re-placement is queued for the next run-loop turn
+  NSView* _watchedTitlebar;         // the title bar container whose frame changes are watched
+  CFAbsoluteTime _windowButtonsFixWindow;
+  NSUInteger _windowButtonsFixCount;
 }
 
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID {
@@ -2078,20 +2083,57 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSButton* close = [win standardWindowButton:NSWindowCloseButton];
   NSView* container = close.superview.superview;
   if (!container) return;
+  [self watchWindowButtons:container];
+  _placingWindowButtons = YES;
   CGFloat h = [self sidebarCollapsed] && !_sidebarPeeking ? kToolbarHeight : 47;
   NSRect cf = container.frame;
   cf.size.height = h;
   cf.origin.y = win.frame.size.height - h;
-  container.frame = cf;
+  if (!NSEqualRects(cf, container.frame)) container.frame = cf;
   CGFloat xs[3] = {13, 36, 59};
   NSWindowButton kinds[3] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
   for (int i = 0; i < 3; ++i) {
     NSButton* b = [win standardWindowButton:kinds[i]];
     NSRect f = b.frame;
-    f.origin.x = xs[i] + (_sidebar.hidden ? 0 : 0);
+    f.origin.x = xs[i];
     f.origin.y = round((h - f.size.height) / 2);
-    b.frame = f;
+    if (!NSEqualRects(f, b.frame)) b.frame = f;
   }
+  _placingWindowButtons = NO;
+}
+// AppKit lays the title bar out again by itself (an appearance change such as macOS turning dark at sunset, a sheet,
+// a title bar refresh), putting the buttons back at its own spots until the window next became main. Watch the
+// container and the buttons and put them back on the next run-loop turn (V73). A burst limit keeps a layout fight
+// from spinning.
+- (void)watchWindowButtons:(NSView*)container {
+  if (_watchedTitlebar == container) return;
+  NSNotificationCenter* nc = NSNotificationCenter.defaultCenter;
+  if (_watchedTitlebar) [nc removeObserver:self name:NSViewFrameDidChangeNotification object:nil];
+  _watchedTitlebar = container;
+  NSMutableArray<NSView*>* views = [NSMutableArray arrayWithObject:container];
+  for (NSWindowButton k : {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton})
+    if (NSButton* b = [self.window standardWindowButton:k]) [views addObject:b];
+  for (NSView* v in views) {
+    v.postsFrameChangedNotifications = YES;
+    [nc addObserver:self selector:@selector(windowButtonsMoved:) name:NSViewFrameDidChangeNotification object:v];
+  }
+}
+- (void)windowButtonsMoved:(NSNotification*)note {
+  if (_placingWindowButtons || _windowButtonsFixPending) return;
+  CFAbsoluteTime now = CFAbsoluteTimeGetCurrent();
+  if (now - _windowButtonsFixWindow > 1) {
+    _windowButtonsFixWindow = now;
+    _windowButtonsFixCount = 0;
+  }
+  if (++_windowButtonsFixCount > 30) return;  // more than 30 a second: AppKit keeps moving them; stop fighting
+  _windowButtonsFixPending = YES;
+  __weak MainWindowController* weakSelf = self;
+  dispatch_async(dispatch_get_main_queue(), ^{
+    MainWindowController* me = weakSelf;
+    if (!me) return;
+    me->_windowButtonsFixPending = NO;
+    [me positionWindowButtons];
+  });
 }
 - (NSRect)windowButtonFrame {  // tests: the close button, in window coordinates
   NSButton* close = [self.window standardWindowButton:NSWindowCloseButton];

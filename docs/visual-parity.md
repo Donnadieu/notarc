@@ -45,7 +45,8 @@ Two more of Omar's Arc 1.169 / NotArc 0.30 screenshots. These were misses in V7,
 
 - [x] **V73 Window buttons in colour.** Close, minimize and zoom are macOS's own buttons in their red, yellow and green,
   with the system's shading and coloured rims, in an active window and an inactive one alike, at Arc's spots (centres
-  x 20/43/66, y 24; measured within 1 pt of Omar's Arc screenshot). NotArc's turned into flat grey circles whenever its
+  x 20/43/66, y 24; measured within 1 pt of Omar's Arc screenshot), and they stay there when AppKit lays the title bar
+  out again (a light/dark switch). NotArc's turned into flat grey circles whenever its
   window lacked key focus: another app in front, or (with Chrome-style pages) a page's own window holding focus while
   you use it. Ref: shot (Omar's Arc, Nov 11), Omar's NotArc shot (grey circles next to skool.com), app (Arc places the
   system's own buttons).

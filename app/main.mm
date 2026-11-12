@@ -1396,10 +1396,24 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
   NSString* inactive = WindowButtonsLook(win, &sys2, &placed2, &inactiveLook);
   [w sidebarDimmedForTest:NO];
   BOOL notKey = !win.isKeyWindow;  // the case Omar saw: drawn while another window has key focus
-  std::printf("SELFTEST-WINDOWBUTTONS system=%d placed=%d activeLook=%d inactiveLook=%d notKey=%d\n", sys1 && sys2,
-              placed1 && placed2, activeLook, inactiveLook, notKey);
-  if (!(sys1 && sys2 && placed1 && placed2 && activeLook && inactiveLook))
-    std::printf("SELFTEST-WINDOWBUTTONS-DEBUG active=[%s] inactive=[%s]\n", active.UTF8String, inactive.UTF8String);
+  // AppKit lays the title bar out again on its own (an appearance change, as when macOS turns dark at sunset): the
+  // buttons must come back to Arc's spots without the window becoming main.
+  NSAppearance* was = win.appearance;
+  win.appearance = [NSAppearance appearanceNamed:[[win.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameDarkAqua, NSAppearanceNameAqua ]] isEqual:NSAppearanceNameDarkAqua] ? NSAppearanceNameAqua : NSAppearanceNameDarkAqua];
+  NSView* bar = [win standardWindowButton:NSWindowCloseButton].superview.superview;
+  bar.needsLayout = YES;
+  [bar layoutSubtreeIfNeeded];
+  win.appearance = was;
+  bar.needsLayout = YES;
+  [bar layoutSubtreeIfNeeded];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+  BOOL sys3, stayPlaced, look3;
+  NSString* later = WindowButtonsLook(win, &sys3, &stayPlaced, &look3);
+  std::printf("SELFTEST-WINDOWBUTTONS system=%d placed=%d activeLook=%d inactiveLook=%d notKey=%d stayPlaced=%d\n",
+              sys1 && sys2 && sys3, placed1 && placed2, activeLook, inactiveLook && look3, notKey, stayPlaced);
+  if (!(sys1 && sys2 && sys3 && placed1 && placed2 && activeLook && inactiveLook && look3 && stayPlaced))
+    std::printf("SELFTEST-WINDOWBUTTONS-DEBUG active=[%s] inactive=[%s] later=[%s]\n", active.UTF8String,
+                inactive.UTF8String, later.UTF8String);
   // The pill: no Boost brush on a plain site, nor on a site with a Boost on (idle or hovered).
   static NSString* const kPlain = @"https://plain.notarc.test/";
   static NSString* const kBoosted = @"https://boosted.notarc.test/";
@@ -1435,6 +1449,7 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
     std::fflush(stdout);
     done();
   });
+  });  // dispatch_after (title bar relayout)
 }
 
 // The page fills its card exactly (Omar, Nov 11: a white bar above the page and a white border around Google's sign-in

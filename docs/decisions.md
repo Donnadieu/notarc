@@ -584,6 +584,10 @@ trackpad; everything else is checked by the hidden self-test.
     likely does too (Arc's bundle has a dimmed window-controls colour); if Omar wants that back, only the background case
     changes. NotArc's own views still dim in an inactive window (V8, decision 113). If a future macOS drops the private
     method, the buttons fall back to the system's normal look.
+147. **The buttons are put back at Arc's spots whenever AppKit moves them (V73).** AppKit lays the title bar out again
+    by itself (an appearance change, as when macOS turns dark at sunset), which dropped the buttons to its own height
+    until the window next became main. NotArc watches the title bar's and the buttons' frames and re-places them on the
+    next run-loop turn, at most 30 times a second so a layout fight can't spin.
 146. **No Boost button in the address pill (V74; replaces decision 110's Boost exception and V69's "unless").** Arc
     1.169 never shows a Boost icon there (Omar; Arc moved Boosts into the Site Control Center in 2023 and ships its
     Boost icons only in that bundle). A Boost is seen and switched in the site control center's Boosts section, the

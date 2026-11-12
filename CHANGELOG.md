@@ -6,7 +6,8 @@ or later. From 0.5.0 on, NotArc updates itself.
 ## 0.30.2
 - The window's close, minimize and zoom buttons stay in macOS's red, yellow and green with their shading and rims,
   in every window, like Arc's. They turned into flat grey circles whenever a page had focus (with Chrome-style pages)
-  or another app was in front.
+  or another app was in front. They also no longer jump up out of line with the sidebar after macOS switches between
+  light and dark.
 - The address bar no longer shows a blue paintbrush after the domain on sites with a Boost on. As in Arc, Boosts are
   in the site controls (and the View menu, the page's right-click menu and the Library).
 
