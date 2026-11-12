@@ -2,6 +2,7 @@
 // NotArc browser process entry point.
 #import <Cocoa/Cocoa.h>
 
+#include <objc/runtime.h>
 #include <cstdio>
 #include <string>
 #include <vector>
@@ -136,6 +137,29 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
     WaitUntil(cond, timeoutSec - 0.25, then);
   });
+}
+
+// Hidden runs: any window that comes onto a screen (Chromium's own picture-in-picture window included) is 1% opaque
+// and click-through before it's ordered in, so it never flashes on Omar's screen. Windows parked far off every screen
+// (visual renders) keep the alpha they're given.
+static IMP gOrderWindowIMP, gSetAlphaIMP;
+static BOOL OnSomeScreen(NSWindow* w) { return NSMaxX(w.frame) > -10000 && NSMaxY(w.frame) > -10000; }
+static void HiddenSetAlpha(NSWindow* w, SEL sel, CGFloat a) {
+  if (a > 0.011 && OnSomeScreen(w)) a = 0.01;
+  ((void (*)(id, SEL, CGFloat))gSetAlphaIMP)(w, sel, a);
+}
+static void HiddenOrderWindow(NSWindow* w, SEL sel, NSWindowOrderingMode mode, NSInteger rel) {
+  if (mode != NSWindowOut && OnSomeScreen(w)) {
+    ((void (*)(id, SEL, CGFloat))gSetAlphaIMP)(w, @selector(setAlphaValue:), 0.01);
+    w.ignoresMouseEvents = YES;
+  }
+  ((void (*)(id, SEL, NSWindowOrderingMode, NSInteger))gOrderWindowIMP)(w, sel, mode, rel);
+}
+static void KeepTestWindowsHidden(void) {
+  if (gOrderWindowIMP) return;
+  gSetAlphaIMP = method_setImplementation(class_getInstanceMethod(NSWindow.class, @selector(setAlphaValue:)), (IMP)HiddenSetAlpha);
+  gOrderWindowIMP = method_setImplementation(class_getInstanceMethod(NSWindow.class, @selector(orderWindow:relativeTo:)),
+                                             (IMP)HiddenOrderWindow);
 }
 
 
@@ -609,6 +633,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
   self.window.restoreOpenTabs = crashedLastTime;
   [self.window saveSidebarNow];  // first launch: persist the import immediately
   if (self.selfTest) {
+    KeepTestWindowsHidden();
     [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
     self.window.window.alphaValue = 0.01;
     self.window.window.ignoresMouseEvents = YES;
@@ -821,10 +846,10 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         [self.window closeAllBrowsers];
       };
       if (self.selfTestReload) { finish(); return; }
-      // Window buttons and the pill's Boost brush, the page fills its card (white bar/border fix), then multiple
-      // windows; the last two resize or move the window.
+      // Window buttons and the pill's Boost brush, the floating video and mini player, the page fills its card
+      // (white bar/border fix), then multiple windows; the last two resize or move the window.
       [self runWindowButtonsSelfTest:^{
-      [self runPageFitSelfTest:^{
+      [self runFloatingVideoThenPageFit:^{
       // Multiple windows (#39): runs last so no other check shares the screen with a second window.
       MainWindowController* w = self.window;
       // The crash-restore test expects the marker tab on screen when the run saves. Checks that end after it opened
@@ -1541,6 +1566,167 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
 }
 #pragma clang diagnostic pop
 
+// Floating video and mini player (V73-V78), on a local page (no network) that plays a short video with
+// media-session metadata. The float is Chromium's real picture-in-picture window, kept 1% opaque like every test window.
+- (void)runFloatingVideoSelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSString* dir = [NSHomeDirectory() stringByAppendingPathComponent:@"NotArcMediaTest"];
+  NSData* html = [NSData dataWithContentsOfFile:[dir stringByAppendingPathComponent:@"media-test.html"]];
+  NSData* webm = [NSData dataWithContentsOfFile:[dir stringByAppendingPathComponent:@"media-test.webm"]];
+  NSData* icon = [NSData dataWithContentsOfFile:[dir stringByAppendingPathComponent:@"icon.png"]];
+  if (!html || !webm) {
+    std::printf("SELFTEST-FLOATVIDEO floated=0 size=0 corner=0 anchored=0 miniHidden=0 fixture=0\n");
+    done();
+    return;
+  }
+  auto serve = [](NSString* url, NSData* d) {
+    BrowserClient::SetTestResponse(url.UTF8String, d ? std::string((const char*)d.bytes, d.length) : std::string());
+  };
+  serve(@"https://media.example/watch", html);
+  serve(@"https://media.example/media-test.webm", webm);
+  serve(@"https://media.example/icon.png", icon);
+  void (^finish)(void) = ^{
+    serve(@"https://media.example/watch", nil);
+    serve(@"https://media.example/media-test.webm", nil);
+    serve(@"https://media.example/icon.png", nil);
+    done();
+  };
+  [w openInNewTab:@"https://media.example/watch"];
+  ArcItem* t = w.shownItem;
+  BOOL (^floating)(void) = ^BOOL { return w.floatingVideoWindow != nil && w.floatingVideoItem == t; };
+  WaitUntil(^{ [w pollMediaNow]; return (BOOL)(t.mediaPlaying && t.mediaTitle.length); }, 15, ^{
+    BOOL playing = t.mediaPlaying;
+    [w openInNewTab:@"https://example.com/float-other"];
+    ArcItem* other = w.shownItem;
+    WaitUntil(floating, 8, ^{
+      // A. Leaving the playing tab floats the video: Arc's size, corners and place over the sidebar's bottom-left.
+      NSWindow* fw = w.floatingVideoWindow;
+      NSRect f = fw.frame, m = w.window.frame;
+      BOOL floated = playing && fw.isVisible && t.inPictureInPicture;
+      BOOL size = fabs(NSWidth(f) - 222) <= 1 && fabs(NSHeight(f) - 125) <= 1;
+      BOOL corner = fabs(w.floatingVideoCornerRadius - 6) < 0.01;
+      BOOL anchored = fw && fw.parentWindow == w.window && fabs(NSMinX(f) - NSMinX(m) - 20) <= 1 && fabs(NSMinY(f) - NSMinY(m) - 98) <= 1;
+      BOOL miniHidden = w.mediaBarItem == nil;
+      std::printf("SELFTEST-FLOATVIDEO floated=%d size=%d corner=%d anchored=%d miniHidden=%d\n", floated, size, corner, anchored,
+                  miniHidden);
+      if (!(floated && size && anchored)) std::printf("FLOAT-DEBUG frame=%s main=%s playing=%d pip=%d\n", NSStringFromRect(f).UTF8String,
+                                                      NSStringFromRect(m).UTF8String, playing, t.inPictureInPicture);
+      // B. Hover controls: back to the tab, the site, play/pause, minimize, close and the progress bar; the pointer
+      // reaches NotArc's controls, never Chromium's own.
+      [w setFloatingControlsHoveredForTest:YES];
+      WaitUntil(^{ [w pollMediaNow]; return (BOOL)([w.floatingControlsState containsString:@"progress=1"]); }, 5, ^{
+        NSString* s = w.floatingControlsState;
+        auto has = [&](NSString* k) { return (int)[[NSString stringWithFormat:@" %@ ", s] containsString:[NSString stringWithFormat:@" %@ ", k]]; };
+        std::printf("SELFTEST-FLOATCONTROLS hover=%d back=%d site=%d play=%d minimize=%d close=%d progress=%d hit=%d\n", has(@"hover=1"),
+                    has(@"back=1"), has(@"site=media.example"), has(@"play=1"), has(@"minimize=1"), has(@"close=1"),
+                    has(@"progress=1"), has(@"hit=1"));
+        if (!has(@"hit=1") || !has(@"progress=1")) std::printf("FLOATCONTROLS-DEBUG %s\n", s.UTF8String);
+        // C. The big button pauses and plays the page's video.
+        [w pressFloatingControl:@"playpause"];
+        WaitUntil(^{ [w pollMediaNow]; return (BOOL)(!t.mediaPlaying && t.mediaPaused); }, 5, ^{
+          BOOL paused = !t.mediaPlaying && t.mediaPaused;
+          [w pressFloatingControl:@"playpause"];
+          WaitUntil(^{ [w pollMediaNow]; return t.mediaPlaying; }, 5, ^{
+            std::printf("SELFTEST-FLOATPLAY paused=%d resumed=%d\n", paused, t.mediaPlaying);
+            // D. The back arrow returns to the video's tab (the video goes back into the page); leaving floats it again.
+            [w pressFloatingControl:@"back"];
+            WaitUntil(^{ return (BOOL)(w.shownItem == t && !floating() && !t.inPictureInPicture); }, 5, ^{
+              BOOL back = w.shownItem == t && !floating();
+              [w showItem:other];
+              WaitUntil(floating, 8, ^{
+                std::printf("SELFTEST-FLOATBACK back=%d refloat=%d\n", back, floating());
+                // E. Close: the video goes away, the sound keeps playing in the mini player.
+                [w pressFloatingControl:@"close"];
+                WaitUntil(^{ [w pollMediaNow]; return (BOOL)(!floating() && !t.inPictureInPicture && w.mediaBarItem == t); }, 6, ^{
+                  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                    [w pollMediaNow];
+                    WaitUntil(^{ return t.mediaPlaying; }, 3, ^{
+                      std::printf("SELFTEST-FLOATCLOSE closed=%d stillPlaying=%d miniPlayer=%d\n", !floating() && !t.inPictureInPicture,
+                                  t.mediaPlaying, w.mediaBarItem == t);
+                      // F. The mini player shows the site's icon (not the artwork); hovering shows the title, reopen and close.
+                      [w setMediaArtworkForTest:[NSImage imageWithSystemSymbolName:@"music.note" accessibilityDescription:nil]
+                                            url:t.mediaArtworkURL];
+                      [w setMediaCardHoveredForTest:YES];
+                      NSString* mp = w.miniPlayerState;
+                      auto mhas = [&](NSString* k) { return (int)[[NSString stringWithFormat:@" %@ ", mp] containsString:[NSString stringWithFormat:@" %@ ", k]]; };
+                      std::printf("SELFTEST-MINIPLAYERHOVER favicon=%d tall=%d title=%d reopen=%d close=%d\n", mhas(@"favicon=1"),
+                                  mhas(@"h=64"), [mp containsString:@"title=LIKA - Morning coffee groove|"], mhas(@"reopen=1"),
+                                  mhas(@"close=1"));
+                      if (!mhas(@"h=64") || !mhas(@"favicon=1")) std::printf("MINIPLAYER-DEBUG %s\n", mp.UTF8String);
+                      [w setMediaCardHoveredForTest:NO];
+                      // G. Its play button plays the sound without bringing the video back; the speaker sets the volume.
+                      [w mediaBarPlay:nil];
+                      WaitUntil(^{ [w pollMediaNow]; return (BOOL)(!t.mediaPlaying && t.mediaPaused); }, 5, ^{
+                        BOOL mpaused = !t.mediaPlaying && t.mediaPaused;
+                        [w mediaBarPlay:nil];
+                        WaitUntil(^{ [w pollMediaNow]; return t.mediaPlaying; }, 5, ^{
+                          BOOL resumed = t.mediaPlaying;
+                          [w setMediaVolume:0.3 forItem:t];
+                          [w runJS:@"setTimeout(()=>{document.title='vol:'+document.querySelector('video').volume.toFixed(2)},300)" inItem:t];
+                          WaitUntil(^{ return [t.liveTitle hasPrefix:@"vol:"]; }, 4, ^{
+                            std::printf("SELFTEST-MINIPLAYERAUDIO paused=%d resumed=%d noVideo=%d volume=%d\n", mpaused, resumed,
+                                        !floating() && !t.inPictureInPicture, [t.liveTitle isEqualToString:@"vol:0.30"]);
+                            [w runJS:@"document.title='Media test page'" inItem:t];
+                            // H. Reopen brings the floating video back; minimize sends it to the mini player again.
+                            [w pressMiniPlayerControl:@"reopen"];
+                            WaitUntil(floating, 6, ^{
+                              BOOL reopened = floating();
+                              BOOL hiddenWhileFloating = w.mediaBarItem == nil;
+                              [w pressFloatingControl:@"minimize"];
+                              WaitUntil(^{ [w pollMediaNow]; return (BOOL)(!floating() && w.mediaBarItem == t); }, 6, ^{
+                                BOOL minimized = !floating() && w.mediaBarItem == t;
+                                WaitUntil(^{ [w pollMediaNow]; return t.mediaPlaying; }, 3, ^{
+                                  std::printf("SELFTEST-MINIPLAYERREOPEN reopened=%d miniHidden=%d minimized=%d playing=%d\n", reopened,
+                                              hiddenWhileFloating, minimized, t.mediaPlaying);
+                                  // I. Another Space on another profile: the sound keeps playing and the mini player stays.
+                                  ArcSpace* home = w.currentSpace, *away = nil;
+                                  for (ArcSpace* s in w.spaces)
+                                    if (![s.profileDirectory isEqualToString:home.profileDirectory]) away = s;
+                                  [w switchToSpace:away];
+                                  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                                    [w pollMediaNow];
+                                    WaitUntil(^{ return (BOOL)(t.mediaPlaying && w.mediaBarItem == t); }, 3, ^{
+                                      std::printf("SELFTEST-MINIPLAYERSPACE otherProfile=%d playing=%d miniPlayer=%d\n",
+                                                  away != nil && w.currentSpace == away, t.mediaPlaying, w.mediaBarItem == t);
+                                      // J. The mini player's X stops the sound and removes the player.
+                                      [w pressMiniPlayerControl:@"close"];
+                                      WaitUntil(^{ [w pollMediaNow]; return (BOOL)(!t.mediaPlaying && w.mediaBarItem == nil); }, 5, ^{
+                                        BOOL stopped = !t.mediaPlaying, removed = w.mediaBarItem == nil;
+                                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                                          [w pollMediaNow];
+                                          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                                            std::printf("SELFTEST-MINIPLAYERSTOP stopped=%d removed=%d staysGone=%d\n", stopped, removed,
+                                                        !t.mediaPlaying && w.mediaBarItem == nil);
+                                            std::fflush(stdout);
+                                            [w switchToSpace:home];
+                                            finish();
+                                          });
+                                        });
+                                      });
+                                    });
+                                  });
+                                });
+                              });
+                            });
+                          });
+                        });
+                      });
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+}
+
+- (void)runFloatingVideoThenPageFit:(void (^)(void))done {
+  [self runFloatingVideoSelfTest:^{ [self runPageFitSelfTest:done]; }];
+}
+
 - (void)runSelfTestActions {
   if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"buttons"]) {  // quick local loop
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
@@ -1555,6 +1741,16 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
   if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"pagefit"]) {  // quick local loop
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [self runPageFitSelfTest:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
+    });
+    return;
+  }
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"miniplayer"]) {  // quick local loop
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runFloatingVideoSelfTest:^{
         std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
         std::fflush(stdout);
         [self.window closeAllBrowsers];

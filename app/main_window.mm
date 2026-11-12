@@ -3857,8 +3857,12 @@ NSString* FavoritePreviewKind(NSString* url) {
 }
 
 // The page's artwork when it gives one (loaded once, never in hidden test runs), else the site's icon.
-- (void)updateMediaArtworkFor:(ArcItem*)item {
+static NSCache<NSString*, NSImage*>* MediaArtworkCache() {
   static NSCache<NSString*, NSImage*>* cache = [NSCache new];
+  return cache;
+}
+- (void)updateMediaArtworkFor:(ArcItem*)item {
+  NSCache<NSString*, NSImage*>* cache = MediaArtworkCache();
   NSString* art = item.mediaArtworkURL;
   NSImage* img = art.length ? [cache objectForKey:art] : nil;
   if (!img && art.length && !self.selfTestProfiles && ![_mediaArtLoading isEqual:art] &&
@@ -3891,6 +3895,36 @@ NSString* FavoritePreviewKind(NSString* url) {
 }
 
 - (ArcItem*)mediaBarItem { return _mediaBar.hidden ? nil : _mediaItem; }
+
+// Floating video and mini player (V73-V78): what today's build does (Chromium's own window, no NotArc controls).
+- (ArcItem*)floatingVideoItem {
+  for (ArcSpace* s in _spaces)
+    for (ArcItem* t in s.allTabs)
+      if (t.inPictureInPicture) return t;
+  return nil;
+}
+- (NSWindow*)floatingVideoWindow {
+  if (!self.floatingVideoItem) return nil;
+  for (NSWindow* w in NSApp.windows)
+    if (w.isVisible && [NSStringFromClass(w.class) hasPrefix:@"NativeWidgetMacFrameless"]) return w;
+  return nil;
+}
+- (CGFloat)floatingVideoCornerRadius { return self.floatingVideoWindow.contentView.layer.cornerRadius; }
+- (void)setFloatingControlsHoveredForTest:(BOOL)hovered {}
+- (NSString*)floatingControlsState { return @"none"; }
+- (void)pressFloatingControl:(NSString*)name {}
+- (NSString*)miniPlayerState {
+  NSImage* art = _mediaItem.mediaArtworkURL.length ? [MediaArtworkCache() objectForKey:_mediaItem.mediaArtworkURL] : nil;
+  return [NSString stringWithFormat:@"h=%.0f title=%@| favicon=%d reopen=0 close=0", NSHeight(_mediaBar.frame),
+                                    _mediaTitle.hidden ? @"" : _mediaTitle.stringValue,
+                                    _mediaItem && _mediaArt.image && _mediaArt.image != art];
+}
+- (void)pressMiniPlayerControl:(NSString*)name {}
+- (void)setMediaVolume:(double)volume forItem:(ArcItem*)item {}
+- (void)setMediaArtworkForTest:(NSImage*)image url:(NSString*)url {
+  if (image && url.length) [MediaArtworkCache() setObject:image forKey:url];
+  [self updateMediaBar];
+}
 
 - (void)toggleMuteItem:(ArcItem*)item {
   auto it = _browsers.find(item.browserId);
