@@ -1566,7 +1566,7 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
 }
 #pragma clang diagnostic pop
 
-// Floating video and mini player (V73-V78), on a local page (no network) that plays a short video with
+// Floating video and mini player (V75-V80), on a local page (no network) that plays a short video with
 // media-session metadata. The float is Chromium's real picture-in-picture window, kept 1% opaque like every test window.
 - (void)runFloatingVideoSelfTest:(void (^)(void))done {
   MainWindowController* w = self.window;
@@ -1606,7 +1606,7 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
       BOOL size = fabs(NSWidth(f) - 222) <= 1 && fabs(NSHeight(f) - 125) <= 1;
       BOOL corner = fabs(w.floatingVideoCornerRadius - 6) < 0.01;
       BOOL anchored = fw && fw.parentWindow == w.window && fabs(NSMinX(f) - NSMinX(m) - 20) <= 1 && fabs(NSMinY(f) - NSMinY(m) - 98) <= 1;
-      BOOL miniHidden = w.mediaBarItem == nil;
+      BOOL miniHidden = w.mediaBarItem != t;  // (another check's paused tab may still have the bar)
       std::printf("SELFTEST-FLOATVIDEO floated=%d size=%d corner=%d anchored=%d miniHidden=%d\n", floated, size, corner, anchored,
                   miniHidden);
       if (!(floated && size && anchored)) std::printf("FLOAT-DEBUG frame=%s main=%s playing=%d pip=%d\n", NSStringFromRect(f).UTF8String,
@@ -1671,7 +1671,7 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
                             [w pressMiniPlayerControl:@"reopen"];
                             WaitUntil(floating, 6, ^{
                               BOOL reopened = floating();
-                              BOOL hiddenWhileFloating = w.mediaBarItem == nil;
+                              BOOL hiddenWhileFloating = w.mediaBarItem != t;
                               [w pressFloatingControl:@"minimize"];
                               WaitUntil(^{ [w pollMediaNow]; return (BOOL)(!floating() && w.mediaBarItem == t); }, 6, ^{
                                 BOOL minimized = !floating() && w.mediaBarItem == t;
@@ -1690,13 +1690,13 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
                                                   away != nil && w.currentSpace == away, t.mediaPlaying, w.mediaBarItem == t);
                                       // J. The mini player's X stops the sound and removes the player.
                                       [w pressMiniPlayerControl:@"close"];
-                                      WaitUntil(^{ [w pollMediaNow]; return (BOOL)(!t.mediaPlaying && w.mediaBarItem == nil); }, 5, ^{
-                                        BOOL stopped = !t.mediaPlaying, removed = w.mediaBarItem == nil;
+                                      WaitUntil(^{ [w pollMediaNow]; return (BOOL)(!t.mediaPlaying && w.mediaBarItem != t); }, 5, ^{
+                                        BOOL stopped = !t.mediaPlaying, removed = w.mediaBarItem != t;
                                         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                                           [w pollMediaNow];
                                           dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
                                             std::printf("SELFTEST-MINIPLAYERSTOP stopped=%d removed=%d staysGone=%d\n", stopped, removed,
-                                                        !t.mediaPlaying && w.mediaBarItem == nil);
+                                                        !t.mediaPlaying && w.mediaBarItem != t);
                                             std::fflush(stdout);
                                             [w switchToSpace:home];
                                             finish();

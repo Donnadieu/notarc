@@ -293,7 +293,7 @@ NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed 
 - (BOOL)callControlsShown;  // tests
 - (NSString*)mediaCardDescription;  // tests (V3)
 - (void)setMediaCardHoveredForTest:(BOOL)hovered;
-// Floating video and mini player (V73-V78). The float is Chromium's picture-in-picture window for the tab.
+// Floating video and mini player (V75-V80). The float is Chromium's picture-in-picture window for the tab.
 - (NSWindow*)floatingVideoWindow;                // shown float, or nil
 - (ArcItem*)floatingVideoItem;                   // its tab
 - (CGFloat)floatingVideoCornerRadius;            // tests

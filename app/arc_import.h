@@ -54,6 +54,12 @@
 @property(nonatomic, strong) NSImage* thumbnail;
 @property(nonatomic, strong) NSDate* thumbnailTaken;  // when the last copy was started (throttles copies)
 @property(nonatomic) BOOL inPictureInPicture;  // its video is in a floating PiP window (#46, not saved)
+// Floating video and mini player (V75-V80, not saved): what the page's main media element is doing.
+@property(nonatomic) BOOL mediaHasVideo;      // a video with pictures (the mini player can reopen it as a float)
+@property(nonatomic) double mediaCurrentTime;  // seconds
+@property(nonatomic) double mediaDuration;     // seconds; 0 when unknown or live
+@property(nonatomic) double mediaVolume;       // 0 = never set (the page's own)
+@property(nonatomic) BOOL mediaDismissed;      // closed from the mini player; shows again when it plays again
 @property(nonatomic) BOOL usingCamera;
 @property(nonatomic) BOOL usingMic;
 @property(nonatomic) BOOL micMuted;
