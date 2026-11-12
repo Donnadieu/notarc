@@ -1092,6 +1092,17 @@ NSString* MediaBarTitle(NSString* pageTitle) {
 
 // Arc: "Drag a tab from your sidebar into the middle of the screen to create a Split View" (#37). The page card takes
 // sidebar drags; the side nearest the pointer is where the new pane goes, shown by a tinted half while dragging.
+// Arc's window buttons are macOS's own, always in their red, yellow and green with the shading and coloured rims
+// (Omar, Nov 12; V73). macOS draws them grey whenever their window lacks key appearance: when another app is in front,
+// and in NotArc also whenever a Chrome-style page (its own child window) has key focus, i.e. while you use the page.
+// The buttons ask the window's (private) -hasKeyAppearance; claiming it keeps the system buttons themselves in colour in
+// active and inactive windows alike. NotArc's own views don't follow it (the sidebar dims through applyWindowActive).
+@interface NotArcBrowserWindow : NSWindow
+@end
+@implementation NotArcBrowserWindow
+- (BOOL)hasKeyAppearance { return YES; }
+@end
+
 @interface PageDropView : NSView
 @property(nonatomic, weak) MainWindowController* owner;
 @property(nonatomic, strong) NSView* preview;
@@ -1607,7 +1618,6 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSString* _lastCaptureLink;
   NSView* _captureOverlay;
   NSString* _captureDirectory;
-  NSButton* _boostButton;   // Arc: Boost indicator in the address pill
   NSButton* _extensionsButton;  // puzzle piece in the address pill: More (the rest of the extensions, #66, V69)
   NSButton* _copyURLButton;     // Copy URL in the address pill's hover row
   NSButton* _siteControlsButton;  // the site control center button (V49, V72)
@@ -1647,7 +1657,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
 }
 
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID {
-  NSWindow* window = [[NSWindow alloc]
+  NSWindow* window = [[NotArcBrowserWindow alloc]
       initWithContentRect:NSMakeRect(0, 0, 1280, 820)
                 styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
                           NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable |
@@ -1665,6 +1675,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
     for (ArcSpace* s in spaces)
       if ([s.spaceID isEqualToString:focusedID]) _space = s;
     [self buildLayout];
+    [self positionWindowButtons];  // also for a window that opens behind another and isn't main yet (V73)
   }
   return self;
 }
@@ -1917,8 +1928,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _addressPillText.frame = NSMakeRect(12, 9, _addressPill.bounds.size.width - 12 - 60, 18);
   [_addressPill addSubview:_addressPillText];
   // Arc's hover row (Omar's Arc 1.169 screenshot, Nov 11): this profile's pinned extensions, the puzzle (More) for
-  // the rest, Copy URL, then the site control center. Boost shows only while the site has one on; Developer Mode
-  // sites get Developer Tools at the far left. Laid out by layoutPillButtons.
+  // the rest, Copy URL, then the site control center. No Boost button: Arc keeps Boosts in the site control center
+  // (V74). Developer Mode sites get Developer Tools at the far left. Laid out by layoutPillButtons.
   NSButton* (^pillButton)(NSString*, SEL, NSString*, NSString*) = ^NSButton*(NSString* symbol, SEL action, NSString* tip, NSString* ident) {
     NSButton* b = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:tip] target:self action:action];
     b.bordered = NO;
@@ -1930,7 +1941,6 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
     [_addressPill addSubview:b];
     return b;
   };
-  _boostButton = pillButton(@"paintbrush.pointed", @selector(editBoost:), @"Boost This Site", @"boost");
   _extensionsButton = pillButton(@"puzzlepiece.extension", @selector(showExtensionPicker:), @"Extensions", @"more");
   _copyURLButton = pillButton(@"link", @selector(copyCurrentURL:), @"Copy URL", @"copy");
   _siteControlsButton = pillButton(@"slider.horizontal.3", @selector(showSiteSettings:), @"Site Controls", @"site");
@@ -7985,27 +7995,21 @@ static ArcItem* NewSection(NSString* title) {
   [self saveBoosts];
   [self applyBoostsEverywhere];
 }
-// Like Arc: the Boost button is filled and tinted when this site has an active Boost.
+// Whether the shown site has a Boost, and whether it's on. Arc shows it only in the site control center (its Boosts
+// section with an on/off switch), never as a brush in the address pill (V74, Omar Nov 12).
 - (void)updateBoostIndicator {
   Boost* b = _shown ? [self boostForURL:[self itemCurrentURL:_shown]] : nil;
   BOOL on = b && b.enabled;
-  _boostButton.image = [NSImage imageWithSystemSymbolName:on ? @"paintbrush.pointed.fill" : @"paintbrush.pointed"
-                                 accessibilityDescription:@"Boost This Site"];
-  _boostButton.contentTintColor = on ? (b.hue >= 0 ? [NSColor colorWithHue:fmod(b.hue, 360) / 360 saturation:0.75 brightness:0.95 alpha:1]
-                                                    : NSColor.controlAccentColor)
-                                     : NSColor.secondaryLabelColor;
-  _boostButton.toolTip = on ? @"Boost on: edit Boost" : (b ? @"Boost off: edit Boost" : @"Boost This Site");
   _boostIndicator = on ? @"on" : (b ? @"off" : @"none");
   [self layoutPillButtons];
   [self updatePillButtons];
 }
-// Arc's address pill shows only the site until the pointer is over it; then copy link, site controls (and Boost,
-// extensions) appear at its right. A site with a Boost on keeps its Boost button showing.
+// Arc's address pill shows only the site until the pointer is over it; then extensions, copy link and site controls
+// appear at its right.
 - (void)updatePillButtons {
   BOOL hover = ((SidebarPillView*)_addressPill).hovered || _pillButtonsForced;
-  BOOL boostOn = [_boostIndicator isEqual:@"on"];
   for (NSView* v in _addressPill.subviews)
-    if (v.tag == 90) v.alphaValue = hover || (v == _boostButton && boostOn) ? 1 : 0;
+    if (v.tag == 90) v.alphaValue = hover ? 1 : 0;
 }
 - (NSString*)pillButtonState {  // tests: how many site buttons show, out of how many
   NSUInteger shown = 0, all = 0;
@@ -9682,7 +9686,10 @@ static const CGFloat kSwitcherTileW = 168, kSwitcherThumbH = 126, kSwitcherGap =
   if (note.object == self.window && _peek) [_peek.window close];
 }
 // Arc dims the sidebar's text and icons while its window isn't the active one; the Space colour stays.
-- (void)windowDidResignMain:(NSNotification*)note { [self applyWindowActive]; }
+- (void)windowDidResignMain:(NSNotification*)note {
+  [self positionWindowButtons];  // AppKit lays the title bar out again on main changes
+  [self applyWindowActive];
+}
 - (void)applyWindowActive {
   BOOL active = self.window.isMainWindow || (self.selfTestProfiles && !_testInactive);
   CGFloat a = active ? 1 : 0.55;
@@ -11010,11 +11017,9 @@ static const NSUInteger kPillMaxExtensions = 2;  // Arc showed two of Omar's ext
 
 - (void)layoutPillButtons {
   if (!_addressPill) return;
-  _boostButton.hidden = ![_boostIndicator isEqual:@"on"];  // Arc: no Boost button unless the site has one on
   _extensionsButton.hidden = !(ChromePagesEnabled() || _pillInstalledCount > 0);
   NSMutableArray<NSButton*>* order = [NSMutableArray array];
   if (!_devToolsButton.hidden) [order addObject:_devToolsButton];
-  if (!_boostButton.hidden) [order addObject:_boostButton];
   [order addObjectsFromArray:_pinnedExtensionButtons ?: @[]];
   if (!_extensionsButton.hidden) [order addObject:_extensionsButton];
   if (_copyURLButton) [order addObject:_copyURLButton];

@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-71 done of 71 items.
+73 done of 73 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -39,6 +39,22 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   tabs; the selected row is filled with the Space's colour, a shade deeper (Arc blue on the default theme). Ref: app
   (centred, top-left, floating and full-window placements), colours, help (Command Bar Actions), video.
 
+## Reported by Omar (Nov 12)
+
+Two more of Omar's Arc 1.169 / NotArc 0.30 screenshots. These were misses in V7, V12 and V69.
+
+- [x] **V73 Window buttons in colour.** Close, minimize and zoom are macOS's own buttons in their red, yellow and green,
+  with the system's shading and coloured rims, in an active window and an inactive one alike, at Arc's spots (centres
+  x 20/43/66, y 24; measured within 1 pt of Omar's Arc screenshot). NotArc's turned into flat grey circles whenever its
+  window lacked key focus: another app in front, or (with Chrome-style pages) a page's own window holding focus while
+  you use it. Ref: shot (Omar's Arc, Nov 11), Omar's NotArc shot (grey circles next to skool.com), app (Arc places the
+  system's own buttons).
+- [x] **V74 No Boost brush in the address pill.** Arc shows no icon after the domain, on a plain site or a site with a
+  Boost on; Boosts live in the site control center (its Boosts section with an on/off switch). NotArc showed a blue
+  paintbrush (its Boost button) after the domain whenever the site had a Boost on. Ref: Omar (Arc never shows it), help
+  (Arc's 2023 release notes: "Boosts now live within the Site Control Center"; the Boosts article edits them from the
+  Site Control Panel), app (Arc's Boost icons ship only in its site control center).
+
 ## Reported by Omar (Nov 11)
 
 Omar compared his NotArc 0.29.0 with Arc 1.169 side by side: six screenshots (three of each). These were misses in
@@ -54,8 +70,8 @@ V12, V29, V49 and V50 above.
   a row).
 - [x] **V69 Pill hover row.** Hovering the pill shows this profile's pinned extensions with their own icons (up to
   two; clicking one opens its popup under it, right-click for Options / Unpin), the puzzle (More) with every
-  extension and Pin / Unpin, then Copy URL and the site control center. No Boost button unless the site has a Boost
-  on. Ref: shot (Omar's Arc: two extension icons, link, controls), Omar's NotArc shot (Boost, link, controls, no
+  extension and Pin / Unpin, then Copy URL and the site control center. No Boost button, even on a site with a Boost
+  on (V74). Ref: shot (Omar's Arc: two extension icons, link, controls), Omar's NotArc shot (Boost, link, controls, no
   extensions).
 - [x] **V70 Arc's extensions show up.** Import Everything from Arc copied Omar's five extensions but left Chrome-style
   pages off, so none loaded and the pill showed none. Copying any now turns them on (they start at the next launch,
@@ -73,8 +89,8 @@ V12, V29, V49 and V50 above.
 
 - [x] **V6 Window frame.** No title bar; the page is a rounded card (8 pt corners) inset 10/9/9 pt on the Space colour,
   hairline edge, soft shadow only in light mode. Ref: shot, app (content inset, corner radius).
-- [x] **V7 Traffic lights.** Window buttons sit inside the sidebar at x 20/43/66, centre y 24; they dim when the window
-  is inactive and hide in focus mode. Ref: shot, app (dimmed window controls).
+- [x] **V7 Traffic lights.** Window buttons sit inside the sidebar at x 20/43/66, centre y 24, and hide in focus mode.
+  They are macOS's own buttons in their red, yellow and green in every window, active or not (V73). Ref: shot, Omar.
 - [x] **V8 Inactive window.** An inactive window keeps the Space colour but its sidebar text and icons dim. Ref: app.
 - [x] **V9 Loading.** A loading tab shows a small spinner in place of its icon (in its row, or in its pane of a split
   row), and a soft glow in the Space's colour sweeps along the top of the page card while the shown page loads. Ref:
@@ -88,8 +104,8 @@ V12, V29, V49 and V50 above.
   toolbar icon colour (white ~60%); back / forward dim to ~22% when there's nowhere to go. Ref: shot, colours.
 - [x] **V12 Address pill.** x 8-264, 36 pt tall, ~10 pt corners, white ~9% (dark); shows the domain only in 13 pt;
   the site buttons appear at its right only while the pointer is over it, in Arc's order since Nov 11 (V69): pinned
-  extensions, More, Copy URL, site controls (a site with a Boost on keeps its Boost button); hover lightens it; click
-  opens the dropdown (V67). Ref: shot, app.
+  extensions, More, Copy URL, site controls; never a Boost brush (V74); hover lightens it; click opens the dropdown
+  (V67). Ref: shot, app.
 - [x] **V13 Favorites grid.** Tiles 3 to a row (79 x 47 pt, 9 pt gaps, ~10 pt corners, white ~8%), 16 pt icon centred;
   selected tile is brighter; unread badge at the corner; tiles widen when there are fewer per row. Ref: shot.
 - [x] **V14 Space title.** Space name (and its emoji icon) at x 18 in 12-13 pt semibold, white ~45%; "..." menu on hover.
