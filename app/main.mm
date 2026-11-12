@@ -821,7 +821,9 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         [self.window closeAllBrowsers];
       };
       if (self.selfTestReload) { finish(); return; }
-      // The page fills its card (white bar/border fix), then multiple windows; both resize or move the window.
+      // Window buttons and the pill's Boost brush, the page fills its card (white bar/border fix), then multiple
+      // windows; the last two resize or move the window.
+      [self runWindowButtonsSelfTest:^{
       [self runPageFitSelfTest:^{
       // Multiple windows (#39): runs last so no other check shares the screen with a second window.
       MainWindowController* w = self.window;
@@ -878,6 +880,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         });
       });
       }];  // runPageFitSelfTest
+      }];  // runWindowButtonsSelfTest
      });
     });
   }
@@ -1344,6 +1347,96 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
   SettingSetObject(@"arcImportNotNow", nil);
 }
 
+// One window button drawn the way it is now, its middle pixel as r,g,b (0-1).
+static NSColor* WindowButtonMiddle(NSButton* b) {
+  b.needsDisplay = YES;
+  NSBitmapImageRep* rep = [b bitmapImageRepForCachingDisplayInRect:b.bounds];
+  if (!rep) return nil;
+  [b cacheDisplayInRect:b.bounds toBitmapImageRep:rep];
+  return [[rep colorAtX:rep.pixelsWide / 2 y:rep.pixelsHigh / 2] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+}
+// Visual parity V73: the window's own macOS buttons (no drawn copies), at Arc's spots, in macOS's red, yellow and green.
+// Fills *coloured and *placed; returns the measured colours and centres for the log.
+static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BOOL* coloured) {
+  *system = *placed = *coloured = YES;
+  NSMutableArray* parts = [NSMutableArray array];
+  const NSWindowButton kinds[3] = {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton};
+  const CGFloat arcX[3] = {20, 43, 66};  // centres, measured on Omar's Arc screenshot (Nov 11, 1x): 20.5 / 43.5 / 66.5
+  for (int i = 0; i < 3; ++i) {
+    NSButton* b = [win standardWindowButton:kinds[i]];
+    *system &= b && [NSStringFromClass(b.class) hasPrefix:@"_NSTheme"] && b.enabled && !b.isHiddenOrHasHiddenAncestor &&
+               b.alphaValue > 0.99;
+    NSRect f = b ? [b convertRect:b.bounds toView:nil] : NSZeroRect;
+    CGFloat cx = NSMidX(f), cy = win.frame.size.height - NSMidY(f);
+    *placed &= fabs(cx - arcX[i]) <= 1.5 && fabs(cy - 24) <= 1.5;
+    NSColor* c = b ? WindowButtonMiddle(b) : nil;
+    double r = c.redComponent, g = c.greenComponent, bl = c.blueComponent;
+    // Inactive macOS buttons are flat grey (r = g = b); active ones are clearly red, yellow and green.
+    BOOL hue = i == 0 ? (r - g > 0.25 && r - bl > 0.25) : i == 1 ? (r > 0.6 && g > 0.45 && r - bl > 0.3 && g - bl > 0.3)
+                                                                 : (g - r > 0.2 && g - bl > 0.2);
+    *coloured &= c != nil && hue;
+    [parts addObject:[NSString stringWithFormat:@"%d:%.2f,%.2f,%.2f@%.1f,%.1f", i, r, g, bl, cx, cy]];
+  }
+  return [parts componentsJoinedByString:@" "];
+}
+
+// Omar, Nov 12: (a) Arc's window buttons are macOS's own red, yellow and green with their shading and rims; NotArc's
+// came out as flat grey circles whenever its window wasn't the key one (a Chrome-style page window took key, or another
+// app was in front). They must look the same in an active and an inactive window. (b) NotArc showed a blue paintbrush
+// (the Boost button) after the domain on a site with a Boost on; Arc keeps Boosts in the site control center and shows
+// no Boost icon in the address pill, on a plain site or a Boosted one. The hidden test window is never key, so it is
+// the inactive case as macOS sees it; "active" is NotArc's own active state (sidebar not dimmed, V8).
+- (void)runWindowButtonsSelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSWindow* win = w.window;
+  BOOL sys1, placed1, activeLook, sys2, placed2, inactiveLook;
+  [w sidebarDimmedForTest:NO];
+  NSString* active = WindowButtonsLook(win, &sys1, &placed1, &activeLook);
+  [w sidebarDimmedForTest:YES];
+  NSString* inactive = WindowButtonsLook(win, &sys2, &placed2, &inactiveLook);
+  [w sidebarDimmedForTest:NO];
+  BOOL notKey = !win.isKeyWindow;  // the case Omar saw: drawn while another window has key focus
+  std::printf("SELFTEST-WINDOWBUTTONS system=%d placed=%d activeLook=%d inactiveLook=%d notKey=%d\n", sys1 && sys2,
+              placed1 && placed2, activeLook, inactiveLook, notKey);
+  if (!(sys1 && sys2 && placed1 && placed2 && activeLook && inactiveLook))
+    std::printf("SELFTEST-WINDOWBUTTONS-DEBUG active=[%s] inactive=[%s]\n", active.UTF8String, inactive.UTF8String);
+  // The pill: no Boost brush on a plain site, nor on a site with a Boost on (idle or hovered).
+  static NSString* const kPlain = @"https://plain.notarc.test/";
+  static NSString* const kBoosted = @"https://boosted.notarc.test/";
+  BrowserClient::SetTestResponse(kPlain.UTF8String, "<!doctype html><title>plain site</title><p>plain");
+  BrowserClient::SetTestResponse(kBoosted.UTF8String, "<!doctype html><title>boosted site</title><p>boosted");
+  [w deleteBoostForHost:@"plain.notarc.test"];
+  [w setBoostForHost:@"boosted.notarc.test" configure:^(Boost* b) { b.enabled = YES; b.hue = -1; }];
+  [w openInNewTab:kPlain];
+  ArcItem* plain = w.shownItem;
+  [w openInNewTab:kBoosted];
+  ArcItem* boosted = w.shownItem;
+  WaitUntil(^{ return (BOOL)([plain.liveTitle isEqual:@"plain site"] && [boosted.liveTitle isEqual:@"boosted site"]); }, 10, ^{
+    NSString* (^brush)(ArcItem*) = ^NSString*(ArcItem* t) {  // "<idle>|<hover>", each 1 when the brush shows
+      [w showItem:t];
+      NSString* idleOrder = w.pillButtonOrder;
+      NSString* idleState = w.pillButtonState;  // "<shown>/<all>"; with no hover, nothing may show
+      [w setPillHoveredForTest:YES];
+      NSString* hoverOrder = w.pillButtonOrder;
+      [w setPillHoveredForTest:NO];
+      BOOL idle = [idleOrder containsString:@"boost"] || ![idleState hasPrefix:@"0/"];
+      return [NSString stringWithFormat:@"%d|%d", idle, (int)[hoverOrder containsString:@"boost"]];
+    };
+    NSString* p = brush(plain);
+    NSString* b = brush(boosted);
+    BOOL boostOn = [w.boostIndicatorState isEqual:@"on"];  // the Boosted site really has its Boost on
+    std::printf("SELFTEST-PILLBOOST plainIdle=%d plainHover=%d boostOn=%d boostedIdle=%d boostedHover=%d\n",
+                [p hasPrefix:@"0|"], [p hasSuffix:@"|0"], boostOn, [b hasPrefix:@"0|"], [b hasSuffix:@"|0"]);
+    [w deleteBoostForHost:@"boosted.notarc.test"];
+    [w showItem:boosted];
+    [w closeTab:nil];
+    [w showItem:plain];
+    [w closeTab:nil];
+    std::fflush(stdout);
+    done();
+  });
+}
+
 // The page fills its card exactly (Omar, Nov 11: a white bar above the page and a white border around Google's sign-in
 // page, after resizing the window). A local page as wide as its viewport reports its size; after every window resize
 // and sidebar toggle the page, its Chrome-style page window (if any) and the white backing under the card must all
@@ -1434,6 +1527,16 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
 #pragma clang diagnostic pop
 
 - (void)runSelfTestActions {
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"buttons"]) {  // quick local loop
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runWindowButtonsSelfTest:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
+    });
+    return;
+  }
   if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"pagefit"]) {  // quick local loop
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [self runPageFitSelfTest:^{
@@ -2298,7 +2401,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       [w setPillHoveredForTest:YES];
       NSString* pillHover = w.pillButtonState;
       [w setPillHoveredForTest:NO];
-      BOOL pillButtons = ([pillIdle hasPrefix:@"0/"] || ([pillIdle hasPrefix:@"1/"] && [w.boostIndicatorState isEqual:@"on"])) && [pillHover componentsSeparatedByString:@"/"].firstObject.integerValue >= 2 &&
+      BOOL pillButtons = [pillIdle hasPrefix:@"0/"] && [pillHover componentsSeparatedByString:@"/"].firstObject.integerValue >= 2 &&
                          [[pillHover componentsSeparatedByString:@"/"].firstObject isEqual:[pillHover componentsSeparatedByString:@"/"].lastObject];
       std::printf("SELFTEST-SIDEBARLOOK grid=%d defaultTheme=%d noScrollTrack=%d dots=%d pillButtons=%d\n", gridOK,
                   w.currentSpace.themeColors.count || !w.sidebarIsDark || w.defaultThemeShown, w.sidebarScrollerIsOverlay,
@@ -2639,7 +2742,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       });
     });
     // Omar, Nov 11 (V69): the address pill's hover row is Arc's: this profile's pinned extensions (their own icons),
-    // the puzzle (More) for the rest, Copy URL, then the site control center; Boost only while the site has one on.
+    // the puzzle (More) for the rest, Copy URL, then the site control center; no Boost brush (V74, Nov 12).
     // Pin / Unpin round-trips, and clicking a pinned icon opens its popup under that icon.
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 53 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       MainWindowController* w = self.window;
@@ -2654,7 +2757,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       [w setPillHoveredForTest:YES];
       NSString* pinned = order();
       BOOL arcOrder = [pinned isEqual:[NSString stringWithFormat:@"ext:%@,more,copy,site", fx]];
-      BOOL noBoost = ![w.pillButtonOrder containsString:@"boost"] || [w.boostIndicatorState isEqual:@"on"];
+      BOOL noBoost = ![w.pillButtonOrder containsString:@"boost"];  // Arc: never a Boost brush in the pill (V74)
       BOOL ownIcon = [w pillExtensionHasOwnIcon:fx];
       [w setExtension:fx pinned:NO];
       NSString* unpinned = order();
