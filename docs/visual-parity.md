@@ -1,6 +1,6 @@
 # Visual parity with Arc 1.169
 
-73 done of 73 items.
+79 done of 79 items.
 
 Feature parity ([feature-parity.md](feature-parity.md)) says NotArc does everything Arc does. This list says it
 **looks and feels** like Arc while doing it: every screen, panel, menu, state and animation. One box per screen or
@@ -26,7 +26,7 @@ videos, textures), NotArc draws its own. Calls made along the way are in [decisi
   lavender-white; a long title ends in "..." (Omar's Arc 1.169 screenshot), and a close button shows on the row under
   the pointer (not on the selected row by itself). Ref: shot, colours, app, video.
 - [x] **V3 Mini player and media controls.** A 32 pt bar above the bottom bar (x 8-264, black ~60%, 8 pt corners)
-  for the tab playing sound: the site's icon or artwork, then back, play/pause, forward and the speaker spread evenly,
+  for the tab playing sound: the site's icon (never the artwork, V78), then back, play/pause, forward and the speaker spread evenly,
   no text (what's playing is the icon's tooltip, without any running "(2:52)" clock). Back and forward use the
   page's own previous / next track, else skip 10 s. Ref: shot (measured to the pixel), help (Mini Player).
 - [x] **V4 Archive in the sidebar.** The archive button opens Archive inside the sidebar (Library), not a window: a
@@ -55,6 +55,39 @@ Two more of Omar's Arc 1.169 / NotArc 0.30 screenshots. These were misses in V7,
   paintbrush (its Boost button) after the domain whenever the site had a Boost on. Ref: Omar (Arc never shows it), help
   (Arc's 2023 release notes: "Boosts now live within the Site Control Center"; the Boosts article edits them from the
   Site Control Panel), app (Arc's Boost icons ship only in its site control center).
+
+## Reported by Omar (Nov 12): floating video and mini player
+
+Omar's five Arc 1.169 screenshots of a YouTube video (the float over the sidebar, its hover controls, the slim mini
+player and its hover row) and his notes. Before this, NotArc left Chromium's own picture-in-picture window as it was
+(373x210 at the screen's bottom-right corner, Chromium's controls), its X paused the video, and the mini player showed
+the track's artwork and only the current Space's tabs. This replaces the "Arc's own picture-in-picture windows" line
+that was under Out of scope.
+
+- [x] **V75 Floating video.** Leaving a tab whose video is playing floats it in a small window over the sidebar's
+  bottom-left: 222 pt wide at the video's shape (125 pt for 16:9), 6 pt corners, a dark hairline, 20 pt from the
+  window's left edge and 98 pt above its bottom (20 pt above the mini player's spot); it moves with the window and can
+  be dragged. The mini player stays hidden while the video floats. Ref: shot (measured at 1x), app (Arc's PiP window,
+  LastVideoPIPPosition).
+- [x] **V76 Float hover controls.** Under the pointer the video dims and shows a back-to-tab arrow top-left, the site
+  (www.youtube.com) in the middle of the top, minimize and close top-right on 28 pt rounded tiles, a big pause/play in
+  the middle, and a white progress bar 10 pt above the bottom (click or drag to seek). The back arrow shows the
+  video's tab (in its own Space) and puts the video back in the page. Ref: shot, app (tooltips "returns to the original
+  tab", "minimizes the pip window", "closes the pip window").
+- [x] **V77 Close and minimize keep the sound.** Both take the video away and the sound keeps playing; the mini player
+  takes over. Chromium's own close paused the video. Ref: shot, Omar's notes, app (userRequestedMinimize,
+  userRequestedClose).
+- [x] **V78 Mini player.** The slim 32 pt bar above the Space dots shows the site's icon (YouTube's, not the video's
+  artwork), then previous, play/pause, next and the speaker; they drive the page's media session (previous / next
+  track, else 10 s skips). The speaker is Arc's Adjust Tab Volume: a small slider for that tab's sound. Play plays
+  the sound without bringing the video back. Ref: shot, app (Adjust Tab Volume, speaker.wave.1/3).
+- [x] **V79 Mini player hover row.** Under the pointer the card grows to 64 pt: what's playing (the media session's
+  title, else the page title) ending in "...", then Open Picture in Picture (videos only) and Close Mini Player.
+  Open Picture in Picture floats the video again; the X stops the sound and removes the player until that tab plays
+  again. Ref: shot, app (Close Mini Player, Open Picture in Picture, Back to Tab tooltips).
+- [x] **V80 Playing across Spaces and profiles.** Switching to another Space (also one on another profile, such as
+  Andela) keeps the sound playing and the mini player in the sidebar; its icon still goes back to the tab, switching
+  Space. Ref: Omar's notes.
 
 ## Reported by Omar (Nov 11)
 
@@ -261,5 +294,5 @@ Not built on purpose; not counted.
 - Arc Max banners and Ask Arc's cloud chat screens: NotArc's AI runs on the Mac and has its own simpler screens.
 - Sharing screens (share links for Spaces, folders, Easels): there is no server to host links.
 - Arc's mobile sidebar icons and Windows-only screens: NotArc is a Mac app.
-- Arc's own picture-in-picture windows (its thin PiP top bar, the call window): under CEF, Chromium draws the video
-  and document picture-in-picture windows itself, so NotArc can't restyle them; PiP and auto-PiP work as Chromium's.
+- Arc's call window (document picture-in-picture for Meet): Chromium draws document PiP windows itself. The video
+  float is Arc's since V75.

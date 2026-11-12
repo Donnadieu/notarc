@@ -1,0 +1,21 @@
+<!doctype html>
+<!-- Self-test page for the floating video and the mini player (V75-V80). Copied into the throwaway home by
+     make-test-home.py; never loads anything from the network. -->
+<html><head><meta charset="utf-8"><title>Media test page</title><link rel="icon" href="icon.png"></head>
+<body style="margin:0;background:#111">
+<video id="v" src="media-test.webm" loop playsinline style="width:640px;height:360px"></video>
+<script>
+const v = document.getElementById('v');
+v.volume = 0.01;  // the run is silent enough; the check needs volume > 0
+window.__mediaLog = [];
+if (navigator.mediaSession) {
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: 'LIKA - Morning coffee groove', artist: 'Test Artist',
+    artwork: [{ src: 'https://artwork.invalid/cover.png', sizes: '512x512', type: 'image/png' }]
+  });
+  navigator.mediaSession.setActionHandler('previoustrack', () => window.__mediaLog.push('prev'));
+  navigator.mediaSession.setActionHandler('nexttrack', () => window.__mediaLog.push('next'));
+}
+v.addEventListener('playing', () => { document.title = 'Media test page'; });
+v.play().then(() => window.__mediaLog.push('play'), e => { document.title = 'play:' + e.name; });
+</script></body></html>

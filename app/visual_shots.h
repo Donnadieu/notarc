@@ -32,6 +32,10 @@
 //   cmdbar <text>                open the new-tab command bar and type <text>
 //   cmdbar-current               open the command bar for the current tab (Cmd+L)
 //   close-cmdbar
+//   float-hover [0|1]            the floating video's hover controls (V76)
+//   float-press <name>           press one: back, playpause, minimize, close
+//   mini-hover [0|1]             the mini player's hover row (V79)
+//   mini-press <name>            press one: reopen, close
 //   kv <key path>                print a value from the window controller (layout checks)
 //   wait <seconds>
 //   shot <name>                  the whole window, child panels composited on top

@@ -3,6 +3,16 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## 0.30.3
+- A playing video you leave now floats like Arc's: a small window (222 pt wide, rounded corners) over the bottom-left of
+  the sidebar that moves with the window and can be dragged, instead of Chromium's big window at the screen's corner.
+  Under the pointer it shows Arc's controls: back to the tab, the site, minimize, close, a big play/pause and a
+  progress bar you can click to seek.
+- Closing or minimizing the floating video keeps the sound playing; the mini player takes over. The mini player shows
+  the site's icon (not the video's artwork), and under the pointer it shows what's playing, a button that floats the
+  video again and an X that stops the sound. Its speaker sets the tab's volume.
+- The mini player and the sound stay when you switch to another Space or profile.
+
 ## 0.30.2
 - The window's close, minimize and zoom buttons stay in macOS's red, yellow and green with their shading and rims,
   in every window, like Arc's. They turned into flat grey circles whenever a page had focus (with Chrome-style pages)

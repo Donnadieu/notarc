@@ -594,3 +594,39 @@ trackpad; everything else is checked by the hidden self-test.
     View menu (Boost This Site, Turn Boost On/Off), the page's right-click menu and the Library. Arc's site-controls button may change when a
     Boost is on (it ships a filled controls icon and a Boost indicator state), but how isn't known, so NotArc adds no
     indicator.
+## 2026-11-12: floating video and mini player (Omar's report)
+147. **The float is Chromium's own picture-in-picture window, reshaped (V75; replaces decision 124).** CEF can't draw
+    a video anywhere but in a page or Chromium's PiP window, so NotArc keeps that window and changes it: Arc's size
+    (222 pt wide, measured at 1x from Omar's screenshot), 6 pt corners, a child of the browser window parked 20 pt from
+    its left edge and 98 pt above its bottom, so it moves with the window. Arc's float in the screenshot sat about 10 pt
+    in from the sidebar's right edge with a narrower sidebar; NotArc anchors it from the left, as Omar described it.
+148. **NotArc's controls sit in a see-through window of their own over the video (V76).** Chromium's controls show
+    whenever its window gets the pointer; a window on top takes the pointer instead, so only NotArc's controls (Arc's
+    back arrow, site, minimize, close, play/pause and progress bar) appear. Dragging the video moves it, as in Arc; its
+    size is fixed (Arc's resize handle isn't in the screenshots). Arc's minimize icon was hidden under the site name in
+    the screenshot; NotArc uses the "shrink" arrows.
+149. **Minimize and close do the same thing (V77).** Omar: closing the float keeps the sound playing in the mini
+    player, and minimize sends it to the mini player. Arc's bundle has both (userRequestedMinimize, userRequestedClose)
+    but no other difference was visible, so both leave the video in the page, playing.
+150. **The mini player shows the site's icon, never the artwork (V78; replaces the artwork part of decision 105).**
+    Omar's screenshots show YouTube's icon while a video with a thumbnail plays. NotArc no longer downloads artwork.
+151. **The speaker opens a volume slider instead of muting (V78).** Arc 1.169's tooltip for it is "Adjust Tab Volume".
+    Mute stays in the tab's right-click menu, the tab row's speaker and Cmd+Shift+M. The slider goes down to 5%: at 0
+    the page counts as silent and the player would go.
+152. **The mini player covers every Space of the window (V80).** Arc kept playing (and showing the player) when Omar
+    switched to his Andela Space on another profile. Pages in other Spaces were never closed, only the player was
+    limited to the current Space. The player keeps the tab it shows while it's paused, unless another tab starts
+    playing.
+153. **The mini player's X pauses the page and hides the player until that tab plays again (V79).** Arc's "Close Mini
+    Player". It doesn't close the tab.
+154. **Hidden runs keep every window 1% opaque from the moment it's ordered in.** Chromium's PiP window used to be
+    faked in self-tests (the AUTOPIP check still stubs it); the new checks use the real window, so a test-only hook
+    makes any window coming onto a screen nearly invisible and click-through before AppKit shows it.
+155. **Chromium's own site name is kept out of the float (V75).** Chromium 156 always draws the site's icon and name
+    at the top-left of its PiP window; Arc's float shows only the video. NotArc makes Chromium's window 34 pt taller
+    above and below, so Chromium letterboxes the video into the middle with its name in the top bar, and a rounded mask
+    lets only the video through. NotArc's own controls show the site on hover, as Arc's do.
+156. **The float stays with NotArc's window.** As a child of the browser window it sits over the sidebar and goes behind
+    other apps with it, instead of floating over every app the way Chromium's window did. Omar described it as part of
+    the window ("at the bottom left of NotArc"); if he wants it on top of other apps, only the window level changes.
+

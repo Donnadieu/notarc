@@ -293,6 +293,20 @@ NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed 
 - (BOOL)callControlsShown;  // tests
 - (NSString*)mediaCardDescription;  // tests (V3)
 - (void)setMediaCardHoveredForTest:(BOOL)hovered;
+// Floating video and mini player (V75-V80). The float is Chromium's picture-in-picture window for the tab.
+- (NSWindow*)floatingVideoWindow;                // shown float, or nil
+- (ArcItem*)floatingVideoItem;                   // its tab
+- (CGFloat)floatingVideoCornerRadius;            // tests
+- (NSRect)floatingVideoFrame;                    // where the video shows, in screen points
+- (BOOL)floatingVideoHidesChromiumBar;           // tests: Chromium's own site name isn't shown
+- (void)setFloatingControlsHoveredForTest:(BOOL)hovered;
+- (NSString*)floatingControlsState;              // tests: "hover=1 back=1 site=<host> play=1 ..."
+- (void)pressFloatingControl:(NSString*)name;    // "back", "playpause", "minimize", "close"
+- (NSString*)miniPlayerState;                    // tests: "h=64 title=<title>| favicon=1 reopen=1 close=1"
+- (void)pressMiniPlayerControl:(NSString*)name;  // "reopen", "close"
+- (void)setMediaVolume:(double)volume forItem:(ArcItem*)item;
+- (void)setMediaArtworkForTest:(NSImage*)image url:(NSString*)url;
+- (IBAction)mediaBarPlay:(id)sender;
 - (IBAction)mediaBarNext:(id)sender;
 @property(nonatomic, copy) NSDictionary<NSString*, NSArray<NSString*>*>* searchSuggestionStub;
 - (void)commandSuggestionsAfterFetch:(NSString*)text done:(void (^)(NSArray<NSDictionary*>* items))done;  // tests: query -> suggestions

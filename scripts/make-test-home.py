@@ -9,7 +9,7 @@ reads or writes your real NotArc data, Downloads or Arc folder. The Arc files fo
 three Spaces on two profiles, Favorites, Pinned tabs with a nested folder, Today tabs, an archive and a window.
 Everything in them is invented.
 """
-import json, os, sys, uuid
+import json, os, shutil, sys, uuid
 
 REF = 978307200  # 2001-01-01 UTC, Arc's NSDate reference
 
@@ -112,6 +112,12 @@ def main(home):
                                                            "timeLastActiveAt": nsdate(now - k * 7200 - 43200)}}}}]
     with open(os.path.join(arc, "StorableArchiveItems.json"), "w") as fh:
         json.dump({"version": 1, "items": archive}, fh, indent=1)
+    # A local page that plays a short video with media-session metadata (floating video and mini player checks).
+    media = os.path.join(home, "NotArcMediaTest")
+    os.makedirs(media, exist_ok=True)
+    testdata = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata")
+    for name in ("media-test.html", "media-test.webm", "icon.png"):
+        shutil.copyfile(os.path.join(testdata, name), os.path.join(media, name))
     print(arc)
 
 

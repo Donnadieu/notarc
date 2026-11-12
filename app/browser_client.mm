@@ -91,17 +91,24 @@ void BrowserClient::SetTestResponse(const std::string& url_prefix, const std::st
 
 CefRefPtr<CefResourceHandler> BrowserClient::GetResourceHandler(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
                                                                 CefRefPtr<CefRequest> request) {
-  std::string body;
+  std::string body, type = "text/html";
   {
     std::lock_guard<std::mutex> lock(g_test_responses_lock);
     if (!g_test_responses || g_test_responses->empty()) return nullptr;
     std::string url = request->GetURL().ToString();
     for (auto& [prefix, html] : *g_test_responses)
-      if (url.rfind(prefix, 0) == 0) body = html;
+      if (url.rfind(prefix, 0) == 0) {
+        body = html;
+        auto ends = [&](const char* ext) {
+          size_t n = strlen(ext);
+          return prefix.size() >= n && prefix.compare(prefix.size() - n, n, ext) == 0;
+        };
+        type = ends(".webm") ? "video/webm" : ends(".png") ? "image/png" : "text/html";  // media checks (V75-V80)
+      }
   }
   if (body.empty()) return nullptr;
   CefRefPtr<CefStreamReader> stream = CefStreamReader::CreateForData(body.data(), body.size());  // copies
-  return new CefStreamResourceHandler("text/html", stream);
+  return new CefStreamResourceHandler(type, stream);
 }
 
 bool BrowserClient::DoClose(CefRefPtr<CefBrowser> browser) {

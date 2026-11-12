@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(NotArc VERSION 0.30.2 LANGUAGES C CXX OBJC OBJCXX)
+project(NotArc VERSION 0.30.3 LANGUAGES C CXX OBJC OBJCXX)
 set(VERSION_SHORT ${PROJECT_VERSION})
 
 # CEF binary distribution. Upgrading Chromium = point this at a newer CEF build.
@@ -111,6 +111,8 @@ set(APP_SRCS
   app/arc_history.mm
   app/favicons.h
   app/favicons.mm
+  app/floating_video.h
+  app/floating_video.mm
   app/app_icons.h
   app/app_icons.mm
   app/main_window.h

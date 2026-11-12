@@ -402,6 +402,14 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
                     w.alphaValue, NSStringFromRect(w.frame).UTF8String, w.parentWindow != nil);
     } else if ([cmd isEqual:@"close-cmdbar"]) {
       [c hideCommandBar];
+    } else if ([cmd isEqual:@"float-hover"]) {  // V76: the floating video's hover controls
+      [c setFloatingControlsHoveredForTest:arg.boolValue];
+    } else if ([cmd isEqual:@"float-press"]) {  // back, playpause, minimize, close
+      [c pressFloatingControl:arg];
+    } else if ([cmd isEqual:@"mini-hover"]) {  // V79: the mini player's hover row
+      [c setMediaCardHoveredForTest:arg.boolValue];
+    } else if ([cmd isEqual:@"mini-press"]) {  // reopen, close
+      [c pressMiniPlayerControl:arg];
     } else if ([cmd isEqual:@"shot"]) {
       ShootWindow(c, [self.outDir stringByAppendingPathComponent:[arg stringByAppendingString:@".png"]]);
     } else if ([cmd isEqual:@"sidebar"]) {

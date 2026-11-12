@@ -2,6 +2,7 @@
 #import "app/main_window.h"
 #import "app/arc_alert.h"
 #import "app/theme_picker.h"
+#import "app/floating_video.h"
 #import "app/welcome.h"
 #import "app/autofill.h"
 #import "app/password_store.h"
@@ -1556,8 +1557,15 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSButton* _mediaNext;
   NSImageView* _mediaArt;
   NSTextField* _mediaSubtitle;
-  NSString* _mediaArtLoading;
   ArcItem* _mediaItem;
+  NSTextField* _mediaHoverTitle;  // V79: what's playing, over the controls while the pointer is on the card
+  NSButton* _mediaReopen;         // V79: brings the floating video back
+  NSButton* _mediaClose;          // V79: stops the sound and removes the player
+  NSPopover* _volumePopover;      // V78: Arc's Adjust Tab Volume
+  FloatingVideo* _float;          // V75-V77: the floating video and its controls
+  ArcItem* _floatItem;
+  NSTimer* _floatPoll;
+  NSDate* _pipGuardUntil;         // the page's own PiP state is trusted again after this
   NSScrollView* _sidebarScroll;
   NSTimer* _mediaTimer;
   ArcItem* _hoverItem;
@@ -1758,7 +1766,15 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _mediaPrev = mediaButton(@"backward.end.fill", @"Previous", @selector(mediaBarPrevious:), 13);
   _mediaPlay = mediaButton(@"pause.fill", @"Pause", @selector(mediaBarPlay:), 13);
   _mediaNext = mediaButton(@"forward.end.fill", @"Next", @selector(mediaBarNext:), 13);
-  _mediaMute = mediaButton(@"speaker.wave.3.fill", @"Mute", @selector(mediaBarMute:), 13);
+  _mediaMute = mediaButton(@"speaker.wave.3.fill", @"Adjust Tab Volume", @selector(mediaBarVolume:), 13);
+  // Arc's hover row (Omar's screenshot): the title on the left, Open Picture in Picture and Close Mini Player right.
+  _mediaHoverTitle = [NSTextField labelWithString:@""];
+  _mediaHoverTitle.font = [NSFont systemFontOfSize:13 weight:NSFontWeightSemibold];
+  _mediaHoverTitle.lineBreakMode = NSLineBreakByTruncatingTail;
+  _mediaHoverTitle.cell.truncatesLastVisibleLine = YES;
+  _mediaReopen = mediaButton(@"pip.enter", @"Open Picture in Picture", @selector(mediaBarReopen:), 12);
+  _mediaClose = mediaButton(@"xmark", @"Close Mini Player", @selector(mediaBarClose:), 12);
+  _mediaHoverTitle.hidden = _mediaReopen.hidden = _mediaClose.hidden = YES;
   // Arc's call controls: in a call, the bar shows microphone and camera toggles instead of play / mute.
   _callCam = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"video.fill" accessibilityDescription:@"Camera"]
                                 target:self action:@selector(callBarCamera:)];
@@ -1769,7 +1785,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _callMic.bordered = NO;
   _callMic.frame = NSMakeRect(kSidebarWidth - 16 - 28, 5, 24, 24);
   _callCam.hidden = _callMic.hidden = YES;
-  for (NSView* v in @[ _mediaArt, _mediaTitle, _mediaSubtitle, _mediaPrev, _mediaPlay, _mediaNext, _mediaMute, _callCam, _callMic ])
+  for (NSView* v in @[ _mediaArt, _mediaTitle, _mediaSubtitle, _mediaPrev, _mediaPlay, _mediaNext, _mediaMute, _callCam, _callMic,
+                       _mediaHoverTitle, _mediaReopen, _mediaClose ])
     [_mediaBar addSubview:v];
   _mediaBar.hidden = YES;
   [sidebar addSubview:_mediaBar];
@@ -2850,8 +2867,9 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
 // Automatic picture-in-picture (#46): a video playing in the tab you leave pops out; coming back puts it back.
 // Runs with a user gesture (DevTools Runtime.evaluate) because the page itself can only open PiP from a click.
 static NSString* const kPiPEnterJS =
-    @"(()=>{if(document.pictureInPictureElement)return 'already';const v=[...document.querySelectorAll('video')]"
-    @".find(x=>!x.paused&&!x.ended&&x.readyState>1&&!x.disablePictureInPicture);if(!v)return 'none';"
+    @"(()=>{if(document.pictureInPictureElement)return 'already';const vs=[...document.querySelectorAll('video')]"
+    @".filter(x=>!x.ended&&x.readyState>1&&!x.disablePictureInPicture);"
+    @"const v=vs.find(x=>!x.paused)||vs.find(x=>x.currentTime>0&&x.videoWidth>0);if(!v)return 'none';"
     @"return v.requestPictureInPicture().then(()=>'pip',e=>'error:'+e.name);})()";
 static NSString* const kPiPExitJS =
     @"(()=>document.pictureInPictureElement?document.exitPictureInPicture().then(()=>'exited',e=>'error:'+e.name):'none')()";
@@ -2870,10 +2888,101 @@ static NSString* const kPiPExitJS =
             }];
 }
 
+// Arc's floating video (V75-V77): the PiP window Chromium opens is found, made Arc's size and anchored over the
+// sidebar's bottom-left, with NotArc's controls on top. While it floats, the mini player stays hidden.
+- (void)floatVideoOfItem:(ArcItem*)item {
+  if (!item.browserId || _floatItem == item) return;
+  // Windows on screen now; Chromium may show its earlier (hidden) PiP window again, so hidden ones don't count.
+  NSMutableSet<NSWindow*>* before = [NSMutableSet set];
+  for (NSWindow* w in NSApp.windows)
+    if (w.isVisible) [before addObject:w];
+  _pipGuardUntil = [NSDate dateWithTimeIntervalSinceNow:2];
+  __weak MainWindowController* weakSelf = self;
+  [self pictureInPicture:YES item:item done:^(NSString* result) {
+    if (item.inPictureInPicture) [weakSelf adoptVideoWindowOfItem:item before:before tries:30];
+    [weakSelf updateMediaBar];
+  }];
+}
+
+- (void)adoptVideoWindowOfItem:(ArcItem*)item before:(NSSet<NSWindow*>*)before tries:(int)tries {
+  if (!item.inPictureInPicture || _floatItem == item) return;
+  NSMutableSet<NSWindow*>* skip = [before mutableCopy] ?: [NSMutableSet set];
+  if (_float) [skip addObjectsFromArray:@[ _float.videoWindow ?: (id)NSNull.null, _float.controlsWindow ?: (id)NSNull.null ]];
+  NSWindow* pip = FindPictureInPictureWindow(NSApp.windows, skip);
+  if (!pip) {  // Chromium shows its window a moment after the page's promise settles
+    __weak MainWindowController* weakSelf = self;
+    if (tries > 0)
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 10), dispatch_get_main_queue(), ^{
+        [weakSelf adoptVideoWindowOfItem:item before:before tries:tries - 1];
+      });
+    return;
+  }
+  [self endFloatControls];
+  _float = [[FloatingVideo alloc] initWithVideoWindow:pip];
+  _floatItem = item;
+  _float.site = [NSURL URLWithString:item.url ?: @""].host ?: @"";
+  _float.playing = item.mediaPlaying || !item.mediaPaused;
+  _float.progress = item.mediaDuration > 0 ? item.mediaCurrentTime / item.mediaDuration : -1;
+  __weak MainWindowController* weakSelf = self;
+  _float.onAction = ^(NSString* action, double value) { [weakSelf floatingVideo:item action:action value:value]; };
+  [_float placeOver:self.window];
+  // While it floats, read the video's time often enough for the progress bar (this tab only).
+  _floatPoll = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer*) { [weakSelf pollFloatingVideo]; }];
+  [self updateMediaBar];
+}
+
+- (void)pollFloatingVideo {
+  if (!_floatItem) return;
+  if (!_float.videoWindow.isVisible) {  // Chromium closed its window (the page left PiP or went away)
+    _floatItem.inPictureInPicture = NO;
+    [self endFloatControls];
+    [self updateMediaBar];
+    return;
+  }
+  [self probeMediaInItem:_floatItem];
+}
+
+- (void)endFloatControls {
+  [_floatPoll invalidate];
+  _floatPoll = nil;
+  [_float close];
+  _float = nil;
+  _floatItem = nil;
+}
+
+// The video leaves the float but keeps playing in its tab (Arc's close and minimize): the mini player takes over.
+- (void)sendFloatToMiniPlayer:(ArcItem*)item {
+  _pipGuardUntil = [NSDate dateWithTimeIntervalSinceNow:2];
+  [self runJS:@"document.pictureInPictureElement&&document.exitPictureInPicture().catch(()=>{})" inItem:item];
+  item.inPictureInPicture = NO;
+  if (_floatItem == item) [self endFloatControls];
+  [self updateMediaBar];
+}
+
+- (void)floatingVideo:(ArcItem*)item action:(NSString*)action value:(double)value {
+  if ([action isEqualToString:@"back"]) {
+    ArcSpace* owner = [self spaceOwningItem:item];
+    if (owner && owner != _space) [self switchToSpace:owner];
+    if (_shown != item) [self showItem:item];  // showing the tab puts the video back in the page
+  } else if ([action isEqualToString:@"playpause"]) {
+    [self togglePlayItem:item];
+  } else if ([action isEqualToString:@"minimize"] || [action isEqualToString:@"close"]) {
+    [self sendFloatToMiniPlayer:item];
+  } else if ([action isEqualToString:@"seek"]) {
+    [self runJS:[NSString stringWithFormat:@"(()=>{const v=document.pictureInPictureElement;"
+                                           @"if(v&&isFinite(v.duration))v.currentTime=v.duration*%f;})()", value]
+         inItem:item];
+  }
+}
+
 - (void)showItem:(ArcItem*)item {
   if (!item.url.length) return;
-  if (item != _shown && _shown.mediaPlaying && SettingBool(kSettingAutoPiP)) [self pictureInPicture:YES item:_shown done:nil];
-  if (item.inPictureInPicture && item != _shown) [self pictureInPicture:NO item:item done:nil];
+  if (item != _shown && _shown.mediaPlaying && SettingBool(kSettingAutoPiP)) [self floatVideoOfItem:_shown];
+  if (item.inPictureInPicture && item != _shown) {
+    _pipGuardUntil = [NSDate dateWithTimeIntervalSinceNow:2];
+    [self pictureInPicture:NO item:item done:nil];
+    if (_floatItem == item) [self endFloatControls];
+  }
   if (item != _shown && _shown) [self popPageCard];
   _shown.lastActiveAt = [NSDate date];  // the tab we leave was active until now
   BOOL switched = item != _shown;
@@ -3460,8 +3569,12 @@ static NSString* const kMediaProbeJS =
      "var held=m.some(function(e){return e.__notarcPaused;});"
      "var s=navigator.mediaSession,md=s&&s.metadata,h=window.__notarcMSActions||{},art='';"
      "if(md&&md.artwork&&md.artwork.length)art=md.artwork[md.artwork.length-1].src||'';"
+     "var pe=document.pictureInPictureElement,pm=pe||m.find(function(e){return !e.paused;})||"
+     "m.find(function(e){return e.currentTime>0;})||m[0];"
      "var meta=JSON.stringify({t:md?md.title:'',a:md?(md.artist||md.album||''):'',art:art,"
-     "prev:!!h.previoustrack,next:!!h.nexttrack});"
+     "prev:!!h.previoustrack,next:!!h.nexttrack,pip:!!pe,"
+     "vid:m.some(function(e){return e.tagName=='VIDEO'&&e.videoWidth>0;}),"
+     "ct:pm?pm.currentTime:0,dur:pm&&isFinite(pm.duration)?pm.duration:0});"
      "console.log('__notarc_media__:'+(on?'playing':(held?'paused':'none'))+'|'+m.map(function(e){"
      "return [e.paused,e.ended,e.readyState,e.muted,e.volume,e.error&&e.error.code].join(',');}).join(';')+'|'+meta);})()";
 // Remembers which media actions the page handles (previous / next track), so the mini player can offer them.
@@ -3512,6 +3625,8 @@ static NSString* const kCallHookJS =
   f->ExecuteJavaScript(js.UTF8String, f->GetURL(), 0);
 }
 
+- (void)probeMediaInItem:(ArcItem*)item { [self runJS:kMediaProbeJS inItem:item]; }
+
 - (void)pollMediaNow {
   for (auto& kv : _browsers) {
     CefRefPtr<CefFrame> f = kv.second->GetMainFrame();
@@ -3540,7 +3655,30 @@ static NSString* const kCallHookJS =
     item.mediaArtworkURL = str(@"art");
     item.mediaCanPrevious = [meta[@"prev"] boolValue];
     item.mediaCanNext = [meta[@"next"] boolValue];
-    if (changed && item == _mediaItem) [self updateMediaBar];
+    BOOL hadVideo = item.mediaHasVideo;
+    item.mediaHasVideo = [meta[@"vid"] boolValue];
+    item.mediaCurrentTime = [meta[@"ct"] doubleValue];
+    item.mediaDuration = [meta[@"dur"] doubleValue];
+    changed |= hadVideo != item.mediaHasVideo;
+    // The page's own picture-in-picture state (it may start or end PiP itself), except just after NotArc changed it.
+    if (meta[@"pip"] && (!_pipGuardUntil || _pipGuardUntil.timeIntervalSinceNow < 0)) {
+      BOOL pip = [meta[@"pip"] boolValue];
+      if (pip != item.inPictureInPicture) {
+        item.inPictureInPicture = pip;
+        if (!pip && _floatItem == item) [self endFloatControls];
+        if (pip && !_floatItem) [self adoptVideoWindowOfItem:item before:nil tries:10];
+        changed = YES;
+      }
+    }
+    if (_floatItem == item) {
+      _float.progress = item.mediaDuration > 0 ? item.mediaCurrentTime / item.mediaDuration : -1;
+      if (playing || paused) _float.playing = playing;
+    }
+    if (changed) [self updateMediaBar];
+  }
+  if (playing && item.mediaDismissed) {  // it plays again: the mini player may show it again
+    item.mediaDismissed = NO;
+    [self updateMediaBar];
   }
   if (playing == item.mediaPlaying && paused == item.mediaPaused) return;
   item.mediaPlaying = playing;
@@ -3794,11 +3932,21 @@ NSString* FavoritePreviewKind(NSString* url) {
   ArcItem* call = [self callItem];
   _callMic.hidden = !call || !call.usingMic;
   _callCam.hidden = !call || !call.usingCamera;
+  // Any Space (and so any profile) of this window: the sound keeps playing in the background when you switch (V80).
+  // Not while it floats (the float has its own controls), and not after its X until it plays again.
   ArcItem* pick = nil;
-  if (!call)
-    for (ArcItem* t in _space.allTabs)
-      if (t != _shown && t.browserId && (t.mediaPlaying || t.mediaPaused) && (!pick || (t.mediaPlaying && !pick.mediaPlaying)))
-        pick = t;
+  auto eligible = [&](ArcItem* t) {
+    return t != _shown && t.browserId && _browsers.count(t.browserId) && (t.mediaPlaying || t.mediaPaused) &&
+           !t.inPictureInPicture && !t.mediaDismissed;
+  };
+  if (!call) {
+    for (ArcSpace* sp in _spaces)
+      for (ArcItem* t in sp.allTabs)
+        if (eligible(t) && (!pick || (t.mediaPlaying && !pick.mediaPlaying))) pick = t;
+    // The bar keeps the tab it shows (paused or not) unless another tab is playing and this one isn't.
+    if (_mediaItem && _mediaItem != pick && eligible(_mediaItem) && (_mediaItem.mediaPlaying || !pick.mediaPlaying))
+      pick = _mediaItem;
+  }
   ArcItem* item = call ?: pick;
   _mediaItem = item;
   BOOL show = item != nil;
@@ -3816,12 +3964,16 @@ NSString* FavoritePreviewKind(NSString* url) {
       _mediaPlay.image = [NSImage imageWithSystemSymbolName:item.mediaPlaying ? @"pause.fill" : @"play.fill"
                                    accessibilityDescription:item.mediaPlaying ? @"Pause" : @"Play"];
       _mediaPlay.toolTip = item.mediaPlaying ? @"Pause" : @"Play";
-      _mediaMute.image = [NSImage imageWithSystemSymbolName:item.audioMuted ? @"speaker.slash.fill" : @"speaker.wave.3.fill"
+      double vol = item.mediaVolume > 0 ? item.mediaVolume : 1;
+      _mediaMute.image = [NSImage imageWithSystemSymbolName:item.audioMuted ? @"speaker.slash.fill"
+                                                            : vol < 0.5      ? @"speaker.wave.1.fill"
+                                                                             : @"speaker.wave.3.fill"
                                    accessibilityDescription:nil];
     }
     NSString* host = [NSURL URLWithString:item.url ?: @""].host ?: @"";
     if ([host hasPrefix:@"www."]) host = [host substringFromIndex:4];
     _mediaTitle.stringValue = (!call && item.mediaTitle.length) ? item.mediaTitle : MediaBarTitle(item.displayTitle);
+    _mediaHoverTitle.stringValue = _mediaTitle.stringValue;
     _mediaSubtitle.stringValue = (!call && item.mediaArtist.length) ? item.mediaArtist : host;
     // Arc shows no text in the bar; what's playing is the icon's tooltip.
     _mediaArt.toolTip = _mediaSubtitle.stringValue.length
@@ -3842,7 +3994,24 @@ NSString* FavoritePreviewKind(NSString* url) {
   _mediaBar.layer.backgroundColor = (dark ? [NSColor colorWithWhite:0 alpha:0.60] : [NSColor colorWithWhite:1 alpha:0.60]).CGColor;
   NSColor* fg = dark ? [NSColor colorWithSRGBRed:0.667 green:0.667 blue:0.702 alpha:1] : [NSColor colorWithWhite:0 alpha:0.6];
   _mediaTitle.hidden = _mediaSubtitle.hidden = YES;
+  // V79: under the pointer the card grows up to 64 pt: the title, Open Picture in Picture (videos only) and Close
+  // Mini Player on a row of their own above the controls (Omar's Arc screenshot, 1x). A call keeps the slim bar.
+  BOOL hover = ((MediaCardView*)_mediaBar).inside && _callMic.hidden && _callCam.hidden && _mediaItem;
+  NSRect card = _mediaBar.frame;
+  card.size.height = hover ? 2 * kMediaCardHeight : kMediaCardHeight;
+  if (!NSEqualRects(card, _mediaBar.frame)) _mediaBar.frame = card;
   CGFloat W = NSWidth(_mediaBar.bounds), first = 21.5, step = (W - 22 - first) / 4;
+  _mediaHoverTitle.hidden = _mediaClose.hidden = !hover;
+  _mediaReopen.hidden = !hover || !_mediaItem.mediaHasVideo;
+  if (hover) {
+    CGFloat row = kMediaCardHeight;
+    _mediaClose.frame = NSMakeRect(round(W - 17 - 12), row + (kMediaCardHeight - 24) / 2, 24, 24);
+    _mediaReopen.frame = NSMakeRect(round(W - 49 - 12), row + (kMediaCardHeight - 24) / 2, 24, 24);
+    CGFloat right = (_mediaReopen.hidden ? NSMinX(_mediaClose.frame) : NSMinX(_mediaReopen.frame)) - 6;
+    _mediaHoverTitle.frame = NSMakeRect(first - 8, row + (kMediaCardHeight - 17) / 2, right - (first - 8), 17);
+    _mediaHoverTitle.textColor = dark ? [NSColor colorWithWhite:1 alpha:0.92] : [NSColor colorWithWhite:0 alpha:0.85];
+    _mediaClose.contentTintColor = _mediaReopen.contentTintColor = fg;
+  }
   _mediaArt.frame = NSMakeRect(first - 8, (kMediaCardHeight - 16) / 2, 16, 16);
   NSArray<NSButton*>* slots = _callMic.hidden && _callCam.hidden ? @[ _mediaPrev, _mediaPlay, _mediaNext, _mediaMute ]
                                                                  : @[ _callMic, _callCam ];
@@ -3856,27 +4025,16 @@ NSString* FavoritePreviewKind(NSString* url) {
   }
 }
 
-// The page's artwork when it gives one (loaded once, never in hidden test runs), else the site's icon.
-- (void)updateMediaArtworkFor:(ArcItem*)item {
+// Artwork pages give for a track (tests only: Arc's mini player never shows it, so NotArc no longer downloads it).
+static NSCache<NSString*, NSImage*>* MediaArtworkCache() {
   static NSCache<NSString*, NSImage*>* cache = [NSCache new];
-  NSString* art = item.mediaArtworkURL;
-  NSImage* img = art.length ? [cache objectForKey:art] : nil;
-  if (!img && art.length && !self.selfTestProfiles && ![_mediaArtLoading isEqual:art] &&
-      ([art hasPrefix:@"https://"] || [art hasPrefix:@"http://"])) {
-    _mediaArtLoading = art;
-    __weak MainWindowController* weakSelf = self;
-    [[NSURLSession.sharedSession dataTaskWithURL:[NSURL URLWithString:art]
-                               completionHandler:^(NSData* data, NSURLResponse*, NSError*) {
-                                 NSImage* got = data.length ? [[NSImage alloc] initWithData:data] : nil;
-                                 dispatch_async(dispatch_get_main_queue(), ^{
-                                   if (got) [cache setObject:got forKey:art];
-                                   [weakSelf updateMediaBar];
-                                 });
-                               }] resume];
-  }
-  _mediaArt.image = img ?: [self iconImageForItem:item];
+  return cache;
+}
+// Arc's mini player shows the site's icon, not the track's artwork (Omar's Arc screenshots, V78).
+- (void)updateMediaArtworkFor:(ArcItem*)item {
+  _mediaArt.image = [self iconImageForItem:item];
   _mediaArt.imageScaling = NSImageScaleProportionallyUpOrDown;
-  _mediaArt.layer.cornerRadius = img ? 3 : 0;
+  _mediaArt.layer.cornerRadius = 0;
 }
 
 - (NSString*)mediaCardDescription {  // tests (visual parity V3)
@@ -3891,6 +4049,80 @@ NSString* FavoritePreviewKind(NSString* url) {
 }
 
 - (ArcItem*)mediaBarItem { return _mediaBar.hidden ? nil : _mediaItem; }
+
+// Floating video and mini player (V75-V80).
+- (ArcItem*)floatingVideoItem { return _float.videoWindow.isVisible ? _floatItem : nil; }
+- (NSWindow*)floatingVideoWindow { return _float.videoWindow.isVisible ? _float.videoWindow : nil; }
+- (CGFloat)floatingVideoCornerRadius { return _float.cornerRadius; }
+- (NSRect)floatingVideoFrame { return _float ? _float.visibleFrame : NSZeroRect; }
+- (BOOL)floatingVideoHidesChromiumBar { return _float.hidesChromiumBar; }
+- (void)setFloatingControlsHoveredForTest:(BOOL)hovered { _float.hovered = hovered; }
+- (NSString*)floatingControlsState { return _float ? _float.stateDescription : @"none"; }
+- (void)pressFloatingControl:(NSString*)name { [_float press:name]; }
+
+- (NSString*)miniPlayerState {
+  NSImage* art = _mediaItem.mediaArtworkURL.length ? [MediaArtworkCache() objectForKey:_mediaItem.mediaArtworkURL] : nil;
+  return [NSString stringWithFormat:@"h=%.0f title=%@| favicon=%d reopen=%d close=%d", NSHeight(_mediaBar.frame),
+                                    _mediaHoverTitle.hidden ? @"" : _mediaHoverTitle.stringValue,
+                                    _mediaItem && _mediaArt.image && _mediaArt.image != art, !_mediaReopen.hidden,
+                                    !_mediaClose.hidden];
+}
+- (void)pressMiniPlayerControl:(NSString*)name {
+  if ([name isEqualToString:@"reopen"]) [self mediaBarReopen:nil];
+  else if ([name isEqualToString:@"close"]) [self mediaBarClose:nil];
+}
+- (void)setMediaArtworkForTest:(NSImage*)image url:(NSString*)url {
+  if (image && url.length) [MediaArtworkCache() setObject:image forKey:url];
+  [self updateMediaBar];
+}
+
+// Open Picture in Picture (V79): the video floats again (a user click, so the page lets it).
+- (void)mediaBarReopen:(id)sender {
+  ArcItem* item = _mediaItem;
+  if (!item || !item.mediaHasVideo) return;
+  [self floatVideoOfItem:item];
+}
+
+// Close Mini Player (V79): the sound stops and the player goes until that tab plays again.
+- (void)mediaBarClose:(id)sender {
+  ArcItem* item = _mediaItem;
+  if (!item) return;
+  [self runJS:@"(function(){[].slice.call(document.querySelectorAll('video,audio')).forEach(function(e){"
+              @"e.__notarcPaused=false;if(!e.paused)e.pause();});})()"
+       inItem:item];
+  item.mediaDismissed = YES;
+  item.mediaPlaying = item.mediaPaused = NO;
+  if ([_outline rowForItem:item] >= 0) [_outline reloadItem:item];
+  [self updateMediaBar];
+}
+
+// Arc's Adjust Tab Volume (V78): the speaker opens a small slider for the page's sound.
+- (void)setMediaVolume:(double)volume forItem:(ArcItem*)item {
+  if (!item) return;
+  volume = MIN(1, MAX(0.05, volume));
+  item.mediaVolume = volume;
+  [self runJS:[NSString stringWithFormat:@"(function(){[].slice.call(document.querySelectorAll('video,audio'))"
+                                         @".forEach(function(e){e.volume=%.2f;});})()", volume]
+       inItem:item];
+  if (item == _mediaItem) [self updateMediaBar];
+}
+- (void)mediaBarVolume:(NSButton*)sender {
+  ArcItem* item = _mediaItem;
+  if (!item) return;
+  if (_volumePopover.shown) { [_volumePopover close]; return; }
+  NSSlider* slider = [NSSlider sliderWithValue:item.mediaVolume > 0 ? item.mediaVolume : 1 minValue:0.05 maxValue:1
+                                        target:self action:@selector(mediaVolumeSlid:)];
+  slider.frame = NSMakeRect(12, 8, 140, 20);
+  slider.continuous = YES;
+  NSViewController* vc = [NSViewController new];
+  vc.view = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 164, 36)];
+  [vc.view addSubview:slider];
+  _volumePopover = [NSPopover new];
+  _volumePopover.behavior = NSPopoverBehaviorTransient;
+  _volumePopover.contentViewController = vc;
+  [_volumePopover showRelativeToRect:sender.bounds ofView:sender preferredEdge:NSRectEdgeMaxY];
+}
+- (void)mediaVolumeSlid:(NSSlider*)slider { [self setMediaVolume:slider.doubleValue forItem:_mediaItem]; }
 
 - (void)toggleMuteItem:(ArcItem*)item {
   auto it = _browsers.find(item.browserId);
@@ -3919,10 +4151,15 @@ NSString* FavoritePreviewKind(NSString* url) {
   return [NSString stringWithFormat:@"speaker=%d muted=%d", s && !s.hidden, [s.toolTip isEqual:@"Unmute Tab"]];
 }
 - (void)mediaBarPlay:(id)sender { if (_mediaItem) [self togglePlayItem:_mediaItem]; }
-- (void)mediaBarMute:(id)sender { if (_mediaItem) [self toggleMuteItem:_mediaItem]; }
 - (void)mediaBarPrevious:(id)sender { if (_mediaItem) [self runJS:MediaActionJS(@"previoustrack") inItem:_mediaItem]; }
 - (void)mediaBarNext:(id)sender { if (_mediaItem) [self runJS:MediaActionJS(@"nexttrack") inItem:_mediaItem]; }
-- (void)mediaBarShowTab:(id)sender { if (_mediaItem) [self showItem:_mediaItem]; }
+- (void)mediaBarShowTab:(id)sender {  // Arc's Back to Tab, in whichever Space it is
+  ArcItem* item = _mediaItem;
+  if (!item) return;
+  ArcSpace* owner = [self spaceOwningItem:item];
+  if (owner && owner != _space) [self switchToSpace:owner];
+  [self showItem:item];
+}
 - (void)menuToggleMute:(NSMenuItem*)sender { [self toggleMuteItem:sender.representedObject]; }
 - (void)menuTogglePlay:(NSMenuItem*)sender { [self togglePlayItem:sender.representedObject]; }
 
