@@ -431,7 +431,10 @@ static CGColorRef GrainPatternColor() {
               NSAppearanceNameDarkAqua;
   CGFloat radius = self.card.layer.cornerRadius;
   CGPathRef path = CGPathCreateWithRoundedRect(self.bounds, radius, radius, nullptr);
-  self.layer.backgroundColor = NSColor.whiteColor.CGColor;  // hidden under the card; a shadow needs something to cast it
+  BOOL shadow = !dark && radius > 0;
+  // Hidden under the card; a shadow needs something to cast it. Clear when there's no shadow (dark, or a square card):
+  // then nothing white can ever show around a page.
+  self.layer.backgroundColor = shadow ? NSColor.whiteColor.CGColor : NSColor.clearColor.CGColor;
   self.layer.cornerRadius = radius;
   self.layer.shadowPath = path;
   self.layer.shadowColor = NSColor.blackColor.CGColor;
@@ -445,7 +448,7 @@ static CGColorRef GrainPatternColor() {
   }
   tight.frame = self.bounds;
   tight.cornerRadius = radius;
-  tight.backgroundColor = NSColor.whiteColor.CGColor;
+  tight.backgroundColor = shadow ? NSColor.whiteColor.CGColor : NSColor.clearColor.CGColor;
   tight.shadowPath = path;
   tight.shadowColor = NSColor.blackColor.CGColor;
   tight.shadowOffset = CGSizeZero;
@@ -1979,6 +1982,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _content.layer.cornerRadius = kCardRadius;
   _content.layer.masksToBounds = YES;
   _cardEdge = [[CardEdgeView alloc] initWithFrame:_content.frame];
+  _cardEdge.autoresizingMask = _content.autoresizingMask;  // follows the card on resize (windowDidResize re-syncs it too)
   _cardEdge.wantsLayer = YES;
   _cardEdge.card = _content;
   [root addSubview:_cardEdge];
@@ -2757,6 +2761,7 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
     item.browserId = browser->GetIdentifier();
     _browsers[item.browserId] = browser;
   [self adoptBrowser:item.browserId];
+    [self hidePageUnlessShown:item];
     return;
   }
   CefWindowInfo info;
@@ -2776,6 +2781,18 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   item.browserId = browser->GetIdentifier();
   _browsers[item.browserId] = browser;
   [self adoptBrowser:item.browserId];
+  [self hidePageUnlessShown:item];
+}
+
+// A page made for a tab that isn't on screen (tabs whose Space profile was still starting, crash restore) starts
+// hidden. It used to sit unhidden over the card until the next layout: a Chrome-style page's own window even covered
+// the shown page, at the size the card had when it was made.
+- (void)hidePageUnlessShown:(ArcItem*)item {
+  if ([[self visiblePanes] containsObject:item]) return;
+  auto it = _browsers.find(item.browserId);
+  if (it == _browsers.end()) return;
+  [self pageViewForBrowser:it->second].hidden = YES;
+  it->second->GetHost()->WasHidden(true);
 }
 
 // Automatic picture-in-picture (#46): a video playing in the tab you leave pops out; coming back puts it back.
@@ -6718,6 +6735,10 @@ static NSData* PortraitPNG(NSData* png, NSColor* bg) {
 
 - (void)windowDidResize:(NSNotification*)note {
   [self positionWindowButtons];
+  // The white backing under the card must keep the card's frame, or it sticks out above or beside the page as a white
+  // bar (it used to keep its old size until the sidebar or toolbar was toggled).
+  if (_cardEdge && !NSEqualRects(_cardEdge.frame, _content.frame)) _cardEdge.frame = _content.frame;
+  if (_loadingGlow.superlayer) [self updateLoadingGlow];
   if (_splitItems.count > 1) [self layoutPanes];
 }
 
@@ -9193,6 +9214,45 @@ static NSArray<NSString*>* NewSpaceSwatches() {
   CGFloat a = _content.layer.borderWidth > 0 ? CGColorGetAlpha(_content.layer.borderColor) : 0;
   [_cardEdge displayIfNeeded];
   return [NSString stringWithFormat:@"border=%.2f shadow=%.2f", a, _cardEdge.hidden ? 0 : _cardEdge.layer.shadowOpacity];
+}
+// Tests: does the shown page fill its card exactly? edge=1: the white backing under the card has the card's frame (else
+// it sticks out as a white bar or border). page=1: the page's view (or Chrome-style placeholder) fills the card.
+// window=1: a Chrome-style page's own window sits exactly over the card, attached, with the card's corner radius.
+// glow=1: no loading glow left on a page that finished loading.
+- (NSString*)pageFitState {
+  NSView* page = _shown ? [self webViewForItem:_shown] : nil;
+  BOOL edge = _cardEdge.hidden || NSEqualRects(_cardEdge.frame, _content.frame);
+  BOOL fills = page && !page.hidden && page.superview == _content && NSEqualRects(page.frame, _content.bounds);
+  ChromePageHost* host = _shown ? _chromePages[@(_shown.browserId)] : nil;
+  BOOL window = YES;
+  NSRect pw = NSZeroRect, want = NSZeroRect;
+  if (host) {
+    NSWindow* p = host.pageWindow;
+    want = [self.window convertRectToScreen:[_content convertRect:_content.bounds toView:nil]];
+    pw = p.frame;
+    window = p.isVisible && p.parentWindow == self.window && NSEqualRects(pw, want) &&
+             fabs(p.contentView.layer.cornerRadius - _content.layer.cornerRadius) < 0.01;
+  }
+  NSUInteger others = 0;  // other page windows left showing over the card (they'd cover the shown page)
+  NSRect cardOnScreen = [self.window convertRectToScreen:[_content convertRect:_content.bounds toView:nil]];
+  for (NSWindow* c in self.window.childWindows)
+    if (c != host.pageWindow && c.isVisible && [NSStringFromClass(c.class) hasPrefix:@"Cef"] &&
+        NSIntersectsRect(c.frame, cardOnScreen))
+      ++others;
+  for (NSNumber* bid in _chromePages)
+    if (_chromePages[bid] != host && _chromePages[bid].pageWindow.isVisible && !_chromePages[bid].pageWindow.parentWindow) ++others;
+  for (auto& kv : _browsers) {  // another tab's page view (or placeholder) not hidden in the card
+    NSView* v = [self pageViewForBrowser:kv.second];
+    if (v && v != page && !v.hidden && v.superview == _content && ![_splitItems containsObject:[self itemForBrowserId:kv.first]])
+      ++others;
+  }
+  BOOL glow = _shown.loading || _loadingGlow.superlayer == nil;
+  return [NSString stringWithFormat:@"edge=%d page=%d window=%d glow=%d others=%d card=%.0fx%.0f chrome=%d | edgeFrame=%@ cardFrame=%@ "
+                                    @"pageWin=%@ want=%@ radius=%.1f/%.1f",
+                                    edge, fills, window, glow, others == 0, NSWidth(_content.frame), NSHeight(_content.frame), host != nil,
+                                    NSStringFromRect(_cardEdge.frame), NSStringFromRect(_content.frame), NSStringFromRect(pw),
+                                    NSStringFromRect(want), host.pageWindow.contentView.layer.cornerRadius,
+                                    _content.layer.cornerRadius];
 }
 - (NSString*)pageCardEdgeDebug {
   return [NSString stringWithFormat:@"hidden=%d dark=%d radius=%.0f layerShadow=%.2f super=%d", _cardEdge.hidden, IsDark(_cardEdge),

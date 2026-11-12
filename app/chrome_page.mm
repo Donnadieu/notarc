@@ -158,11 +158,12 @@ class PageWindowDelegate : public CefWindowDelegate {
   }
   [page setFrame:[self screenRect] display:YES];
   if (page.parentWindow != main) [main addChildWindow:page ordered:NSWindowAbove];
-  // The page card's rounded corners (Arc: 10 pt, continuous).
+  // The page card's corners: the card's own radius, square when the card is (sidebar hidden, focus mode); a rounded
+  // page on a square card left the window background showing in its corners.
   NSView* content = page.contentView;
   content.wantsLayer = YES;
-  CGFloat radius = _placeholder.superview.layer.cornerRadius;
-  content.layer.cornerRadius = radius > 0 ? radius : 10;
+  CALayer* card = _placeholder.superview.layer;
+  content.layer.cornerRadius = card ? card.cornerRadius : 10;
   content.layer.cornerCurve = kCACornerCurveContinuous;
   content.layer.masksToBounds = YES;
 }

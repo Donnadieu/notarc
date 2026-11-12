@@ -434,6 +434,7 @@ NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed 
 - (NSRect)pageCardFrame;   // tests: the rounded page card, in window content coordinates
 - (CGFloat)pageCardRadius;
 - (NSString*)pageCardEdgeStyle;  // tests: border alpha and shadow opacity of the page card (#122)
+- (NSString*)pageFitState;       // tests: "edge=1 page=1 window=1 glow=1 card=WxH chrome=0|1 | debug"
 - (NSString*)sidebarAddressText;   // tests: the site shown in the sidebar address pill
 // Developer Mode (#68, per site): View > Turn On/Off Developer Mode for This Site, Site Settings, and the reset.
 - (IBAction)toggleDeveloperMode:(id)sender;
