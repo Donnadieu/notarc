@@ -575,3 +575,22 @@ trackpad; everything else is checked by the hidden self-test.
 144. **Settings window (item 5) unchanged:** it already has Arc's toolbar tabs and panes (V58), and there's no Arc
     settings picture to compare against, so nothing was changed blind.
 
+## 2026-11-12: window buttons and the Boost brush (Omar's report)
+145. **The window buttons stay in colour in inactive windows too (V73).** Omar asked for Arc's look in active and
+    inactive windows. NotArc keeps macOS's own buttons (as Arc does: it places the system's buttons in its sidebar) and
+    its window always claims key appearance (AppKit's private `hasKeyAppearance`, which the buttons ask), so they never
+    turn grey: not while a Chrome-style page (its own child window) has focus, which was the grey Omar saw while using a
+    page, and not while another app is in front. macOS itself greys other apps' buttons in the background, and Arc
+    likely does too (Arc's bundle has a dimmed window-controls colour); if Omar wants that back, only the background case
+    changes. NotArc's own views still dim in an inactive window (V8, decision 113). If a future macOS drops the private
+    method, the buttons fall back to the system's normal look.
+147. **The buttons are put back at Arc's spots whenever AppKit moves them (V73).** AppKit lays the title bar out again
+    by itself (an appearance change, as when macOS turns dark at sunset), which dropped the buttons to its own height
+    until the window next became main. NotArc watches the title bar's and the buttons' frames and re-places them on the
+    next run-loop turn, at most 30 times a second so a layout fight can't spin.
+146. **No Boost button in the address pill (V74; replaces decision 110's Boost exception and V69's "unless").** Arc
+    1.169 never shows a Boost icon there (Omar; Arc moved Boosts into the Site Control Center in 2023 and ships its
+    Boost icons only in that bundle). A Boost is seen and switched in the site control center's Boosts section, the
+    View menu (Boost This Site, Turn Boost On/Off), the page's right-click menu and the Library. Arc's site-controls button may change when a
+    Boost is on (it ships a filled controls icon and a Boost indicator state), but how isn't known, so NotArc adds no
+    indicator.
