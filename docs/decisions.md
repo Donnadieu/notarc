@@ -630,3 +630,16 @@ trackpad; everything else is checked by the hidden self-test.
     other apps with it, instead of floating over every app the way Chromium's window did. Omar described it as part of
     the window ("at the bottom left of NotArc"); if he wants it on top of other apps, only the window level changes.
 
+## 2026-11-13: Camera and microphone on Google Meet
+
+157. **Chromium's `<usermedia>` and `<geolocation>` elements are off (`--disable-blink-features`).** Through CEF, an
+    allowed element request whose macOS step Chromium thinks is still open is shown again (Chrome's own prompt UI would
+    ask macOS there; CEF can't), an Allow on that crashed Chromium, and the element then waits for a macOS answer
+    Chromium never sees. Sites fall back to getUserMedia/geolocation, which NotArc asks about and macOS prompts for on
+    first use. The self-test keeps them on with `NOTARC_TEST_CAPTURE_ELEMENTS=1`.
+158. **A prompt Chromium shows again for requests NotArc just allowed is ignored, never allowed.** Same browser, same
+    origin, permissions within the allowed ones, within 1.5 s of the Allow. IGNORE finalizes the requests (the page
+    keeps its grant); ACCEPT or DENY would run their already-used callbacks.
+159. **Screen sharing is asked every time and never remembered,** like Chrome. NotArc can't pick a window or tab
+    (CEF shares the whole screen), so the card says "share your screen".
+

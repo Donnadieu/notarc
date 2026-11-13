@@ -58,6 +58,9 @@ sign "" "$FW"
 for helper in "$APP/Contents/Frameworks/"*.app; do sign "$ROOT/app/helper.entitlements" "$helper"; done
 sign "$ROOT/app/NotArc.entitlements" "$APP"
 codesign --verify --deep --strict "$APP"
+# Camera/mic usage strings and entitlements on the app and every helper (a hardened-runtime build without them is
+# killed by macOS when a site starts the camera).
+if [ "$ADHOC" = 1 ]; then "$ROOT/scripts/check-signing.sh" "$APP" --adhoc; else "$ROOT/scripts/check-signing.sh" "$APP"; fi
 
 notarize() {  # notarize <file to submit> <label>
   local log="$STAGE/notary-$2.log"
