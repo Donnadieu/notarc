@@ -4073,6 +4073,17 @@ static NSCache<NSString*, NSImage*>* MediaArtworkCache() {
   if ([name isEqualToString:@"reopen"]) [self mediaBarReopen:nil];
   else if ([name isEqualToString:@"close"]) [self mediaBarClose:nil];
 }
+// Tests: the press goes to the view the window hit-tested. A control in a titled window that isn't key (hidden test
+// windows never are) ignores mouseDown:, so it gets the tracking AppKit runs for a click in the key window.
+static void PressViewForTest(NSView* hit, NSEvent* down) {
+  if ([hit isKindOfClass:NSControl.class] && ((NSControl*)hit).cell && ((NSControl*)hit).enabled) {
+    NSControl* c = (NSControl*)hit;
+    [c.cell trackMouse:down inRect:c.bounds ofView:c untilMouseUp:YES];  // sends the action on the release inside
+  } else {
+    [hit mouseDown:down];
+  }
+}
+
 - (NSString*)clickMiniPlayerControl:(NSString*)name {
   NSButton* b = [name isEqualToString:@"reopen"] ? _mediaReopen : [name isEqualToString:@"close"] ? _mediaClose : nil;
   NSWindow* win = self.window;
@@ -4086,7 +4097,7 @@ static NSCache<NSString*, NSImage*>* MediaArtworkCache() {
                                context:nil eventNumber:0 clickCount:1 pressure:type == NSEventTypeLeftMouseDown ? 1 : 0];
   };
   [NSApp postEvent:event(NSEventTypeLeftMouseUp) atStart:NO];  // the press's tracking loop reads the release
-  [hit mouseDown:event(NSEventTypeLeftMouseDown)];
+  PressViewForTest(hit, event(NSEventTypeLeftMouseDown));
   while ([NSApp nextEventMatchingMask:NSEventMaskLeftMouseUp untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES]) {
   }  // a view that didn't track the press leaves the release behind
   return hit == b ? @"button" : hit ? NSStringFromClass(hit.class) : @"nothing";
@@ -4136,7 +4147,7 @@ static NSCache<NSString*, NSImage*>* MediaArtworkCache() {
                               pressure:type == NSEventTypeLeftMouseDown ? 1 : 0];
   };
   [NSApp postEvent:event(NSEventTypeLeftMouseUp) atStart:NO];
-  [hit mouseDown:event(NSEventTypeLeftMouseDown)];
+  PressViewForTest(hit, event(NSEventTypeLeftMouseDown));
   while ([NSApp nextEventMatchingMask:NSEventMaskLeftMouseUp untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES]) {
   }
   return [NSString stringWithFormat:@"%@:%@", NSStringFromClass(win.class), NSStringFromClass(hit.class)];
@@ -4177,7 +4188,7 @@ static NSCache<NSString*, NSImage*>* MediaArtworkCache() {
   check(@"update", _updateBanner, YES);
   for (NSView* v in _spaceBar.subviews) check(@"bottomBarIcon", v, NO);
   for (NSView* v in _sidebarNav.subviews) check(@"navIcon", v, NO);
-  for (NSView* v in _mediaBar.subviews) check(@"miniPlayerControl", v, NO);
+  for (NSView* v in _mediaBar.subviews) if (!v.hidden) check(@"miniPlayerControl", v, NO);
   for (NSView* v in _addressPill.subviews) if (!v.hidden) check(@"pillPart", v, NO);
   if (!_favGrid.hidden) check(@"pinned", _favGrid, YES);
   // Each tab row's content (title, close button) inside the list's visible width.
