@@ -3,7 +3,7 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.30.4
 - The mini player's two buttons at the top right work again: the one that floats the video brings it back where it
   was, still playing, and the X stops the sound and removes the player. Under the pointer the player grows into two
   rows, and the tab list sat over the top row and took its clicks.
@@ -16,6 +16,9 @@ or later. From 0.5.0 on, NotArc updates itself.
   with Chrome-style pages, where it used to stay hidden behind the page), it hides again when you move away, and its
   toggle or Cmd-S pins it back. With the sidebar hidden the page keeps an even margin all round, the window buttons
   hide with the sidebar as in Arc, and each window remembers whether its sidebar is hidden.
+- NotArc keeps a small log of site requests (camera, notifications and so on) and its answers, in
+  SiteRequests.log next to your tabs, on this Mac only. It closed twice on Nov 13 when Allow was clicked on a request
+  from Google Meet; the cause isn't found yet, and the log will show which request it was if it happens again.
 
 ## 0.30.3
 - A playing video you leave now floats like Arc's: a small window (222 pt wide, rounded corners) over the bottom-left of

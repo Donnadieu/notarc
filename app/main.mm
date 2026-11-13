@@ -595,6 +595,8 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
   // Self-tests never use Apple's real on-device model (#58): checks see "unavailable" unless they install a stub.
   if (self.selfTest) MaxSetTestModel(@"unavailable:selftest", nil);
   self.window.storePath = storePath;
+  BrowserClient::SetPermissionLogPath(
+      [storePath.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"SiteRequests.log"].UTF8String);
   self.window.archivePath = ArchiveStorePath(self.selfTest);
   self.window.historyPath = HistoryStorePath(self.selfTest);
   self.window.linkRoutingPath = LinkRoutingPath(self.selfTest);
@@ -2242,8 +2244,11 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
       WaitUntil(^{ return (BOOL)[a.liveTitle hasPrefix:@"n:"]; }, 6, ^{
         BOOL granted = [a.liveTitle isEqualToString:@"n:granted"];
         BOOL remembered = [[w sitePermissionsForOrigin:@"https://perm-a.example"][@"notifications"] boolValue];
-        std::printf("SELFTEST-PERMCLICK asked=%d clickedAllow=%d granted=%d remembered=%d\n", asked,
-                    [hit hasSuffix:@":NSButton"], granted, remembered);
+        NSString* logPath = [w.storePath.stringByDeletingLastPathComponent stringByAppendingPathComponent:@"SiteRequests.log"];
+        NSString* log = [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:nil] ?: @"";
+        BOOL logged = [log containsString:@"origin=https://perm-a.example/"] && [log containsString:@" allow prompt"];
+        std::printf("SELFTEST-PERMCLICK asked=%d clickedAllow=%d granted=%d remembered=%d logged=%d\n", asked,
+                    [hit hasSuffix:@":NSButton"], granted, remembered, logged);
         std::fflush(stdout);
         // B. Remembered "yes" (as after a relaunch): answered at once, no card.
         [w rememberSite:@"https://perm-b.example" names:@[ @"notifications" ] allow:YES];
