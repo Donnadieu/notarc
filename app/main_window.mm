@@ -4116,6 +4116,44 @@ static NSCache<NSString*, NSImage*>* MediaArtworkCache() {
 
 - (NSWindow*)floatingControlsWindow { return _float.controlsWindow; }
 
+- (NSWindow*)topWindowAtScreenPointForTest:(NSPoint)point {
+  for (NSNumber* n in [NSWindow windowNumbersWithOptions:0]) {  // front to back
+    NSWindow* win = [NSApp windowWithWindowNumber:n.integerValue];
+    if (win.isVisible && NSPointInRect(point, win.frame)) return win;
+  }
+  return nil;
+}
+- (NSString*)clickAtScreenForTest:(NSPoint)point {
+  NSWindow* win = [self topWindowAtScreenPointForTest:point];
+  if (!win) return @"nowindow";
+  NSPoint p = [win convertPointFromScreen:point];
+  NSView* frameView = win.contentView.superview ?: win.contentView;
+  NSView* hit = [frameView hitTest:p];
+  if (!hit) return [NSStringFromClass(win.class) stringByAppendingString:@":nothing"];
+  NSEvent* (^event)(NSEventType) = ^NSEvent*(NSEventType type) {
+    return [NSEvent mouseEventWithType:type location:p modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime
+                          windowNumber:win.windowNumber context:nil eventNumber:0 clickCount:1
+                              pressure:type == NSEventTypeLeftMouseDown ? 1 : 0];
+  };
+  [NSApp postEvent:event(NSEventTypeLeftMouseUp) atStart:NO];
+  [hit mouseDown:event(NSEventTypeLeftMouseDown)];
+  while ([NSApp nextEventMatchingMask:NSEventMaskLeftMouseUp untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES]) {
+  }
+  return [NSString stringWithFormat:@"%@:%@", NSStringFromClass(win.class), NSStringFromClass(hit.class)];
+}
+- (NSButton*)sidebarToggleButton {
+  for (NSView* v in _sidebarNav.subviews)
+    if ([v isKindOfClass:NSButton.class] && ((NSButton*)v).action == @selector(toggleSidebar:)) return (NSButton*)v;
+  return nil;
+}
+- (NSPoint)sidebarToggleScreenPoint {
+  NSButton* b = [self sidebarToggleButton];
+  if (!b.window) return NSMakePoint(-99999, -99999);
+  return [b.window convertPointToScreen:[b convertPoint:NSMakePoint(NSMidX(b.bounds), NSMidY(b.bounds)) toView:nil]];
+}
+- (NSWindow*)sidebarToggleWindow { return [self sidebarToggleButton].window; }
+- (CGFloat)pageCardCornerRadius { return _content.layer.cornerRadius; }
+
 - (CGFloat)sidebarWidth { return NSWidth(_sidebar.frame); }
 - (void)setSidebarWidth:(CGFloat)width {}
 - (NSString*)sidebarEdgeState { return @"handle=0 cursor=0"; }

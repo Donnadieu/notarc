@@ -1981,8 +1981,100 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
   });
 }
 
+// Sidebar hide and show (Omar, Nov 13: after the toggle hid the sidebar he couldn't bring it back). Arc 1.169: the page
+// keeps an even margin all round, the pointer at the window's left edge slides the sidebar out over the page and
+// leaving hides it, the toggle (or Cmd-S) there pins it back, and each window keeps its own state. Real clicks and
+// pointer moves (posted mouse-moved events, as the window server sends them).
+- (void)runSidebarToggleSelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSWindow* win = w.window;
+  if (w.sidebarHidden) [w toggleSidebar:nil];
+  void (^move)(NSPoint) = ^(NSPoint screen) {
+    [NSApp postEvent:[NSEvent mouseEventWithType:NSEventTypeMouseMoved location:[win convertPointFromScreen:screen]
+                                   modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime
+                                    windowNumber:win.windowNumber context:nil eventNumber:0 clickCount:0 pressure:0]
+             atStart:NO];
+  };
+  BOOL (^peeking)(void) = ^BOOL { return [w.sidebarPeekState hasPrefix:@"peeking=1"]; };
+  NSPoint leftEdge = NSMakePoint(NSMinX(win.frame) + 1, NSMidY(win.frame));
+  NSPoint middle = NSMakePoint(NSMidX(win.frame) + 200, NSMidY(win.frame));
+  // 1. A real click on the toggle hides the sidebar; the page keeps an even, rounded margin on all four sides.
+  NSString* hit1 = [w clickAtScreenForTest:w.sidebarToggleScreenPoint];
+  BOOL clickHides = w.sidebarHidden;
+  BOOL savedHidden = SettingBool(@"sidebarHidden");
+  NSRect card = w.pageCardFrame, b = win.contentView.bounds;
+  CGFloat l = NSMinX(card), r = NSMaxX(b) - NSMaxX(card), bt = NSMinY(card), tp = NSMaxY(b) - NSMaxY(card);
+  BOOL equalInsets = w.toolbarShown || (l >= 4 && fabs(l - r) < 0.5 && fabs(l - bt) < 0.5 && fabs(l - tp) < 0.5 && w.pageCardCornerRadius > 0);
+  // 2. The pointer at the far left edge slides it out over the page (the page stays put).
+  move(leftEdge);
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    BOOL hoverShows = peeking();
+    if (!hoverShows) [w beginSidebarPeekForTest];  // so the rest still runs
+    BOOL pageStays = NSEqualRects(w.pageCardFrame, card);
+    BOOL onTop = [w topWindowAtScreenPointForTest:w.sidebarToggleScreenPoint] == w.sidebarToggleWindow && w.sidebarToggleWindow;
+    // 3. Leaving it hides it again.
+    move(middle);
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      BOOL leaveHides = !peeking() && w.sidebarHidden;
+      if (peeking()) [w endSidebarPeekForTest];
+      // 4. Out again, and a real click on its toggle pins it back: docked, the page laid out beside it.
+      move(leftEdge);
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        BOOL hoverAgain = peeking();
+        if (!hoverAgain) [w beginSidebarPeekForTest];
+        NSString* hit2 = [w clickAtScreenForTest:w.sidebarToggleScreenPoint];
+        BOOL pinClick = !w.sidebarHidden && !peeking() && NSMinX(w.pageCardFrame) >= w.sidebarWidth - 0.5 &&
+                        !SettingBool(@"sidebarHidden");
+        if (peeking()) [w endSidebarPeekForTest];
+        if (w.sidebarHidden) [w toggleSidebar:nil];
+        // 5. Cmd-S (Arc's Hide Sidebar / Show Sidebar) both ways, and from the floating sidebar it pins it.
+        NSMenuItem* key = nil;
+        for (NSMenuItem* top in NSApp.mainMenu.itemArray)
+          for (NSMenuItem* it in top.submenu.itemArray)
+            if ([it.keyEquivalent isEqualToString:@"s"] && it.keyEquivalentModifierMask == NSEventModifierFlagCommand) key = it;
+        BOOL shortcut = key.action == @selector(toggleSidebar:);
+        if (shortcut) [NSApp sendAction:key.action to:w from:key];
+        BOOL keyHides = w.sidebarHidden;
+        if (shortcut) [NSApp sendAction:key.action to:w from:key];
+        BOOL keyShows = !w.sidebarHidden;
+        if (!w.sidebarHidden) [w toggleSidebar:nil];
+        [w beginSidebarPeekForTest];
+        if (shortcut) [NSApp sendAction:key.action to:w from:key];
+        BOOL keyPins = !w.sidebarHidden && !peeking();
+        if (peeking()) [w endSidebarPeekForTest];
+        if (w.sidebarHidden) [w toggleSidebar:nil];
+        // 6. Per window: one saved hidden opens hidden; hiding or showing it is saved with it, not as the main window's.
+        ArcSpace* sp = w.currentSpace;
+        MainWindowController* w2 = [w restoreWindowsFromList:@[ @{@"space" : sp.spaceID ?: @"", @"sidebarHidden" : @YES} ]].firstObject;
+        BOOL opensHidden = w2 && w2.sidebarHidden;
+        [w2 toggleSidebar:nil];
+        NSDictionary* entry = nil;
+        for (NSDictionary* d in [MainWindowController windowStateList]) entry = d;
+        BOOL savedShown = w2 && !w2.sidebarHidden && entry && ![entry[@"sidebarHidden"] boolValue];
+        [w2 toggleSidebar:nil];
+        for (NSDictionary* d in [MainWindowController windowStateList]) entry = d;
+        BOOL perWindow = opensHidden && savedShown && [entry[@"sidebarHidden"] boolValue] && !w.sidebarHidden &&
+                         !SettingBool(@"sidebarHidden");
+        [w2.window close];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+          std::printf("SELFTEST-SIDEBARTOGGLE clickHides=%d savedHidden=%d equalInsets=%d hoverShows=%d pageStays=%d overlayOnTop=%d "
+                      "leaveHides=%d hoverAgain=%d pinClick=%d shortcut=%d keyHides=%d keyShows=%d keyPins=%d perWindow=%d\n",
+                      clickHides, savedHidden, equalInsets, hoverShows, pageStays, onTop, leaveHides, hoverAgain, pinClick,
+                      shortcut, keyHides, keyShows, keyPins, perWindow);
+          if (!(clickHides && equalInsets && hoverShows && onTop && pinClick && perWindow))
+            std::printf("SIDEBARTOGGLE-DEBUG hit1=%s hit2=%s card=%s insets=%.1f/%.1f/%.1f/%.1f radius=%.1f opensHidden=%d "
+                        "savedShown=%d\n", hit1.UTF8String, hit2.UTF8String, NSStringFromRect(card).UTF8String, l, r, bt, tp,
+                        w.pageCardCornerRadius, opensHidden, savedShown);
+          std::fflush(stdout);
+          done();
+        });
+      });
+    });
+  });
+}
+
 - (void)runFloatingVideoThenPageFit:(void (^)(void))done {
-  [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runPageFitSelfTest:done]; }]; }];
+  [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }];
 }
 
 - (void)runSelfTestActions {
@@ -2010,9 +2102,11 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [self runFloatingVideoSelfTest:^{
        [self runSidebarResizeSelfTest:^{
+       [self runSidebarToggleSelfTest:^{
         std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
         std::fflush(stdout);
         [self.window closeAllBrowsers];
+       }];
        }];
       }];
     });

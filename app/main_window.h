@@ -313,6 +313,13 @@ extern const CGFloat kSidebarDefaultWidth, kSidebarMinWidth, kSidebarMaxWidth;  
 // release (screen points). Returns the class of the view that took it.
 - (NSString*)dragInWindowForTest:(NSWindow*)win fromScreen:(NSPoint)from toScreen:(NSPoint)to;
 - (NSWindow*)floatingControlsWindow;  // tests: NotArc's controls over the float
+// Tests: a real click at a screen point: it lands in the front-most of NotArc's windows there, which hit-tests it.
+// Returns the class of the view that took it ("<window class>:<view class>").
+- (NSString*)clickAtScreenForTest:(NSPoint)point;
+- (NSWindow*)topWindowAtScreenPointForTest:(NSPoint)point;
+- (NSPoint)sidebarToggleScreenPoint;  // tests: the toggle next to the window buttons
+- (NSWindow*)sidebarToggleWindow;     // tests: the window it's in (the main one, or the floating sidebar's)
+- (CGFloat)pageCardCornerRadius;      // tests
 // Sidebar width (Arc: drag its right edge). Kept per window: the main window's in the settings, others' in Windows.json.
 - (CGFloat)sidebarWidth;
 - (void)setSidebarWidth:(CGFloat)width;
