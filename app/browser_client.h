@@ -51,6 +51,10 @@ class BrowserClient : public CefClient,
       std::function<void(int browser_id, int request_id, const std::string& origin, uint32_t permissions)>;
   void set_permission_callback(PermissionCallback cb) { on_permission_ = std::move(cb); }
   void ResolvePermission(int request_id, bool allow);
+  // A local log of site requests and NotArc's answers (SiteRequests.log next to the sidebar), one line each, written at
+  // once: after Omar's Nov 13 crash inside Chromium's PermissionRequest::PermissionGranted, the next one names the request.
+  static void SetPermissionLogPath(const std::string& path);
+  static void LogPermission(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
   bool OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                       const CefString& requesting_origin, uint32_t requested_permissions,
                                       CefRefPtr<CefMediaAccessCallback> callback) override;

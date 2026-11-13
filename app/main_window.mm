@@ -62,10 +62,17 @@
 #include "include/cef_cookie.h"
 #include "include/cef_urlrequest.h"
 
+const CGFloat kSidebarDefaultWidth = 273, kSidebarMinWidth = 200, kSidebarMaxWidth = 400;  // Arc's (see main_window.h)
+
+// The width the sidebar opens at: the main window's last one (kept in the settings), else Arc's default.
+static CGFloat SavedSidebarWidth() {
+  double w = SettingDouble(@"sidebarWidth");
+  return w > 0 ? MIN(kSidebarMaxWidth, MAX(kSidebarMinWidth, w)) : kSidebarDefaultWidth;
+}
+
 static NSPasteboardType const kSidebarItemPasteboardType = @"io.github.donnadieu.notarc.sidebar-item";
 
 namespace {
-constexpr CGFloat kSidebarWidth = 273;  // Arc's default (StorableWindows.json sidebarWidth)
 // The page sits in a rounded card on the Space colour, as in Arc (measured from Arc 1.169):
 constexpr CGFloat kCardInsetTop = 10, kCardInsetSide = 9, kCardInsetBottom = 9, kCardRadius = 8;
 
@@ -529,7 +536,7 @@ static NSImage* SadPageGlyph() {
 
 // A card for the bottom of the sidebar: icon, one line (tag 1) and a capsule button (tag 2).
 static NSBox* SidebarBannerCard(NSString* symbol, id target, SEL action, NSString* button) {
-  const CGFloat W = kSidebarWidth - 17, H = 36;
+  const CGFloat W = kSidebarDefaultWidth - 17, H = 36;  // follows the sidebar's width from there
   NSBox* card = [[NSBox alloc] initWithFrame:NSMakeRect(8, 44, W, H)];
   card.boxType = NSBoxCustom;
   card.borderWidth = 0;
@@ -568,6 +575,9 @@ static NSBox* SidebarBannerCard(NSString* symbol, id target, SEL action, NSStrin
   }];
   pill.identifier = @"bannerPill";
   title.frame = NSMakeRect(32, 10, NSMinX(b.frame) - 6 - 32, 16);
+  title.autoresizingMask = NSViewWidthSizable;
+  pill.autoresizingMask = b.autoresizingMask = NSViewMinXMargin;  // the button stays at the right end
+  card.autoresizingMask = NSViewWidthSizable;
   for (NSView* v in @[ icon, title, pill, b ]) [card.contentView addSubview:v];
   return card;
 }
@@ -725,6 +735,38 @@ static const CGFloat kMediaCardHeight = 32;  // Arc (Omar's screenshot): x 8-264
 - (void)mouseExited:(NSEvent*)e {
   self.inside = NO;
   if (self.hoverChanged) self.hoverChanged(NO);
+}
+@end
+
+// The sidebar's right edge (Arc: drag it to resize the sidebar). A thin strip over the gap between the sidebar and
+// the page card, with the left-right resize cursor; reports the drag in screen points from where it started.
+@interface SidebarEdgeView : NSView
+@property(nonatomic, copy) void (^began)(void);
+@property(nonatomic, copy) void (^moved)(CGFloat dx);
+@property(nonatomic, copy) void (^ended)(void);
+@property(nonatomic, readonly) NSCursor* cursor;
+@end
+@implementation SidebarEdgeView {
+  CGFloat _startX;
+}
+- (NSCursor*)cursor { return NSCursor.resizeLeftRightCursor; }
+- (BOOL)acceptsFirstMouse:(NSEvent*)event { return YES; }
+- (BOOL)mouseDownCanMoveWindow { return NO; }
+- (void)resetCursorRects { [self addCursorRect:self.bounds cursor:self.cursor]; }
+static CGFloat ScreenX(NSEvent* e) {
+  NSWindow* w = e.window;
+  return w ? [w convertPointToScreen:e.locationInWindow].x : e.locationInWindow.x;
+}
+- (void)mouseDown:(NSEvent*)e {
+  _startX = ScreenX(e);
+  if (self.began) self.began();
+}
+- (void)mouseDragged:(NSEvent*)e {
+  if (self.moved) self.moved(ScreenX(e) - _startX);
+}
+- (void)mouseUp:(NSEvent*)e {
+  if (self.moved) self.moved(ScreenX(e) - _startX);
+  if (self.ended) self.ended();
 }
 @end
 
@@ -1496,6 +1538,10 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   HoverTracker* _edgeTracker;
   HoverTracker* _peekTracker;
   NSTrackingArea* _peekArea;
+  id _pointerMonitor;        // pointer moves anywhere in this window (page windows included): the left-edge reveal
+  NSPanel* _peekPanel;       // Chrome-style pages: the floating sidebar's own window, above the page windows
+  BOOL _peekLeavePending;
+  BOOL _restoringWindowState;  // applying a saved state: not saved again
   CALayer* _loadingGlow;     // Arc's glow along the page card's top edge while the shown page loads
   BOOL _pillButtonsForced;
   BOOL _testInactive;
@@ -1560,6 +1606,9 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   ArcItem* _mediaItem;
   NSTextField* _mediaHoverTitle;  // V79: what's playing, over the controls while the pointer is on the card
   NSButton* _mediaReopen;         // V79: brings the floating video back
+  CGFloat _sidebarWidth;          // Arc: drag the sidebar's right edge (kSidebarMinWidth-kSidebarMaxWidth), per window
+  CGFloat _sidebarWidthAtDragStart;
+  SidebarEdgeView* _sidebarEdge;
   NSButton* _mediaClose;          // V79: stops the sound and removes the player
   NSPopover* _volumePopover;      // V78: Arc's Adjust Tab Volume
   FloatingVideo* _float;          // V75-V77: the floating video and its controls
@@ -1687,7 +1736,10 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
     _space = spaces.firstObject;
     for (ArcSpace* s in spaces)
       if ([s.spaceID isEqualToString:focusedID]) _space = s;
+    _sidebarWidth = SavedSidebarWidth();  // the main window's last width; other windows then take their own
     [self buildLayout];
+    [self startPointerMonitor];
+    if (SettingBool(@"sidebarHidden")) [self applySavedSidebarHidden:YES];  // as the main window was left
     [self positionWindowButtons];  // also for a window that opens behind another and isn't main yet (V73)
   }
   return self;
@@ -1703,7 +1755,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   frameView.blendingMode = NSVisualEffectBlendingModeBehindWindow;
   frameView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
   [root addSubview:frameView];
-  NSView* sidebar = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, kSidebarWidth, bounds.size.height)];
+  NSView* sidebar = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, _sidebarWidth, bounds.size.height)];
   sidebar.autoresizingMask = NSViewHeightSizable;
   _sidebar = sidebar;
   // Space theme tint: a gradient over the whole frame, under every control.
@@ -1731,8 +1783,9 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
 
   // Arc's mini player: a dark card above the bottom bar with the artwork (or the site's icon), what's playing and
   // the site on two lines, and back / play-pause / forward; mute shows while the pointer is over the card.
-  MediaCardView* card = [[MediaCardView alloc] initWithFrame:NSMakeRect(8, 46, kSidebarWidth - 17, kMediaCardHeight)];
+  MediaCardView* card = [[MediaCardView alloc] initWithFrame:NSMakeRect(8, 46, _sidebarWidth - 17, kMediaCardHeight)];
   card.hoverChanged = ^(BOOL inside) { [weakOwner updateMediaBar]; };
+  card.autoresizingMask = NSViewWidthSizable;  // follows the sidebar's width (layoutMediaCard places the controls)
   _mediaBar = card;
   _mediaBar.wantsLayer = YES;
   _mediaBar.layer.cornerRadius = 8;
@@ -1779,11 +1832,11 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _callCam = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"video.fill" accessibilityDescription:@"Camera"]
                                 target:self action:@selector(callBarCamera:)];
   _callCam.bordered = NO;
-  _callCam.frame = NSMakeRect(kSidebarWidth - 16 - 56, 5, 24, 24);
+  _callCam.frame = NSMakeRect(_sidebarWidth - 16 - 56, 5, 24, 24);
   _callMic = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"mic.fill" accessibilityDescription:@"Microphone"]
                                 target:self action:@selector(callBarMic:)];
   _callMic.bordered = NO;
-  _callMic.frame = NSMakeRect(kSidebarWidth - 16 - 28, 5, 24, 24);
+  _callMic.frame = NSMakeRect(_sidebarWidth - 16 - 28, 5, 24, 24);
   _callCam.hidden = _callMic.hidden = YES;
   for (NSView* v in @[ _mediaArt, _mediaTitle, _mediaSubtitle, _mediaPrev, _mediaPlay, _mediaNext, _mediaMute, _callCam, _callMic,
                        _mediaHoverTitle, _mediaReopen, _mediaClose ])
@@ -1802,6 +1855,11 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
                                              name:DownloadsChangedNotification object:nil];
   _updateBanner = SidebarBannerCard(@"arrow.down.circle.fill", self, @selector(restartToUpdate:), @"Restart");
   _updateBanner.hidden = YES;
+  for (NSView* card in @[ _updateBanner, _meetingBar ]) {  // made at Arc's default width; this window's may differ
+    NSRect f = card.frame;
+    f.size.width = _sidebarWidth - 17;
+    card.frame = f;
+  }
   _updateBanner.toolTip = @"Restart NotArc to finish updating; your tabs come back";
   [sidebar addSubview:_updateBanner];
   [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(updateReady:)
@@ -1810,14 +1868,14 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   [sidebar addSubview:_meetingBar];
 
   _spacePicker = [[NSPopUpButton alloc]
-      initWithFrame:NSMakeRect(8, bounds.size.height - 120, kSidebarWidth - 16, 26) pullsDown:NO];
-  _spacePicker.autoresizingMask = NSViewMinYMargin;
+      initWithFrame:NSMakeRect(8, bounds.size.height - 120, _sidebarWidth - 16, 26) pullsDown:NO];
+  _spacePicker.autoresizingMask = NSViewMinYMargin | NSViewWidthSizable;
   [self rebuildSpacePicker];
   _spacePicker.target = self;
   _spacePicker.action = @selector(spaceChanged:);
   // The pop-up stays as the Space list model; Arc shows a plain title row instead of a drop-down.
   // Arc's Space title: the name in dim semibold text; "..." shows on hover; right-click opens the Space menu.
-  SpaceHeaderView* header = [[SpaceHeaderView alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 234, kSidebarWidth - 17, 34)];
+  SpaceHeaderView* header = [[SpaceHeaderView alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 234, _sidebarWidth - 17, 34)];
   header.autoresizingMask = NSViewMinYMargin;
   _spaceHeader = header;
   _spaceHeaderTitle = [NSTextField labelWithString:@""];
@@ -1843,14 +1901,14 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   rename.numberOfClicksRequired = 2;  // double-click the name to rename, as in Arc
   [_spaceHeaderTitle addGestureRecognizer:rename];
   [sidebar addSubview:_spaceHeader];
-  _favGrid = [[FavoritesGridView alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 90, kSidebarWidth - 17, 0)];
+  _favGrid = [[FavoritesGridView alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 90, _sidebarWidth - 17, 0)];
   _favGrid.owner = self;
   _favGrid.autoresizingMask = NSViewMinYMargin;
   [sidebar addSubview:_favGrid];
   [self updateSpaceHeader];
 
   NSScrollView* scroll = [[SidebarScrollView alloc]
-      initWithFrame:NSMakeRect(8, 42, kSidebarWidth - 17, bounds.size.height - 166)];
+      initWithFrame:NSMakeRect(8, 42, _sidebarWidth - 17, bounds.size.height - 166)];
   scroll.autoresizingMask = NSViewHeightSizable;
   scroll.drawsBackground = NO;
   scroll.verticalScroller = [SidebarScroller new];
@@ -1881,7 +1939,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
     };
   }
   NSTableColumn* col = [[NSTableColumn alloc] initWithIdentifier:@"item"];
-  col.width = kSidebarWidth - 17;
+  col.width = _sidebarWidth - 17;
   col.resizingMask = NSTableColumnAutoresizingMask;
   [_outline addTableColumn:col];
   _outline.outlineTableColumn = col;
@@ -1917,8 +1975,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   // 36 pt address pill (8 pt from each side, 46 pt from the top) with copy-link and site-settings buttons.
   // Arc: window buttons and these icons share one line centred 23.5 pt below the top; toggle centred at x 94,
   // back / forward / reload at 183 / 217 / 251.
-  _sidebarNav = [[NSView alloc] initWithFrame:NSMakeRect(0, bounds.size.height - 37, kSidebarWidth, 28)];
-  _sidebarNav.autoresizingMask = NSViewMinYMargin;
+  _sidebarNav = [[NSView alloc] initWithFrame:NSMakeRect(0, bounds.size.height - 37, _sidebarWidth, 28)];
+  _sidebarNav.autoresizingMask = NSViewMinYMargin | NSViewWidthSizable;
   NSArray* nav = @[ @[ @"sidebar.left", @"toggleSidebar:", @81 ], @[ @"arrow.left", @"goBack:", @170 ],
                     @[ @"arrow.right", @"goForward:", @204 ], @[ @"arrow.clockwise", @"reloadPage:", @238 ] ];
   for (NSArray* n in nav) {
@@ -1927,15 +1985,17 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
     b.bordered = NO;
     b.contentTintColor = SidebarIconColor();
     b.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:14 weight:NSFontWeightMedium];
-    b.frame = NSMakeRect([n[2] doubleValue], 1, 26, 26);
+    BOOL right = ![n[1] isEqual:@"toggleSidebar:"];  // back / forward / reload stay at the right end
+    b.frame = NSMakeRect([n[2] doubleValue] + (right ? _sidebarWidth - kSidebarDefaultWidth : 0), 1, 26, 26);
+    if (right) b.autoresizingMask = NSViewMinXMargin;
     if ([n[1] isEqual:@"goBack:"]) _navBack = b;
     if ([n[1] isEqual:@"goForward:"]) _navForward = b;
     [_sidebarNav addSubview:b];
   }
   [sidebar addSubview:_sidebarNav];
-  _addressPill = [[SidebarPillView alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 82, kSidebarWidth - 17, 36)];
+  _addressPill = [[SidebarPillView alloc] initWithFrame:NSMakeRect(8, bounds.size.height - 82, _sidebarWidth - 17, 36)];
   _addressPill.wantsLayer = YES;
-  _addressPill.autoresizingMask = NSViewMinYMargin;
+  _addressPill.autoresizingMask = NSViewMinYMargin | NSViewWidthSizable;
   __weak MainWindowController* weakSelf = self;
   _addressPill.onClick = ^{ [weakSelf openLocation:nil]; };
   _addressPill.hoverChanged = ^{ [weakSelf updatePillButtons]; };
@@ -1978,7 +2038,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   [sidebar addSubview:_addressPill];
 
   // Bottom bar, as in Arc: archive (Library) at the left, one icon per Space in the middle, "+" menu at the right.
-  _spaceBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 5.5, kSidebarWidth - 17, 30)];  // Arc: icons centred 20.5 pt up
+  _spaceBar = [[NSView alloc] initWithFrame:NSMakeRect(8, 5.5, _sidebarWidth - 17, 30)];  // Arc: icons centred 20.5 pt up
   NSButton* lib = [NSButton buttonWithImage:[NSImage imageWithSystemSymbolName:@"square.stack" accessibilityDescription:@"Library"]
                                      target:self action:@selector(showLibrary:)];
   lib.bordered = NO;
@@ -1995,17 +2055,20 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   plus.contentTintColor = SidebarIconColor();
   plus.symbolConfiguration = [NSImageSymbolConfiguration configurationWithPointSize:15 weight:NSFontWeightMedium];
   plus.frame = NSMakeRect(_spaceBar.bounds.size.width - 29, 2, 26, 26);
+  plus.autoresizingMask = NSViewMinXMargin;
   [_spaceBar addSubview:plus];
   _spaceIcons = [NSStackView stackViewWithViews:@[]];
   _spaceIcons.orientation = NSUserInterfaceLayoutOrientationHorizontal;
   _spaceIcons.spacing = 0;
   _spaceIcons.distribution = NSStackViewDistributionGravityAreas;
   _spaceIcons.frame = NSMakeRect(32, 0, _spaceBar.bounds.size.width - 64, 30);
+  _spaceIcons.autoresizingMask = NSViewMinXMargin | NSViewMaxXMargin;  // stays centred
+  _spaceBar.autoresizingMask = NSViewWidthSizable;
   [_spaceBar addSubview:_spaceIcons];
   [sidebar addSubview:_spaceBar];
   [self rebuildSpaceBar];  // rebuildSpacePicker above ran before the bar existed
 
-  PageDropView* pageDrop = [[PageDropView alloc] initWithFrame:NSMakeRect(kSidebarWidth, 0, bounds.size.width - kSidebarWidth,
+  PageDropView* pageDrop = [[PageDropView alloc] initWithFrame:NSMakeRect(_sidebarWidth, 0, bounds.size.width - _sidebarWidth,
                                                                            bounds.size.height)];
   pageDrop.owner = self;
   _content = pageDrop;
@@ -2020,8 +2083,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   [root addSubview:_cardEdge];
   [root addSubview:_content];
 
-  _toolbar = [[NSView alloc] initWithFrame:NSMakeRect(kSidebarWidth, bounds.size.height - kToolbarHeight,
-                                                      bounds.size.width - kSidebarWidth, kToolbarHeight)];
+  _toolbar = [[NSView alloc] initWithFrame:NSMakeRect(_sidebarWidth, bounds.size.height - kToolbarHeight,
+                                                      bounds.size.width - _sidebarWidth, kToolbarHeight)];
   _toolbar.autoresizingMask = NSViewWidthSizable | NSViewMinYMargin;
   NSArray* buttons = @[ @[ @"chevron.left", @"goBack:" ], @[ @"chevron.right", @"goForward:" ], @[ @"arrow.clockwise", @"reloadPage:" ] ];
   CGFloat bx = 8;
@@ -2047,6 +2110,23 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   _toolbar.hidden = YES;
   [root addSubview:_toolbar];
   if (!SettingBool(kSettingShowSpaceHeader)) [self applySpaceHeader:NO];
+  // Arc: the sidebar's right edge resizes it. Above the sidebar and the page, over the gap between them.
+  _sidebarEdge = [[SidebarEdgeView alloc] initWithFrame:NSZeroRect];
+  _sidebarEdge.autoresizingMask = NSViewHeightSizable;
+  __weak MainWindowController* weakEdgeOwner = self;
+  _sidebarEdge.began = ^{
+    MainWindowController* me = weakEdgeOwner;
+    if (me) me->_sidebarWidthAtDragStart = me->_sidebarWidth;
+  };
+  _sidebarEdge.moved = ^(CGFloat dx) {
+    MainWindowController* me = weakEdgeOwner;
+    if (!me) return;
+    CGFloat w = me->_sidebarWidthAtDragStart + dx;
+    if (fabs(w - kSidebarDefaultWidth) < 5) w = kSidebarDefaultWidth;  // Arc snaps to its default width
+    [me setSidebarWidth:w];
+  };
+  _sidebarEdge.ended = ^{ [weakEdgeOwner saveSidebarWidth]; };
+  [root addSubview:_sidebarEdge positioned:NSWindowAbove relativeTo:nil];
   [self layoutContentArea];
 
   [self reloadSidebar];
@@ -2055,14 +2135,16 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
 // Sidebar column, top down (Arc): pill 46-82; Favorites grid from 90; Space title 8 below the grid; tabs after it,
 // down to the bottom bar (or the media bar above it).
 - (void)layoutSidebar {
-  CGFloat H = _sidebar.bounds.size.height, w = kSidebarWidth - 17;
+  CGFloat H = _sidebar.bounds.size.height, w = NSWidth(_sidebar.bounds) - 17;
   CGFloat gridH = [_favGrid heightForWidth:w];
   _favGrid.hidden = gridH == 0;
   _favGrid.frame = NSMakeRect(8, H - 90 - gridH, w, gridH);
   CGFloat below = gridH ? 90 + gridH : 82;
   _spaceHeader.frame = NSMakeRect(8, H - below - 42, w, 34);
   CGFloat top = _spaceHeader.hidden ? below + 8 : below + 42;
-  CGFloat bottom = _mediaBar.hidden ? 42 : 46 + kMediaCardHeight + 4;
+  // The mini player's full height: under the pointer it grows to two rows, and the list ends above it. (The list
+  // sits above the card, so a row of the card under the list's frame lost its clicks: reopen and X did nothing.)
+  CGFloat bottom = _mediaBar.hidden ? 42 : 46 + MAX(kMediaCardHeight, NSHeight(_mediaBar.frame)) + 4;
   NSRect mf = _meetingBar.frame;
   mf.origin.y = bottom + 2;
   _meetingBar.frame = mf;
@@ -2103,6 +2185,10 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   [self watchWindowButtons:container];
   _placingWindowButtons = YES;
   CGFloat h = [self sidebarCollapsed] && !_sidebarPeeking ? kToolbarHeight : 47;
+  // Arc: the window buttons go with the sidebar and come back with it (or with the toolbar); never in focus mode.
+  BOOL hideButtons = _focusMode || (_sidebar.hidden && !_sidebarPeeking && _toolbar.hidden);
+  for (NSWindowButton k : {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton})
+    [win standardWindowButton:k].hidden = hideButtons;
   NSRect cf = container.frame;
   cf.size.height = h;
   cf.origin.y = win.frame.size.height - h;
@@ -2925,6 +3011,9 @@ static NSString* const kPiPExitJS =
   _float.progress = item.mediaDuration > 0 ? item.mediaCurrentTime / item.mediaDuration : -1;
   __weak MainWindowController* weakSelf = self;
   _float.onAction = ^(NSString* action, double value) { [weakSelf floatingVideo:item action:action value:value]; };
+  double savedWidth = SettingDouble(@"floatingVideoWidth");  // the size it was last resized to
+  if (savedWidth > 0) _float.width = savedWidth;
+  _float.onResized = ^(CGFloat width) { SettingSetObject(@"floatingVideoWidth", @(width)); };
   [_float placeOver:self.window];
   // While it floats, read the video's time often enough for the progress bar (this tab only).
   _floatPoll = [NSTimer scheduledTimerWithTimeInterval:0.5 repeats:YES block:^(NSTimer*) { [weakSelf pollFloatingVideo]; }];
@@ -3999,7 +4088,10 @@ NSString* FavoritePreviewKind(NSString* url) {
   BOOL hover = ((MediaCardView*)_mediaBar).inside && _callMic.hidden && _callCam.hidden && _mediaItem;
   NSRect card = _mediaBar.frame;
   card.size.height = hover ? 2 * kMediaCardHeight : kMediaCardHeight;
-  if (!NSEqualRects(card, _mediaBar.frame)) _mediaBar.frame = card;
+  if (!NSEqualRects(card, _mediaBar.frame)) {
+    _mediaBar.frame = card;
+    [self layoutSidebar];  // the list above makes room for the taller card
+  }
   CGFloat W = NSWidth(_mediaBar.bounds), first = 21.5, step = (W - 22 - first) / 4;
   _mediaHoverTitle.hidden = _mediaClose.hidden = !hover;
   _mediaReopen.hidden = !hover || !_mediaItem.mediaHasVideo;
@@ -4070,6 +4162,179 @@ static NSCache<NSString*, NSImage*>* MediaArtworkCache() {
 - (void)pressMiniPlayerControl:(NSString*)name {
   if ([name isEqualToString:@"reopen"]) [self mediaBarReopen:nil];
   else if ([name isEqualToString:@"close"]) [self mediaBarClose:nil];
+}
+// Tests: the press goes to the view the window hit-tested. A control in a titled window that isn't key (hidden test
+// windows never are) ignores mouseDown:, so it gets the tracking AppKit runs for a click in the key window.
+static void PressViewForTest(NSView* hit, NSEvent* down) {
+  if ([hit isKindOfClass:NSControl.class] && ((NSControl*)hit).cell && ((NSControl*)hit).enabled) {
+    NSControl* c = (NSControl*)hit;
+    [c.cell trackMouse:down inRect:c.bounds ofView:c untilMouseUp:YES];  // sends the action on the release inside
+  } else {
+    [hit mouseDown:down];
+  }
+}
+
+- (NSString*)clickMiniPlayerControl:(NSString*)name {
+  NSButton* b = [name isEqualToString:@"reopen"] ? _mediaReopen : [name isEqualToString:@"close"] ? _mediaClose : nil;
+  NSWindow* win = self.window;
+  if (!b || b.hidden || b.window != win) return @"hidden";
+  NSPoint p = [b convertPoint:NSMakePoint(NSMidX(b.bounds), NSMidY(b.bounds)) toView:nil];
+  NSView* frameView = win.contentView.superview ?: win.contentView;  // the window hit-tests from its frame view
+  NSView* hit = [frameView hitTest:p];
+  NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+  NSEvent* (^event)(NSEventType) = ^NSEvent*(NSEventType type) {
+    return [NSEvent mouseEventWithType:type location:p modifierFlags:0 timestamp:now windowNumber:win.windowNumber
+                               context:nil eventNumber:0 clickCount:1 pressure:type == NSEventTypeLeftMouseDown ? 1 : 0];
+  };
+  [NSApp postEvent:event(NSEventTypeLeftMouseUp) atStart:NO];  // the press's tracking loop reads the release
+  PressViewForTest(hit, event(NSEventTypeLeftMouseDown));
+  while ([NSApp nextEventMatchingMask:NSEventMaskLeftMouseUp untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES]) {
+  }  // a view that didn't track the press leaves the release behind
+  return hit == b ? @"button" : hit ? NSStringFromClass(hit.class) : @"nothing";
+}
+
+- (NSString*)dragInWindowForTest:(NSWindow*)win fromScreen:(NSPoint)from toScreen:(NSPoint)to {
+  if (!win) return @"nowindow";
+  NSEvent* (^event)(NSEventType, NSPoint) = ^NSEvent*(NSEventType type, NSPoint screen) {
+    return [NSEvent mouseEventWithType:type location:[win convertPointFromScreen:screen] modifierFlags:0
+                             timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:win.windowNumber context:nil
+                           eventNumber:0 clickCount:1 pressure:type == NSEventTypeLeftMouseUp ? 0 : 1];
+  };
+  NSView* frameView = win.contentView.superview ?: win.contentView;
+  NSView* hit = [frameView hitTest:[win convertPointFromScreen:from]];
+  if (!hit) return @"nothing";
+  [NSApp postEvent:event(NSEventTypeLeftMouseUp, to) atStart:NO];  // for a view that tracks the press in a loop
+  [hit mouseDown:event(NSEventTypeLeftMouseDown, from)];
+  for (int i = 1; i <= 8; ++i) {  // each move is placed against the window as it is now (it may resize)
+    NSPoint p = NSMakePoint(from.x + (to.x - from.x) * i / 8, from.y + (to.y - from.y) * i / 8);
+    [hit mouseDragged:event(NSEventTypeLeftMouseDragged, p)];
+  }
+  [hit mouseUp:event(NSEventTypeLeftMouseUp, to)];
+  while ([NSApp nextEventMatchingMask:NSEventMaskLeftMouseUp untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES]) {
+  }
+  return NSStringFromClass(hit.class);
+}
+
+- (NSWindow*)floatingControlsWindow { return _float.controlsWindow; }
+
+- (NSWindow*)topWindowAtScreenPointForTest:(NSPoint)point {
+  for (NSNumber* n in [NSWindow windowNumbersWithOptions:0]) {  // front to back
+    NSWindow* win = [NSApp windowWithWindowNumber:n.integerValue];
+    if (win.isVisible && NSPointInRect(point, win.frame)) return win;
+  }
+  return nil;
+}
+- (NSString*)clickAtScreenForTest:(NSPoint)point {
+  NSWindow* win = [self topWindowAtScreenPointForTest:point];
+  if (!win) return @"nowindow";
+  NSPoint p = [win convertPointFromScreen:point];
+  NSView* frameView = win.contentView.superview ?: win.contentView;
+  NSView* hit = [frameView hitTest:p];
+  if (!hit) return [NSStringFromClass(win.class) stringByAppendingString:@":nothing"];
+  NSEvent* (^event)(NSEventType) = ^NSEvent*(NSEventType type) {
+    return [NSEvent mouseEventWithType:type location:p modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime
+                          windowNumber:win.windowNumber context:nil eventNumber:0 clickCount:1
+                              pressure:type == NSEventTypeLeftMouseDown ? 1 : 0];
+  };
+  [NSApp postEvent:event(NSEventTypeLeftMouseUp) atStart:NO];
+  PressViewForTest(hit, event(NSEventTypeLeftMouseDown));
+  while ([NSApp nextEventMatchingMask:NSEventMaskLeftMouseUp untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES]) {
+  }
+  return [NSString stringWithFormat:@"%@:%@", NSStringFromClass(win.class), NSStringFromClass(hit.class)];
+}
+- (NSButton*)sidebarToggleButton {
+  for (NSView* v in _sidebarNav.subviews)
+    if ([v isKindOfClass:NSButton.class] && ((NSButton*)v).action == @selector(toggleSidebar:)) return (NSButton*)v;
+  return nil;
+}
+- (NSPoint)sidebarToggleScreenPoint {
+  NSButton* b = [self sidebarToggleButton];
+  if (!b.window) return NSMakePoint(-99999, -99999);
+  return [b.window convertPointToScreen:[b convertPoint:NSMakePoint(NSMidX(b.bounds), NSMidY(b.bounds)) toView:nil]];
+}
+- (NSWindow*)sidebarToggleWindow { return [self sidebarToggleButton].window; }
+- (CGFloat)pageCardCornerRadius { return _content.layer.cornerRadius; }
+- (void)setSitePromptRememberForTest:(BOOL)on { _sitePromptRemember.state = on ? NSControlStateValueOn : NSControlStateValueOff; }
+- (NSPoint)sitePromptButtonScreenPoint:(BOOL)allow {
+  NSMutableArray<NSView*>* todo = [NSMutableArray arrayWithObject:_siteAlert.contentViewController.view ?: [NSView new]];
+  while (todo.count) {
+    NSView* v = todo.lastObject;
+    [todo removeLastObject];
+    if ([v isKindOfClass:NSButton.class] && ((NSButton*)v).action == @selector(sitePromptButton:) && v.tag == (allow ? 1 : 0) && v.window)
+      return [v.window convertPointToScreen:[v convertPoint:NSMakePoint(NSMidX(v.bounds), NSMidY(v.bounds)) toView:nil]];
+    [todo addObjectsFromArray:v.subviews];
+  }
+  return NSMakePoint(-99999, -99999);
+}
+
+- (CGFloat)sidebarWidth { return NSWidth(_sidebar.frame); }
+// Arc's sidebar resize: the sidebar and everything in it take the new width, and the page card moves over.
+- (CGFloat)maxSidebarWidth {  // Arc's limit, but always leaving the page some room in a narrow window
+  return MAX(kSidebarMinWidth, MIN(kSidebarMaxWidth, NSWidth(self.window.contentView.bounds) - 360));
+}
+- (void)setSidebarWidth:(CGFloat)width {
+  width = round(MIN([self maxSidebarWidth], MAX(kSidebarMinWidth, width)));
+  if (width == _sidebarWidth && NSWidth(_sidebar.frame) == width) return;
+  _sidebarWidth = width;
+  NSRect f = _sidebar.frame;
+  f.size.width = width;
+  _sidebar.frame = f;  // the bars and cards follow (autoresizing); the list, header and favorites in layoutSidebar
+  [self layoutSidebar];
+  [self layoutMediaCard];
+  [self layoutPillButtons];
+  [self layoutContentArea];
+  [self positionWindowButtons];
+}
+// The width is kept per window: the main window's in the settings (the next launch opens at it, and so do new
+// windows), the others' in Windows.json.
+- (void)saveSidebarWidth {
+  if ([self isMainWindowController]) SettingSetObject(@"sidebarWidth", @(_sidebarWidth));
+  else [MainWindowController saveWindowState];
+}
+- (NSString*)sidebarEdgeState {
+  NSWindow* win = self.window;
+  NSPoint p = NSMakePoint(_sidebarWidth - 1, NSHeight(win.contentView.bounds) / 2);
+  NSView* frameView = win.contentView.superview ?: win.contentView;
+  BOOL handle = _sidebarEdge.superview && !_sidebarEdge.hidden && [frameView hitTest:p] == _sidebarEdge;
+  return [NSString stringWithFormat:@"handle=%d cursor=%d", handle,
+                                    handle && _sidebarEdge.cursor == NSCursor.resizeLeftRightCursor];
+}
+
+// Tests: everything in the sidebar fits its width at the current size (tabs, pinned, the pill, the mini player,
+// the bottom bar, the top icons), and the page card starts after it.
+- (NSString*)sidebarLayoutState {
+  CGFloat W = NSWidth(_sidebar.frame), inner = W - 17;
+  NSMutableArray* bad = [NSMutableArray array];
+  auto check = [&](NSString* name, NSView* v, BOOL fullWidth) {
+    if (!v) return;
+    NSRect f = [v convertRect:v.bounds toView:_sidebar];
+    if (NSMinX(f) < -0.5 || NSMaxX(f) > W + 0.5 || (fullWidth && fabs(NSWidth(f) - inner) > 1)) [bad addObject:name];
+  };
+  check(@"pill", _addressPill, YES);
+  check(@"tabs", _sidebarScroll, YES);
+  check(@"miniPlayer", _mediaBar, YES);
+  check(@"bottomBar", _spaceBar, YES);
+  check(@"header", _spaceHeader, YES);
+  check(@"meeting", _meetingBar, YES);
+  check(@"update", _updateBanner, YES);
+  for (NSView* v in _spaceBar.subviews) check(@"bottomBarIcon", v, NO);
+  for (NSView* v in _sidebarNav.subviews) check(@"navIcon", v, NO);
+  for (NSView* v in _mediaBar.subviews) if (!v.hidden) check(@"miniPlayerControl", v, NO);
+  for (NSView* v in _addressPill.subviews) if (!v.hidden) check(@"pillPart", v, NO);
+  if (!_favGrid.hidden) check(@"pinned", _favGrid, YES);
+  // Each tab row's content (title, close button) inside the list's visible width.
+  CGFloat listRight = NSMaxX(_sidebarScroll.frame);
+  if (fabs(NSWidth(_sidebarScroll.contentView.bounds) - inner) > 1) [bad addObject:@"listWidth"];
+  for (NSInteger r = 0; r < _outline.numberOfRows; ++r) {
+    NSView* cell = [_outline viewAtColumn:0 row:r makeIfNecessary:NO];
+    if (!cell || cell.hidden || NSWidth(cell.frame) <= 0) continue;
+    NSRect f = [cell convertRect:cell.bounds toView:_sidebar];
+    if (NSMaxX(f) > listRight + 1) { [bad addObject:[NSString stringWithFormat:@"row%ld(%.0f>%.0f)", (long)r, NSMaxX(f), listRight]]; break; }
+  }
+  NSView* back = _navBack;  // Arc keeps back / forward / reload at the right end
+  if (back && fabs(NSMaxX([back convertRect:back.bounds toView:_sidebar]) - (W - 77)) > 1.5) [bad addObject:@"navRight"];
+  if (!_sidebar.hidden && NSMinX(_content.frame) < W - 0.5) [bad addObject:@"card"];
+  return [NSString stringWithFormat:@"fits=%d width=%.0f bad=%@", bad.count == 0, W, [bad componentsJoinedByString:@","]];
 }
 - (void)setMediaArtworkForTest:(NSImage*)image url:(NSString*)url {
   if (image && url.length) [MediaArtworkCache() setObject:image forKey:url];
@@ -9124,6 +9389,7 @@ static NSArray<NSString*>* NewSpaceSwatches() {
   [self layoutContentArea];
   [self positionWindowButtons];
   [self updateEdgeStrip];
+  [self saveSidebarHidden];
   _lastSidebarMotion = @"none";
   if (ReduceMotion()) return;
   CASpringAnimation* (^spring)(NSString*, id, id) = ^CASpringAnimation*(NSString* key, id from, id to) {
@@ -9136,7 +9402,7 @@ static NSArray<NSString*>* NewSpaceSwatches() {
     a.duration = a.settlingDuration;
     return a;
   };
-  CGFloat w = NSWidth(_sidebar.frame) ?: kSidebarWidth;
+  CGFloat w = NSWidth(_sidebar.frame) ?: _sidebarWidth;
   BOOL slid = NO;
   if (ghost) {
     [self.window.contentView.layer addSublayer:ghost];
@@ -9197,9 +9463,34 @@ static NSArray<NSString*>* NewSpaceSwatches() {
   NSView* root = self.window.contentView;
   CGFloat H = root.bounds.size.height;
   [_sidebar removeFromSuperview];
-  [root addSubview:_sidebar positioned:NSWindowAbove relativeTo:nil];  // above the page card
   _sidebar.wantsLayer = YES;
-  _sidebar.frame = NSMakeRect(6, 6, kSidebarWidth, H - 12);
+  if (ChromePagesEnabled()) {
+    // Chrome-style pages are windows of their own over this one: the floating sidebar gets a window above them
+    // (in this window's view it was under the page, so it couldn't be seen or clicked).
+    const CGFloat pad = 24;  // room for its shadow
+    if (!_peekPanel) {
+      _peekPanel = [[NSPanel alloc] initWithContentRect:NSZeroRect
+                                              styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel
+                                                backing:NSBackingStoreBuffered
+                                                  defer:NO];
+      _peekPanel.opaque = NO;
+      _peekPanel.backgroundColor = NSColor.clearColor;
+      _peekPanel.hasShadow = NO;
+      _peekPanel.releasedWhenClosed = NO;
+      _peekPanel.becomesKeyOnlyIfNeeded = YES;
+      _peekPanel.acceptsMouseMovedEvents = YES;
+      _peekPanel.contentView = [[NSView alloc] initWithFrame:NSZeroRect];
+    }
+    NSRect inWindow = NSMakeRect(6 - pad, 6 - pad, _sidebarWidth + 2 * pad, H - 12 + 2 * pad);
+    [_peekPanel setFrame:[self.window convertRectToScreen:inWindow] display:NO];
+    [_peekPanel.contentView addSubview:_sidebar];
+    _sidebar.frame = NSMakeRect(pad, pad, _sidebarWidth, H - 12);
+    if (_peekPanel.parentWindow) [self.window removeChildWindow:_peekPanel];
+    [self.window addChildWindow:_peekPanel ordered:NSWindowAbove];  // the last child added: above the pages
+  } else {
+    [root addSubview:_sidebar positioned:NSWindowAbove relativeTo:nil];  // above the page card
+    _sidebar.frame = NSMakeRect(6, 6, _sidebarWidth, H - 12);
+  }
   NSColor* bg = _space.themeColors.count ? ColorFromHex(_space.themeColors.firstObject) : nil;
   if (!bg) bg = IsDark(root) ? ColorFromHex(@"#120C39") : [NSColor colorWithSRGBRed:0.93 green:0.92 blue:0.97 alpha:1];
   _sidebar.layer.backgroundColor = bg.CGColor;
@@ -9217,7 +9508,7 @@ static NSArray<NSString*>* NewSpaceSwatches() {
   [self positionWindowButtons];
   if (!ReduceMotion()) {
     CABasicAnimation* slide = [CABasicAnimation animationWithKeyPath:@"transform.translation.x"];
-    slide.fromValue = @(-(kSidebarWidth + 12));
+    slide.fromValue = @(-(_sidebarWidth + 12));
     slide.toValue = @0;
     slide.duration = 0.22;
     slide.timingFunction = [CAMediaTimingFunction functionWithControlPoints:0.2 :0.9 :0.3 :1];
@@ -9230,8 +9521,7 @@ static NSArray<NSString*>* NewSpaceSwatches() {
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
         MainWindowController* me = weakSelf;
         if (!me || !me->_sidebarPeeking) return;
-        NSPoint p = [me->_sidebar convertPoint:me.window.mouseLocationOutsideOfEventStream fromView:nil];
-        if (!NSPointInRect(p, NSInsetRect(me->_sidebar.bounds, -8, -8)) && !me->_commandBar.isVisible) [me endSidebarPeek];
+        if (![me pointIsOverPeek:NSEvent.mouseLocation] && !me->_commandBar.isVisible) [me endSidebarPeek];
       });
     };
   }
@@ -9248,20 +9538,90 @@ static NSArray<NSString*>* NewSpaceSwatches() {
   if (_peekArea) [_sidebar removeTrackingArea:_peekArea];
   _peekArea = nil;
   _sidebar.hidden = YES;
+  if (_peekPanel && _sidebar.window == _peekPanel) {  // back into this window, under the page card as at launch
+    [_sidebar removeFromSuperview];
+    [self.window.contentView addSubview:_sidebar positioned:NSWindowBelow relativeTo:_content];
+    [self.window removeChildWindow:_peekPanel];
+    [_peekPanel orderOut:nil];
+  }
   _sidebar.layer.backgroundColor = nil;
   _sidebar.layer.cornerRadius = 0;
   _sidebar.layer.borderWidth = 0;
   _sidebar.layer.shadowOpacity = 0;
   _sidebar.shadow = nil;
-  _sidebar.frame = NSMakeRect(0, 0, kSidebarWidth, self.window.contentView.bounds.size.height);
+  _sidebar.frame = NSMakeRect(0, 0, _sidebarWidth, self.window.contentView.bounds.size.height);
   [self layoutSidebar];
   [self positionWindowButtons];
   [self updateEdgeStrip];
 }
+// Arc: with the sidebar hidden, the pointer at the window's far left edge slides it out; moving off it hides it again.
+// Watches pointer moves in this window and its page windows (a strip view's tracking area never fired over a
+// Chrome-style page, which is a window of its own covering the edge).
+- (void)startPointerMonitor {
+  if (_pointerMonitor) return;
+  self.window.acceptsMouseMovedEvents = YES;
+  __weak MainWindowController* weakSelf = self;
+  _pointerMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskMouseMoved | NSEventMaskLeftMouseDragged
+                                                          handler:^NSEvent*(NSEvent* e) {
+                                                            [weakSelf pointerMoved:e];
+                                                            return e;
+                                                          }];
+}
+- (void)stopPointerMonitor {
+  if (_pointerMonitor) [NSEvent removeMonitor:_pointerMonitor];
+  _pointerMonitor = nil;
+}
+- (BOOL)ownsWindow:(NSWindow*)w {
+  for (NSWindow* p = w; p; p = p.parentWindow)
+    if (p == self.window) return YES;
+  return NO;
+}
+- (BOOL)pointIsOverPeek:(NSPoint)screen {
+  NSRect r = [_sidebar.window convertRectToScreen:[_sidebar convertRect:_sidebar.bounds toView:nil]];
+  return NSPointInRect(screen, NSInsetRect(r, -8, -8));
+}
+- (void)pointerMoved:(NSEvent*)e {
+  if (!_sidebar.hidden && !_sidebarPeeking) return;  // docked: nothing to do
+  if (_focusMode || ![self ownsWindow:e.window]) return;
+  NSPoint p = [e.window convertPointToScreen:e.locationInWindow];
+  NSRect f = self.window.frame;
+  if (!_sidebarPeeking) {
+    if (p.x <= NSMinX(f) + 6 && p.x >= NSMinX(f) - 1 && p.y >= NSMinY(f) && p.y <= NSMaxY(f)) [self beginSidebarPeek];
+    return;
+  }
+  if ([self pointIsOverPeek:p] || _commandBar.isVisible) { _peekLeavePending = NO; return; }
+  if (_peekLeavePending) return;
+  _peekLeavePending = YES;  // a moment's grace, as Arc: crossing the gap back doesn't drop it
+  __weak MainWindowController* weakSelf = self;
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.25 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+    MainWindowController* me = weakSelf;
+    if (!me || !me->_peekLeavePending) return;
+    me->_peekLeavePending = NO;
+    if (me->_sidebarPeeking) [me endSidebarPeek];
+  });
+}
+
+// Hidden or docked is kept per window: the main window's in the settings, the others' in Windows.json.
+- (void)saveSidebarHidden {
+  if (_restoringWindowState || _focusMode) return;  // focus mode hides it for a while; that isn't the choice
+  if ([self isMainWindowController]) SettingSetBool(@"sidebarHidden", _sidebar.hidden);
+  else [MainWindowController saveWindowState];
+}
+- (void)applySavedSidebarHidden:(BOOL)hidden {
+  if (hidden == [self sidebarCollapsed]) return;
+  _restoringWindowState = YES;
+  if (_sidebarPeeking) [self endSidebarPeek];
+  _sidebar.hidden = hidden;
+  [self layoutContentArea];
+  [self positionWindowButtons];
+  [self updateEdgeStrip];
+  _restoringWindowState = NO;
+}
+
 - (NSString*)sidebarPeekState {  // tests (V23)
   return [NSString stringWithFormat:@"peeking=%d strip=%d floating=%d radius=%.0f shadow=%.2f cardFull=%d", _sidebarPeeking,
                                     _edgeStrip.superview != nil, _sidebarPeeking && !_sidebar.hidden, _sidebar.layer.cornerRadius,
-                                    _sidebar.layer.shadowOpacity, NSMinX(_content.frame) == 0];
+                                    _sidebar.layer.shadowOpacity, NSMinX(_content.frame) <= kCardInsetSide + 0.5];
 }
 - (void)beginSidebarPeekForTest { [self beginSidebarPeek]; }
 - (void)endSidebarPeekForTest { [self endSidebarPeek]; }
@@ -9269,7 +9629,7 @@ static NSArray<NSString*>* NewSpaceSwatches() {
 // Page area = window minus the sidebar (if shown) minus the toolbar (if shown).
 - (void)layoutContentArea {
   NSRect b = self.window.contentView.bounds;
-  CGFloat x = [self sidebarCollapsed] ? 0 : kSidebarWidth;
+  CGFloat x = [self sidebarCollapsed] ? 0 : _sidebarWidth;
   BOOL bar = SettingBool(kSettingShowToolbar) && !_focusMode;
   _toolbar.hidden = !bar;
   CGFloat top = bar ? kToolbarHeight : 0;
@@ -9286,14 +9646,22 @@ static NSArray<NSString*>* NewSpaceSwatches() {
   }
   _address.frame = NSMakeRect(bx + 6, 7, _toolbar.bounds.size.width - bx - 16, 24);
   // Card insets; with no sidebar (and in focus mode) the page fills the window, as in Arc.
-  BOOL card = ![self sidebarCollapsed];
+  // Arc 1.169: with the sidebar hidden the card keeps an even margin all round (kCardInsetSide); only focus mode
+  // lets the page fill the window.
+  BOOL card = !_focusMode, alone = [self sidebarCollapsed];
   [self updateEdgeStrip];
-  CGFloat left = card ? 0 : 0, right = card ? kCardInsetSide : 0, bottom = card ? kCardInsetBottom : 0;
-  CGFloat topInset = card && !bar ? kCardInsetTop : 0;
+  CGFloat left = card && alone ? kCardInsetSide : 0, right = card ? kCardInsetSide : 0,
+          bottom = card ? (alone ? kCardInsetSide : kCardInsetBottom) : 0;
+  CGFloat topInset = card && !bar ? (alone ? kCardInsetSide : kCardInsetTop) : 0;
   _content.layer.cornerRadius = card ? kCardRadius : 0;
   _content.frame = NSMakeRect(x + left, bottom, b.size.width - x - left - right, b.size.height - top - topInset - bottom);
   _cardEdge.frame = _content.frame;
   _cardEdge.hidden = !card;
+  _sidebarEdge.frame = NSMakeRect(x - 4, 0, 8, b.size.height - 40);  // not over the window's top bar icons
+  _sidebarEdge.hidden = [self sidebarCollapsed] || _focusMode;
+  if (_sidebarEdge.superview && _sidebarEdge != _sidebarEdge.superview.subviews.lastObject && !_sidebarPeeking)
+    [_sidebarEdge.superview addSubview:_sidebarEdge positioned:NSWindowAbove relativeTo:nil];
+  [self.window invalidateCursorRectsForView:_sidebarEdge];
   _cardEdge.needsDisplay = YES;
   [self updateToolbarAddress];
   [self layoutPanes];
@@ -9551,9 +9919,8 @@ static NSArray<NSString*>* NewSpaceSwatches() {
   } else if (_sidebar.hidden && !_sidebarWasHidden) {
     [self toggleSidebar:nil];
   }
-  for (NSWindowButton b : {NSWindowCloseButton, NSWindowMiniaturizeButton, NSWindowZoomButton})
-    [self.window standardWindowButton:b].hidden = _focusMode;
   [self layoutContentArea];
+  [self positionWindowButtons];  // the window buttons: hidden in focus mode and with the sidebar
 }
 - (ArcItem*)shownItem { return _shown; }
 
@@ -12158,7 +12525,7 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
 // Renders the sidebar (theme backdrop included) to a PNG, for comparing with Arc screenshots.
 - (BOOL)writeSidebarSnapshot:(NSString*)path {
   NSView* root = self.window.contentView;
-  NSRect r = NSMakeRect(0, 0, kSidebarWidth, root.bounds.size.height);
+  NSRect r = NSMakeRect(0, 0, _sidebarWidth, root.bounds.size.height);
   NSBitmapImageRep* rep = [root bitmapImageRepForCachingDisplayInRect:r];
   [root cacheDisplayInRect:r toBitmapImageRep:rep];
   NSData* png = [rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
@@ -12651,7 +13018,7 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
 - (LibraryPanelView*)libraryPanel {
   if (_library) return _library;
   __weak MainWindowController* weakSelf = self;
-  _library = [[LibraryPanelView alloc] initWithFrame:NSMakeRect(8, 42, kSidebarWidth - 17, 300)];
+  _library = [[LibraryPanelView alloc] initWithFrame:NSMakeRect(8, 42, _sidebarWidth - 17, 300)];
   _library.archiveProvider = ^NSArray<ArchivedTab*>* { return [weakSelf archivedTabs]; };
   _library.reopen = ^(ArchivedTab* tab) {
     [weakSelf reopenArchivedTab:tab];
@@ -13262,6 +13629,8 @@ static BOOL LibraryIsMediaFile(NSString* path) {
 
 - (void)closeSecondaryWindow {
   [gWindows removeObject:self];
+  [self stopPointerMonitor];
+  [_peekPanel orderOut:nil];
   [MainWindowController saveWindowState];  // closed by hand: it doesn't come back (skipped while quitting)
   [_mediaTimer invalidate];
   _mediaTimer = nil;
@@ -13298,6 +13667,8 @@ static BOOL LibraryIsMediaFile(NSString* path) {
     d[@"space"] = w->_space.spaceID;
     if (w->_shown.itemID) d[@"item"] = w->_shown.itemID;
     d[@"frame"] = NSStringFromRect(w.window.frame);
+    d[@"sidebarWidth"] = @(w->_sidebarWidth);
+    d[@"sidebarHidden"] = @(w->_sidebar.hidden || w->_sidebarPeeking);
     [out addObject:d];
   }
   return out;
@@ -13340,6 +13711,9 @@ static BOOL LibraryIsMediaFile(NSString* path) {
     MainWindowController* w = [[MainWindowController alloc] initSecondaryFrom:main space:space];
     NSRect f = [d[@"frame"] isKindOfClass:NSString.class] ? NSRectFromString(d[@"frame"]) : NSZeroRect;
     if (f.size.width >= 400 && f.size.height >= 300) [w.window setFrame:f display:NO];
+    if ([d[@"sidebarWidth"] respondsToSelector:@selector(doubleValue)] && [d[@"sidebarWidth"] doubleValue] > 0)
+      [w setSidebarWidth:[d[@"sidebarWidth"] doubleValue]];  // its own width
+    if ([d[@"sidebarHidden"] respondsToSelector:@selector(boolValue)]) [w applySavedSidebarHidden:[d[@"sidebarHidden"] boolValue]];
     // A tab already on screen in the main window stays there.
     if (item.url.length && item != main->_shown && ![main->_splitItems containsObject:item]) [w showItem:item];
     [opened addObject:w];

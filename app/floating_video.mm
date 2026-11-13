@@ -4,6 +4,8 @@
 const CGFloat kFloatingVideoWidth = 222;
 const CGFloat kFloatingVideoRadius = 6;
 const NSPoint kFloatingVideoOffset = {20, 98};
+const CGFloat kFloatingVideoMinWidth = 200;
+const CGFloat kFloatingVideoMaxWidth = 640;
 
 // Measured from Omar's Arc 1.169 screenshot of the hovered float (1x): 28 pt rounded-square buttons 10 pt in from
 // the corners, the site centred between them, a 36 pt pause/play in the middle and a 4 pt bar 10 pt above the bottom.
@@ -59,17 +61,31 @@ NSWindow* FindPictureInPictureWindow(NSArray<NSWindow*>* windows, NSSet<NSWindow
 - (void)mouseDragged:(NSEvent*)e { [self seekTo:e]; }
 @end
 
-// Covers the video: hover shows the controls; dragging anywhere else moves the float.
+// Covers the video: hover shows the controls; dragging an edge or corner resizes the float (Arc), dragging anywhere
+// else moves it.
+enum FloatEdges { kEdgeLeft = 1, kEdgeRight = 2, kEdgeBottom = 4, kEdgeTop = 8 };
+static const CGFloat kResizeBand = 8;  // how far in from the edge a press resizes
 @interface FloatControlsView : NSView
 @property(nonatomic, weak) FloatingVideo* owner;
 @property(nonatomic) NSPoint dragStart;
 @property(nonatomic) NSPoint originAtDragStart;
+@property(nonatomic) NSRect frameAtDragStart;
+@property(nonatomic) int edges;  // what the press is resizing (0: it moves the float)
+- (int)edgesAtPoint:(NSPoint)p;
+- (NSCursor*)cursorAtPoint:(NSPoint)p;
 @end
 
 @interface FloatingVideo ()
 @property(nonatomic) BOOL dragged;
 - (void)controlsViewMoved:(NSPoint)delta;
+- (void)resizeFrom:(NSRect)start edges:(int)edges dx:(CGFloat)dx dy:(CGFloat)dy;
+- (void)resizeEnded;
 @end
+
+// Where the pointer is on screen for this event (also for events made by tests, which don't move the real pointer).
+static NSPoint ScreenPoint(NSEvent* e) {
+  return e.window ? [e.window convertPointToScreen:e.locationInWindow] : [NSEvent mouseLocation];
+}
 
 @implementation FloatControlsView
 - (BOOL)acceptsFirstMouse:(NSEvent*)event { return YES; }
@@ -85,14 +101,58 @@ NSWindow* FindPictureInPictureWindow(NSArray<NSWindow*>* windows, NSSet<NSWindow
 }
 - (void)mouseEntered:(NSEvent*)e { self.owner.hovered = YES; }
 - (void)mouseExited:(NSEvent*)e { self.owner.hovered = NO; }
+- (int)edgesAtPoint:(NSPoint)p {
+  NSRect b = self.bounds;
+  int edges = 0;
+  if (p.x < kResizeBand) edges |= kEdgeLeft;
+  else if (p.x > NSWidth(b) - kResizeBand) edges |= kEdgeRight;
+  if (p.y < kResizeBand) edges |= kEdgeBottom;
+  else if (p.y > NSHeight(b) - kResizeBand) edges |= kEdgeTop;
+  return NSPointInRect(p, b) ? edges : 0;
+}
+- (NSCursor*)cursorAtPoint:(NSPoint)p {
+  int e = [self edgesAtPoint:p];
+  if (!e) return nil;
+  BOOL h = e & (kEdgeLeft | kEdgeRight), v = e & (kEdgeTop | kEdgeBottom);
+  if (h && v) {
+    if (@available(macOS 15.0, *)) {
+      NSCursorFrameResizePosition pos = (NSCursorFrameResizePosition)((e & kEdgeTop ? NSCursorFrameResizePositionTop : NSCursorFrameResizePositionBottom) |
+                                        (e & kEdgeLeft ? NSCursorFrameResizePositionLeft : NSCursorFrameResizePositionRight));
+      return [NSCursor frameResizeCursorFromPosition:pos inDirections:NSCursorFrameResizeDirectionsAll];
+    }
+    return NSCursor.crosshairCursor;
+  }
+  return h ? NSCursor.resizeLeftRightCursor : NSCursor.resizeUpDownCursor;
+}
+- (void)resetCursorRects {
+  NSRect b = self.bounds;
+  CGFloat W = NSWidth(b), H = NSHeight(b), k = kResizeBand;
+  NSRect rects[] = {NSMakeRect(0, 0, k, k), NSMakeRect(W - k, 0, k, k), NSMakeRect(0, H - k, k, k), NSMakeRect(W - k, H - k, k, k),
+                    NSMakeRect(k, 0, W - 2 * k, k), NSMakeRect(k, H - k, W - 2 * k, k), NSMakeRect(0, k, k, H - 2 * k),
+                    NSMakeRect(W - k, k, k, H - 2 * k)};
+  for (NSRect r : rects) {
+    NSCursor* c = [self cursorAtPoint:NSMakePoint(NSMidX(r), NSMidY(r))];
+    if (c) [self addCursorRect:r cursor:c];
+  }
+}
 - (void)mouseDown:(NSEvent*)e {
-  self.dragStart = [NSEvent mouseLocation];
-  self.originAtDragStart = self.owner.videoWindow.frame.origin;
+  self.dragStart = ScreenPoint(e);
+  self.edges = [self edgesAtPoint:[self convertPoint:e.locationInWindow fromView:nil]];
+  self.frameAtDragStart = self.owner.visibleFrame;
+  // Where the video shows (Chromium's window is taller): starting from Chromium's origin made it jump on every drag.
+  self.originAtDragStart = self.owner.visibleFrame.origin;
 }
 - (void)mouseDragged:(NSEvent*)e {
-  NSPoint now = [NSEvent mouseLocation];
-  [self.owner controlsViewMoved:NSMakePoint(self.originAtDragStart.x + now.x - self.dragStart.x,
-                                            self.originAtDragStart.y + now.y - self.dragStart.y)];
+  NSPoint now = ScreenPoint(e);
+  CGFloat dx = now.x - self.dragStart.x, dy = now.y - self.dragStart.y;
+  if (self.edges) [self.owner resizeFrom:self.frameAtDragStart edges:self.edges dx:dx dy:dy];
+  else [self.owner controlsViewMoved:NSMakePoint(self.originAtDragStart.x + dx, self.originAtDragStart.y + dy)];
+}
+- (void)mouseUp:(NSEvent*)e {
+  if (!self.edges) return;
+  [self mouseDragged:e];
+  self.edges = 0;
+  [self.owner resizeEnded];
 }
 @end
 
@@ -113,6 +173,7 @@ NSWindow* FindPictureInPictureWindow(NSArray<NSWindow*>* windows, NSSet<NSWindow
 - (instancetype)initWithVideoWindow:(NSWindow*)window {
   if (!(self = [super init])) return nil;
   _video = window;
+  _width = kFloatingVideoWidth;
   _aspect = NSWidth(window.frame) > 0 ? NSHeight(window.frame) / NSWidth(window.frame) : 9.0 / 16;
   // Only the video shows, with Arc's corners (a rounded mask on Chromium's content); NotArc's controls take the pointer.
   window.opaque = NO;
@@ -229,17 +290,63 @@ NSWindow* FindPictureInPictureWindow(NSArray<NSWindow*>* windows, NSSet<NSWindow
 - (void)placeOver:(NSWindow*)parent {
   if (!parent || !_video) return;
   _applying = YES;
-  NSRect f = _video.frame;
-  CGFloat w = kFloatingVideoWidth, h = round(kFloatingVideoWidth * _aspect);
   NSPoint origin = self.dragged ? _visibleFrame.origin
                                 : NSMakePoint(NSMinX(parent.frame) + kFloatingVideoOffset.x, NSMinY(parent.frame) + kFloatingVideoOffset.y);
-  _visibleFrame = NSMakeRect(origin.x, origin.y, w, h);
-  NSRect target = NSInsetRect(_visibleFrame, 0, -kHiddenBar);
-  if (!NSEqualRects(target, f)) [_video setFrame:target display:YES];
-  [self maskVideo];
+  CGFloat w = [self clampedWidth:_width onScreen:parent.screen];
+  [self showAt:[self keptOnScreen:NSMakeRect(origin.x, origin.y, w, round(w * _aspect)) screen:parent.screen]];
   if (_video.parentWindow != parent) [parent addChildWindow:_video ordered:NSWindowAbove];
   [self syncControls];
   _applying = NO;
+}
+
+// Arc's limits, and never bigger than the screen.
+- (CGFloat)clampedWidth:(CGFloat)w onScreen:(NSScreen*)screen {
+  CGFloat maxW = kFloatingVideoMaxWidth;
+  if (screen) maxW = MIN(maxW, MIN(NSWidth(screen.visibleFrame), NSHeight(screen.visibleFrame) / MAX(0.1, _aspect)));
+  return round(MIN(MAX(kFloatingVideoMinWidth, maxW), MAX(kFloatingVideoMinWidth, w)));
+}
+- (NSRect)keptOnScreen:(NSRect)r screen:(NSScreen*)screen {
+  if (!screen) return r;
+  NSRect vis = screen.visibleFrame;
+  r.origin.x = MIN(MAX(NSMinX(r), NSMinX(vis)), NSMaxX(vis) - NSWidth(r));
+  r.origin.y = MIN(MAX(NSMinY(r), NSMinY(vis)), NSMaxY(vis) - NSHeight(r));
+  return r;
+}
+- (void)showAt:(NSRect)visible {
+  _visibleFrame = visible;
+  _width = NSWidth(visible);
+  NSRect target = NSInsetRect(_visibleFrame, 0, -kHiddenBar);
+  if (!NSEqualRects(target, _video.frame)) [_video setFrame:target display:YES];
+  [self maskVideo];
+}
+
+// Arc's float resize: the size follows the pointer, keeping the video's shape and the corner (or edge) across from
+// the one being dragged, within Arc's limits and the screen.
+- (void)resizeFrom:(NSRect)start edges:(int)edges dx:(CGFloat)dx dy:(CGFloat)dy {
+  CGFloat w = NSWidth(start);
+  CGFloat byX = edges & kEdgeRight ? NSWidth(start) + dx : edges & kEdgeLeft ? NSWidth(start) - dx : 0;
+  CGFloat byY = edges & kEdgeTop ? (NSHeight(start) + dy) / _aspect : edges & kEdgeBottom ? (NSHeight(start) - dy) / _aspect : 0;
+  if (byX && byY) w = fabs(byX - NSWidth(start)) >= fabs(byY - NSWidth(start)) ? byX : byY;
+  else w = byX ?: byY ?: w;
+  NSScreen* screen = _video.parentWindow ? _video.parentWindow.screen : _video.screen;
+  w = [self clampedWidth:w onScreen:screen];
+  CGFloat h = round(w * _aspect);
+  NSRect r = NSMakeRect(edges & kEdgeLeft ? NSMaxX(start) - w : NSMinX(start), edges & kEdgeBottom ? NSMaxY(start) - h : NSMinY(start), w, h);
+  r = [self keptOnScreen:r screen:screen];
+  if (!NSEqualPoints(r.origin, start.origin)) self.dragged = YES;  // it no longer sits at Arc's spot
+  _applying = YES;
+  [self showAt:r];
+  [self syncControls];
+  _applying = NO;
+}
+- (void)resizeEnded {
+  if (self.onResized) self.onResized(_width);
+}
+- (BOOL)showsResizeCursors {  // tests: the corners and edges have resize cursors, the middle none
+  NSRect b = _view.bounds;
+  return [_view cursorAtPoint:NSMakePoint(NSMaxX(b) - 2, NSMaxY(b) - 2)] != nil &&
+         [_view cursorAtPoint:NSMakePoint(1, NSMidY(b))] == NSCursor.resizeLeftRightCursor &&
+         [_view cursorAtPoint:NSMakePoint(NSMidX(b), NSMidY(b))] == nil;
 }
 
 - (void)maskVideo {
@@ -272,6 +379,7 @@ NSWindow* FindPictureInPictureWindow(NSArray<NSWindow*>* windows, NSSet<NSWindow
   if (!NSEqualRects(_controls.frame, _visibleFrame)) [_controls setFrame:_visibleFrame display:YES];
   if (_controls.parentWindow != _video) [_video addChildWindow:_controls ordered:NSWindowAbove];
   [self layoutControls];
+  [_controls invalidateCursorRectsForView:_view];
 }
 
 - (void)controlsViewMoved:(NSPoint)origin {
@@ -325,9 +433,17 @@ NSWindow* FindPictureInPictureWindow(NSArray<NSWindow*>* windows, NSSet<NSWindow
   NSPoint centre = [cv convertPoint:NSMakePoint(NSMidX(cv.bounds), NSMidY(cv.bounds) + 30) toView:cv.superview];
   BOOL hit = _controls.parentWindow == _video && NSEqualRects(_controls.frame, _visibleFrame) && _video.ignoresMouseEvents &&
              [cv hitTest:centre] != nil;
-  return [NSString stringWithFormat:@"hover=%d back=%d site=%@ play=%d minimize=%d close=%d progress=%d hit=%d", on,
-                                    shown(_back), on ? _siteLabel.stringValue : @"", shown(_play), shown(_minimize),
-                                    shown(_close), shown(_bar) && _bar.fraction > 0, hit];
+  // Every control inside the video and none on top of another (the site name may run under minimize, as in Arc).
+  NSArray<NSView*>* parts = @[ _back, _minimize, _close, _play, _bar ];
+  BOOL fits = NSWidth(_siteLabel.frame) > 20;
+  for (NSUInteger i = 0; i < parts.count; ++i) {
+    fits &= NSContainsRect(_view.bounds, parts[i].frame);
+    for (NSUInteger j = i + 1; j < parts.count; ++j) fits &= !NSIntersectsRect(parts[i].frame, parts[j].frame);
+  }
+  return [NSString stringWithFormat:@"hover=%d back=%d site=%@ play=%d minimize=%d close=%d progress=%d hit=%d resizeCursor=%d "
+                                    @"fits=%d", on, shown(_back), on ? _siteLabel.stringValue : @"", shown(_play),
+                                    shown(_minimize), shown(_close), shown(_bar) && _bar.fraction > 0, hit,
+                                    [self showsResizeCursors], fits];
 }
 
 - (void)close {

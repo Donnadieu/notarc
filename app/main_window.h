@@ -32,6 +32,8 @@ NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed 
 @class ThemePickerController;
 @class ArcAlert;
 @class WelcomeView;
+extern const CGFloat kSidebarDefaultWidth, kSidebarMinWidth, kSidebarMaxWidth;  // Arc's
+
 @interface MainWindowController : NSWindowController <NSWindowDelegate>
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID;
 // Self-test: Space profiles live in separate "SelfTest Space ..." folders and Arc cookies are not imported,
@@ -304,6 +306,27 @@ NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed 
 - (void)pressFloatingControl:(NSString*)name;    // "back", "playpause", "minimize", "close"
 - (NSString*)miniPlayerState;                    // tests: "h=64 title=<title>| favicon=1 reopen=1 close=1"
 - (void)pressMiniPlayerControl:(NSString*)name;  // "reopen", "close"
+// Tests: a real click on a mini player button (the window hit-tests its centre, the view there gets the press and
+// release). Returns "button" when it reached that button, else what took the click.
+- (NSString*)clickMiniPlayerControl:(NSString*)name;
+// Tests: a real drag in `win`: the window hit-tests the start, and the view there gets the press, the moves and the
+// release (screen points). Returns the class of the view that took it.
+- (NSString*)dragInWindowForTest:(NSWindow*)win fromScreen:(NSPoint)from toScreen:(NSPoint)to;
+- (NSWindow*)floatingControlsWindow;  // tests: NotArc's controls over the float
+// Tests: a real click at a screen point: it lands in the front-most of NotArc's windows there, which hit-tests it.
+// Returns the class of the view that took it ("<window class>:<view class>").
+- (NSString*)clickAtScreenForTest:(NSPoint)point;
+- (NSWindow*)topWindowAtScreenPointForTest:(NSPoint)point;
+- (NSPoint)sidebarToggleScreenPoint;  // tests: the toggle next to the window buttons
+- (NSWindow*)sidebarToggleWindow;     // tests: the window it's in (the main one, or the floating sidebar's)
+- (CGFloat)pageCardCornerRadius;      // tests
+- (NSPoint)sitePromptButtonScreenPoint:(BOOL)allow;  // tests: the open site request's Allow / Don't Allow
+- (void)setSitePromptRememberForTest:(BOOL)on;        // tests: its "Remember for this site" box
+// Sidebar width (Arc: drag its right edge). Kept per window: the main window's in the settings, others' in Windows.json.
+- (CGFloat)sidebarWidth;
+- (void)setSidebarWidth:(CGFloat)width;
+- (NSString*)sidebarEdgeState;    // tests: "handle=1 cursor=1"
+- (NSString*)sidebarLayoutState;  // tests: "fits=1 ..." when everything in the sidebar fits its width
 - (void)setMediaVolume:(double)volume forItem:(ArcItem*)item;
 - (void)setMediaArtworkForTest:(NSImage*)image url:(NSString*)url;
 - (IBAction)mediaBarPlay:(id)sender;
@@ -383,6 +406,7 @@ NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed 
 - (NSArray<NSString*>*)siteSettingsRows;  // tests: "name=ask|allow|block" for each row, then "secure=0|1"
 - (void)setSitePermission:(NSString*)name value:(NSNumber*)allow forOrigin:(NSString*)origin;  // nil = ask
 - (NSDictionary*)sitePermissionsForOrigin:(NSString*)origin;
+- (void)rememberSite:(NSString*)origin names:(NSArray<NSString*>*)names allow:(BOOL)allow;
 // Command bar suggestions. Each is @{kind, title, subtitle, key} plus the object it acts on; kinds:
 // "go" (typed text), "tab" (switch to an open/pinned tab in any Space), "space", "history", "action" (menu
 // command), "site" (top visited site, shown when the field is empty). Picks are counted and rank higher later.
