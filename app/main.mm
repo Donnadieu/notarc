@@ -2105,7 +2105,8 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
       }
       if (left <= 0 || [h.liveTitle hasPrefix:@"n:"]) {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-          std::printf("SELFTEST-PERMPUSH survived=1 cardsAnswered=%d\n", clicks);
+          std::printf("SELFTEST-PERMPUSH survived=1\n");
+          std::printf("PERMPUSH-DEBUG cards=%d\n", clicks);
           std::printf("PERMPUSH-DEBUG title=%s\n", h.liveTitle.UTF8String ?: "-");
           std::fflush(stdout);
           BrowserClient::SetTestResponse("https://perm-h.example/sw.js", "");
