@@ -7,6 +7,7 @@
 #include <string>
 #include <vector>
 
+#import "app/floating_video.h"
 #import "app/arc_import.h"
 #import "app/arc_alert.h"
 #import "app/theme_picker.h"
@@ -1678,6 +1679,7 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
                                 WaitUntil(^{ [w pollMediaNow]; return t.mediaPlaying; }, 3, ^{
                                   std::printf("SELFTEST-MINIPLAYERREOPEN reopened=%d miniHidden=%d minimized=%d playing=%d\n", reopened,
                                               hiddenWhileFloating, minimized, t.mediaPlaying);
+                                  [self runMiniPlayerReopenClickSelfTest:t done:^{
                                   // I. Another Space on another profile: the sound keeps playing and the mini player stays.
                                   ArcSpace* home = w.currentSpace, *away = nil;
                                   for (ArcSpace* s in w.spaces)
@@ -1705,6 +1707,7 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
                                       });
                                     });
                                   });
+                                  }];
                                 });
                               });
                             });
@@ -1723,8 +1726,263 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
   });
 }
 
+// K. Real clicks on the mini player's Open Picture in Picture (Omar, Nov 13: clicking it did nothing; the checks above
+// call the action directly). The window hit-tests the button's centre like a mouse-down. The float must come back with
+// the same video at the same time, still playing (no reload, no restart), after a minimize, after a close (sound only)
+// and with the video's tab in another Space on another profile.
+- (void)runMiniPlayerReopenClickSelfTest:(ArcItem*)t done:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  BOOL (^floating)(void) = ^BOOL { return w.floatingVideoWindow != nil && w.floatingVideoItem == t; };
+  BOOL (^mini)(void) = ^BOOL {
+    [w pollMediaNow];
+    return (BOOL)(!floating() && w.mediaBarItem == t && t.mediaPlaying);
+  };
+  // Marks the page and its video once, so a reload or a restart of the video shows.
+  [w runJS:@"(()=>{if(window.__reo)return;const v=document.querySelector('video');window.__reo=1;window.__restarts=0;"
+           @"v.__reo=1;['emptied','loadstart','abort'].forEach(e=>v.addEventListener(e,()=>window.__restarts++));})()"
+      inItem:t];
+  // Brings a float up the way that already works (the action itself), for a case whose click came before.
+  void (^toFloat)(void (^)(void)) = ^(void (^then)(void)) {
+    if (floating()) { then(); return; }
+    [w pressMiniPlayerControl:@"reopen"];
+    WaitUntil(floating, 6, then);
+  };
+  void (^clickCase)(NSString*, void (^)(void)) = ^(NSString* name, void (^next)(void)) {
+    WaitUntil(mini, 6, ^{
+      BOOL ready = mini();
+      [w runJS:@"(()=>{const v=document.querySelector('video');"
+               @"document.title='pre:'+v.currentTime.toFixed(2)+':'+(isFinite(v.duration)?v.duration:0).toFixed(2);})()"
+          inItem:t];
+      WaitUntil(^{ return [t.liveTitle hasPrefix:@"pre:"]; }, 3, ^{
+        NSArray<NSString*>* pre = [t.liveTitle hasPrefix:@"pre:"] ? [[t.liveTitle substringFromIndex:4] componentsSeparatedByString:@":"] : @[];
+        double ct0 = pre.count == 2 ? pre[0].doubleValue : -1, dur = pre.count == 2 ? pre[1].doubleValue : 0;
+        CFAbsoluteTime t0 = CFAbsoluteTimeGetCurrent();
+        [w setMediaCardHoveredForTest:YES];  // the pointer is on the card: the reopen button shows
+        NSString* hit = [w clickMiniPlayerControl:@"reopen"];
+        WaitUntil(floating, 6, ^{
+          BOOL floated = floating();
+          BOOL miniHidden = w.mediaBarItem != t;
+          BOOL anchored = floated && w.floatingVideoWindow.parentWindow == w.window;
+          [w runJS:@"(()=>{const v=document.querySelector('video'),p=document.pictureInPictureElement;"
+                   @"document.title='post:'+(p===v&&v.__reo===1&&window.__reo===1?1:0)+':'+v.currentTime.toFixed(2)+':'+"
+                   @"(v.paused?0:1)+':'+window.__restarts;})()"
+              inItem:t];
+          WaitUntil(^{ return [t.liveTitle hasPrefix:@"post:"]; }, 3, ^{
+            double dt = CFAbsoluteTimeGetCurrent() - t0;
+            NSArray<NSString*>* post = [t.liveTitle hasPrefix:@"post:"] ? [[t.liveTitle substringFromIndex:5] componentsSeparatedByString:@":"] : @[];
+            BOOL sameMedia = post.count == 4 && [post[0] isEqualToString:@"1"] && [post[3] isEqualToString:@"0"];
+            double ct1 = post.count == 4 ? post[1].doubleValue : -1;
+            double expect = dur > 0 ? fmod(ct0 + dt, dur) : ct0 + dt;
+            double off = fabs(ct1 - expect);
+            if (dur > 0) off = MIN(off, dur - off);  // the test video loops
+            BOOL sameTime = ct0 >= 0 && ct1 >= 0 && off < 1.5;
+            BOOL playing = post.count == 4 && [post[2] isEqualToString:@"1"];
+            std::printf("SELFTEST-MINIREOPENCLICK case=%s ready=%d hitButton=%d floated=%d miniHidden=%d anchored=%d "
+                        "sameMedia=%d sameTime=%d playing=%d\n", name.UTF8String, ready, [hit isEqualToString:@"button"],
+                        floated, miniHidden, anchored, sameMedia, sameTime, playing);
+            if (!(floated && sameMedia && sameTime && playing && [hit isEqualToString:@"button"]))
+              std::printf("MINIREOPENCLICK-DEBUG case=%s hit=%s ct0=%.2f ct1=%.2f expect=%.2f dur=%.2f title=%s\n",
+                          name.UTF8String, hit.UTF8String, ct0, ct1, expect, dur, t.liveTitle.UTF8String);
+            std::fflush(stdout);
+            [w setMediaCardHoveredForTest:NO];
+            [w runJS:@"document.title='Media test page'" inItem:t];
+            next();
+          });
+        });
+      });
+    });
+  };
+  // 1. After the float was minimized (the check above ends there).
+  clickCase(@"minimize", ^{
+    // 2. After the float was closed: only the sound plays on.
+    toFloat(^{
+      [w pressFloatingControl:@"close"];
+      clickCase(@"close", ^{
+        // 3. From another Space on another profile, the video's tab staying in its own Space.
+        toFloat(^{
+          [w pressFloatingControl:@"minimize"];
+          ArcSpace* home = w.currentSpace, *away = nil;
+          for (ArcSpace* s in w.spaces)
+            if (![s.profileDirectory isEqualToString:home.profileDirectory]) away = s;
+          WaitUntil(mini, 6, ^{
+            [w switchToSpace:away];
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+              clickCase(away && w.currentSpace == away ? @"space" : @"space-noswitch", ^{
+                toFloat(^{
+                  [w pressFloatingControl:@"minimize"];
+                  [w switchToSpace:home];
+                  WaitUntil(mini, 6, ^{
+                    [self runFloatResizeSelfTest:t then:^{
+                      // 4. The X: a real click stops the sound (the page's video pauses) and the player goes.
+                      WaitUntil(mini, 6, ^{
+                        BOOL ready = mini();
+                        [w setMediaCardHoveredForTest:YES];
+                        NSString* hit = [w clickMiniPlayerControl:@"close"];
+                        WaitUntil(^{ [w pollMediaNow]; return (BOOL)(!t.mediaPlaying && w.mediaBarItem != t); }, 5, ^{
+                          [w runJS:@"document.title='x:'+(document.querySelector('video').paused?1:0)" inItem:t];
+                          WaitUntil(^{ return [t.liveTitle hasPrefix:@"x:"]; }, 3, ^{
+                            BOOL paused = [t.liveTitle isEqualToString:@"x:1"];
+                            std::printf("SELFTEST-MINICLOSECLICK ready=%d hitButton=%d stopped=%d pagePaused=%d removed=%d\n",
+                                        ready, [hit isEqualToString:@"button"], !t.mediaPlaying, paused, w.mediaBarItem != t);
+                            if (![hit isEqualToString:@"button"]) std::printf("MINICLOSECLICK-DEBUG hit=%s\n", hit.UTF8String);
+                            std::fflush(stdout);
+                            [w setMediaCardHoveredForTest:NO];
+                            // Playing again brings the mini player back for the checks after this one.
+                            [w runJS:@"document.title='Media test page';const v=document.querySelector('video');"
+                                     @"v.__notarcPaused=false;v.play();" inItem:t];
+                            WaitUntil(mini, 6, ^{ done(); });
+                          });
+                        });
+                      });
+                    }];
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+}
+
+// Floating video resize (Omar, Nov 13): real drags on the float's corner and edge, in the hidden float. The size follows
+// the pointer within Arc's limits and the screen, keeps the video's shape and the opposite corner, the controls fit at
+// the smallest and largest sizes, and the size is remembered for the next float.
+- (void)runFloatResizeSelfTest:(ArcItem*)t then:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  BOOL (^floating)(void) = ^BOOL { return w.floatingVideoWindow != nil && w.floatingVideoItem == t; };
+  [w pressMiniPlayerControl:@"reopen"];
+  WaitUntil(floating, 6, ^{
+    BOOL had = floating();
+    NSRect f0 = w.floatingVideoFrame;
+    double aspect = NSWidth(f0) > 0 ? NSHeight(f0) / NSWidth(f0) : 0;
+    NSRect vis = w.floatingVideoWindow.screen.visibleFrame;
+    // The top-right corner, 100 pt out: the bottom-left corner stays.
+    NSPoint c = NSMakePoint(NSMaxX(f0) - 2, NSMaxY(f0) - 2);
+    NSString* hit = [w dragInWindowForTest:w.floatingControlsWindow fromScreen:c toScreen:NSMakePoint(c.x + 100, c.y + 100 * aspect)];
+    NSRect f1 = w.floatingVideoFrame;
+    BOOL resized = NSWidth(f1) >= NSWidth(f0) + 95 && NSWidth(f1) <= NSWidth(f0) + 105;
+    BOOL keepsAspect = NSWidth(f1) > 0 && fabs(NSHeight(f1) / NSWidth(f1) - aspect) < 0.02;
+    BOOL anchored = fabs(NSMinX(f1) - NSMinX(f0)) < 1 && fabs(NSMinY(f1) - NSMinY(f0)) < 1 &&
+                    w.floatingVideoWindow.parentWindow == w.window;
+    BOOL saved = resized && fabs(SettingDouble(@"floatingVideoWidth") - NSWidth(f1)) < 1;
+    BOOL cursor = [w.floatingControlsState containsString:@"resizeCursor=1"];
+    // As far as it goes: Arc's largest size (or the screen), the controls laid out inside.
+    c = NSMakePoint(NSMaxX(f1) - 2, NSMaxY(f1) - 2);
+    [w dragInWindowForTest:w.floatingControlsWindow fromScreen:c toScreen:NSMakePoint(c.x + 3000, c.y + 3000)];
+    NSRect fmax = w.floatingVideoFrame;
+    BOOL maxOK = NSWidth(fmax) <= kFloatingVideoMaxWidth + 0.5 &&
+                 (NSWidth(fmax) >= kFloatingVideoMaxWidth - 0.5 || NSMaxX(fmax) >= NSMaxX(vis) - 1 || NSMaxY(fmax) >= NSMaxY(vis) - 1);
+    BOOL onScreenMax = NSContainsRect(NSInsetRect(vis, -0.5, -0.5), fmax);
+    BOOL fitsMax = [w.floatingControlsState containsString:@"fits=1"];
+    // And as small as it goes.
+    c = NSMakePoint(NSMaxX(fmax) - 2, NSMaxY(fmax) - 2);
+    [w dragInWindowForTest:w.floatingControlsWindow fromScreen:c toScreen:NSMakePoint(c.x - 3000, c.y - 3000)];
+    NSRect fmin = w.floatingVideoFrame;
+    BOOL minOK = fabs(NSWidth(fmin) - kFloatingVideoMinWidth) < 0.5 && fabs(NSHeight(fmin) / NSWidth(fmin) - aspect) < 0.02;
+    BOOL fitsMin = [w.floatingControlsState containsString:@"fits=1"];
+    BOOL anchoredMin = fabs(NSMinX(fmin) - NSMinX(f0)) < 1 && fabs(NSMinY(fmin) - NSMinY(f0)) < 1;
+    // The left edge, 60 pt out: the right edge stays.
+    NSPoint e = NSMakePoint(NSMinX(fmin) + 2, NSMidY(fmin));
+    [w dragInWindowForTest:w.floatingControlsWindow fromScreen:e toScreen:NSMakePoint(e.x - 60, e.y)];
+    NSRect fe = w.floatingVideoFrame;
+    BOOL edge = fabs(NSWidth(fe) - NSWidth(fmin) - 60) <= 1 && fabs(NSMaxX(fe) - NSMaxX(fmin)) < 1 &&
+                fabs(NSHeight(fe) / NSWidth(fe) - aspect) < 0.02 && NSContainsRect(NSInsetRect(vis, -0.5, -0.5), fe);
+    CGFloat kept = NSWidth(fe);
+    // Remembered: the next float comes back at that size.
+    [w pressFloatingControl:@"minimize"];
+    WaitUntil(^{ return (BOOL)!floating(); }, 5, ^{
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w pressMiniPlayerControl:@"reopen"];
+        WaitUntil(floating, 6, ^{
+          NSRect fr = w.floatingVideoFrame;
+          BOOL remembered = floating() && fabs(NSWidth(fr) - kept) < 1 && NSWidth(fe) > NSWidth(fmin) + 30;
+          std::printf("SELFTEST-FLOATRESIZE floated=%d resized=%d keepsAspect=%d anchored=%d saved=%d cursor=%d maxOK=%d "
+                      "onScreen=%d fitsMax=%d minOK=%d fitsMin=%d anchoredMin=%d edge=%d remembered=%d\n", had, resized,
+                      keepsAspect, anchored, saved, cursor, maxOK, onScreenMax, fitsMax, minOK, fitsMin, anchoredMin, edge,
+                      remembered);
+          if (!(resized && minOK && edge && remembered))
+            std::printf("FLOATRESIZE-DEBUG hit=%s f0=%s f1=%s max=%s min=%s edge=%s again=%s screen=%s state=%s\n",
+                        hit.UTF8String, NSStringFromRect(f0).UTF8String, NSStringFromRect(f1).UTF8String,
+                        NSStringFromRect(fmax).UTF8String, NSStringFromRect(fmin).UTF8String, NSStringFromRect(fe).UTF8String,
+                        NSStringFromRect(fr).UTF8String, NSStringFromRect(vis).UTF8String, w.floatingControlsState.UTF8String);
+          std::fflush(stdout);
+          SettingSetObject(@"floatingVideoWidth", nil);  // Arc's size again for the checks after this one
+          [w pressFloatingControl:@"minimize"];
+          done();
+        });
+      });
+    });
+  });
+}
+
+// Sidebar resize (Omar, Nov 13: dragging its right edge did nothing). Real drags on the edge of the hidden window: the
+// width follows the pointer within Arc's limits, the cursor changes on the edge, everything fits at every width, and
+// the width is kept per window (the main window's in the settings, the others' in Windows.json).
+- (void)runSidebarResizeSelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSPoint (^edgeOf)(MainWindowController*) = ^NSPoint(MainWindowController* c) {
+    NSRect f = c.window.frame;
+    return NSMakePoint(NSMinX(f) + c.sidebarWidth - 1, NSMinY(f) + NSHeight(f) / 2);
+  };
+  CGFloat w0 = w.sidebarWidth;
+  NSPoint a = edgeOf(w);
+  NSString* hit = [w dragInWindowForTest:w.window fromScreen:a toScreen:NSMakePoint(a.x + 60, a.y)];
+  CGFloat w1 = w.sidebarWidth;
+  BOOL follows = fabs(w1 - (w0 + 60)) <= 1;
+  BOOL handle = [w.sidebarEdgeState containsString:@"handle=1"], cursor = [w.sidebarEdgeState containsString:@"cursor=1"];
+  BOOL saved = follows && fabs(SettingDouble(@"sidebarWidth") - w1) < 0.5;
+  NSString* midState = w.sidebarLayoutState;
+  a = edgeOf(w);
+  [w dragInWindowForTest:w.window fromScreen:a toScreen:NSMakePoint(a.x + 1000, a.y)];
+  CGFloat wmax = w.sidebarWidth;
+  NSString* maxState = w.sidebarLayoutState;
+  a = edgeOf(w);
+  [w dragInWindowForTest:w.window fromScreen:a toScreen:NSMakePoint(a.x - 1000, a.y)];
+  CGFloat wmin = w.sidebarWidth;
+  NSString* minState = w.sidebarLayoutState;
+  BOOL limits = fabs(wmax - kSidebarMaxWidth) < 0.5 && fabs(wmin - kSidebarMinWidth) < 0.5;
+  a = edgeOf(w);
+  [w dragInWindowForTest:w.window fromScreen:a toScreen:NSMakePoint(a.x + 50, a.y)];
+  CGFloat wmain = w.sidebarWidth;  // 250: the main window's, saved for the next launch
+  // Another window: its own width comes back from Windows.json, and a drag there changes only that window's.
+  ArcSpace* sp = w.currentSpace;
+  NSArray<MainWindowController*>* opened = [w restoreWindowsFromList:@[ @{@"space" : sp.spaceID ?: @"", @"sidebarWidth" : @310} ]];
+  MainWindowController* w2 = opened.firstObject;
+  BOOL perWindowRestored = w2 && fabs(w2.sidebarWidth - 310) < 0.5;
+  a = edgeOf(w2);
+  [w dragInWindowForTest:w2.window fromScreen:a toScreen:NSMakePoint(a.x + 20, a.y)];
+  NSDictionary* entry = nil;
+  for (NSDictionary* d in [MainWindowController windowStateList]) entry = d;
+  BOOL perWindowSaved = w2 && fabs(w2.sidebarWidth - 330) <= 1 && fabs([entry[@"sidebarWidth"] doubleValue] - w2.sidebarWidth) < 0.5 &&
+                        fabs(w.sidebarWidth - wmain) < 0.5 && fabs(SettingDouble(@"sidebarWidth") - wmain) < 0.5;
+  // A window with no width of its own (and the main window at the next launch) opens at the saved one.
+  NSArray<MainWindowController*>* fresh = [w restoreWindowsFromList:@[ @{@"space" : sp.spaceID ?: @""} ]];
+  MainWindowController* w3 = fresh.firstObject;
+  BOOL launch = w3 && fabs(wmain - (kSidebarMinWidth + 50)) <= 1 && fabs(w3.sidebarWidth - wmain) < 0.5;
+  NSString* w2State = w2.sidebarLayoutState;
+  [w2.window close];
+  [w3.window close];
+  [w setSidebarWidth:kSidebarDefaultWidth];
+  SettingSetObject(@"sidebarWidth", nil);
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+    std::printf("SELFTEST-SIDEBARRESIZE handle=%d cursor=%d follows=%d saved=%d limits=%d fitsMid=%d fitsMax=%d fitsMin=%d "
+                "fitsOther=%d perWindowRestored=%d perWindowSaved=%d launch=%d backToDefault=%d\n", handle, cursor, follows,
+                saved, limits, [midState hasPrefix:@"fits=1"], [maxState hasPrefix:@"fits=1"], [minState hasPrefix:@"fits=1"],
+                [w2State hasPrefix:@"fits=1"], perWindowRestored, perWindowSaved, launch,
+                fabs(w.sidebarWidth - kSidebarDefaultWidth) < 0.5);
+    if (!(follows && limits && perWindowSaved && [maxState hasPrefix:@"fits=1"] && [minState hasPrefix:@"fits=1"]))
+      std::printf("SIDEBARRESIZE-DEBUG hit=%s w0=%.0f w1=%.0f max=%.0f min=%.0f main=%.0f w2=%.0f mid=[%s] maxS=[%s] minS=[%s] "
+                  "other=[%s]\n", hit.UTF8String, w0, w1, wmax, wmin, wmain, w2.sidebarWidth, midState.UTF8String,
+                  maxState.UTF8String, minState.UTF8String, w2State.UTF8String);
+    std::fflush(stdout);
+    done();
+  });
+}
+
 - (void)runFloatingVideoThenPageFit:(void (^)(void))done {
-  [self runFloatingVideoSelfTest:^{ [self runPageFitSelfTest:done]; }];
+  [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runPageFitSelfTest:done]; }]; }];
 }
 
 - (void)runSelfTestActions {
@@ -1751,9 +2009,11 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
   if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"miniplayer"]) {  // quick local loop
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [self runFloatingVideoSelfTest:^{
+       [self runSidebarResizeSelfTest:^{
         std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
         std::fflush(stdout);
         [self.window closeAllBrowsers];
+       }];
       }];
     });
     return;

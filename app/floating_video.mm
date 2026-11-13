@@ -4,6 +4,8 @@
 const CGFloat kFloatingVideoWidth = 222;
 const CGFloat kFloatingVideoRadius = 6;
 const NSPoint kFloatingVideoOffset = {20, 98};
+const CGFloat kFloatingVideoMinWidth = 200;
+const CGFloat kFloatingVideoMaxWidth = 640;
 
 // Measured from Omar's Arc 1.169 screenshot of the hovered float (1x): 28 pt rounded-square buttons 10 pt in from
 // the corners, the site centred between them, a 36 pt pause/play in the middle and a 4 pt bar 10 pt above the bottom.
@@ -325,10 +327,20 @@ NSWindow* FindPictureInPictureWindow(NSArray<NSWindow*>* windows, NSSet<NSWindow
   NSPoint centre = [cv convertPoint:NSMakePoint(NSMidX(cv.bounds), NSMidY(cv.bounds) + 30) toView:cv.superview];
   BOOL hit = _controls.parentWindow == _video && NSEqualRects(_controls.frame, _visibleFrame) && _video.ignoresMouseEvents &&
              [cv hitTest:centre] != nil;
-  return [NSString stringWithFormat:@"hover=%d back=%d site=%@ play=%d minimize=%d close=%d progress=%d hit=%d", on,
-                                    shown(_back), on ? _siteLabel.stringValue : @"", shown(_play), shown(_minimize),
-                                    shown(_close), shown(_bar) && _bar.fraction > 0, hit];
+  // Every control inside the video and none on top of another (the site name may run under minimize, as in Arc).
+  NSArray<NSView*>* parts = @[ _back, _minimize, _close, _play, _bar ];
+  BOOL fits = NSWidth(_siteLabel.frame) > 20;
+  for (NSUInteger i = 0; i < parts.count; ++i) {
+    fits &= NSContainsRect(_view.bounds, parts[i].frame);
+    for (NSUInteger j = i + 1; j < parts.count; ++j) fits &= !NSIntersectsRect(parts[i].frame, parts[j].frame);
+  }
+  return [NSString stringWithFormat:@"hover=%d back=%d site=%@ play=%d minimize=%d close=%d progress=%d hit=%d resizeCursor=%d "
+                                    @"fits=%d", on, shown(_back), on ? _siteLabel.stringValue : @"", shown(_play),
+                                    shown(_minimize), shown(_close), shown(_bar) && _bar.fraction > 0, hit,
+                                    [self showsResizeCursors], fits];
 }
+
+- (BOOL)showsResizeCursors { return NO; }
 
 - (void)close {
   if (_resizeObserver) [NSNotificationCenter.defaultCenter removeObserver:_resizeObserver];

@@ -62,6 +62,8 @@
 #include "include/cef_cookie.h"
 #include "include/cef_urlrequest.h"
 
+const CGFloat kSidebarDefaultWidth = 273, kSidebarMinWidth = 200, kSidebarMaxWidth = 400;  // Arc's (see main_window.h)
+
 static NSPasteboardType const kSidebarItemPasteboardType = @"io.github.donnadieu.notarc.sidebar-item";
 
 namespace {
@@ -4070,6 +4072,89 @@ static NSCache<NSString*, NSImage*>* MediaArtworkCache() {
 - (void)pressMiniPlayerControl:(NSString*)name {
   if ([name isEqualToString:@"reopen"]) [self mediaBarReopen:nil];
   else if ([name isEqualToString:@"close"]) [self mediaBarClose:nil];
+}
+- (NSString*)clickMiniPlayerControl:(NSString*)name {
+  NSButton* b = [name isEqualToString:@"reopen"] ? _mediaReopen : [name isEqualToString:@"close"] ? _mediaClose : nil;
+  NSWindow* win = self.window;
+  if (!b || b.hidden || b.window != win) return @"hidden";
+  NSPoint p = [b convertPoint:NSMakePoint(NSMidX(b.bounds), NSMidY(b.bounds)) toView:nil];
+  NSView* frameView = win.contentView.superview ?: win.contentView;  // the window hit-tests from its frame view
+  NSView* hit = [frameView hitTest:p];
+  NSTimeInterval now = NSProcessInfo.processInfo.systemUptime;
+  NSEvent* (^event)(NSEventType) = ^NSEvent*(NSEventType type) {
+    return [NSEvent mouseEventWithType:type location:p modifierFlags:0 timestamp:now windowNumber:win.windowNumber
+                               context:nil eventNumber:0 clickCount:1 pressure:type == NSEventTypeLeftMouseDown ? 1 : 0];
+  };
+  [NSApp postEvent:event(NSEventTypeLeftMouseUp) atStart:NO];  // the press's tracking loop reads the release
+  [hit mouseDown:event(NSEventTypeLeftMouseDown)];
+  while ([NSApp nextEventMatchingMask:NSEventMaskLeftMouseUp untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES]) {
+  }  // a view that didn't track the press leaves the release behind
+  return hit == b ? @"button" : hit ? NSStringFromClass(hit.class) : @"nothing";
+}
+
+- (NSString*)dragInWindowForTest:(NSWindow*)win fromScreen:(NSPoint)from toScreen:(NSPoint)to {
+  if (!win) return @"nowindow";
+  NSEvent* (^event)(NSEventType, NSPoint) = ^NSEvent*(NSEventType type, NSPoint screen) {
+    return [NSEvent mouseEventWithType:type location:[win convertPointFromScreen:screen] modifierFlags:0
+                             timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:win.windowNumber context:nil
+                           eventNumber:0 clickCount:1 pressure:type == NSEventTypeLeftMouseUp ? 0 : 1];
+  };
+  NSView* frameView = win.contentView.superview ?: win.contentView;
+  NSView* hit = [frameView hitTest:[win convertPointFromScreen:from]];
+  if (!hit) return @"nothing";
+  [NSApp postEvent:event(NSEventTypeLeftMouseUp, to) atStart:NO];  // for a view that tracks the press in a loop
+  [hit mouseDown:event(NSEventTypeLeftMouseDown, from)];
+  for (int i = 1; i <= 8; ++i) {  // each move is placed against the window as it is now (it may resize)
+    NSPoint p = NSMakePoint(from.x + (to.x - from.x) * i / 8, from.y + (to.y - from.y) * i / 8);
+    [hit mouseDragged:event(NSEventTypeLeftMouseDragged, p)];
+  }
+  [hit mouseUp:event(NSEventTypeLeftMouseUp, to)];
+  while ([NSApp nextEventMatchingMask:NSEventMaskLeftMouseUp untilDate:nil inMode:NSDefaultRunLoopMode dequeue:YES]) {
+  }
+  return NSStringFromClass(hit.class);
+}
+
+- (NSWindow*)floatingControlsWindow { return _float.controlsWindow; }
+
+- (CGFloat)sidebarWidth { return NSWidth(_sidebar.frame); }
+- (void)setSidebarWidth:(CGFloat)width {}
+- (NSString*)sidebarEdgeState { return @"handle=0 cursor=0"; }
+
+// Tests: everything in the sidebar fits its width at the current size (tabs, pinned, the pill, the mini player,
+// the bottom bar, the top icons), and the page card starts after it.
+- (NSString*)sidebarLayoutState {
+  CGFloat W = NSWidth(_sidebar.frame), inner = W - 17;
+  NSMutableArray* bad = [NSMutableArray array];
+  auto check = [&](NSString* name, NSView* v, BOOL fullWidth) {
+    if (!v) return;
+    NSRect f = [v convertRect:v.bounds toView:_sidebar];
+    if (NSMinX(f) < -0.5 || NSMaxX(f) > W + 0.5 || (fullWidth && fabs(NSWidth(f) - inner) > 1)) [bad addObject:name];
+  };
+  check(@"pill", _addressPill, YES);
+  check(@"tabs", _sidebarScroll, YES);
+  check(@"miniPlayer", _mediaBar, YES);
+  check(@"bottomBar", _spaceBar, YES);
+  check(@"header", _spaceHeader, YES);
+  check(@"meeting", _meetingBar, YES);
+  check(@"update", _updateBanner, YES);
+  for (NSView* v in _spaceBar.subviews) check(@"bottomBarIcon", v, NO);
+  for (NSView* v in _sidebarNav.subviews) check(@"navIcon", v, NO);
+  for (NSView* v in _mediaBar.subviews) check(@"miniPlayerControl", v, NO);
+  for (NSView* v in _addressPill.subviews) if (!v.hidden) check(@"pillPart", v, NO);
+  if (!_favGrid.hidden) check(@"pinned", _favGrid, YES);
+  // Each tab row's content (title, close button) inside the list's visible width.
+  CGFloat listRight = NSMaxX(_sidebarScroll.frame);
+  if (fabs(NSWidth(_sidebarScroll.contentView.bounds) - inner) > 1) [bad addObject:@"listWidth"];
+  for (NSInteger r = 0; r < _outline.numberOfRows; ++r) {
+    NSView* cell = [_outline viewAtColumn:0 row:r makeIfNecessary:NO];
+    if (!cell || cell.hidden || NSWidth(cell.frame) <= 0) continue;
+    NSRect f = [cell convertRect:cell.bounds toView:_sidebar];
+    if (NSMaxX(f) > listRight + 1) { [bad addObject:[NSString stringWithFormat:@"row%ld(%.0f>%.0f)", (long)r, NSMaxX(f), listRight]]; break; }
+  }
+  NSView* back = _navBack;  // Arc keeps back / forward / reload at the right end
+  if (back && fabs(NSMaxX([back convertRect:back.bounds toView:_sidebar]) - (W - 77)) > 1.5) [bad addObject:@"navRight"];
+  if (!_sidebar.hidden && NSMinX(_content.frame) < W - 0.5) [bad addObject:@"card"];
+  return [NSString stringWithFormat:@"fits=%d width=%.0f bad=%@", bad.count == 0, W, [bad componentsJoinedByString:@","]];
 }
 - (void)setMediaArtworkForTest:(NSImage*)image url:(NSString*)url {
   if (image && url.length) [MediaArtworkCache() setObject:image forKey:url];

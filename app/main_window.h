@@ -32,6 +32,8 @@ NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed 
 @class ThemePickerController;
 @class ArcAlert;
 @class WelcomeView;
+extern const CGFloat kSidebarDefaultWidth, kSidebarMinWidth, kSidebarMaxWidth;  // Arc's
+
 @interface MainWindowController : NSWindowController <NSWindowDelegate>
 - (instancetype)initWithSpaces:(NSArray<ArcSpace*>*)spaces focusedSpaceID:(NSString*)focusedID;
 // Self-test: Space profiles live in separate "SelfTest Space ..." folders and Arc cookies are not imported,
@@ -304,6 +306,18 @@ NSDictionary* SiteSearchFor(NSString* typed);  // Site Search: the site a typed 
 - (void)pressFloatingControl:(NSString*)name;    // "back", "playpause", "minimize", "close"
 - (NSString*)miniPlayerState;                    // tests: "h=64 title=<title>| favicon=1 reopen=1 close=1"
 - (void)pressMiniPlayerControl:(NSString*)name;  // "reopen", "close"
+// Tests: a real click on a mini player button (the window hit-tests its centre, the view there gets the press and
+// release). Returns "button" when it reached that button, else what took the click.
+- (NSString*)clickMiniPlayerControl:(NSString*)name;
+// Tests: a real drag in `win`: the window hit-tests the start, and the view there gets the press, the moves and the
+// release (screen points). Returns the class of the view that took it.
+- (NSString*)dragInWindowForTest:(NSWindow*)win fromScreen:(NSPoint)from toScreen:(NSPoint)to;
+- (NSWindow*)floatingControlsWindow;  // tests: NotArc's controls over the float
+// Sidebar width (Arc: drag its right edge). Kept per window: the main window's in the settings, others' in Windows.json.
+- (CGFloat)sidebarWidth;
+- (void)setSidebarWidth:(CGFloat)width;
+- (NSString*)sidebarEdgeState;    // tests: "handle=1 cursor=1"
+- (NSString*)sidebarLayoutState;  // tests: "fits=1 ..." when everything in the sidebar fits its width
 - (void)setMediaVolume:(double)volume forItem:(ArcItem*)item;
 - (void)setMediaArtworkForTest:(NSImage*)image url:(NSString*)url;
 - (IBAction)mediaBarPlay:(id)sender;

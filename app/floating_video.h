@@ -8,6 +8,8 @@
 extern const CGFloat kFloatingVideoWidth;   // 222 pt (Omar's Arc screenshot, 1x)
 extern const CGFloat kFloatingVideoRadius;  // 6 pt
 extern const NSPoint kFloatingVideoOffset;  // from the window's bottom-left corner: (20, 98)
+extern const CGFloat kFloatingVideoMinWidth;  // resizing by its edges and corners stays within these
+extern const CGFloat kFloatingVideoMaxWidth;
 
 // Chromium's picture-in-picture window among `windows` that isn't in `before` (nil if it hasn't appeared yet).
 NSWindow* FindPictureInPictureWindow(NSArray<NSWindow*>* windows, NSSet<NSWindow*>* before);
@@ -26,7 +28,7 @@ NSWindow* FindPictureInPictureWindow(NSArray<NSWindow*>* windows, NSSet<NSWindow
 @property(nonatomic, readonly) CGFloat cornerRadius;  // tests
 @property(nonatomic, readonly) BOOL hidesChromiumBar;  // tests: Chromium's own site name is outside what shows
 @property(nonatomic) BOOL hovered;
-- (NSString*)stateDescription;  // tests
+- (NSString*)stateDescription;  // tests: "... resizeCursor=1 fits=1" (every control inside the video, none overlapping)
 - (void)press:(NSString*)name;  // tests: as if that control was clicked
 - (void)close;                  // drops the controls; Chromium closes its own window when the page leaves PiP
 @end
