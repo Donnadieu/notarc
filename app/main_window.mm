@@ -4254,6 +4254,18 @@ static void PressViewForTest(NSView* hit, NSEvent* down) {
 }
 - (NSWindow*)sidebarToggleWindow { return [self sidebarToggleButton].window; }
 - (CGFloat)pageCardCornerRadius { return _content.layer.cornerRadius; }
+- (void)setSitePromptRememberForTest:(BOOL)on { _sitePromptRemember.state = on ? NSControlStateValueOn : NSControlStateValueOff; }
+- (NSPoint)sitePromptButtonScreenPoint:(BOOL)allow {
+  NSMutableArray<NSView*>* todo = [NSMutableArray arrayWithObject:_siteAlert.contentViewController.view ?: [NSView new]];
+  while (todo.count) {
+    NSView* v = todo.lastObject;
+    [todo removeLastObject];
+    if ([v isKindOfClass:NSButton.class] && ((NSButton*)v).action == @selector(sitePromptButton:) && v.tag == (allow ? 1 : 0) && v.window)
+      return [v.window convertPointToScreen:[v convertPoint:NSMakePoint(NSMidX(v.bounds), NSMidY(v.bounds)) toView:nil]];
+    [todo addObjectsFromArray:v.subviews];
+  }
+  return NSMakePoint(-99999, -99999);
+}
 
 - (CGFloat)sidebarWidth { return NSWidth(_sidebar.frame); }
 // Arc's sidebar resize: the sidebar and everything in it take the new width, and the page card moves over.

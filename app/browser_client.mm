@@ -103,7 +103,7 @@ CefRefPtr<CefResourceHandler> BrowserClient::GetResourceHandler(CefRefPtr<CefBro
           size_t n = strlen(ext);
           return prefix.size() >= n && prefix.compare(prefix.size() - n, n, ext) == 0;
         };
-        type = ends(".webm") ? "video/webm" : ends(".png") ? "image/png" : "text/html";  // media checks (V75-V80)
+        type = ends(".webm") ? "video/webm" : ends(".png") ? "image/png" : ends(".js") ? "text/javascript" : "text/html";  // media checks (V75-V80)
       }
   }
   if (body.empty()) return nullptr;
@@ -449,6 +449,9 @@ bool BrowserClient::OnShowPermissionPrompt(CefRefPtr<CefBrowser> browser, uint64
   CEF_REQUIRE_UI_THREAD();
   if (!on_permission_) return false;
   int id = next_permission_id_++;
+  if (getenv("NOTARC_PROMPT_DEBUG"))
+    std::fprintf(stderr, "PROMPT-SHOW browser=%d prompt=%llu id=%d bits=%u origin=%s\n", browser->GetIdentifier(),
+                 (unsigned long long)prompt_id, id, requested, origin.ToString().c_str());
   PendingPermission p;
   p.prompt = callback;
   p.prompt_id = prompt_id;
@@ -457,8 +460,9 @@ bool BrowserClient::OnShowPermissionPrompt(CefRefPtr<CefBrowser> browser, uint64
   return true;
 }
 
-void BrowserClient::OnDismissPermissionPrompt(CefRefPtr<CefBrowser>, uint64_t prompt_id, cef_permission_request_result_t) {
+void BrowserClient::OnDismissPermissionPrompt(CefRefPtr<CefBrowser>, uint64_t prompt_id, cef_permission_request_result_t result) {
   CEF_REQUIRE_UI_THREAD();
+  if (getenv("NOTARC_PROMPT_DEBUG")) std::fprintf(stderr, "PROMPT-DISMISS prompt=%llu result=%d\n", (unsigned long long)prompt_id, result);
   for (auto it = pending_permissions_.begin(); it != pending_permissions_.end(); ++it)
     if (it->second.prompt && it->second.prompt_id == prompt_id) {
       pending_permissions_.erase(it);  // Chromium gave up on it (page closed or navigated)
@@ -471,6 +475,9 @@ void BrowserClient::ResolvePermission(int request_id, bool allow) {
   if (it == pending_permissions_.end()) return;
   PendingPermission p = it->second;
   pending_permissions_.erase(it);
+  if (getenv("NOTARC_PROMPT_DEBUG"))
+    std::fprintf(stderr, "PROMPT-ANSWER id=%d prompt=%llu allow=%d media=%d\n", request_id, (unsigned long long)p.prompt_id, allow,
+                 p.media != nullptr);
   if (p.media) {
     if (allow) p.media->Continue(p.media_bits);
     else p.media->Cancel();

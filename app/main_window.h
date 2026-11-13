@@ -320,6 +320,8 @@ extern const CGFloat kSidebarDefaultWidth, kSidebarMinWidth, kSidebarMaxWidth;  
 - (NSPoint)sidebarToggleScreenPoint;  // tests: the toggle next to the window buttons
 - (NSWindow*)sidebarToggleWindow;     // tests: the window it's in (the main one, or the floating sidebar's)
 - (CGFloat)pageCardCornerRadius;      // tests
+- (NSPoint)sitePromptButtonScreenPoint:(BOOL)allow;  // tests: the open site request's Allow / Don't Allow
+- (void)setSitePromptRememberForTest:(BOOL)on;        // tests: its "Remember for this site" box
 // Sidebar width (Arc: drag its right edge). Kept per window: the main window's in the settings, others' in Windows.json.
 - (CGFloat)sidebarWidth;
 - (void)setSidebarWidth:(CGFloat)width;
@@ -404,6 +406,7 @@ extern const CGFloat kSidebarDefaultWidth, kSidebarMinWidth, kSidebarMaxWidth;  
 - (NSArray<NSString*>*)siteSettingsRows;  // tests: "name=ask|allow|block" for each row, then "secure=0|1"
 - (void)setSitePermission:(NSString*)name value:(NSNumber*)allow forOrigin:(NSString*)origin;  // nil = ask
 - (NSDictionary*)sitePermissionsForOrigin:(NSString*)origin;
+- (void)rememberSite:(NSString*)origin names:(NSArray<NSString*>*)names allow:(BOOL)allow;
 // Command bar suggestions. Each is @{kind, title, subtitle, key} plus the object it acts on; kinds:
 // "go" (typed text), "tab" (switch to an open/pinned tab in any Space), "space", "history", "action" (menu
 // command), "site" (top visited site, shown when the field is empty). Picks are counted and rank higher later.

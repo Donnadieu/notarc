@@ -3,6 +3,20 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- The mini player's two buttons at the top right work again: the one that floats the video brings it back where it
+  was, still playing, and the X stops the sound and removes the player. Under the pointer the player grows into two
+  rows, and the tab list sat over the top row and took its clicks.
+- The sidebar can be resized by dragging its right edge, like Arc (200 to 400 pt; it snaps to Arc's 273 pt near it).
+  Each window keeps its own width, and the main window's comes back at the next launch.
+- The floating video can be resized by its edges and corners. It keeps the video's shape, stays on screen, keeps its
+  size for the next video (200 to 640 pt wide), and its controls fit at every size. Dragging it no longer makes it
+  jump down a little each time.
+- A hidden sidebar comes back again. Moving the pointer to the window's left edge slides it out over the page (also
+  with Chrome-style pages, where it used to stay hidden behind the page), it hides again when you move away, and its
+  toggle or Cmd-S pins it back. With the sidebar hidden the page keeps an even margin all round, the window buttons
+  hide with the sidebar as in Arc, and each window remembers whether its sidebar is hidden.
+
 ## 0.30.3
 - A playing video you leave now floats like Arc's: a small window (222 pt wide, rounded corners) over the bottom-left of
   the sidebar that moves with the window and can be dragged, instead of Chromium's big window at the screen's corner.

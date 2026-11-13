@@ -2073,8 +2073,225 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
   });
 }
 
+// E-G: a tab switch while a request waits (Chromium takes the request off a hidden tab and asks again when it's shown,
+// so one request can reach NotArc twice), a remembered request from a background tab, and a remembered request with
+// the tab switched away and back at once.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-retain-cycles"
+// H. As YouTube and Google Calendar ask: a service worker's push subscription and the page's own request at once
+// (both are the notifications permission), then Allow.
+- (void)runSitePermissionPushCase:(void (^)(ArcItem*))done {
+  MainWindowController* w = self.window;
+  NSString* html = @"<!doctype html><title>perm</title><body>ask</body>";
+  NSData* page = [html dataUsingEncoding:NSUTF8StringEncoding];
+  NSData* sw = [@"self.addEventListener('push',()=>{});" dataUsingEncoding:NSUTF8StringEncoding];
+  BrowserClient::SetTestResponse("https://perm-h.example/sw.js", std::string((const char*)sw.bytes, sw.length));
+  BrowserClient::SetTestResponse("https://perm-h.example/", std::string((const char*)page.bytes, page.length));
+  [w openInNewTab:@"https://perm-h.example/"];
+  ArcItem* h = w.shownItem;
+  WaitUntil(^{ return (BOOL)(!h.loading && [h.liveTitle isEqualToString:@"perm"]); }, 10, ^{
+    [w runJS:@"(async()=>{try{const r=await navigator.serviceWorker.register('/sw.js');await navigator.serviceWorker.ready;"
+             @"const a=r.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:"
+             @"'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkvMeAtA3LFgDzkrxZJjSgSnfckjBJuBkr3qBUYIHBQFLXYp5Nksh8U'}).catch(e=>'sub:'+e.name);"
+             @"const b=Notification.requestPermission();const [x,y]=await Promise.all([a,b]);document.title='n:'+y+'|'+(typeof x==='string'?x:'sub');"
+             @"}catch(e){document.title='n:err:'+e.name;}})()"
+        inItem:h];
+    __block int clicks = 0;
+    __block void (^answer)(int);
+    answer = ^(int left) {
+      if (w.pendingSitePrompt) {
+        [w clickAtScreenForTest:[w sitePromptButtonScreenPoint:YES]];
+        ++clicks;
+      }
+      if (left <= 0 || [h.liveTitle hasPrefix:@"n:"]) {
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          std::printf("SELFTEST-PERMPUSH survived=1 cardsAnswered=%d\n", clicks);
+          std::printf("PERMPUSH-DEBUG title=%s\n", h.liveTitle.UTF8String ?: "-");
+          std::fflush(stdout);
+          BrowserClient::SetTestResponse("https://perm-h.example/sw.js", "");
+          dispatch_async(dispatch_get_main_queue(), ^{
+            answer = nil;
+            done(h);
+          });
+        });
+        return;
+      }
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ answer(left - 1); });
+    };
+    answer(20);
+  });
+}
+
+- (void)runSitePermissionSwitchCases:(NSArray<ArcItem*>*)earlier done:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSString* html = @"<!doctype html><title>perm</title><body>ask</body>";
+  NSData* page = [html dataUsingEncoding:NSUTF8StringEncoding];
+  for (NSString* u in @[ @"https://perm-e.example/", @"https://perm-f.example/", @"https://perm-g.example/" ])
+    BrowserClient::SetTestResponse(u.UTF8String, std::string((const char*)page.bytes, page.length));
+  NSString* ask = @"Notification.requestPermission().then(r=>document.title='n:'+r,e=>document.title='n:err')";
+  ArcItem* other = earlier.firstObject;
+  // Clicks Allow on every card that shows within a few seconds (a request asked again shows again).
+  __block void (^allowAll)(int, int, void (^)(int));
+  allowAll = ^(int left, int clicks, void (^then)(int)) {
+    if (left <= 0) { then(clicks); return; }
+    if (w.pendingSitePrompt) {
+      [w clickAtScreenForTest:[w sitePromptButtonScreenPoint:YES]];
+      ++clicks;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ allowAll(left - 1, clicks, then); });
+  };
+  [w openInNewTab:@"https://perm-e.example/"];
+  ArcItem* e = w.shownItem;
+  WaitUntil(^{ return (BOOL)(!e.loading && [e.liveTitle isEqualToString:@"perm"]); }, 10, ^{
+    [w runJS:ask inItem:e];
+    WaitUntil(^{ return (BOOL)(w.pendingSitePrompt.length > 0); }, 10, ^{
+      BOOL asked = w.pendingSitePrompt != nil;
+      [w showItem:other];  // away while the card waits, and back
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w showItem:e];
+        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+          allowAll(8, 0, ^(int clicks) {
+            std::printf("SELFTEST-PERMSWITCH asked=%d granted=%d survived=1 cardsAnswered=%d\n", asked,
+                        [e.liveTitle isEqualToString:@"n:granted"], clicks);
+            std::fflush(stdout);
+            // F. Remembered, asked from a tab in the background, then shown.
+            [w rememberSite:@"https://perm-f.example" names:@[ @"notifications" ] allow:YES];
+            [w openInNewTab:@"https://perm-f.example/" background:YES];
+            ArcItem* f = nil;
+            for (ArcItem* x in w.currentSpace.allTabs)
+              if ([x.url hasPrefix:@"https://perm-f.example"]) f = x;
+            WaitUntil(^{ return (BOOL)(f && !f.loading && [f.liveTitle isEqualToString:@"perm"]); }, 10, ^{
+              [w runJS:ask inItem:f];
+              dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                [w showItem:f];
+                WaitUntil(^{ return (BOOL)[f.liveTitle hasPrefix:@"n:"]; }, 6, ^{
+                  std::printf("SELFTEST-PERMBACKGROUND survived=1\n");  // Chromium holds a hidden tab's request; nothing to answer
+                  std::printf("PERMBACKGROUND-DEBUG title=%s\n", f.liveTitle.UTF8String ?: "-");
+                  std::fflush(stdout);
+                  // G. Remembered, and the tab switched away and back at once.
+                  [w rememberSite:@"https://perm-g.example" names:@[ @"notifications" ] allow:YES];
+                  [w openInNewTab:@"https://perm-g.example/"];
+                  ArcItem* g = w.shownItem;
+                  WaitUntil(^{ return (BOOL)(!g.loading && [g.liveTitle isEqualToString:@"perm"]); }, 10, ^{
+                    [w runJS:ask inItem:g];
+                    for (int i = 0; i < 3; ++i) {
+                      [w showItem:other];
+                      [w showItem:g];
+                    }
+                    WaitUntil(^{ return (BOOL)[g.liveTitle hasPrefix:@"n:"]; }, 6, ^{
+                      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                        std::printf("SELFTEST-PERMQUICKSWITCH granted=%d survived=1\n", [g.liveTitle isEqualToString:@"n:granted"]);
+                        std::fflush(stdout);
+                        [self runSitePermissionPushCase:^(ArcItem* hItem) {
+                        NSMutableArray* all = [earlier mutableCopy];
+                        for (ArcItem* x in @[ e, f ?: e, g ]) if (![all containsObject:x]) [all addObject:x];
+                        for (ArcItem* x in all) {
+                          if (w.shownItem != x) [w showItem:x];
+                          [w resetSitePermissions:nil];
+                          [w closeCurrentTab];
+                        }
+                        if (hItem) {
+                          if (w.shownItem != hItem) [w showItem:hItem];
+                          [w resetSitePermissions:nil];
+                          [w closeCurrentTab];
+                        }
+                        dispatch_async(dispatch_get_main_queue(), ^{
+                          allowAll = nil;  // the block refers to itself; let it go on the next turn
+                          done();
+                        });
+                        }];
+                      });
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+}
+#pragma clang diagnostic pop
+
+// Site requests (Omar, Nov 13: NotArc closed twice, the second time 17 s after it reopened, inside Chromium's
+// PermissionRequest::PermissionGranted when NotArc answered Allow). Local pages ask for notifications: a real click
+// on Allow (remembered), the next request answered from what was remembered, two requests at once, and a request
+// answered after the page went on to another address. Each must end with the page told, and NotArc still running.
+- (void)runSitePermissionSelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSString* html = @"<!doctype html><title>perm</title><body>ask</body>";
+  NSData* page = [html dataUsingEncoding:NSUTF8StringEncoding];
+  for (NSString* u in @[ @"https://perm-a.example/", @"https://perm-b.example/", @"https://perm-c.example/", @"https://perm-d.example/",
+                          @"https://perm-d.example/next" ])
+    BrowserClient::SetTestResponse(u.UTF8String, std::string((const char*)page.bytes, page.length));
+  NSString* ask = @"Notification.requestPermission().then(r=>document.title='n:'+r,e=>document.title='n:err')";
+  void (^open)(NSString*, void (^)(ArcItem*)) = ^(NSString* url, void (^then)(ArcItem*)) {
+    [w openInNewTab:url];
+    ArcItem* t = w.shownItem;
+    WaitUntil(^{ return (BOOL)(!t.loading && [t.liveTitle isEqualToString:@"perm"]); }, 10, ^{ then(t); });
+  };
+  // A. A real click on Allow (Remember ticked), on the request's own card.
+  open(@"https://perm-a.example/", ^(ArcItem* a) {
+    [w runJS:ask inItem:a];
+    WaitUntil(^{ if (w.shownItem != a) [w showItem:a]; return (BOOL)(w.pendingSitePrompt.length > 0); }, 10, ^{
+      BOOL asked = [w.pendingSitePrompt hasPrefix:@"notifications:"];
+      [w setSitePromptRememberForTest:YES];
+      NSString* hit = [w clickAtScreenForTest:[w sitePromptButtonScreenPoint:YES]];
+      WaitUntil(^{ return (BOOL)[a.liveTitle hasPrefix:@"n:"]; }, 6, ^{
+        BOOL granted = [a.liveTitle isEqualToString:@"n:granted"];
+        BOOL remembered = [[w sitePermissionsForOrigin:@"https://perm-a.example"][@"notifications"] boolValue];
+        std::printf("SELFTEST-PERMCLICK asked=%d clickedAllow=%d granted=%d remembered=%d\n", asked,
+                    [hit hasSuffix:@":NSButton"], granted, remembered);
+        std::fflush(stdout);
+        // B. Remembered "yes" (as after a relaunch): answered at once, no card.
+        [w rememberSite:@"https://perm-b.example" names:@[ @"notifications" ] allow:YES];
+        open(@"https://perm-b.example/", ^(ArcItem* b) {
+          [w runJS:ask inItem:b];
+          WaitUntil(^{ return (BOOL)[b.liveTitle hasPrefix:@"n:"]; }, 6, ^{
+            std::printf("SELFTEST-PERMREMEMBERED granted=%d noCard=%d\n", [b.liveTitle isEqualToString:@"n:granted"],
+                        w.pendingSitePrompt == nil);
+            std::fflush(stdout);
+            // C. Two requests at once (pages often ask twice), then Allow.
+            open(@"https://perm-c.example/", ^(ArcItem* c) {
+              [w runJS:[NSString stringWithFormat:@"%@;Notification.requestPermission();", ask] inItem:c];
+              WaitUntil(^{ if (w.shownItem != c) [w showItem:c]; return (BOOL)(w.pendingSitePrompt.length > 0); }, 10, ^{
+                [w setSitePromptRememberForTest:NO];
+                NSString* hitC = [w clickAtScreenForTest:[w sitePromptButtonScreenPoint:YES]];
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+                  if (w.pendingSitePrompt) [w clickAtScreenForTest:[w sitePromptButtonScreenPoint:YES]];  // a second card
+                  WaitUntil(^{ return (BOOL)[c.liveTitle hasPrefix:@"n:"]; }, 6, ^{
+                    std::printf("SELFTEST-PERMTWICE clickedAllow=%d granted=%d\n", [hitC hasSuffix:@":NSButton"],
+                                [c.liveTitle isEqualToString:@"n:granted"]);
+                    std::fflush(stdout);
+                    // D. The page moves on before the answer: Allow then must not reach a request Chromium dropped.
+                    open(@"https://perm-d.example/", ^(ArcItem* d) {
+                      [w runJS:ask inItem:d];
+                      WaitUntil(^{ if (w.shownItem != d) [w showItem:d]; return (BOOL)(w.pendingSitePrompt.length > 0); }, 10, ^{
+                        [w runJS:@"location.href='https://perm-d.example/next'" inItem:d];
+                        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                          if (w.pendingSitePrompt) [w clickAtScreenForTest:[w sitePromptButtonScreenPoint:YES]];
+                          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+                            std::printf("SELFTEST-PERMAFTERLEAVE survived=1 noCardLeft=%d\n", w.pendingSitePrompt == nil);
+                            std::fflush(stdout);
+                            [self runSitePermissionSwitchCases:@[ a, b, c, d ] done:done];
+                          });
+                        });
+                      });
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+}
+
 - (void)runFloatingVideoThenPageFit:(void (^)(void))done {
-  [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }];
+  [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runSitePermissionSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }]; }];
 }
 
 - (void)runSelfTestActions {
@@ -2091,6 +2308,16 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
   if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"pagefit"]) {  // quick local loop
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [self runPageFitSelfTest:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
+    });
+    return;
+  }
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"permissions"]) {  // quick local loop
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runSitePermissionSelfTest:^{
         std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
         std::fflush(stdout);
         [self.window closeAllBrowsers];
