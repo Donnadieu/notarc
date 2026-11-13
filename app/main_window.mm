@@ -4457,6 +4457,7 @@ static void PressViewForTest(NSView* hit, NSEvent* down) {
 // ---- Site prompts ---------------------------------------------------------------------------------
 static NSArray<NSArray*>* PermissionNames() {
   return @[
+    @[ @(BrowserClient::kScreenSharePermission), @"screen", @"share your screen" ],  // asked every time, like Chrome
     @[ @(CEF_PERMISSION_TYPE_CAMERA_STREAM), @"camera", @"use your camera" ],
     @[ @(CEF_PERMISSION_TYPE_MIC_STREAM), @"microphone", @"use your microphone" ],
     @[ @(CEF_PERMISSION_TYPE_GEOLOCATION), @"location", @"know your location" ],
@@ -4490,7 +4491,8 @@ static NSString* OriginKey(NSString* origin) {
 - (void)rememberSite:(NSString*)origin names:(NSArray<NSString*>*)names allow:(BOOL)allow {
   NSMutableDictionary* all = [SettingObject(kSettingSitePermissions) mutableCopy] ?: [NSMutableDictionary dictionary];
   NSMutableDictionary* site = [all[OriginKey(origin)] mutableCopy] ?: [NSMutableDictionary dictionary];
-  for (NSString* n in names) site[n] = @(allow);
+  for (NSString* n in names)
+    if (![n isEqualToString:@"screen"]) site[n] = @(allow);  // screen sharing is never remembered
   all[OriginKey(origin)] = site;
   SettingSetObject(kSettingSitePermissions, all);
 }
@@ -4510,6 +4512,10 @@ static NSString* OriginKey(NSString* origin) {
   NSDictionary* saved = [self sitePermissionsForOrigin:origin];
   BOOL allKnown = YES;
   for (NSString* n in names) {
+    if ([n isEqualToString:@"screen"]) {  // never remembered: always ask
+      allKnown = NO;
+      continue;
+    }
     if (saved[n] && ![saved[n] boolValue]) {
       _client->ResolvePermission(requestId, false);
       return;
@@ -5261,6 +5267,17 @@ static NSString* AdBlockSiteKey(NSString* host) {
   CefMouseEvent m;
   m.x = 40;
   m.y = 40;
+  it->second->GetHost()->SendMouseClickEvent(m, MBT_LEFT, false, 1);
+  it->second->GetHost()->SendMouseClickEvent(m, MBT_LEFT, true, 1);
+}
+
+- (void)clickPageForTest:(ArcItem*)item x:(int)x y:(int)y {
+  auto it = _browsers.find(item.browserId);
+  if (it == _browsers.end()) return;
+  CefMouseEvent m;
+  m.x = x;
+  m.y = y;
+  it->second->GetHost()->SendMouseMoveEvent(m, false);
   it->second->GetHost()->SendMouseClickEvent(m, MBT_LEFT, false, 1);
   it->second->GetHost()->SendMouseClickEvent(m, MBT_LEFT, true, 1);
 }

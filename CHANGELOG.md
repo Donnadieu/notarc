@@ -3,6 +3,17 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## 0.30.5
+- Google Meet's "Use camera and microphone" no longer closes NotArc. Meet's button is Chromium's new camera button
+  (`<usermedia>`); after you allow it, Chromium asks again for the same camera when it thinks macOS hasn't been asked
+  yet, and saying yes to that second question crashed Chromium. NotArc now never allows the same request twice, and it
+  turns Chromium's camera and location buttons off, so Meet and other sites ask through the usual route: NotArc's own
+  card, then macOS's camera prompt the first time.
+- Screen sharing (Meet's "Present now") is its own question, "share your screen", asked every time. It used to be
+  asked as "use your camera", and a site whose camera you had remembered could share your whole screen without asking.
+- Release check: the app and each of its five helpers must carry the camera and microphone descriptions and, when
+  signed, the hardened runtime with the camera and microphone entitlements (`scripts/check-signing.sh`).
+
 ## 0.30.4
 - The mini player's two buttons at the top right work again: the one that floats the video brings it back where it
   was, still playing, and the X stops the sound and removes the player. Under the pointer the player grows into two

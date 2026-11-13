@@ -426,6 +426,7 @@ extern const CGFloat kSidebarDefaultWidth, kSidebarMinWidth, kSidebarMaxWidth;  
 - (NSUInteger)liveTabCount;  // Arc: "New Nested Folder"; added at the top of the folder  // in Pinned, where the first pinned item was
 - (void)loadURL:(NSString*)url inItem:(ArcItem*)item;
 - (void)sendKeyToItem:(ArcItem*)item;  // used by the self-test to trigger the hang monitor
+- (void)clickPageForTest:(ArcItem*)item x:(int)x y:(int)y;  // tests: a real (trusted) click at page point x,y
 @property(nonatomic, readonly) ArcItem* hungItem;
 - (void)answerHungSheet:(BOOL)exitPage;  // page the Wait/Exit sheet is about, nil if none
 - (void)hideHoverCard;

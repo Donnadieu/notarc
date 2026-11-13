@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(NotArc VERSION 0.30.4 LANGUAGES C CXX OBJC OBJCXX)
+project(NotArc VERSION 0.30.5 LANGUAGES C CXX OBJC OBJCXX)
 set(VERSION_SHORT ${PROJECT_VERSION})
 
 # CEF binary distribution. Upgrading Chromium = point this at a newer CEF build.

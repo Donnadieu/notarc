@@ -58,10 +58,26 @@ sign "" "$FW"
 for helper in "$APP/Contents/Frameworks/"*.app; do sign "$ROOT/app/helper.entitlements" "$helper"; done
 sign "$ROOT/app/NotArc.entitlements" "$APP"
 codesign --verify --deep --strict "$APP"
+# Camera/mic usage strings and entitlements on the app and every helper (a hardened-runtime build without them is
+# killed by macOS when a site starts the camera).
+if [ "$ADHOC" = 1 ]; then "$ROOT/scripts/check-signing.sh" "$APP" --adhoc; else "$ROOT/scripts/check-signing.sh" "$APP"; fi
 
 notarize() {  # notarize <file to submit> <label>
-  local log="$STAGE/notary-$2.log"
-  xcrun notarytool submit "$1" --keychain-profile "$PROFILE" --wait 2>&1 | tee "$log"
+  local log="$STAGE/notary-$2.log" sub="" try
+  # Network hiccups (upload or status-poll timeouts) retry; Apple's own verdict (Invalid/Rejected) doesn't.
+  for try in 1 2 3; do
+    xcrun notarytool submit "$1" --keychain-profile "$PROFILE" --wait 2>&1 | tee "$log" || true
+    grep -q "status: \(Accepted\|Invalid\|Rejected\)" "$log" && break
+    sub=$(sed -n 's/^ *id: \([0-9a-f-]*\).*/\1/p' "$log" | head -1)
+    if [ -n "$sub" ] && grep -q "Successfully uploaded" "$log"; then  # uploaded: wait for that submission
+      for _ in 1 2 3; do
+        xcrun notarytool wait "$sub" --keychain-profile "$PROFILE" 2>&1 | tee "$log" || true
+        grep -q "status: \(Accepted\|Invalid\|Rejected\)" "$log" && break 2
+        sleep 20
+      done
+    fi
+    echo "notarytool: no verdict (attempt $try), retrying" >&2; sleep 30
+  done
   if ! grep -q "status: Accepted" "$log"; then
     local sub; sub=$(sed -n 's/^ *id: \([0-9a-f-]*\).*/\1/p' "$log" | head -1)
     [ -n "$sub" ] && xcrun notarytool log "$sub" --keychain-profile "$PROFILE" >&2 || true

@@ -4,6 +4,7 @@
 #include "app/content_blocker.h"
 #import "app/autofill.h"
 
+#include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -456,16 +457,25 @@ void BrowserClient::LogPermission(const char* fmt, ...) {
   std::fclose(f);  // written now: a crash right after must not lose it
 }
 
+static std::atomic<bool> g_refuse_device_media{false};
+void BrowserClient::SetRefuseDeviceMediaForTest(bool refuse) { g_refuse_device_media = refuse; }
+
 bool BrowserClient::OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
                                                    const CefString& origin, uint32_t requested,
                                                    CefRefPtr<CefMediaAccessCallback> callback) {
   CEF_REQUIRE_UI_THREAD();
+  if (g_refuse_device_media) {
+    LogPermission("media refused (test) requested=%u origin=%s", requested, origin.ToString().c_str());
+    callback->Cancel();
+    return true;
+  }
   if (!on_permission_) return false;
   uint32_t perms = 0;
-  if (requested & (CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE))
-    perms |= CEF_PERMISSION_TYPE_CAMERA_STREAM;
-  if (requested & (CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE))
-    perms |= CEF_PERMISSION_TYPE_MIC_STREAM;
+  // Screen sharing is its own question (Meet's Present now): never answered from a remembered camera or mic "yes".
+  if (requested & (CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_AUDIO_CAPTURE))
+    perms |= kScreenSharePermission;
+  if (requested & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE) perms |= CEF_PERMISSION_TYPE_CAMERA_STREAM;
+  if (requested & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE) perms |= CEF_PERMISSION_TYPE_MIC_STREAM;
   int id = next_permission_id_++;
   LogPermission("media id=%d browser=%d requested=%u origin=%s", id, browser->GetIdentifier(), requested, origin.ToString().c_str());
   PendingPermission p;
@@ -480,6 +490,18 @@ bool BrowserClient::OnShowPermissionPrompt(CefRefPtr<CefBrowser> browser, uint64
                                            uint32_t requested, CefRefPtr<CefPermissionPromptCallback> callback) {
   CEF_REQUIRE_UI_THREAD();
   if (!on_permission_) return false;
+  auto again = just_allowed_.find(browser->GetIdentifier());
+  if (again != just_allowed_.end() && again->second.origin == origin.ToString() && requested &&
+      (requested & ~again->second.bits) == 0) {
+    // Chromium re-showed what NotArc allowed a moment ago (see just_allowed_): never allow it twice.
+    LogPermission("prompt prompt=%llu browser=%d requested=%u origin=%s: already allowed, ignored", (unsigned long long)prompt_id,
+                  browser->GetIdentifier(), requested, origin.ToString().c_str());
+    if (getenv("NOTARC_PROMPT_DEBUG"))
+      std::fprintf(stderr, "PROMPT-REGRANT-IGNORED browser=%d prompt=%llu bits=%u\n", browser->GetIdentifier(),
+                   (unsigned long long)prompt_id, requested);
+    callback->Continue(CEF_PERMISSION_RESULT_IGNORE);  // runs after this returns (CEF posts it)
+    return true;
+  }
   int id = next_permission_id_++;
   LogPermission("prompt id=%d prompt=%llu browser=%d requested=%u origin=%s", id, (unsigned long long)prompt_id,
                 browser->GetIdentifier(), requested, origin.ToString().c_str());
@@ -489,6 +511,9 @@ bool BrowserClient::OnShowPermissionPrompt(CefRefPtr<CefBrowser> browser, uint64
   PendingPermission p;
   p.prompt = callback;
   p.prompt_id = prompt_id;
+  p.prompt_bits = requested;
+  p.browser_id = browser->GetIdentifier();
+  p.origin = origin.ToString();
   pending_permissions_[id] = p;
   on_permission_(browser->GetIdentifier(), id, origin.ToString(), requested);
   return true;
@@ -522,7 +547,22 @@ void BrowserClient::ResolvePermission(int request_id, bool allow) {
     if (allow) p.media->Continue(p.media_bits);
     else p.media->Cancel();
   } else if (p.prompt) {
-    p.prompt->Continue(allow ? CEF_PERMISSION_RESULT_ACCEPT : CEF_PERMISSION_RESULT_DENY);
+    if (!allow) {
+      p.prompt->Continue(CEF_PERMISSION_RESULT_DENY);
+      return;
+    }
+    // Chromium handles the Allow right inside Continue (a click) or in the very next task it posts (an answer given
+    // while the prompt was being shown, e.g. remembered): a prompt it shows again meanwhile is the same requests.
+    int gen = ++just_allowed_gen_;
+    just_allowed_[p.browser_id] = JustAllowed{p.origin, p.prompt_bits, gen};
+    p.prompt->Continue(CEF_PERMISSION_RESULT_ACCEPT);
+    // Kept a little longer than that next task, in case Chromium queues it behind others.
+    CefRefPtr<BrowserClient> self(this);
+    int browser_id = p.browser_id;
+    CefPostDelayedTask(TID_UI, base::BindOnce([](CefRefPtr<BrowserClient> c, int b, int g) {
+      auto it = c->just_allowed_.find(b);
+      if (it != c->just_allowed_.end() && it->second.gen == g) c->just_allowed_.erase(it);
+    }, self, browser_id, gen), 1500);
   }
 }
 

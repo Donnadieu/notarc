@@ -44,9 +44,11 @@ class BrowserClient : public CefClient,
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
   CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
 
+  // NotArc's own bit (above CEF's permission types) for a screen-sharing request (getDisplayMedia).
+  static constexpr uint32_t kScreenSharePermission = 1u << 31;
   // Site permissions (camera, mic, location, notifications, ...). The UI answers with ResolvePermission.
   // request_id is ours; `permissions` uses CEF_PERMISSION_TYPE_* bits (media requests are mapped onto
-  // CAMERA_STREAM / MIC_STREAM). Called on the UI thread.
+  // CAMERA_STREAM / MIC_STREAM, screen sharing onto kScreenSharePermission). Called on the UI thread.
   using PermissionCallback =
       std::function<void(int browser_id, int request_id, const std::string& origin, uint32_t permissions)>;
   void set_permission_callback(PermissionCallback cb) { on_permission_ = std::move(cb); }
@@ -54,6 +56,8 @@ class BrowserClient : public CefClient,
   // A local log of site requests and NotArc's answers (SiteRequests.log next to the sidebar), one line each, written at
   // once: after Omar's Nov 13 crash inside Chromium's PermissionRequest::PermissionGranted, the next one names the request.
   static void SetPermissionLogPath(const std::string& path);
+  // Self-test with the Mac's real camera/mic status (no fake devices): refuse every device request, so nothing opens.
+  static void SetRefuseDeviceMediaForTest(bool refuse);
   static void LogPermission(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
   bool OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                       const CefString& requesting_origin, uint32_t requested_permissions,
@@ -262,8 +266,22 @@ class BrowserClient : public CefClient,
     uint32_t media_bits = 0;
     CefRefPtr<CefPermissionPromptCallback> prompt;
     uint64_t prompt_id = 0;
+    uint32_t prompt_bits = 0;
+    int browser_id = 0;
+    std::string origin;
   };
   std::map<int, PendingPermission> pending_permissions_;
+  // A prompt NotArc just allowed, per browser, until the next run-loop turn. Chromium answers Allow synchronously, and
+  // for Meet's <usermedia> button it can then show the SAME, already granted requests again (its "ask macOS" step):
+  // allowing that second prompt makes Chromium grant a request twice and crash (CHECK in
+  // PermissionRequest::PermissionGranted). Such a re-shown prompt is ignored instead; the page keeps its grant.
+  struct JustAllowed {
+    std::string origin;
+    uint32_t bits = 0;
+    int gen = 0;
+  };
+  std::map<int, JustAllowed> just_allowed_;
+  int just_allowed_gen_ = 0;
   int next_permission_id_ = 1;
   int open_browsers_ = 0;
   bool quit_when_empty_ = false;
