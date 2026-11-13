@@ -24,6 +24,8 @@ NSWindow* FindPictureInPictureWindow(NSArray<NSWindow*>* windows, NSSet<NSWindow
 // "back", "playpause", "minimize", "close", or "seek" with the fraction as value.
 @property(nonatomic, copy) void (^onAction)(NSString* action, double value);
 - (void)placeOver:(NSWindow*)parent;  // Arc's size and spot (keeps a spot the user dragged it to)
+@property(nonatomic) CGFloat width;  // what shows of the video, in points (the user resizes it by its edges)
+@property(nonatomic, copy) void (^onResized)(CGFloat width);  // a resize by the pointer ended
 @property(nonatomic, readonly) NSRect visibleFrame;   // the video on screen (Chromium's window is taller)
 @property(nonatomic, readonly) CGFloat cornerRadius;  // tests
 @property(nonatomic, readonly) BOOL hidesChromiumBar;  // tests: Chromium's own site name is outside what shows

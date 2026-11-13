@@ -1828,8 +1828,8 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
                             std::fflush(stdout);
                             [w setMediaCardHoveredForTest:NO];
                             // Playing again brings the mini player back for the checks after this one.
-                            [w runJS:@"document.title='Media test page';const v=document.querySelector('video');"
-                                     @"v.__notarcPaused=false;v.play();" inItem:t];
+                            [w runJS:@"(()=>{document.title='Media test page';const v=document.querySelector('video');"
+                                     @"v.__notarcPaused=false;v.play();})()" inItem:t];
                             WaitUntil(mini, 6, ^{ done(); });
                           });
                         });
