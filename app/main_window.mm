@@ -5265,6 +5265,17 @@ static NSString* AdBlockSiteKey(NSString* host) {
   it->second->GetHost()->SendMouseClickEvent(m, MBT_LEFT, true, 1);
 }
 
+- (void)clickPageForTest:(ArcItem*)item x:(int)x y:(int)y {
+  auto it = _browsers.find(item.browserId);
+  if (it == _browsers.end()) return;
+  CefMouseEvent m;
+  m.x = x;
+  m.y = y;
+  it->second->GetHost()->SendMouseMoveEvent(m, false);
+  it->second->GetHost()->SendMouseClickEvent(m, MBT_LEFT, false, 1);
+  it->second->GetHost()->SendMouseClickEvent(m, MBT_LEFT, true, 1);
+}
+
 - (ArcItem*)hungItem { return _hungItem; }
 
 - (void)showHungSheetFor:(ArcItem*)item {

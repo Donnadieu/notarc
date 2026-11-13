@@ -2296,8 +2296,171 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
   });
 }
 
+// Camera and microphone (Omar, Nov 13: NotArc closed when he clicked Google Meet's "Use camera and microphone").
+// Meet's button is Chromium's <usermedia> element: its request goes through Chromium's permission prompt (not the
+// getUserMedia media route). Once it's allowed, Chromium shows the same, already granted, request again when it thinks
+// macOS hasn't been asked yet, and Allow on that second one crashed Chromium. Each case prints its line before the next
+// starts, so a crash shows up as the missing line (and a short log).
+// Modes: default = fake camera + mic (--use-fake-device-for-media-stream, which also makes Chromium treat the macOS
+// permission as given); NOTARC_REAL_MEDIA_STATUS=1 = no fake devices, so Chromium reads this Mac's real camera status
+// for this build (an ad-hoc build has none: "not asked yet"), and every device request is refused so nothing opens;
+// NOTARC_FAKE_MEDIA_UI=1 = Chromium answers media requests itself (--use-fake-ui-for-media-stream), plus screen sharing.
+- (void)runMediaPermissionSelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  BOOL fakeUI = getenv("NOTARC_FAKE_MEDIA_UI") != nullptr;
+  BOOL realStatus = getenv("NOTARC_REAL_MEDIA_STATUS") != nullptr;
+  BrowserClient::SetRefuseDeviceMediaForTest(realStatus);
+  NSString* plain = @"<!doctype html><title>media</title><body style='margin:0'>"
+                    @"<button id=b style='position:fixed;left:20px;top:20px;width:120px;height:40px'>go</button></body>";
+  NSString* element =
+      @"<!doctype html><title>media</title><style>body{margin:0}#u{position:fixed;left:30px;top:30px}</style><body>"
+      @"<usermedia id=u></usermedia><script>const u=document.getElementById('u');"
+      @"try{u.setConstraints({video:{},audio:{}})}catch(e){}"
+      @"u.onstream=()=>{document.title='um:stream:'+(u.stream?u.stream.getTracks().length:0)};"
+      @"u.onerror=()=>{document.title='um:error:'+(u.error?u.error.name:'')};"
+      @"u.oncancel=()=>{document.title='um:cancel'};"
+      @"setTimeout(()=>{const r=u.getBoundingClientRect();document.title='um:ready:'+Math.round(r.left+r.width/2)+','+"
+      @"Math.round(r.top+r.height/2)+':'+(window.HTMLUserMediaElement?1:0)},900);</script></body>";
+  for (NSString* u in @[ @"https://media-a.example/", @"https://media-d.example/" ]) {
+    NSData* d = [plain dataUsingEncoding:NSUTF8StringEncoding];
+    BrowserClient::SetTestResponse(u.UTF8String, std::string((const char*)d.bytes, d.length));
+  }
+  for (NSString* u in @[ @"https://media-b.example/", @"https://media-c.example/" ]) {
+    NSData* d = [element dataUsingEncoding:NSUTF8StringEncoding];
+    BrowserClient::SetTestResponse(u.UTF8String, std::string((const char*)d.bytes, d.length));
+  }
+  void (^open)(NSString*, void (^)(ArcItem*)) = ^(NSString* url, void (^then)(ArcItem*)) {
+    [w openInNewTab:url];
+    ArcItem* t = w.shownItem;
+    WaitUntil(^{ return (BOOL)(!t.loading && t.liveTitle.length && ![t.liveTitle isEqualToString:t.url]); }, 10, ^{ then(t); });
+  };
+  BOOL (^remembered)(NSString*) = ^BOOL(NSString* origin) {
+    NSDictionary* s = [w sitePermissionsForOrigin:origin];
+    return [s[@"camera"] boolValue] && [s[@"microphone"] boolValue];
+  };
+  void (^allowCard)(void) = ^{  // Allow the open card, "Remember for this site" ticked
+    if (!w.pendingSitePrompt) return;
+    [w setSitePromptRememberForTest:YES];
+    [w clickAtScreenForTest:[w sitePromptButtonScreenPoint:YES]];
+  };
+  BOOL (^answered)(ArcItem*) = ^BOOL(ArcItem* t) {
+    return [t.liveTitle hasPrefix:@"um:stream"] || [t.liveTitle hasPrefix:@"um:error"] || [t.liveTitle hasPrefix:@"um:cancel"];
+  };
+  // With real status every device request is refused, so the element reports an error instead of a stream.
+  NSString* expected = realStatus ? @"um:error:NotAllowedError" : @"um:stream:2";
+  NSString* gum = @"navigator.mediaDevices.getUserMedia({video:true,audio:true}).then(s=>{window.__s=s;"
+                  @"document.title='%@:'+s.getTracks().length},e=>document.title='%@:'+e.name)";
+  // Click Meet's kind of button: wait until the element is ready, then a real (trusted) click on it.
+  void (^clickElement)(ArcItem*, void (^)(BOOL)) = ^(ArcItem* t, void (^then)(BOOL)) {
+    WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"um:ready:"]; }, 6, ^{
+      NSArray* parts = [[t.liveTitle substringFromIndex:MIN((NSUInteger)9, t.liveTitle.length)] componentsSeparatedByString:@":"];
+      NSArray* xy = [parts.firstObject componentsSeparatedByString:@","];
+      BOOL supported = parts.count == 2 && [parts[1] isEqualToString:@"1"];
+      if (w.shownItem != t) [w showItem:t];
+      [w clickPageForTest:t x:[xy.firstObject intValue] y:[xy.lastObject intValue]];
+      then(supported);
+    });
+  };
+  void (^finish)(void) = ^{
+    for (NSString* o in @[ @"https://media-a.example", @"https://media-b.example", @"https://media-c.example" ])
+      for (NSString* n in @[ @"camera", @"microphone" ]) [w setSitePermission:n value:nil forOrigin:o];
+    BrowserClient::SetRefuseDeviceMediaForTest(false);
+    done();
+  };
+  // D. Screen sharing (Meet's Present now): getDisplayMedia from a real click. Only with Chromium's fake UI, which
+  // shares a fake screen; NotArc's own route would share the real screen (and ask macOS), never in a test.
+  void (^screen)(void) = ^{
+    if (!fakeUI) { finish(); return; }
+    open(@"https://media-d.example/", ^(ArcItem* d) {
+      [w runJS:@"document.getElementById('b').onclick=()=>navigator.mediaDevices.getDisplayMedia({video:true,audio:true})"
+               @".then(s=>{window.__d=s;document.title='gdm:'+s.getVideoTracks().length},e=>document.title='gdm:'+e.name)"
+         inItem:d];
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        [w clickPageForTest:d x:60 y:40];
+        WaitUntil(^{ return (BOOL)[d.liveTitle hasPrefix:@"gdm:"]; }, 8, ^{
+          BOOL shared = [d.liveTitle isEqualToString:@"gdm:1"];
+          [w runJS:@"window.__d&&window.__d.getTracks().forEach(x=>x.stop())" inItem:d];
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            std::printf("SELFTEST-MEDIASCREEN shared=%d survived=1 title=%s\n", shared, d.liveTitle.UTF8String ?: "-");
+            std::fflush(stdout);
+            finish();
+          });
+        });
+      });
+    });
+  };
+  // C. The same button on a site already remembered (as after a relaunch): no card, no crash.
+  void (^caseC)(void) = ^{
+    if (!fakeUI) [w rememberSite:@"https://media-c.example" names:@[ @"camera", @"microphone" ] allow:YES];
+    open(@"https://media-c.example/", ^(ArcItem* c) {
+      clickElement(c, ^(BOOL supported) {
+        WaitUntil(^{ return answered(c); }, 8, ^{
+          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+            std::printf("SELFTEST-MEDIAREMEMBERED answered=%d noCard=%d survived=1 title=%s\n",
+                        [c.liveTitle isEqualToString:expected], w.pendingSitePrompt == nil, c.liveTitle.UTF8String ?: "-");
+            std::fflush(stdout);
+            screen();
+          });
+        });
+      });
+    });
+  };
+  // B. Meet's button (<usermedia>): click, NotArc's card, Allow + Remember. The answer must reach the page, NotArc must
+  // survive Chromium showing the granted request again, and the answer is remembered for that site only.
+  void (^caseB)(void) = ^{
+    open(@"https://media-b.example/", ^(ArcItem* b) {
+      clickElement(b, ^(BOOL supported) {
+        WaitUntil(^{ if (w.shownItem != b) [w showItem:b]; return (BOOL)(w.pendingSitePrompt.length > 0 || answered(b)); }, 8, ^{
+          NSString* card = w.pendingSitePrompt ?: @"-";
+          BOOL asked = fakeUI || [card hasPrefix:@"camera,microphone:"];
+          if (!fakeUI) allowCard();
+          WaitUntil(^{ return answered(b); }, 8, ^{
+            // Chromium re-shows a granted element request within a moment: give it time to (not) crash.
+            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+              std::printf("SELFTEST-MEDIAELEMENT supported=%d asked=%d answered=%d remembered=%d survived=1 noCardLeft=%d "
+                          "otherSiteAsks=%d title=%s card=%s\n",
+                          supported, asked, [b.liveTitle isEqualToString:expected], fakeUI || remembered(@"https://media-b.example"),
+                          w.pendingSitePrompt == nil, fakeUI || !remembered(@"https://media-c.example"),
+                          b.liveTitle.UTF8String ?: "-", card.UTF8String);
+              std::fflush(stdout);
+              caseC();
+            });
+          });
+        });
+      });
+    });
+  };
+  if (realStatus) {  // no devices may open: only the element cases (they end in a refused device request)
+    caseB();
+    return;
+  }
+  // A. getUserMedia: NotArc's card, Allow + Remember, granted and remembered; asked again, answered with no card.
+  open(@"https://media-a.example/", ^(ArcItem* a) {
+    [w runJS:[NSString stringWithFormat:gum, @"gum", @"gum"] inItem:a];
+    WaitUntil(^{ if (w.shownItem != a) [w showItem:a]; return (BOOL)(w.pendingSitePrompt.length > 0 || [a.liveTitle hasPrefix:@"gum:"]); }, 10, ^{
+      BOOL asked = [w.pendingSitePrompt hasPrefix:@"camera,microphone:"];
+      if (!fakeUI) allowCard();
+      WaitUntil(^{ return (BOOL)[a.liveTitle hasPrefix:@"gum:"]; }, 8, ^{
+        BOOL granted = [a.liveTitle isEqualToString:@"gum:2"];
+        [w runJS:[NSString stringWithFormat:gum, @"gum2", @"gum2"] inItem:a];
+        WaitUntil(^{ return (BOOL)[a.liveTitle hasPrefix:@"gum2:"]; }, 8, ^{
+          if (fakeUI)
+            std::printf("SELFTEST-MEDIAFAKEUI granted=%d again=%d noCard=%d\n", granted, [a.liveTitle isEqualToString:@"gum2:2"],
+                        w.pendingSitePrompt == nil);
+          else
+            std::printf("SELFTEST-MEDIAGUM asked=%d granted=%d remembered=%d again=%d noCard=%d\n", asked, granted,
+                        remembered(@"https://media-a.example"), [a.liveTitle isEqualToString:@"gum2:2"], w.pendingSitePrompt == nil);
+          std::fflush(stdout);
+          [w runJS:@"window.__s&&window.__s.getTracks().forEach(x=>x.stop())" inItem:a];
+          caseB();
+        });
+      });
+    });
+  });
+}
+
 - (void)runFloatingVideoThenPageFit:(void (^)(void))done {
-  [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runSitePermissionSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }]; }];
+  [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runSitePermissionSelfTest:^{ [self runMediaPermissionSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }]; }]; }];
 }
 
 - (void)runSelfTestActions {
@@ -2314,6 +2477,16 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
   if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"pagefit"]) {  // quick local loop
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [self runPageFitSelfTest:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
+    });
+    return;
+  }
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"media"]) {  // quick local loop
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runMediaPermissionSelfTest:^{
         std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
         std::fflush(stdout);
         [self.window closeAllBrowsers];
@@ -6231,17 +6404,19 @@ int main(int argc, char* argv[]) {
   static char noMediaSuspend[] = "--disable-background-media-suspend";  // media test plays in the hidden window
   static char noTimerThrottle[] = "--disable-background-timer-throttling";
   static char noMacOcclusion[] = "--disable-features=MacWebContentsOcclusion";  // pages in hidden test windows stay "visible"
+  static char fakeMediaUI[] = "--use-fake-ui-for-media-stream";
   for (int i = 1; i < argc; ++i)
     if (std::string(argv[i]) == "--selftest" || std::string(argv[i]) == "--selftest-reload" ||
         std::string(argv[i]).rfind("--sidebar-snapshot=", 0) == 0 || std::string(argv[i]).rfind("--visual-shots=", 0) == 0) {
       args.push_back(mockKeychain);
       args.push_back(autoplay);
-      args.push_back(fakeDevices);
+      if (!getenv("NOTARC_REAL_MEDIA_STATUS")) args.push_back(fakeDevices);  // media test: the Mac's own camera status
       args.push_back(noOcclusion);
       args.push_back(noBackground);
       args.push_back(noMediaSuspend);
       args.push_back(noTimerThrottle);
       args.push_back(noMacOcclusion);
+      if (getenv("NOTARC_FAKE_MEDIA_UI")) args.push_back(fakeMediaUI);  // media test: Chromium answers media requests itself
       break;
     }
   // Chrome-style pages (#66) load the extensions copied from Arc. Chromium keeps only the last --disable-features,

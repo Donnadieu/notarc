@@ -54,6 +54,8 @@ class BrowserClient : public CefClient,
   // A local log of site requests and NotArc's answers (SiteRequests.log next to the sidebar), one line each, written at
   // once: after Omar's Nov 13 crash inside Chromium's PermissionRequest::PermissionGranted, the next one names the request.
   static void SetPermissionLogPath(const std::string& path);
+  // Self-test with the Mac's real camera/mic status (no fake devices): refuse every device request, so nothing opens.
+  static void SetRefuseDeviceMediaForTest(bool refuse);
   static void LogPermission(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
   bool OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                       const CefString& requesting_origin, uint32_t requested_permissions,

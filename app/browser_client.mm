@@ -4,6 +4,7 @@
 #include "app/content_blocker.h"
 #import "app/autofill.h"
 
+#include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -456,10 +457,18 @@ void BrowserClient::LogPermission(const char* fmt, ...) {
   std::fclose(f);  // written now: a crash right after must not lose it
 }
 
+static std::atomic<bool> g_refuse_device_media{false};
+void BrowserClient::SetRefuseDeviceMediaForTest(bool refuse) { g_refuse_device_media = refuse; }
+
 bool BrowserClient::OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
                                                    const CefString& origin, uint32_t requested,
                                                    CefRefPtr<CefMediaAccessCallback> callback) {
   CEF_REQUIRE_UI_THREAD();
+  if (g_refuse_device_media) {
+    LogPermission("media refused (test) requested=%u origin=%s", requested, origin.ToString().c_str());
+    callback->Cancel();
+    return true;
+  }
   if (!on_permission_) return false;
   uint32_t perms = 0;
   if (requested & (CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE | CEF_MEDIA_PERMISSION_DESKTOP_VIDEO_CAPTURE))
