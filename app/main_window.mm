@@ -1648,6 +1648,10 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   AutofillController* _autofill;  // passwords and autofill (#67)
   NSView* _toolbar;
   NSMutableArray<NSDictionary*>* _sitePrompts;  // queue; first one is showing
+  // Camera / microphone allowed in a tab for the site it's on (Chrome's "allow this time"): browser id ->
+  // {origin, names}. Later requests from that site in that tab (Meet asks for camera+mic, then mic, then camera)
+  // are answered with no new card; it ends when the tab leaves the site.
+  NSMutableDictionary<NSNumber*, NSDictionary*>* _mediaGrants;
   NSPopover* _siteAlert;  // the site prompt that drops down from the address pill
   NSButton* _sitePromptRemember;
   NSPopover* _sitePopover;
@@ -2832,6 +2836,9 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
     [OwnerOf(browserId, weakSelf) browser:browserId permissionRequest:requestId origin:[NSString stringWithUTF8String:origin.c_str()]
                  bits:perms];
   });
+  _client->set_system_blocked_callback([weakSelf](int browserId, bool audio, bool video) {
+    [OwnerOf(browserId, weakSelf) browser:browserId macOSBlockedAudio:audio video:video];
+  });
   _client->set_external_callback([weakSelf](int browserId, const std::string& url) {
     [OwnerOf(browserId, weakSelf) browser:browserId externalURL:[NSString stringWithUTF8String:url.c_str()]];
   });
@@ -3118,6 +3125,7 @@ static NSString* const kPiPExitJS =
   return nil;
 }
 
+static NSString* OriginKey(NSString* origin);
 - (void)browser:(int)browserId title:(NSString*)title url:(NSString*)url {
   ArcItem* item = [self itemForBrowser:browserId];
   if (!item) return;
@@ -3127,6 +3135,8 @@ static NSString* const kPiPExitJS =
   }
   if (url.length && !item.pinnedURL.length && [self isPinnedItem:item]) item.pinnedURL = item.url ?: url;
   if (url.length) item.url = url;
+  if (url.length && _mediaGrants[@(browserId)] && ![_mediaGrants[@(browserId)][@"origin"] isEqualToString:OriginKey(url)])
+    [_mediaGrants removeObjectForKey:@(browserId)];  // left the site: its camera / mic answer ends here
   if (url.length && item == _shown) [self updateToolbarAddress];
   if (self.historyPath && !_history) _history = [[HistoryStore alloc] initWithPath:self.historyPath];
   if (url.length) [_history recordURL:url title:title space:[self spaceOwningItem:item].title];
@@ -4508,6 +4518,10 @@ static NSString* OriginKey(NSString* origin) {
     _client->ResolvePermission(requestId, false);
     return;
   }
+  if ([self mediaGrantCovers:names browser:browserId origin:origin]) {
+    _client->ResolvePermission(requestId, true);
+    return;
+  }
   // Remembered answers: any remembered "no" refuses, all remembered "yes" allows.
   NSDictionary* saved = [self sitePermissionsForOrigin:origin];
   BOOL allKnown = YES;
@@ -4529,9 +4543,48 @@ static NSString* OriginKey(NSString* origin) {
   NSString* list = phrases.count == 1 ? phrases[0]
                  : [[[phrases subarrayWithRange:NSMakeRange(0, phrases.count - 1)] componentsJoinedByString:@", "]
                        stringByAppendingFormat:@" and %@", phrases.lastObject];
-  [self queueSitePrompt:@{ @"type" : @"permission", @"id" : @(requestId), @"origin" : origin ?: @"", @"names" : names,
+  [self queueSitePrompt:@{ @"type" : @"permission", @"id" : @(requestId), @"browser" : @(browserId), @"origin" : origin ?: @"", @"names" : names,
                            @"title" : [NSString stringWithFormat:@"%@ wants to %@", [NSURL URLWithString:origin].host ?: origin, list],
                            @"allow" : @"Allow", @"deny" : @"Don't Allow" }];
+}
+
+// Camera and microphone only: those are what Chrome keeps for the visit after one Allow.
+- (BOOL)mediaGrantCovers:(NSArray<NSString*>*)names browser:(int)browserId origin:(NSString*)origin {
+  NSDictionary* g = _mediaGrants[@(browserId)];
+  if (!g || !names.count || ![g[@"origin"] isEqualToString:OriginKey(origin)]) return NO;
+  for (NSString* n in names)
+    if (![g[@"names"] containsObject:n]) return NO;
+  return YES;
+}
+
+- (void)grantMedia:(NSArray<NSString*>*)names browser:(int)browserId origin:(NSString*)origin {
+  NSMutableSet* media = [NSMutableSet setWithArray:names];
+  [media intersectSet:[NSSet setWithArray:@[ @"camera", @"microphone" ]]];
+  if (!media.count) return;
+  if (!_mediaGrants) _mediaGrants = [NSMutableDictionary dictionary];
+  NSDictionary* old = _mediaGrants[@(browserId)];
+  if ([old[@"origin"] isEqualToString:OriginKey(origin)]) [media unionSet:old[@"names"]];
+  _mediaGrants[@(browserId)] = @{ @"origin" : OriginKey(origin), @"names" : media };
+}
+
+- (NSString*)mediaGrantForTest:(ArcItem*)item {
+  NSDictionary* g = _mediaGrants[@(item.browserId)];
+  return g ? [NSString stringWithFormat:@"%@:%@", g[@"origin"], [[g[@"names"] allObjects] sortedArrayUsingSelector:@selector(compare:)]] : nil;
+}
+
+// macOS has the camera or microphone off for NotArc (System Settings > Privacy & Security): say so on the page's card,
+// with a button that opens that switch. Chrome shows the same kind of notice.
+- (void)browser:(int)browserId macOSBlockedAudio:(BOOL)audio video:(BOOL)video {
+  NSString* what = audio && video ? @"camera and microphone" : audio ? @"microphone" : @"camera";
+  NSString* pane = audio ? @"Privacy_Microphone" : @"Privacy_Camera";
+  for (NSDictionary* p in _sitePrompts)
+    if ([p[@"type"] isEqualToString:@"system"]) return;  // one notice at a time
+  [self queueSitePrompt:@{ @"type" : @"system", @"names" : @[], @"origin" : @"",
+                           @"url" : [@"x-apple.systempreferences:com.apple.preference.security?" stringByAppendingString:pane],
+                           @"title" : [NSString stringWithFormat:@"macOS has the %@ turned off for NotArc", what],
+                           @"detail" : [NSString stringWithFormat:@"Turn NotArc on in System Settings > Privacy & Security > %@, then reload the page.",
+                                                                  audio ? @"Microphone" : @"Camera"],
+                           @"allow" : @"Open System Settings", @"deny" : @"Not Now" }];
 }
 
 - (void)browser:(int)browserId externalURL:(NSString*)url {
@@ -4584,7 +4637,7 @@ static NSString* OriginKey(NSString* origin) {
   }
   NSButton* remember = [NSButton checkboxWithTitle:@"Remember for this site" target:nil action:nil];
   remember.font = [NSFont systemFontOfSize:12];
-  [views addObject:remember];
+  if ([p[@"names"] count]) [views addObject:remember];  // a macOS notice has nothing to remember
   NSButton* deny = [NSButton buttonWithTitle:p[@"deny"] target:self action:@selector(sitePromptButton:)];
   deny.tag = 0;
   NSButton* allow = [NSButton buttonWithTitle:p[@"allow"] target:self action:@selector(sitePromptButton:)];
@@ -4632,9 +4685,20 @@ static NSString* OriginKey(NSString* origin) {
   _siteAlert = nil;
   if (!p) return;
   [_sitePrompts removeObjectAtIndex:0];
-  if (remember) [self rememberSite:p[@"origin"] names:p[@"names"] allow:allow];
-  if ([p[@"type"] isEqualToString:@"permission"]) _client->ResolvePermission([p[@"id"] intValue], allow);
-  else if (allow) [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:p[@"url"]]];
+  if (remember && [p[@"names"] count]) [self rememberSite:p[@"origin"] names:p[@"names"] allow:allow];
+  if ([p[@"type"] isEqualToString:@"permission"]) {
+    int browserId = [p[@"browser"] intValue];
+    if (allow) [self grantMedia:p[@"names"] browser:browserId origin:p[@"origin"]];
+    _client->ResolvePermission([p[@"id"] intValue], allow);
+    // Requests from the same tab and site that queued up behind this card (Meet asks for camera+mic, mic and camera
+    // at once) are covered by this Allow: answer them now instead of showing more cards.
+    for (NSDictionary* q in [_sitePrompts copy])
+      if ([q[@"type"] isEqualToString:@"permission"] && [q[@"browser"] intValue] == browserId &&
+          [self mediaGrantCovers:q[@"names"] browser:browserId origin:q[@"origin"]]) {
+        [_sitePrompts removeObject:q];
+        _client->ResolvePermission([q[@"id"] intValue], true);
+      }
+  } else if (allow) [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:p[@"url"]]];
   [self showNextSitePrompt];
 }
 

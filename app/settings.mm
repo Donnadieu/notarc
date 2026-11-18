@@ -385,6 +385,15 @@ static NSArray* LittleArchiveChoices() {
 }
 
 static const CGFloat kPaneWidth = 540;
+// Every pane gets the same size and scrolls when it's taller (General). NSTabViewController's own window resizing per
+// pane left the panes drifting above the window's visible area on each tab switch: Settings looked blank (Nov 18).
+static const CGFloat kPaneHeight = 620;
+
+@interface SettingsPaneDocument : NSView  // flipped, so a pane starts at the top of its scroll view
+@end
+@implementation SettingsPaneDocument
+- (BOOL)isFlipped { return YES; }
+@end
 
 // Visual parity V58: Arc's settings panes are grouped cards of rows (label at the left, switch or control at the
 // right, inset hairlines between rows), small section titles above the cards, and flat rounded buttons in Arc's
@@ -497,6 +506,7 @@ static BOOL PrefsDark(NSView* v) {
 
 @implementation SettingsWindowController {
   NSTabViewController* _tabs;
+  NSMutableDictionary<NSString*, NSView*>* _paneViews;  // pane identifier -> the pane itself (inside its scroll view)
   NSPopUpButton* _engine;
   NSPopUpButton* _archive;
   NSPopUpButton* _littleArchive;
@@ -658,10 +668,27 @@ static MainWindowController* Browser() { return [MainWindowController mainContro
 
 - (void)addPane:(NSString*)identifier title:(NSString*)title symbol:(NSString*)sfSymbol view:(NSView*)view {
   NSViewController* vc = [NSViewController new];
-  vc.view = view;
-  vc.title = title;
   [view layoutSubtreeIfNeeded];
-  vc.preferredContentSize = view.fittingSize;
+  NSSize fit = view.fittingSize;
+  SettingsPaneDocument* doc = [[SettingsPaneDocument alloc] initWithFrame:NSMakeRect(0, 0, kPaneWidth, MAX(fit.height, kPaneHeight))];
+  view.translatesAutoresizingMaskIntoConstraints = NO;
+  [doc addSubview:view];
+  [NSLayoutConstraint activateConstraints:@[
+    [view.topAnchor constraintEqualToAnchor:doc.topAnchor], [view.leadingAnchor constraintEqualToAnchor:doc.leadingAnchor],
+    [view.widthAnchor constraintEqualToConstant:kPaneWidth]
+  ]];
+  NSScrollView* scroll = [[NSScrollView alloc] initWithFrame:NSMakeRect(0, 0, kPaneWidth, kPaneHeight)];
+  scroll.hasVerticalScroller = fit.height > kPaneHeight;
+  scroll.autohidesScrollers = YES;
+  scroll.drawsBackground = NO;
+  scroll.borderType = NSNoBorder;
+  scroll.documentView = doc;
+  [doc scrollPoint:NSZeroPoint];
+  if (!_paneViews) _paneViews = [NSMutableDictionary dictionary];
+  _paneViews[identifier] = view;
+  vc.view = scroll;
+  vc.title = title;
+  vc.preferredContentSize = NSMakeSize(kPaneWidth, kPaneHeight);
   NSTabViewItem* item = [NSTabViewItem tabViewItemWithViewController:vc];
   item.identifier = identifier;
   item.label = title;
@@ -686,7 +713,7 @@ static MainWindowController* Browser() { return [MainWindowController mainContro
   NSTabViewController* tabs = [NSTabViewController new];
   tabs.tabStyle = NSTabViewControllerTabStyleToolbar;
   tabs.transitionOptions = NSViewControllerTransitionCrossfade | NSViewControllerTransitionAllowUserInteraction;
-  NSWindow* w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, kPaneWidth, 400)
+  NSWindow* w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, kPaneWidth, kPaneHeight)
                                             styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
                                               backing:NSBackingStoreBuffered
                                                 defer:YES];
@@ -731,12 +758,12 @@ static MainWindowController* Browser() { return [MainWindowController mainContro
   return i >= 0 && i < (NSInteger)_tabs.tabViewItems.count ? _tabs.tabViewItems[i].identifier : nil;
 }
 
-- (NSView*)viewOfPane:(NSString*)identifier { return [self paneItem:identifier].viewController.view; }
+- (NSView*)viewOfPane:(NSString*)identifier { return _paneViews[identifier]; }
 
 - (BOOL)writePaneSnapshotsTo:(NSString*)folder {  // <pane>.png (light) and <pane>-dark.png, on the window background
   BOOL ok = YES;
   for (NSTabViewItem* item in _tabs.tabViewItems) {
-    NSView* v = item.viewController.view;
+    NSView* v = _paneViews[item.identifier];
     for (NSString* mode in @[ @"", @"-dark" ]) {
       v.appearance = [NSAppearance appearanceNamed:mode.length ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
       [v setFrameSize:v.fittingSize];
@@ -757,6 +784,48 @@ static MainWindowController* Browser() { return [MainWindowController mainContro
     v.appearance = nil;
   }
   return ok;
+}
+
+- (NSString*)shownPaneReport:(NSString*)shotPath {
+  NSWindow* win = self.window;
+  NSView* content = win.contentView;
+  [content layoutSubtreeIfNeeded];
+  NSView* pane = [self viewOfPane:self.selectedPane];
+  __block int texts = 0, controls = 0;
+  __block void (^walk)(NSView*) = nil;
+  void (^visit)(NSView*) = ^(NSView* v) {
+    if (v.isHiddenOrHasHiddenAncestor || v.alphaValue < 0.05) return;
+    NSRect r = NSIntersectionRect([v convertRect:v.bounds toView:content], content.bounds);
+    if (v.window == win && r.size.width >= 4 && r.size.height >= 4) {
+      if ([v isKindOfClass:NSTextField.class] && ((NSTextField*)v).stringValue.length) ++texts;
+      else if ([v isKindOfClass:NSControl.class]) ++controls;
+    }
+    for (NSView* c in v.subviews) walk(c);
+  };
+  walk = visit;
+  if (pane) walk(pane);
+  walk = nil;
+  // Draw the whole content view the way the window does and count pixels that differ from its background.
+  NSView* frameView = content.superview ?: content;  // draws the window background too
+  NSRect area = [content convertRect:content.bounds toView:frameView];
+  NSBitmapImageRep* rep = [frameView bitmapImageRepForCachingDisplayInRect:area];
+  [frameView cacheDisplayInRect:area toBitmapImageRep:rep];
+  NSInteger ink = 0;
+  NSColor* bg = [[rep colorAtX:2 y:rep.pixelsHigh - 3] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+  NSInteger top = (NSInteger)(rep.pixelsHigh * 0.12);  // below the toolbar tabs
+  for (NSInteger y = top; y < rep.pixelsHigh; y += 2)
+    for (NSInteger x = 0; x < rep.pixelsWide; x += 2) {
+      NSColor* c = [[rep colorAtX:x y:y] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+      if (fabs(c.redComponent - bg.redComponent) + fabs(c.greenComponent - bg.greenComponent) + fabs(c.blueComponent - bg.blueComponent) > 0.25) ++ink;
+    }
+  if (shotPath.length) [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:shotPath atomically:YES];
+  NSSize fit = pane.fittingSize;
+  NSRect inContent = [pane convertRect:pane.bounds toView:content];
+  double topGap = content.isFlipped ? NSMinY(inContent) : content.bounds.size.height - NSMaxY(inContent);
+  return [NSString stringWithFormat:@"pane=%@ win=%.0fx%.0f content=%.0fx%.0f topGap=%.0f origin=%.0f,%.0f view=%.0fx%.0f fit=%.0fx%.0f inWindow=%d texts=%d controls=%d ink=%ld",
+                                    self.selectedPane, win.frame.size.width, win.frame.size.height, content.bounds.size.width,
+                                    content.bounds.size.height, topGap, [pane convertPoint:NSZeroPoint toView:content].x, [pane convertPoint:NSZeroPoint toView:content].y, pane.frame.size.width, pane.frame.size.height, fit.width, fit.height,
+                                    pane.window == win, texts, controls, (long)ink];
 }
 
 #pragma mark General
@@ -1211,6 +1280,7 @@ static MainWindowController* Browser() { return [MainWindowController mainContro
 - (void)rebuildPanes {
   NSString* shown = [self selectedPane];
   for (NSTabViewItem* i in [_tabs.tabViewItems copy]) [_tabs removeTabViewItem:i];
+  [_paneViews removeAllObjects];
   [self buildPanes];
   if (shown) [self selectPane:shown];
 }

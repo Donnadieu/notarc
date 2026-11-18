@@ -2510,8 +2510,307 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
   });
 }
 
+// Camera and microphone like Chrome (Omar, Nov 18: Meet said "microphone not found" and the camera only sometimes
+// started). One Allow covers the visit: Meet's burst of follow-up requests (mic only, camera only, mic again), a reload
+// (joining again) and requests queued behind the card get no new card; leaving the site ends it. Before a device
+// starts, NotArc asks macOS when it was never asked and refuses (with a notice) when macOS has it off. Fake devices;
+// macOS's status is a test value, so no real prompt can show.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-retain-cycles"
+- (void)runMediaRepeatSelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  if (getenv("NOTARC_FAKE_MEDIA_UI") || getenv("NOTARC_REAL_MEDIA_STATUS")) {
+    done();
+    return;
+  }
+  NSString* plain = @"<!doctype html><title>rep</title><body>r</body>";
+  NSData* d = [plain dataUsingEncoding:NSUTF8StringEncoding];
+  for (NSString* u in @[ @"https://media-e.example/", @"https://media-f.example/", @"https://media-g.example/" ])
+    BrowserClient::SetTestResponse(u.UTF8String, std::string((const char*)d.bytes, d.length));
+  // Runs `js` (which sets document.title to `<tag>:...`), answering any card with `allow`; then(title, cardShown).
+  void (^run)(ArcItem*, NSString*, NSString*, BOOL, void (^)(NSString*, NSString*)) =
+      ^(ArcItem* t, NSString* js, NSString* tag, BOOL allow, void (^then)(NSString*, NSString*)) {
+        __block NSString* card = nil;
+        [w runJS:js inItem:t];
+        WaitUntil(^{
+          if (w.shownItem != t) [w showItem:t];
+          if (w.pendingSitePrompt) {
+            if (!card) card = w.pendingSitePrompt;
+            [w answerSitePrompt:allow remember:NO];
+          }
+          return (BOOL)[t.liveTitle hasPrefix:[tag stringByAppendingString:@":"]];
+        }, 10, ^{ then(t.liveTitle ?: @"-", card); });
+      };
+  NSString* (^gum)(NSString*, NSString*) = ^NSString*(NSString* tag, NSString* constraints) {
+    return [NSString stringWithFormat:@"navigator.mediaDevices.getUserMedia(%@).then(s=>{const n=s.getTracks().length;s.getTracks().forEach(x=>x.stop());"
+                                      @"document.title='%@:'+n},e=>document.title='%@:'+e.name)", constraints, tag, tag];
+  };
+  void (^open)(NSString*, void (^)(ArcItem*)) = ^(NSString* url, void (^then)(ArcItem*)) {
+    [w openInNewTab:url];
+    ArcItem* t = w.shownItem;
+    WaitUntil(^{ return (BOOL)(!t.loading && [t.liveTitle isEqualToString:@"rep"]); }, 10, ^{ then(t); });
+  };
+  void (^navigate)(ArcItem*, NSString*, void (^)(void)) = ^(ArcItem* t, NSString* url, void (^then)(void)) {
+    [w runJS:[NSString stringWithFormat:@"location.href='%@'", url] inItem:t];
+    WaitUntil(^{ return (BOOL)(!t.loading && [t.url hasPrefix:url] && [t.liveTitle isEqualToString:@"rep"]); }, 10, then);
+  };
+  NSString* burst = @"Promise.all([{audio:true},{video:true},{audio:true}].map(c=>navigator.mediaDevices.getUserMedia(c)))"
+                    @".then(a=>{a.forEach(s=>s.getTracks().forEach(x=>x.stop()));document.title='burst:'+a.length},e=>document.title='burst:'+e.name)";
+  NSString* devs = @"navigator.mediaDevices.enumerateDevices().then(d=>document.title='dev:'+d.filter(x=>x.kind=='audioinput'&&x.label).length+','+"
+                   @"d.filter(x=>x.kind=='videoinput'&&x.label).length)";
+  BrowserClient::SetMacMediaStatusForTest(3, 3);
+  open(@"https://media-e.example/", ^(ArcItem* e) {
+    run(e, gum(@"e1", @"{audio:true,video:true}"), @"e1", YES, ^(NSString* t1, NSString* c1) {
+      BOOL asked = [c1 hasPrefix:@"camera,microphone:"], granted = [t1 isEqualToString:@"e1:2"];
+      run(e, burst, @"burst", YES, ^(NSString* tb, NSString* cb) {
+        BOOL burstOK = [tb isEqualToString:@"burst:3"], burstNoCard = cb == nil;
+        run(e, devs, @"dev", YES, ^(NSString* td, NSString* cd) {
+          NSArray* n = [[td substringFromIndex:MIN((NSUInteger)4, td.length)] componentsSeparatedByString:@","];
+          BOOL devices = n.count == 2 && [n[0] intValue] > 0 && [n[1] intValue] > 0;
+          [w reloadPage:nil];
+          WaitUntil(^{ return (BOOL)(!e.loading && [e.liveTitle isEqualToString:@"rep"]); }, 10, ^{
+            run(e, gum(@"e2", @"{audio:true,video:true}"), @"e2", YES, ^(NSString* t2, NSString* c2) {
+              BOOL rejoin = [t2 isEqualToString:@"e2:2"] && c2 == nil;
+              // Queued: two requests at once from a new site; one Allow answers both.
+              open(@"https://media-f.example/", ^(ArcItem* f) {
+                NSString* two = @"Promise.all([{audio:true,video:true},{audio:true}].map(c=>navigator.mediaDevices.getUserMedia(c)))"
+                                @".then(a=>{a.forEach(s=>s.getTracks().forEach(x=>x.stop()));document.title='two:'+a.length},e=>document.title='two:'+e.name)";
+                __block int shown = 0;
+                [w runJS:two inItem:f];
+                WaitUntil(^{
+                  if (w.shownItem != f) [w showItem:f];
+                  if (w.pendingSitePrompt) {
+                    ++shown;
+                    [w answerSitePrompt:YES remember:NO];
+                  }
+                  return (BOOL)[f.liveTitle hasPrefix:@"two:"];
+                }, 10, ^{
+                  BOOL queued = [f.liveTitle isEqualToString:@"two:2"] && shown == 1;
+                  // Leaving the site ends the answer: back on it, the site is asked again (Don't Allow this time).
+                  navigate(e, @"https://media-f.example/", ^{
+                    navigate(e, @"https://media-e.example/", ^{
+                      run(e, gum(@"e3", @"{audio:true}"), @"e3", NO, ^(NSString* t3, NSString* c3) {
+                        BOOL leftAsks = [c3 hasPrefix:@"microphone:"] && [t3 isEqualToString:@"e3:NotAllowedError"];
+                        std::printf("SELFTEST-MEDIAREPEAT asked=%d granted=%d burstOK=%d burstNoCard=%d devices=%d rejoin=%d queued=%d "
+                                    "leftAsks=%d title=%s/%s/%s/%s/%s cards=%s/%s\n", asked, granted, burstOK, burstNoCard, devices,
+                                    rejoin, queued, leftAsks, t1.UTF8String, tb.UTF8String, t2.UTF8String, f.liveTitle.UTF8String ?: "-",
+                                    t3.UTF8String, cb.UTF8String ?: "-", c2.UTF8String ?: "-");
+                        std::fflush(stdout);
+                        // macOS's own switch: never asked -> NotArc asks macOS once, then the site gets the mic; off ->
+                        // the site is refused and a notice explains where to turn it on.
+                        [w rememberSite:@"https://media-g.example" names:@[ @"camera", @"microphone" ] allow:YES];
+                        BrowserClient::SetMacMediaStatusForTest(0, 3);
+                        int asksBefore = BrowserClient::MacMediaAsksForTest();
+                        open(@"https://media-g.example/", ^(ArcItem* g) {
+                          run(g, gum(@"g1", @"{audio:true}"), @"g1", NO, ^(NSString* tg1, NSString* cg1) {
+                            BOOL macAsked = BrowserClient::MacMediaAsksForTest() == asksBefore + 1 && [tg1 isEqualToString:@"g1:1"];
+                            BrowserClient::SetMacMediaStatusForTest(2, 3);
+                            __block NSString* notice = nil;
+                            [w runJS:gum(@"g2", @"{audio:true}") inItem:g];
+                            WaitUntil(^{
+                              if (w.shownItem != g) [w showItem:g];
+                              if (w.pendingSitePrompt && !notice) notice = w.pendingSitePrompt;
+                              return (BOOL)([g.liveTitle hasPrefix:@"g2:"] && notice != nil);
+                            }, 10, ^{
+                              BOOL refused = [g.liveTitle isEqualToString:@"g2:NotAllowedError"];
+                              BOOL told = [notice isEqualToString:@":"];
+                              if (w.pendingSitePrompt) [w answerSitePrompt:NO remember:NO];
+                              std::printf("SELFTEST-MEDIAMACOS asked=%d refused=%d notice=%d title=%s/%s card=%s\n", macAsked, refused, told,
+                                          tg1.UTF8String, g.liveTitle.UTF8String ?: "-", notice.UTF8String ?: "-");
+                              std::fflush(stdout);
+                              BrowserClient::SetMacMediaStatusForTest(3, 3);
+                              for (NSString* n in @[ @"camera", @"microphone" ]) [w setSitePermission:n value:nil forOrigin:@"https://media-g.example"];
+                              done();
+                            });
+                          });
+                        });
+                      });
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+}
+#pragma clang diagnostic pop
+
+// Manual check with real devices (NOTARC_SELFTEST_ONLY=realmedia NOTARC_REAL_DEVICES=1, never in the suite): permission
+// state, device lists, levels and frame sizes across repeat requests and reloads. NOTARC_PROBE_CODECS=1 lists codecs.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-retain-cycles"
+- (void)runRealMediaProbe:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSString* page = @"<!doctype html><title>probe</title><body>p</body>";
+  NSData* d = [page dataUsingEncoding:NSUTF8StringEncoding];
+  BrowserClient::SetTestResponse("https://media-r.example/", std::string((const char*)d.bytes, d.length));
+  NSString* remember = NSProcessInfo.processInfo.environment[@"NOTARC_PROBE_REMEMBER"];
+  if (remember.length) [w rememberSite:@"https://media-r.example" names:@[ @"camera", @"microphone" ] allow:YES];
+  NSString* js =
+      @"(async()=>{const r={};const q=async n=>{try{return (await navigator.permissions.query({name:n})).state}catch(e){return 'err:'+e.name}};"
+      @"const en=async()=>{const d=await navigator.mediaDevices.enumerateDevices();const o={};for(const x of d){o[x.kind]=o[x.kind]||[0,0,0];"
+      @"o[x.kind][0]++;if(x.deviceId)o[x.kind][1]++;if(x.label)o[x.kind][2]++;}return o};"
+      @"const g=async c=>{const t0=performance.now();try{const s=await navigator.mediaDevices.getUserMedia(c);const t=s.getTracks().map(t=>t.kind[0]+'/'+t.readyState+'/'+(t.muted?'m':'u')+'/'+t.label.slice(0,18));"
+      @"let lvl=-1;if(s.getAudioTracks().length){const ac=new AudioContext();const src=ac.createMediaStreamSource(s);const an=ac.createAnalyser();src.connect(an);"
+      @"const b=new Float32Array(2048);let mx=0;for(let i=0;i<10;i++){await new Promise(r=>setTimeout(r,100));an.getFloatTimeDomainData(b);for(const v of b)mx=Math.max(mx,Math.abs(v));}"
+      @"lvl=+mx.toFixed(4);ac.close();}let vs='';if(s.getVideoTracks().length){const st=s.getVideoTracks()[0].getSettings();vs=st.width+'x'+st.height;}"
+      @"s.getTracks().forEach(t=>t.stop());return {ok:1,ms:Math.round(performance.now()-t0),t,lvl,vs}}catch(e){return {err:e.name+':'+e.message.slice(0,50),ms:Math.round(performance.now()-t0)}}};"
+      @"r.p0=[await q('camera'),await q('microphone')];r.e0=await en();r.a=await g({audio:true});r.e1=await en();r.p1=[await q('camera'),await q('microphone')];"
+      @"r.v=await g({video:true});r.av=await g({audio:true,video:true});r.av2=await g({audio:true,video:true});r.e2=await en();"
+      @"document.title='probe:'+JSON.stringify(r)})()";
+  if (getenv("NOTARC_PROBE_CODECS"))
+    js = @"(()=>{const v=document.createElement('video');const T=['video/mp4; codecs=\\\"avc1.42E01E\\\"','video/mp4; codecs=\\\"avc1.64001F, mp4a.40.2\\\"','audio/mp4; codecs=\\\"mp4a.40.2\\\"','video/webm; codecs=\\\"vp9\\\"','video/mp4; codecs=\\\"av01.0.05M.08\\\"','application/vnd.apple.mpegurl'];"
+         @"const r=T.map(t=>t.split(';')[0].slice(6)+'|'+(t.split('\\\"')[1]||'')+'='+v.canPlayType(t)+'/'+(window.MediaSource&&MediaSource.isTypeSupported(t)?1:0));"
+         @"document.title='probe:'+r.join(' ')})()";
+  __block int round = 0;
+  __block ArcItem* t = nil;
+  __block void (^step)(void) = nil;
+  step = ^{
+    ++round;
+    [w runJS:js inItem:t];
+    WaitUntil(^{
+      if (w.shownItem != t) [w showItem:t];
+      if (w.pendingSitePrompt) [w answerSitePrompt:YES remember:remember.length > 0];
+      return (BOOL)[t.liveTitle hasPrefix:@"probe:"];
+    }, 40, ^{
+      std::printf("PROBE round=%d %s\n", round, t.liveTitle.UTF8String ?: "-");
+      std::fflush(stdout);
+      if (round >= 3) {
+        void (^finish)(void) = done;  // keep it: clearing `step` frees this block and what it holds
+        step = nil;
+        finish();
+        return;
+      }
+      [w reloadPage:nil];
+      WaitUntil(^{ return (BOOL)(!t.loading && [t.liveTitle isEqualToString:@"probe"]); }, 10, ^{ step(); });
+    });
+  };
+  [w openInNewTab:@"https://media-r.example/"];
+  t = w.shownItem;
+  WaitUntil(^{ return (BOOL)(!t.loading && [t.liveTitle isEqualToString:@"probe"]); }, 10, ^{ step(); });
+}
+#pragma clang diagnostic pop
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-retain-cycles"
+// Manual check of a real site (NOTARC_PROBE_URL, network; never in the suite): answers NotArc's cards with Allow
+// (NOTARC_PROBE_ANSWERS caps how many), prints the page text, devices and permission state every 2 s.
+- (void)runSiteMediaProbe:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSString* url = NSProcessInfo.processInfo.environment[@"NOTARC_PROBE_URL"];
+  BOOL remember = NSProcessInfo.processInfo.environment[@"NOTARC_PROBE_REMEMBER"].length > 0;
+  NSString* clickWords = NSProcessInfo.processInfo.environment[@"NOTARC_PROBE_CLICK"] ?: @"";
+  [w openInNewTab:url];
+  ArcItem* t = w.shownItem;
+  __block int tick = 0;
+  NSString* textJS = @"(()=>{const s=(document.body?document.body.innerText:'').replace(/\\s+/g,' ').slice(0,700);"
+                     @"document.title='txt:'+s})()";
+  NSString* devJS = @"(async()=>{const d=await navigator.mediaDevices.enumerateDevices();const q=async n=>{try{return (await navigator.permissions.query({name:n})).state}catch(e){return 'err'}};"
+                    @"document.title='dev:'+JSON.stringify({d:d.map(x=>x.kind[0]+(x.deviceId?'+':'-')+(x.label?x.label.slice(0,14):'')),"
+                    @"cam:await q('camera'),mic:await q('microphone'),streams:(window.__notarcStreams||[]).map(s=>s.getTracks().map(t=>t.kind[0]+t.readyState).join(','))})})()";
+  __block void (^loop)(void) = nil;
+  loop = ^{
+    ++tick;
+    if (w.shownItem != t) [w showItem:t];
+    static int answers = 0;
+    int maxAnswers = getenv("NOTARC_PROBE_ANSWERS") ? atoi(getenv("NOTARC_PROBE_ANSWERS")) : 99;
+    if (w.pendingSitePrompt && tick % 4 == 1) {
+      std::printf("PROBE t=%d card=%s answered=%d\n", tick, w.pendingSitePrompt.UTF8String, answers < maxAnswers);
+      if (answers < maxAnswers) {
+        ++answers;
+        [w answerSitePrompt:YES remember:remember];
+      }
+    }
+    if (tick % 4 == 0) {
+      std::printf("PROBE t=%d title=%s\n", tick, t.liveTitle.UTF8String ?: "-");
+      [w runJS:(tick % 8 == 0 ? devJS : textJS) inItem:t];
+    }
+    for (NSString* word in [clickWords componentsSeparatedByString:@"|"])
+      if (word.length && (tick == 24 || tick == 48))
+        [w runJS:[NSString stringWithFormat:@"(()=>{const b=[...document.querySelectorAll('button,[role=button]')].find(b=>(b.innerText||'').includes('%@'));"
+                                            @"if(b)b.click()})()", word] inItem:t];
+    std::fflush(stdout);
+    if (tick >= 100) {
+      void (^finish)(void) = done;  // keep it: clearing `loop` frees this block and what it holds
+      loop = nil;
+      finish();
+      return;
+    }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ loop(); });
+  };
+  loop();
+}
+#pragma clang diagnostic pop
+
+// Settings window (Omar, Nov 18: Settings opened blank, tall and narrow, on every tab). Shows the real window (kept
+// at 1% alpha in test runs), visits every pane in light and dark, and checks the drawn window has the pane's labels
+// and controls inside it, at Arc's pane width. NOTARC_SETTINGS_SHOTS_DIR saves a picture of each pane.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-retain-cycles"
+- (void)runSettingsWindowSelfTest:(void (^)(void))done {
+  SettingsWindowController* sw = [SettingsWindowController shared];
+  NSString* shots = NSProcessInfo.processInfo.environment[@"NOTARC_SETTINGS_SHOTS_DIR"];
+  [sw showWindow:nil];
+  NSMutableArray* jobs = [NSMutableArray array];
+  for (NSString* mode in @[ @"light", @"dark" ])
+    for (NSString* p in sw.paneIdentifiers) [jobs addObject:@[ p, mode ]];
+  __block NSUInteger i = 0;
+  __block int shown = 0, sized = 0;
+  NSMutableString* bad = [NSMutableString string];
+  __block void (^step)(void) = nil;
+  step = ^{
+    if (i >= jobs.count) {
+      [sw.window orderOut:nil];
+      sw.window.appearance = nil;
+      std::printf("SELFTEST-SETTINGSSHOWN panes=%d shown=%d sized=%d%s%s\n", (int)jobs.count, shown == (int)jobs.count,
+                  sized == (int)jobs.count, bad.length ? " bad=" : "", bad.UTF8String);
+      std::fflush(stdout);
+      void (^finish)(void) = done;  // keep it: clearing `step` frees this block and what it holds
+      step = nil;
+      finish();
+      return;
+    }
+    NSArray* job = jobs[i++];
+    sw.window.appearance = [NSAppearance appearanceNamed:[job[1] isEqual:@"dark"] ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
+    [sw selectPane:job[0]];
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.9 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+      NSString* path = shots.length ? [shots stringByAppendingPathComponent:[NSString stringWithFormat:@"%@-%@.png", job[0], job[1]]] : nil;
+      NSString* r = [sw shownPaneReport:path];
+      int texts = 0, controls = 0, ink = 0, inWindow = 0;
+      double cw = 0, ch = 0, topGap = -1;
+      for (NSString* part in [r componentsSeparatedByString:@" "]) {
+        NSArray* kv = [part componentsSeparatedByString:@"="];
+        if (kv.count != 2) continue;
+        if ([kv[0] isEqual:@"texts"]) texts = [kv[1] intValue];
+        if ([kv[0] isEqual:@"controls"]) controls = [kv[1] intValue];
+        if ([kv[0] isEqual:@"ink"]) ink = [kv[1] intValue];
+        if ([kv[0] isEqual:@"inWindow"]) inWindow = [kv[1] intValue];
+        if ([kv[0] isEqual:@"topGap"]) topGap = [kv[1] doubleValue];
+        if ([kv[0] isEqual:@"content"]) {
+          NSArray* wh = [kv[1] componentsSeparatedByString:@"x"];
+          cw = [wh[0] doubleValue];
+          ch = [wh[1] doubleValue];
+        }
+      }
+      // Shown = the pane starts at the top of the window (not pushed above it) with labels, controls and drawn pixels.
+      BOOL ok = inWindow && texts >= 1 && controls >= 1 && ink >= 300 && topGap >= -2 && topGap <= 2;
+      BOOL size = cw >= 500 && ch >= 400 && ch <= 700;  // Arc-sized, never taller than a laptop screen
+      shown += ok;
+      sized += size;
+      if (!ok || !size) [bad appendFormat:@"%@[%@/%@]", bad.length ? @"," : @"", job[1], r];
+      if (getenv("NOTARC_SETTINGS_DEBUG")) std::printf("SELFTEST-SETTINGSSHOWN-DEBUG %s %s\n", [job[1] UTF8String], r.UTF8String);
+      step();
+    });
+  };
+  step();
+}
+#pragma clang diagnostic pop
+
 - (void)runFloatingVideoThenPageFit:(void (^)(void))done {
-  [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runSitePermissionSelfTest:^{ [self runMediaPermissionSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }]; }]; }];
+  [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runSitePermissionSelfTest:^{ [self runMediaPermissionSelfTest:^{ [self runMediaRepeatSelfTest:^{ [self runSettingsWindowSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }]; }]; }]; }]; }];
 }
 
 - (void)runSelfTestActions {
@@ -2537,7 +2836,29 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
   }
   if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"media"]) {  // quick local loop
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-      [self runMediaPermissionSelfTest:^{
+      [self runMediaPermissionSelfTest:^{ [self runMediaRepeatSelfTest:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }]; }];
+    });
+    return;
+  }
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"realmedia"]) {  // manual real-device check
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      void (^fin)(void) = ^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      };
+      if (getenv("NOTARC_PROBE_URL")) [self runSiteMediaProbe:fin];
+      else [self runRealMediaProbe:fin];
+    });
+    return;
+  }
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"settings"]) {  // quick local loop
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runSettingsWindowSelfTest:^{
         std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
         std::fflush(stdout);
         [self.window closeAllBrowsers];
@@ -6468,7 +6789,7 @@ int main(int argc, char* argv[]) {
         std::string(argv[i]).rfind("--sidebar-snapshot=", 0) == 0 || std::string(argv[i]).rfind("--visual-shots=", 0) == 0) {
       args.push_back(mockKeychain);
       args.push_back(autoplay);
-      if (!getenv("NOTARC_REAL_MEDIA_STATUS")) args.push_back(fakeDevices);  // media test: the Mac's own camera status
+      if (!getenv("NOTARC_REAL_MEDIA_STATUS") && !getenv("NOTARC_REAL_DEVICES")) args.push_back(fakeDevices);  // media test: the Mac's own camera status
       args.push_back(noOcclusion);
       args.push_back(noBackground);
       args.push_back(noMediaSuspend);
@@ -6536,6 +6857,8 @@ int main(int argc, char* argv[]) {
         return 3;
       }
       TestIsolationInstall();
+      // macOS's camera/mic status is a test value (allowed), so NotArc never brings up a real macOS prompt in a test.
+      if (!getenv("NOTARC_REAL_DEVICES")) BrowserClient::SetMacMediaStatusForTest(3, 3);
     }
 
     CefSettings settings;

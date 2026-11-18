@@ -1,5 +1,6 @@
 #include "app/browser_client.h"
 #import "app/downloads.h"
+#import <AVFoundation/AVFoundation.h>
 #import "app/arc_max.h"
 #include "app/content_blocker.h"
 #import "app/autofill.h"
@@ -458,6 +459,50 @@ void BrowserClient::LogPermission(const char* fmt, ...) {
 }
 
 static std::atomic<bool> g_refuse_device_media{false};
+static std::atomic<int> g_test_mac_audio{-1}, g_test_mac_video{-1}, g_test_mac_asks{0};
+void BrowserClient::SetMacMediaStatusForTest(int audio, int video) { g_test_mac_audio = audio; g_test_mac_video = video; }
+int BrowserClient::MacMediaAsksForTest() { return g_test_mac_asks; }
+
+// 0 not asked yet, 1 restricted, 2 denied, 3 allowed (AVAuthorizationStatus).
+static int MacMediaStatus(bool audio) {
+  int t = audio ? g_test_mac_audio : g_test_mac_video;
+  if (t >= 0) return t;
+  return (int)[AVCaptureDevice authorizationStatusForMediaType:audio ? AVMediaTypeAudio : AVMediaTypeVideo];
+}
+
+// Asks macOS for the camera and/or microphone when it was never asked (Chrome does the same before it starts a
+// device: Chromium's audio service runs in a sandboxed helper that can't bring up macOS's prompt itself), then calls
+// done(audioOK, videoOK) on the UI thread.
+static void AskMacThen(bool audio, bool video, std::function<void(bool, bool)> done) {
+  auto ask = [](bool forAudio, std::function<void(bool)> then) {
+    int st = MacMediaStatus(forAudio);
+    if (st != 0) {
+      then(st == 3);
+      return;
+    }
+    if ((forAudio ? g_test_mac_audio : g_test_mac_video) >= 0) {  // test: counted, answered allow, never a real prompt
+      ++g_test_mac_asks;
+      if (forAudio) g_test_mac_audio = 3;
+      else g_test_mac_video = 3;
+      CefPostTask(TID_UI, base::BindOnce([](std::function<void(bool)> t) { t(true); }, then));
+      return;
+    }
+    BrowserClient::LogPermission("asking macOS for the %s", forAudio ? "microphone" : "camera");
+    [AVCaptureDevice requestAccessForMediaType:forAudio ? AVMediaTypeAudio : AVMediaTypeVideo
+                             completionHandler:^(BOOL granted) {
+                               CefPostTask(TID_UI, base::BindOnce([](std::function<void(bool)> t, bool g) { t(g); }, then, (bool)granted));
+                             }];
+  };
+  std::function<void(bool)> afterAudio = [=](bool aOK) {
+    if (!video) {
+      done(aOK, true);
+      return;
+    }
+    ask(false, [=](bool vOK) { done(aOK, vOK); });
+  };
+  if (audio) ask(true, afterAudio);
+  else afterAudio(true);
+}
 void BrowserClient::SetRefuseDeviceMediaForTest(bool refuse) { g_refuse_device_media = refuse; }
 
 bool BrowserClient::OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame>,
@@ -481,6 +526,7 @@ bool BrowserClient::OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser
   PendingPermission p;
   p.media = callback;
   p.media_bits = requested;
+  p.browser_id = browser->GetIdentifier();
   pending_permissions_[id] = p;
   on_permission_(browser->GetIdentifier(), id, origin.ToString(), perms);
   return true;
@@ -544,8 +590,33 @@ void BrowserClient::ResolvePermission(int request_id, bool allow) {
     std::fprintf(stderr, "PROMPT-ANSWER id=%d prompt=%llu allow=%d media=%d\n", request_id, (unsigned long long)p.prompt_id, allow,
                  p.media != nullptr);
   if (p.media) {
-    if (allow) p.media->Continue(p.media_bits);
-    else p.media->Cancel();
+    if (!allow) {
+      p.media->Cancel();
+      return;
+    }
+    bool audio = p.media_bits & CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE, video = p.media_bits & CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE;
+    if (!audio && !video) {  // screen sharing only: macOS asks for Screen Recording itself
+      p.media->Continue(p.media_bits);
+      return;
+    }
+    CefRefPtr<CefMediaAccessCallback> cb = p.media;
+    uint32_t bits = p.media_bits;
+    CefRefPtr<BrowserClient> self(this);
+    int browser_id = p.browser_id;
+    AskMacThen(audio, video, [cb, bits, self, browser_id, audio, video](bool aOK, bool vOK) {
+      uint32_t allowed = bits;
+      if (!aOK) allowed &= ~(uint32_t)CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE;
+      if (!vOK) allowed &= ~(uint32_t)CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE;
+      LogPermission("macOS camera=%s microphone=%s", !video ? "-" : vOK ? "yes" : "no", !audio ? "-" : aOK ? "yes" : "no");
+      // A device macOS turned off for NotArc: refuse the whole request (like Chrome: the site gets NotAllowedError
+      // instead of a silent mic or a black camera) and tell the person how to turn it on.
+      if ((audio && !aOK) || (video && !vOK)) {
+        cb->Cancel();
+        if (self->on_system_blocked_) self->on_system_blocked_(browser_id, audio && !aOK, video && !vOK);
+        return;
+      }
+      cb->Continue(allowed);
+    });
   } else if (p.prompt) {
     if (!allow) {
       p.prompt->Continue(CEF_PERMISSION_RESULT_DENY);

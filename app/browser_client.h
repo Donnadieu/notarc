@@ -58,6 +58,14 @@ class BrowserClient : public CefClient,
   static void SetPermissionLogPath(const std::string& path);
   // Self-test with the Mac's real camera/mic status (no fake devices): refuse every device request, so nothing opens.
   static void SetRefuseDeviceMediaForTest(bool refuse);
+  // macOS's own camera/microphone switch for NotArc, like Chrome: before a site gets an allowed device, NotArc asks
+  // macOS when it was never asked (its prompt), and when macOS says no the site is refused and the UI is told
+  // (audio/video = blocked by macOS). Tests set the status (0 not asked, 1 restricted, 2 denied, 3 allowed; -1 = the
+  // real one) so no real macOS prompt ever shows; a test "ask" answers allow and is counted.
+  using SystemBlockedCallback = std::function<void(int browser_id, bool audio, bool video)>;
+  void set_system_blocked_callback(SystemBlockedCallback cb) { on_system_blocked_ = std::move(cb); }
+  static void SetMacMediaStatusForTest(int audio, int video);
+  static int MacMediaAsksForTest();
   static void LogPermission(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
   bool OnRequestMediaAccessPermission(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                                       const CefString& requesting_origin, uint32_t requested_permissions,
@@ -250,6 +258,7 @@ class BrowserClient : public CefClient,
   PermissionCallback on_permission_;
   ExternalCallback on_external_;
   CaptureCallback on_capture_;
+  SystemBlockedCallback on_system_blocked_;
   AutofillCallback on_autofill_;
   struct AutofillFrame {
     int browser_id = 0;

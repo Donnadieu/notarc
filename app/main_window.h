@@ -398,6 +398,7 @@ extern const CGFloat kSidebarDefaultWidth, kSidebarMinWidth, kSidebarMaxWidth;  
 // Tab > Reset Site Permissions forgets them for the current site.
 @property(nonatomic, readonly) NSString* pendingSitePrompt;  // tests: kind:origin of the sheet showing, or nil
 - (void)answerSitePrompt:(BOOL)allow remember:(BOOL)remember;  // tests: same as clicking the sheet
+- (NSString*)mediaGrantForTest:(ArcItem*)item;  // tests: "origin:(names)" kept for the visit, or nil
 - (IBAction)resetSitePermissions:(id)sender;
 // View > Site Settings (Cmd+Shift+I): popover for the current site with its connection security, a row per
 // common permission (Ask / Allow / Block), Clear Cookies and Refresh, and Reset Permissions.

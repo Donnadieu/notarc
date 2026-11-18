@@ -101,6 +101,10 @@ void SettingsDidChange(void);
 - (NSString*)selectedPane;
 - (NSView*)viewOfPane:(NSString*)identifier;
 - (BOOL)writePaneSnapshotsTo:(NSString*)folder;  // design checks: <pane>.png for each pane
+// Tests: what the Settings window really shows for the selected pane: window and pane sizes, how many labels with text
+// sit inside the window's visible content, and how many pixels of the drawn window differ from its background
+// ("ink"). Writes the drawn window to shotPath when given.
+- (NSString*)shownPaneReport:(NSString*)shotPath;
 // Profiles pane (tests drive the same code as its buttons, without the name prompt).
 - (NSArray<NSString*>*)profileRows;  // "Name: Space A, Space B" per profile, in table order
 - (NSString*)createProfileNamed:(NSString*)name;
