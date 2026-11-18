@@ -173,6 +173,27 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
     } else if ([cmd isEqual:@"newspace"]) {
       ArcSpace* s = [c createSpaceNamed:arg.length ? arg : @"Empty"];
       if (s) [c switchToSpace:s];
+    } else if ([cmd isEqual:@"fav-drag"] && args.count >= 2) {  // fav-drag <tile> <slot>: hold a Favorite mid-drag
+      [c favoritesHoldDragForShots:(NSUInteger)[args[0] integerValue] slot:[args[1] integerValue]];
+    } else if ([cmd isEqual:@"fav-drag-end"]) {
+      [c favoritesDragEndForTest:NSDragOperationNone];
+    } else if ([cmd isEqual:@"fav-lift"] && args.count >= 2) {  // fav-lift <tile> <name>: the lifted tile on its own
+      NSImage* img = [c favoriteLiftedImageForTest:(NSUInteger)[args[0] integerValue]];
+      NSBitmapImageRep* rep = nil;
+      if (img) {
+        rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:(NSInteger)img.size.width * 2
+                                                      pixelsHigh:(NSInteger)img.size.height * 2 bitsPerSample:8 samplesPerPixel:4
+                                                        hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0
+                                                    bitsPerPixel:0];
+        rep.size = img.size;
+        [NSGraphicsContext saveGraphicsState];
+        NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
+        [c.window.contentView.effectiveAppearance performAsCurrentDrawingAppearance:^{ [img drawInRect:NSMakeRect(0, 0, img.size.width, img.size.height)]; }];
+        [NSGraphicsContext restoreGraphicsState];
+      }
+      NSString* path = [self.outDir stringByAppendingPathComponent:[args[1] stringByAppendingString:@".png"]];
+      BOOL ok = rep && [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}] writeToFile:path atomically:YES];
+      std::printf("VISUAL fav-lift %s %s\n", [args[1] UTF8String], ok ? "ok" : "failed");
     } else if ([cmd isEqual:@"peek-sidebar"]) {
       if (!c.sidebarHidden) [c toggleSidebar:nil];
       [c beginSidebarPeekForTest];
