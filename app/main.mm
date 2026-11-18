@@ -2679,8 +2679,9 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
       std::printf("PROBE round=%d %s\n", round, t.liveTitle.UTF8String ?: "-");
       std::fflush(stdout);
       if (round >= 3) {
+        void (^finish)(void) = done;  // keep it: clearing `step` frees this block and what it holds
         step = nil;
-        done();
+        finish();
         return;
       }
       [w reloadPage:nil];
@@ -2733,8 +2734,9 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
                                             @"if(b)b.click()})()", word] inItem:t];
     std::fflush(stdout);
     if (tick >= 100) {
+      void (^finish)(void) = done;  // keep it: clearing `loop` frees this block and what it holds
       loop = nil;
-      done();
+      finish();
       return;
     }
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ loop(); });
@@ -2766,8 +2768,9 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
       std::printf("SELFTEST-SETTINGSSHOWN panes=%d shown=%d sized=%d%s%s\n", (int)jobs.count, shown == (int)jobs.count,
                   sized == (int)jobs.count, bad.length ? " bad=" : "", bad.UTF8String);
       std::fflush(stdout);
+      void (^finish)(void) = done;  // keep it: clearing `step` frees this block and what it holds
       step = nil;
-      done();
+      finish();
       return;
     }
     NSArray* job = jobs[i++];
