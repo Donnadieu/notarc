@@ -3,6 +3,16 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## 0.30.7
+- Favorites can be dragged, as in Arc. Press a Favorite and move it: it lifts off the grid, a dashed empty slot shows
+  where it will land, and the other icons slide out of the way as you move. Let go and it stays there; the order is
+  saved and comes back after a restart. A short click still just opens the site.
+- Drag a tab from the sidebar onto the Favorites to make it a Favorite at that spot (it used to go to the end of the
+  grid, and the grid didn't redraw until something else changed). Drag a Favorite out into the tab list to unpin it:
+  dropped in Today it's an ordinary tab again, dropped in Pinned it stays pinned. Esc or letting go outside the window
+  puts it back.
+- A pinned tab dragged into Today is unpinned too (its saved home address is dropped), like Unpin in the menu.
+
 ## 0.30.6
 - Google Meet's microphone and camera work after one Allow, like Chrome. After you allow the camera and microphone,
   Meet asks again for the microphone alone, then the camera alone; NotArc showed a new card for each, and until you

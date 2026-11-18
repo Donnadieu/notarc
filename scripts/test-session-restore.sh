@@ -24,8 +24,12 @@ if grep -h '^SELFTEST-REALPROFILE ' "$LOG"/*.log | grep -q 'isolatedHome=0\|Unto
 fi
 LINE=$(grep SELFTEST-RESTORE "$LOG/restore.log")
 echo "$LINE"
+# The Favorites order the self-test left by drag (one swap) must come back after the restart.
+FAVS=$(grep -o 'SELFTEST-FAVORDER-DEBUG saved=[^ ]*' "$LOG/phase1.log" | sed 's/.*saved=//')
+FAVOK=0; [ -n "$FAVS" ] && echo "$LINE" | grep -qF -- "$FAVS" && FAVOK=1
+echo "favorites order kept after restart: $FAVOK ($FAVS)"
 if echo "$LINE" | grep -q "crashedLastTime=1" && echo "$LINE" | grep -q "shown=https://example.org/session-restore-marker" &&
-   ! echo "$LINE" | grep -q "restored=0 " && echo "$LINE" | grep -q "sessionLogin=1 savedLogin=1"; then
+   ! echo "$LINE" | grep -q "restored=0 " && echo "$LINE" | grep -q "sessionLogin=1 savedLogin=1" && [ "$FAVOK" = 1 ]; then
   echo "SESSION-RESTORE OK"
 else
   echo "SESSION-RESTORE FAILED (logs in $LOG)"; exit 1

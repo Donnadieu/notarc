@@ -1159,6 +1159,9 @@ NSString* MediaBarTitle(NSString* pageTitle) {
 - (NSMenu*)sidebarMenuForItem:(ArcItem*)item;
 - (BOOL)acceptFavoriteDrop:(id<NSDraggingInfo>)info index:(NSUInteger)index;
 - (BOOL)canDropFavorite:(id<NSDraggingInfo>)info;
+- (ArcItem*)draggedItem:(id<NSDraggingInfo>)info;
+- (void)favoritesGridNeedsLayout;
+- (void)favoritesGridDragEnded;
 - (NSImage*)iconImageForItem:(ArcItem*)item;
 - (ArcItem*)shownItem;
 - (BOOL)usingDefaultTheme;
@@ -1187,47 +1190,157 @@ NSInteger UnreadCountFromTitle(NSString* title) {
   return 0;
 }
 
-@interface FavoritesGridView : NSView <NSViewToolTipOwner>
+// Drag and drop, as in Arc: press a tile and move the pointer a few points to lift it. The other tiles slide aside
+// around a drop spot (an outlined empty slot) that follows the pointer; the drop puts the Favorite there and the order
+// is saved with the sidebar. A tab dragged in from the list opens a drop spot the same way and lands at that slot; a
+// Favorite dragged out closes its place up and can be dropped in the list (or on the page, to split). A short click
+// still opens the site.
+constexpr CGFloat kFavDragThreshold = 4;  // points the pointer moves before a press becomes a drag
+constexpr double kFavSlideSeconds = 0.18;
+static NSString* const kFavSpotKey = @"\u00b7spot";
+
+@interface FavoritesGridView : NSView <NSViewToolTipOwner, NSDraggingSource>
 @property(nonatomic, weak) MainWindowController* owner;
 @property(nonatomic, copy) NSArray<ArcItem*>* items;
 @property(nonatomic) NSInteger hovered;
-@property(nonatomic) BOOL dropTarget;
+@property(nonatomic, strong) ArcItem* dragItem;  // the tab dragged over the grid or out of it (nil: no drag)
+@property(nonatomic) BOOL ownDrag;               // the drag started on this grid and hasn't ended
+@property(nonatomic) NSInteger dropIndex;        // the drop spot's slot among the other tiles (-1: none)
+@property(nonatomic) BOOL testDrag;              // hidden self-tests: drag start recorded, no real drag loop
 + (NSUInteger)rowsForCount:(NSUInteger)n;
 - (CGFloat)heightForWidth:(CGFloat)w;
+- (NSRect)tileRect:(NSUInteger)i;
+- (NSRect)tileRect:(NSUInteger)i count:(NSUInteger)n;
+- (NSArray*)slots;
+- (BOOL)animating;
+- (NSRect)shownRectForKey:(NSString*)key;
+- (NSRect)targetRectForKey:(NSString*)key;
+- (void)endDrag;
+- (void)leaveDrag;
+- (void)changeSlots:(void (^)(void))change landing:(ArcItem*)landing;
+- (NSImage*)liftedImageFor:(ArcItem*)it size:(NSSize)s;
 @end
-@implementation FavoritesGridView
+@implementation FavoritesGridView {
+  NSInteger _pressIndex;  // the tile under the mouse-down (-1: none)
+  NSPoint _pressPoint;
+  NSDictionary<NSString*, NSValue*>* _slideFrom;  // where each tile was drawn when the slots last changed
+  CFTimeInterval _slideStart;
+  NSTimer* _slideTimer;
+}
 + (NSUInteger)rowsForCount:(NSUInteger)n { return n ? (n + 3) / 4 : 0; }
++ (NSUInteger)columnsForCount:(NSUInteger)n {
+  NSUInteger rows = [self rowsForCount:n];
+  return rows ? (n + rows - 1) / rows : 0;
+}
 - (instancetype)initWithFrame:(NSRect)f {
   if ((self = [super initWithFrame:f])) {
     _hovered = -1;
-    [self registerForDraggedTypes:@[ @"io.github.donnadieu.notarc.sidebar-item" ]];
+    _dropIndex = -1;
+    _pressIndex = -1;
+    [self registerForDraggedTypes:@[ kSidebarItemPasteboardType ]];
   }
   return self;
 }
 - (BOOL)isFlipped { return YES; }
-- (NSUInteger)columns {
-  NSUInteger n = self.items.count, rows = [FavoritesGridView rowsForCount:n];
-  return rows ? (n + rows - 1) / rows : 0;
+- (BOOL)acceptsFirstMouse:(NSEvent*)e { return YES; }  // a Favorite opens on the first click, active window or not
+// The tiles other than the one being dragged out, with the drop spot (NSNull) at its slot.
+- (NSArray<ArcItem*>*)baseItems {
+  if (!_dragItem || ![_items containsObject:_dragItem]) return _items ?: @[];
+  NSMutableArray* a = [_items mutableCopy];
+  [a removeObject:_dragItem];
+  return a;
+}
+- (NSArray*)slots {
+  NSMutableArray* s = [[self baseItems] mutableCopy];
+  if (_dropIndex >= 0) [s insertObject:NSNull.null atIndex:MIN((NSUInteger)_dropIndex, s.count)];
+  return s;
+}
+// While its only Favorite is dragged out the grid keeps one slot, so the drag can come back.
+- (NSUInteger)layoutCount {
+  NSUInteger n = self.slots.count;
+  return n == 0 && _ownDrag ? 1 : n;
 }
 - (CGFloat)heightForWidth:(CGFloat)w {
-  NSUInteger rows = [FavoritesGridView rowsForCount:self.items.count];
+  NSUInteger rows = [FavoritesGridView rowsForCount:self.layoutCount];
   return rows ? rows * kFavTileHeight + (rows - 1) * kFavRowGap : 0;
 }
-- (NSRect)tileRect:(NSUInteger)i {
-  NSUInteger cols = MAX((NSUInteger)1, [self columns]);
+- (NSRect)tileRect:(NSUInteger)i count:(NSUInteger)n {
+  NSUInteger cols = MAX((NSUInteger)1, [FavoritesGridView columnsForCount:n]);
   CGFloat w = (self.bounds.size.width - (cols - 1) * kFavColGap) / cols;
   NSUInteger r = i / cols, c = i % cols;
   return NSMakeRect(round(c * (w + kFavColGap)), r * (kFavTileHeight + kFavRowGap), round(w), kFavTileHeight);
 }
+- (NSRect)tileRect:(NSUInteger)i { return [self tileRect:i count:self.layoutCount]; }
+// The Favorite (index in items) whose tile is under p, -1 for none or the drop spot.
 - (NSInteger)indexAt:(NSPoint)p {
-  for (NSUInteger i = 0; i < self.items.count; ++i)
-    if (NSPointInRect(p, [self tileRect:i])) return (NSInteger)i;
+  NSArray* slots = self.slots;
+  for (NSUInteger i = 0; i < slots.count; ++i)
+    if (slots[i] != NSNull.null && NSPointInRect(p, [self tileRect:i])) return (NSInteger)[_items indexOfObject:slots[i]];
   return -1;
+}
+- (NSString*)keyFor:(id)slot {
+  if (slot == NSNull.null) return kFavSpotKey;
+  return ((ArcItem*)slot).itemID ?: [NSString stringWithFormat:@"%p", slot];
+}
+- (NSDictionary<NSString*, NSValue*>*)targetRects {
+  NSArray* slots = self.slots;
+  NSUInteger n = self.layoutCount;
+  NSMutableDictionary* d = [NSMutableDictionary dictionary];
+  for (NSUInteger i = 0; i < slots.count; ++i) d[[self keyFor:slots[i]]] = [NSValue valueWithRect:[self tileRect:i count:n]];
+  return d;
+}
+- (double)slideProgress {
+  if (!_slideFrom) return 1;
+  double t = (CACurrentMediaTime() - _slideStart) / kFavSlideSeconds;
+  return t >= 1 ? 1 : 1 - pow(1 - t, 3);  // ease out
+}
+- (BOOL)animating { return _slideFrom && [self slideProgress] < 1; }
+- (NSRect)targetRectForKey:(NSString*)key {
+  NSValue* v = self.targetRects[key];
+  return v ? v.rectValue : NSZeroRect;
+}
+- (NSRect)shownRectForKey:(NSString*)key {
+  NSRect to = [self targetRectForKey:key];
+  NSValue* from = _slideFrom[key];
+  double p = [self slideProgress];
+  if (!from || p >= 1 || NSIsEmptyRect(to)) return to;
+  NSRect f = from.rectValue;
+  return NSMakeRect(f.origin.x + (to.origin.x - f.origin.x) * p, f.origin.y + (to.origin.y - f.origin.y) * p,
+                    f.size.width + (to.size.width - f.size.width) * p, f.size.height + (to.size.height - f.size.height) * p);
+}
+// Every change to the slots goes through here: each tile slides from where it's drawn now to its new place. A tab
+// that lands in the drop spot starts from the spot.
+- (void)changeSlots:(void (^)(void))change landing:(ArcItem*)landing {
+  NSMutableDictionary* now = [NSMutableDictionary dictionary];
+  for (NSString* k in self.targetRects) now[k] = [NSValue valueWithRect:[self shownRectForKey:k]];
+  CGFloat oldH = [self heightForWidth:0];
+  change();
+  if (landing.itemID && now[kFavSpotKey]) now[landing.itemID] = now[kFavSpotKey];
+  if (NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) {
+    _slideFrom = nil;
+  } else {
+    _slideFrom = now;
+    _slideStart = CACurrentMediaTime();
+    if (!_slideTimer) {
+      __weak FavoritesGridView* weakSelf = self;
+      _slideTimer = [NSTimer timerWithTimeInterval:1.0 / 60 repeats:YES block:^(NSTimer* t) { [weakSelf slideTick]; }];
+      [NSRunLoop.mainRunLoop addTimer:_slideTimer forMode:NSRunLoopCommonModes];  // also ticks inside the drag loop
+    }
+  }
+  if ([self heightForWidth:0] != oldH) [self.owner favoritesGridNeedsLayout];
+  self.needsDisplay = YES;
+}
+- (void)slideTick {
+  self.needsDisplay = YES;
+  if ([self slideProgress] < 1) return;
+  [_slideTimer invalidate];
+  _slideTimer = nil;
+  _slideFrom = nil;
 }
 - (void)setItems:(NSArray<ArcItem*>*)items {
   _items = [items copy];
   [self removeAllToolTips];
-  for (NSUInteger i = 0; i < _items.count; ++i) [self addToolTipRect:[self tileRect:i] owner:self userData:NULL];
+  for (NSUInteger i = 0; i < _items.count; ++i) [self addToolTipRect:[self tileRect:i count:_items.count] owner:self userData:NULL];
   self.needsDisplay = YES;
 }
 - (void)setFrameSize:(NSSize)s {
@@ -1235,51 +1348,83 @@ NSInteger UnreadCountFromTitle(NSString* title) {
   self.items = _items;
 }
 - (NSString*)view:(NSView*)v stringForToolTip:(NSToolTipTag)tag point:(NSPoint)p userData:(void*)d {
-  NSInteger i = [self indexAt:p];
+  NSInteger i = _dragItem ? -1 : [self indexAt:p];
   return i >= 0 ? self.items[(NSUInteger)i].displayTitle : @"";
+}
+- (void)drawTile:(ArcItem*)it rect:(NSRect)r selected:(BOOL)sel hovered:(BOOL)hov dark:(BOOL)dark {
+  CGFloat a = dark ? (sel ? 0.22 : hov ? 0.15 : 0.10) : (sel ? 0.85 : hov ? 0.6 : 0.4);
+  NSColor* fill = dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:a] : [NSColor colorWithWhite:1 alpha:a];
+  [fill setFill];
+  [[NSBezierPath bezierPathWithRoundedRect:r xRadius:kFavRadius yRadius:kFavRadius] fill];
+  NSImage* icon = [self.owner iconImageForItem:it];
+  NSRect ir = NSMakeRect(round(NSMidX(r) - 8), round(NSMidY(r) - 8), 16, 16);
+  if (icon.isTemplate) {
+    NSImage* tinted = [icon copy];
+    [tinted lockFocus];
+    [(dark ? [NSColor colorWithWhite:1 alpha:0.6] : [NSColor colorWithWhite:0 alpha:0.5]) set];
+    NSRectFillUsingOperation(NSMakeRect(0, 0, tinted.size.width, tinted.size.height), NSCompositingOperationSourceAtop);
+    [tinted unlockFocus];
+    icon = tinted;
+  }
+  [icon drawInRect:ir fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:nil];
+  // Arc's unread badge: a small pill over the icon's top-right corner (a dot when there's no room for the number).
+  NSInteger unread = it.hideUnreadBadge ? 0 : UnreadCountFromTitle(it.liveTitle);
+  if (unread > 0) {
+    NSString* text = unread > 99 ? @"99+" : [NSString stringWithFormat:@"%ld", (long)unread];
+    NSDictionary* attrs = @{NSFontAttributeName : [NSFont systemFontOfSize:9 weight:NSFontWeightBold],
+                            NSForegroundColorAttributeName : NSColor.whiteColor};
+    NSSize ts = [text sizeWithAttributes:attrs];
+    CGFloat h = 13, w = MAX(h, ceil(ts.width) + 7);
+    NSRect b = NSMakeRect(round(NSMaxX(ir) - 5), round(NSMinY(ir) - 6), w, h);
+    [[NSColor colorWithSRGBRed:0.96 green:0.27 blue:0.33 alpha:1] setFill];
+    [[NSBezierPath bezierPathWithRoundedRect:b xRadius:h / 2 yRadius:h / 2] fill];
+    [text drawAtPoint:NSMakePoint(round(NSMidX(b) - ts.width / 2), round(NSMidY(b) - ts.height / 2)) withAttributes:attrs];
+  }
+}
+// The drop spot: an empty slot with a dashed outline, where the dragged Favorite will land.
+- (void)drawDropSpot:(NSRect)r dark:(BOOL)dark {
+  NSBezierPath* p = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(r, 1, 1) xRadius:kFavRadius - 1 yRadius:kFavRadius - 1];
+  [[NSColor colorWithWhite:dark ? 1 : 0 alpha:dark ? 0.06 : 0.05] setFill];
+  [p fill];
+  CGFloat dash[2] = {4, 3};
+  [p setLineDash:dash count:2 phase:0];
+  p.lineWidth = 1.5;
+  [[NSColor colorWithWhite:dark ? 1 : 0 alpha:dark ? 0.45 : 0.35] setStroke];
+  [p stroke];
 }
 - (void)drawRect:(NSRect)dirty {
   BOOL dark = IsDark(self);
   ArcItem* shown = [self.owner shownItem];
-  for (NSUInteger i = 0; i < self.items.count; ++i) {
-    ArcItem* it = self.items[i];
-    BOOL sel = it == shown, hov = (NSInteger)i == self.hovered;
-    CGFloat a = dark ? (sel ? 0.22 : hov ? 0.15 : 0.10) : (sel ? 0.85 : hov ? 0.6 : 0.4);
-    NSColor* fill = dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:a] : [NSColor colorWithWhite:1 alpha:a];
-    NSRect r = [self tileRect:i];
-    [fill setFill];
+  for (id slot in self.slots) {
+    NSRect r = [self shownRectForKey:[self keyFor:slot]];
+    if (slot == NSNull.null) {
+      [self drawDropSpot:r dark:dark];
+      continue;
+    }
+    ArcItem* it = slot;
+    [self drawTile:it rect:r selected:it == shown hovered:!_dragItem && (NSInteger)[_items indexOfObject:it] == self.hovered dark:dark];
+  }
+}
+// The tile as it lifts off the grid: its own look on a solid backing, with a soft shadow under it.
+- (NSImage*)liftedImageFor:(ArcItem*)it size:(NSSize)s {
+  const CGFloat pad = 12;
+  BOOL dark = IsDark(self);
+  NSSize sz = NSMakeSize(s.width + 2 * pad, s.height + 2 * pad);
+  __weak FavoritesGridView* weakSelf = self;
+  return [NSImage imageWithSize:sz flipped:YES drawingHandler:^BOOL(NSRect b) {
+    NSRect r = NSMakeRect(pad, pad, s.width, s.height);
+    [NSGraphicsContext saveGraphicsState];
+    NSShadow* sh = [NSShadow new];
+    sh.shadowColor = [NSColor colorWithWhite:0 alpha:0.35];
+    sh.shadowBlurRadius = 10;
+    sh.shadowOffset = NSMakeSize(0, -4);
+    [sh set];
+    [(dark ? [NSColor colorWithSRGBRed:0.2 green:0.2 blue:0.26 alpha:0.96] : [NSColor colorWithWhite:1 alpha:0.97]) setFill];
     [[NSBezierPath bezierPathWithRoundedRect:r xRadius:kFavRadius yRadius:kFavRadius] fill];
-    NSImage* icon = [self.owner iconImageForItem:it];
-    NSRect ir = NSMakeRect(round(NSMidX(r) - 8), round(NSMidY(r) - 8), 16, 16);
-    if (icon.isTemplate) {
-      NSImage* tinted = [icon copy];
-      [tinted lockFocus];
-      [(dark ? [NSColor colorWithWhite:1 alpha:0.6] : [NSColor colorWithWhite:0 alpha:0.5]) set];
-      NSRectFillUsingOperation(NSMakeRect(0, 0, tinted.size.width, tinted.size.height), NSCompositingOperationSourceAtop);
-      [tinted unlockFocus];
-      icon = tinted;
-    }
-    [icon drawInRect:ir fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:YES hints:nil];
-    // Arc's unread badge: a small pill over the icon's top-right corner (a dot when there's no room for the number).
-    NSInteger unread = it.hideUnreadBadge ? 0 : UnreadCountFromTitle(it.liveTitle);
-    if (unread > 0) {
-      NSString* text = unread > 99 ? @"99+" : [NSString stringWithFormat:@"%ld", (long)unread];
-      NSDictionary* attrs = @{NSFontAttributeName : [NSFont systemFontOfSize:9 weight:NSFontWeightBold],
-                              NSForegroundColorAttributeName : NSColor.whiteColor};
-      NSSize ts = [text sizeWithAttributes:attrs];
-      CGFloat h = 13, w = MAX(h, ceil(ts.width) + 7);
-      NSRect b = NSMakeRect(round(NSMaxX(ir) - 5), round(NSMinY(ir) - 6), w, h);
-      [[NSColor colorWithSRGBRed:0.96 green:0.27 blue:0.33 alpha:1] setFill];
-      [[NSBezierPath bezierPathWithRoundedRect:b xRadius:h / 2 yRadius:h / 2] fill];
-      [text drawAtPoint:NSMakePoint(round(NSMidX(b) - ts.width / 2), round(NSMidY(b) - ts.height / 2)) withAttributes:attrs];
-    }
-  }
-  if (self.dropTarget) {
-    [[NSColor colorWithWhite:dark ? 1 : 0 alpha:0.25] setStroke];
-    NSBezierPath* p = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(self.bounds, 1, 1) xRadius:kFavRadius yRadius:kFavRadius];
-    p.lineWidth = 2;
-    [p stroke];
-  }
+    [NSGraphicsContext restoreGraphicsState];
+    [weakSelf drawTile:it rect:r selected:NO hovered:NO dark:dark];
+    return YES;
+  }];
 }
 - (void)updateTrackingAreas {
   [super updateTrackingAreas];
@@ -1290,6 +1435,7 @@ NSInteger UnreadCountFromTitle(NSString* title) {
                                                        owner:self userInfo:nil]];
 }
 - (void)mouseMoved:(NSEvent*)e {
+  if (_dragItem) return;
   NSInteger i = [self indexAt:[self convertPoint:e.locationInWindow fromView:nil]];
   if (i != self.hovered) {
     self.hovered = i;
@@ -1302,27 +1448,116 @@ NSInteger UnreadCountFromTitle(NSString* title) {
   self.needsDisplay = YES;
   [self.owner favoriteHovered:nil rect:NSZeroRect];
 }
+- (void)mouseDown:(NSEvent*)e {
+  _pressPoint = [self convertPoint:e.locationInWindow fromView:nil];
+  _pressIndex = _dragItem ? -1 : [self indexAt:_pressPoint];
+}
+- (void)mouseDragged:(NSEvent*)e {
+  if (_pressIndex < 0 || _dragItem || _pressIndex >= (NSInteger)_items.count) return;
+  NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+  if (hypot(p.x - _pressPoint.x, p.y - _pressPoint.y) < kFavDragThreshold) return;  // a hand's wobble is still a click
+  NSUInteger i = (NSUInteger)_pressIndex;
+  _pressIndex = -1;
+  [self beginDragOf:i event:e];
+}
 - (void)mouseUp:(NSEvent*)e {
+  NSInteger pressed = _pressIndex;
+  _pressIndex = -1;
+  if (_dragItem || _ownDrag) return;  // the end of a drag never opens the site
   NSInteger i = [self indexAt:[self convertPoint:e.locationInWindow fromView:nil]];
-  if (i >= 0) [self.owner favoriteClicked:self.items[(NSUInteger)i]];
+  if (i >= 0 && i == pressed) [self.owner favoriteClicked:self.items[(NSUInteger)i]];
+}
+- (void)beginDragOf:(NSUInteger)i event:(NSEvent*)e {
+  ArcItem* it = _items[i];
+  if (!it.itemID.length) return;
+  NSRect r = [self tileRect:i];
+  self.hovered = -1;
+  [self.owner favoriteHovered:nil rect:NSZeroRect];  // no Gmail/Calendar preview while dragging
+  [self changeSlots:^{
+    self.dragItem = it;
+    self.ownDrag = YES;
+    self.dropIndex = (NSInteger)i;  // its own place is the drop spot until the pointer moves on
+  } landing:nil];
+  if (self.owner.selfTestProfiles) {  // hidden runs: a real drag loop would follow the real pointer
+    self.testDrag = YES;
+    return;
+  }
+  NSPasteboardItem* pb = [NSPasteboardItem new];
+  [pb setString:it.itemID forType:kSidebarItemPasteboardType];
+  NSDraggingItem* d = [[NSDraggingItem alloc] initWithPasteboardWriter:pb];
+  NSImage* img = [self liftedImageFor:it size:r.size];
+  [d setDraggingFrame:NSMakeRect(NSMinX(r) - 12, NSMinY(r) - 12, img.size.width, img.size.height) contents:img];
+  NSDraggingSession* s = [self beginDraggingSessionWithItems:@[ d ] event:e source:self];
+  s.animatesToStartingPositionsOnCancelOrFail = YES;
+}
+- (NSDragOperation)draggingSession:(NSDraggingSession*)s sourceOperationMaskForDraggingContext:(NSDraggingContext)c {
+  return c == NSDraggingContextWithinApplication ? NSDragOperationMove : NSDragOperationNone;
+}
+- (void)draggingSession:(NSDraggingSession*)s endedAtPoint:(NSPoint)p operation:(NSDragOperation)op { [self endDrag]; }
+- (void)endDrag {
+  if (!_ownDrag && !_dragItem && _dropIndex < 0) return;
+  ArcItem* back = _dragItem;  // a cancelled drag puts it back from the drop spot
+  [self changeSlots:^{
+    self.dragItem = nil;
+    self.ownDrag = NO;
+    self.testDrag = NO;
+    self.dropIndex = -1;
+  } landing:back];
+  [self.owner favoritesGridDragEnded];
+}
+// The slot (0..n-1 in an n-slot grid) whose centre is nearest the point.
+- (NSInteger)slotNearest:(NSPoint)p count:(NSUInteger)n {
+  NSInteger best = 0;
+  CGFloat bestD = CGFLOAT_MAX;
+  for (NSUInteger i = 0; i < n; ++i) {
+    NSRect r = [self tileRect:i count:n];
+    CGFloat d = hypot(p.x - NSMidX(r), p.y - NSMidY(r));
+    if (d < bestD) bestD = d, best = (NSInteger)i;
+  }
+  return best;
+}
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info { return [self dragMoved:info]; }
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info { return [self dragMoved:info]; }
+- (NSDragOperation)dragMoved:(id<NSDraggingInfo>)info {
+  ArcItem* dragged = [self.owner draggedItem:info];
+  if (!dragged || ![self.owner canDropFavorite:info]) {
+    [self leaveDrag];
+    return NSDragOperationNone;
+  }
+  NSUInteger others = _items.count - ([_items containsObject:dragged] ? 1 : 0);
+  NSInteger slot = [self slotNearest:[self convertPoint:info.draggingLocation fromView:nil] count:others + 1];
+  if (dragged != _dragItem || slot != _dropIndex)
+    [self changeSlots:^{
+      self.dragItem = dragged;
+      self.dropIndex = slot;
+    } landing:nil];
+  return NSDragOperationMove;
+}
+- (void)draggingExited:(id<NSDraggingInfo>)info { [self leaveDrag]; }
+- (void)draggingEnded:(id<NSDraggingInfo>)info {  // a tab from the list dropped elsewhere or cancelled over the grid
+  if (!_ownDrag) [self leaveDrag];
+}
+- (void)leaveDrag {  // the pointer left: the drop spot closes up (a tab from the list is no longer ours to show)
+  if (_dropIndex < 0 && (_ownDrag || !_dragItem)) return;
+  [self changeSlots:^{
+    self.dropIndex = -1;
+    if (!self.ownDrag) self.dragItem = nil;
+  } landing:nil];
+}
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)info {
+  ArcItem* dragged = [self.owner draggedItem:info];
+  NSUInteger slot = _dropIndex >= 0 ? (NSUInteger)_dropIndex : self.baseItems.count;
+  __block BOOL ok = NO;
+  [self changeSlots:^{
+    self.dropIndex = -1;
+    self.dragItem = nil;
+    ok = [self.owner acceptFavoriteDrop:info index:slot];
+  } landing:dragged];
+  return ok;
 }
 - (NSMenu*)menuForEvent:(NSEvent*)e {
   NSInteger i = [self indexAt:[self convertPoint:e.locationInWindow fromView:nil]];
   return i >= 0 ? [self.owner sidebarMenuForItem:self.items[(NSUInteger)i]] : nil;
-}
-- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)info {
-  BOOL ok = [self.owner canDropFavorite:info];
-  self.dropTarget = ok;
-  self.needsDisplay = YES;
-  return ok ? NSDragOperationMove : NSDragOperationNone;
-}
-- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)info { return self.dropTarget ? NSDragOperationMove : NSDragOperationNone; }
-- (void)draggingExited:(id<NSDraggingInfo>)info { self.dropTarget = NO; self.needsDisplay = YES; }
-- (BOOL)performDragOperation:(id<NSDraggingInfo>)info {
-  self.dropTarget = NO;
-  self.needsDisplay = YES;
-  NSInteger i = [self indexAt:[self convertPoint:info.draggingLocation fromView:nil]];
-  return [self.owner acceptFavoriteDrop:info index:i >= 0 ? (NSUInteger)i : self.items.count];
 }
 @end
 
@@ -3646,17 +3881,81 @@ static NSString* OriginKey(NSString* origin);
   ArcItem* dragged = [self draggedItem:info];
   return dragged && _space.favorites && !dragged.isFolder && !dragged.isSplit && dragged.url.length;
 }
-- (BOOL)acceptFavoriteDrop:(id<NSDraggingInfo>)info index:(NSUInteger)index {
+// A drop on the grid: slot is the drop spot's place among the other tiles (the dragged one left out). A tab from the
+// list keeps its address as the Favorite's home, like Move to Favorites; a Favorite moved within the grid keeps its own.
+- (BOOL)acceptFavoriteDrop:(id<NSDraggingInfo>)info index:(NSUInteger)slot {
   if (![self canDropFavorite:info]) return NO;
   ArcItem* dragged = [self draggedItem:info];
-  return [self moveItem:dragged toParent:_space.favorites index:(NSInteger)MIN(index, _space.favorites.children.count)];
+  ArcItem* fav = _space.favorites;
+  NSMutableArray<ArcItem*>* others = [_favGrid.items mutableCopy];
+  [others removeObject:dragged];
+  NSUInteger index = slot < others.count ? [fav.children indexOfObject:others[slot]]
+                     : others.count      ? [fav.children indexOfObject:others.lastObject] + 1
+                                         : fav.children.count;
+  if (index == NSNotFound || index > fav.children.count) index = fav.children.count;
+  BOOL fromFavorites = [self sectionContaining:dragged] == fav;
+  if ([self parentOfItem:dragged].isSplit) [self detachFromSplit:dragged keep:YES];
+  BOOL moved = [self moveItem:dragged toParent:fav index:(NSInteger)index];
+  if (moved && !fromFavorites) [self markPinnedURLs:dragged];
+  [self updateFavoritesGrid];
+  if (moved) ReorderHaptic();  // Arc: haptic feedback when reordering
+  return moved;
 }
+- (void)favoritesGridNeedsLayout { [self layoutSidebar]; }
+- (void)favoritesGridDragEnded { [self updateFavoritesGrid]; }
 - (NSArray<NSString*>*)favoriteTileTitles {  // tests
   NSMutableArray* out = [NSMutableArray array];
   for (ArcItem* f in _favGrid.items) [out addObject:f.displayTitle ?: @""];
   return out;
 }
 - (NSRect)favoritesGridFrame { return _favGrid.hidden ? NSZeroRect : [_favGrid convertRect:_favGrid.bounds toView:nil]; }  // tests
+- (void)favoritesGridMouseForTest:(NSEventType)type tile:(NSUInteger)tile dx:(CGFloat)dx dy:(CGFloat)dy {
+  NSPoint p = [_favGrid convertPoint:NSMakePoint(NSMidX([_favGrid tileRect:tile]) + dx, NSMidY([_favGrid tileRect:tile]) + dy) toView:nil];
+  NSEvent* e = [NSEvent mouseEventWithType:type location:p modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime
+                              windowNumber:self.window.windowNumber context:nil eventNumber:0 clickCount:1 pressure:1];
+  if (type == NSEventTypeLeftMouseDown) [_favGrid mouseDown:e];
+  else if (type == NSEventTypeLeftMouseDragged) [_favGrid mouseDragged:e];
+  else [_favGrid mouseUp:e];
+}
+- (BOOL)favoritesDragActiveForTest { return _favGrid.ownDrag; }
+- (NSDragOperation)favoritesGridDragForTest:(id<NSDraggingInfo>)info phase:(NSInteger)phase {
+  if (phase == 0) return [_favGrid draggingEntered:info];
+  if (phase == 1) return [_favGrid draggingUpdated:info];
+  if (phase == 2) { [_favGrid draggingExited:info]; return NSDragOperationNone; }
+  return [_favGrid performDragOperation:info] ? NSDragOperationMove : NSDragOperationNone;
+}
+- (void)favoritesDragEndForTest:(NSDragOperation)operation { [_favGrid endDrag]; }  // AppKit ends drops and cancels alike
+- (NSPoint)favoritesSlotPointForTest:(NSUInteger)slot count:(NSUInteger)count {
+  NSRect r = [_favGrid tileRect:slot count:count];
+  return [_favGrid convertPoint:NSMakePoint(NSMidX(r), NSMidY(r)) toView:nil];
+}
+- (NSInteger)favoritesDropIndexForTest { return _favGrid.dropIndex; }
+- (NSString*)favoritesGridStateForTest {
+  return [NSString stringWithFormat:@"slots=%lu spot=%d drop=%ld dragging=%d animating=%d height=%.0f", (unsigned long)_favGrid.slots.count,
+                                    _favGrid.dropIndex >= 0, (long)_favGrid.dropIndex, _favGrid.dragItem != nil, _favGrid.animating,
+                                    NSHeight(_favGrid.frame)];
+}
+- (NSRect)favoriteShownRectForTest:(ArcItem*)item { return item.itemID ? [_favGrid shownRectForKey:item.itemID] : NSZeroRect; }
+- (NSRect)favoriteTargetRectForTest:(ArcItem*)item { return item.itemID ? [_favGrid targetRectForKey:item.itemID] : NSZeroRect; }
+- (NSInteger)favoriteTileIndexForTest:(ArcItem*)item {
+  NSUInteger i = [_favGrid.items indexOfObject:item];
+  return i == NSNotFound ? -1 : (NSInteger)i;
+}
+- (void)favoritesHoldDragForShots:(NSUInteger)tile slot:(NSInteger)slot {
+  [self favoritesGridMouseForTest:NSEventTypeLeftMouseDown tile:tile dx:0 dy:0];
+  [self favoritesGridMouseForTest:NSEventTypeLeftMouseDragged tile:tile dx:14 dy:6];
+  ArcItem* it = _favGrid.dragItem;
+  if (!it) return;
+  if (slot < 0) [_favGrid leaveDrag];
+  else [_favGrid changeSlots:^{ self->_favGrid.dropIndex = slot; } landing:nil];
+}
+- (NSImage*)favoriteLiftedImageForTest:(NSUInteger)tile {
+  return tile < _favGrid.items.count ? [_favGrid liftedImageFor:_favGrid.items[tile] size:[_favGrid tileRect:tile].size] : nil;
+}
+- (BOOL)sidebarDropForTest:(id<NSDraggingInfo>)info parent:(ArcItem*)parent index:(NSInteger)index {
+  if ([self outlineView:_outline validateDrop:info proposedItem:parent proposedChildIndex:index] == NSDragOperationNone) return NO;
+  return [self outlineView:_outline acceptDrop:info item:parent childIndex:index];
+}
 - (NSRect)spaceHeaderFrame { return [_spaceHeader convertRect:_spaceHeader.bounds toView:nil]; }  // tests
 - (BOOL)defaultThemeShown { return !_themeView.hidden && [self usingDefaultTheme]; }  // tests
 
@@ -12999,9 +13298,14 @@ static NSString* const kSpaceStartingError = @"The Space is still starting";
   ArcItem* target = item;
   if (!dragged || !target) return NO;
   if (index == NSOutlineViewDropOnItemIndex) index = target.children.count;
+  ArcItem* from = [self sectionContaining:dragged];
   BOOL moved = [self moveItem:dragged toParent:target index:index];
-  if (moved) ReorderHaptic();  // Arc: haptic feedback when reordering tabs
-  return moved;
+  if (!moved) return NO;
+  ReorderHaptic();  // Arc: haptic feedback when reordering tabs
+  // Dragged into Today from Pinned or Favorites: an ordinary tab again (as Unpin / Remove from Favorites do).
+  if ([self sectionContaining:dragged] == _space.unpinned && from != _space.unpinned) [self clearPinnedURLs:dragged];
+  if (from == _space.favorites) [self updateFavoritesGrid];  // a Favorite dragged out of the grid into the list
+  return YES;
 }
 
 #pragma mark Auto-archive

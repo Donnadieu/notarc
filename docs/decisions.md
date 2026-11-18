@@ -643,3 +643,15 @@ trackpad; everything else is checked by the hidden self-test.
 159. **Screen sharing is asked every time and never remembered,** like Chrome. NotArc can't pick a window or tab
     (CEF shares the whole screen), so the card says "share your screen".
 
+## 2026-11-18: Dragging Favorites (Omar's report)
+
+160. **A press becomes a drag after the pointer moves 4 pt; there's no hold delay.** Arc lifts a Favorite as soon as
+    it moves, and "press and hold, then drag" works the same way. A press that moves less is a click and opens the site;
+    the end of a drag never opens it.
+161. **The drop spot is an empty outlined slot that the other tiles slide around (0.18 s, ease out; none with Reduce
+    Motion).** The grid keeps Arc's balanced rows while dragging: a tab dragged in from the list counts as one more
+    tile, a Favorite dragged out leaves its place, and the grid grows or shrinks by a row when that changes the row
+    count.
+162. **Dragging into Today unpins.** A Favorite or pinned tab dropped in Today loses its saved home address, as
+    Remove from Favorites and Unpin do; dropped in Pinned (or a pinned folder) it keeps it. A tab dropped on the grid
+    gets its current address as its home, as Move to Favorites does; reordering within the grid changes nothing else.

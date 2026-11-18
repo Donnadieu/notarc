@@ -633,6 +633,21 @@ extern const CGFloat kSidebarDefaultWidth, kSidebarMinWidth, kSidebarMaxWidth;  
 - (NSMenu*)sidebarMenuForItem:(ArcItem*)item;  // tests
 - (BOOL)swipeNavigationInstalled;  // tests
 - (NSRect)favoritesGridFrame;                // tests
+// Favorites drag and drop (tests). A real drag loop follows the real pointer, so in hidden runs the grid's drag
+// start is recorded instead, and drops go through the same NSDraggingDestination methods with a stand-in info.
+- (void)favoritesGridMouseForTest:(NSEventType)type tile:(NSUInteger)tile dx:(CGFloat)dx dy:(CGFloat)dy;
+- (BOOL)favoritesDragActiveForTest;            // a drag started from the grid and hasn't ended
+- (NSDragOperation)favoritesGridDragForTest:(id<NSDraggingInfo>)info phase:(NSInteger)phase;  // 0 enter 1 move 2 exit 3 drop
+- (void)favoritesDragEndForTest:(NSDragOperation)operation;  // the drag session ended (None = cancelled)
+- (NSPoint)favoritesSlotPointForTest:(NSUInteger)slot count:(NSUInteger)count;  // window point of a slot's centre
+- (NSInteger)favoritesDropIndexForTest;        // the drop spot's slot (-1: none)
+- (NSString*)favoritesGridStateForTest;         // slots, drop spot, animation
+- (NSRect)favoriteShownRectForTest:(ArcItem*)item;   // where the tile is drawn now (mid-slide)
+- (NSRect)favoriteTargetRectForTest:(ArcItem*)item;  // where it's sliding to
+- (NSInteger)favoriteTileIndexForTest:(ArcItem*)item;
+- (BOOL)sidebarDropForTest:(id<NSDraggingInfo>)info parent:(ArcItem*)parent index:(NSInteger)index;  // tab list drop
+- (void)favoritesHoldDragForShots:(NSUInteger)tile slot:(NSInteger)slot;  // renders: a Favorite held mid-drag
+- (NSImage*)favoriteLiftedImageForTest:(NSUInteger)tile;
 - (NSRect)spaceHeaderFrame;                  // tests
 - (NSString*)lastSpaceSlide;   // tests
 - (NSUInteger)cardPopCount;    // tests

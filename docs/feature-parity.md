@@ -19,7 +19,7 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 
 ## Sidebar & tabs
 
-- [x] Vertical sidebar with Favorites (Top Apps), Pinned, Today
+- [x] Vertical sidebar with Favorites (Top Apps), Pinned, Today; drag Favorites to reorder them, drag tabs into and out of Favorites
 - [x] Folders, nested folders, drag and drop (New Folder, New Nested Folder, New Folder with selected items, drag into and between folders) (#12)
 - [x] Pin/unpin (Cmd+D), Move to Pinned/Today/Top Apps: Move to > Favorites or another Space's Pinned/Today, Remove from Favorites, Move to Pinned, File > Add to / Remove from Favorites (also in the command bar) (#13)
 - [x] Rename tab / item (#14)

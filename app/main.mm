@@ -140,6 +140,44 @@ static void WaitUntil(BOOL (^cond)(void), double timeoutSec, void (^then)(void))
   });
 }
 
+// Self-test stand-in for a drag over a view: a private pasteboard holding a sidebar item's id, and a point in the
+// window. A real NSDraggingSession runs its own loop that follows the real pointer, so hidden tests can't start one.
+@interface SelfTestDragInfo : NSObject <NSDraggingInfo>
+@property(nonatomic) NSPoint location;
+@property(nonatomic, strong) NSPasteboard* pasteboard;
+@property(nonatomic, weak) NSWindow* window;
++ (instancetype)infoForItem:(ArcItem*)item window:(NSWindow*)window;
+@end
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-implementations"
+@implementation SelfTestDragInfo
+@synthesize draggingFormation, animatesToDestination, numberOfValidItemsForDrop;
++ (instancetype)infoForItem:(ArcItem*)item window:(NSWindow*)window {
+  SelfTestDragInfo* d = [SelfTestDragInfo new];
+  d.pasteboard = [NSPasteboard pasteboardWithName:@"io.github.donnadieu.notarc.selftest.drag"];
+  [d.pasteboard clearContents];
+  [d.pasteboard setString:item.itemID ?: @"" forType:@"io.github.donnadieu.notarc.sidebar-item"];
+  d.window = window;
+  return d;
+}
+- (NSWindow*)draggingDestinationWindow { return self.window; }
+- (NSDragOperation)draggingSourceOperationMask { return NSDragOperationMove; }
+- (NSPoint)draggingLocation { return self.location; }
+- (NSPoint)draggedImageLocation { return self.location; }
+- (NSImage*)draggedImage { return nil; }
+- (NSPasteboard*)draggingPasteboard { return self.pasteboard; }
+- (id)draggingSource { return nil; }
+- (NSInteger)draggingSequenceNumber { return 1; }
+- (void)slideDraggedImageTo:(NSPoint)p {}
+- (NSArray<NSString*>*)namesOfPromisedFilesDroppedAtDestination:(NSURL*)u { return nil; }
+- (void)enumerateDraggingItemsWithOptions:(NSDraggingItemEnumerationOptions)o forView:(NSView*)v classes:(NSArray<Class>*)c
+                            searchOptions:(NSDictionary<NSPasteboardReadingOptionKey, id>*)s
+                               usingBlock:(void (^)(NSDraggingItem*, NSInteger, BOOL*))b {}
+- (NSSpringLoadingHighlight)springLoadingHighlight { return NSSpringLoadingHighlightNone; }
+- (void)resetSpringLoading {}
+@end
+#pragma clang diagnostic pop
+
 // Hidden runs: any window that comes onto a screen (Chromium's own picture-in-picture window included) is 1% opaque
 // and click-through before it's ordered in, so it never flashes on Omar's screen. Windows parked far off every screen
 // (visual renders) keep the alpha they're given.
@@ -696,10 +734,16 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
       dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 10 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
         MainWindowController* w = self.window;
         [w testCookieNamesForURL:@"https://example.org/" done:^(NSArray<NSString*>* names) {
-          std::printf("SELFTEST-RESTORE crashedLastTime=%d restored=%lu live=%lu shown=%s sessionLogin=%d savedLogin=%d\n",
+          NSMutableArray* favs = [NSMutableArray array];  // each Space's Favorites order, as saved before the restart
+          for (ArcSpace* sp in w.spaces) {
+            NSMutableArray* hosts = [NSMutableArray array];
+            for (ArcItem* f in sp.favorites.children) [hosts addObject:[NSURL URLWithString:f.url ?: @""].host ?: @"-"];
+            [favs addObject:[NSString stringWithFormat:@"%@:%@", sp.spaceID, [hosts componentsJoinedByString:@","]]];
+          }
+          std::printf("SELFTEST-RESTORE crashedLastTime=%d restored=%lu live=%lu shown=%s sessionLogin=%d savedLogin=%d favorites=%s\n",
                       crashedLastTime, (unsigned long)w.restoredTabCount, (unsigned long)w.liveTabCount,
                       w.shownItem.url.UTF8String ?: "-", [names containsObject:@"notarc_session_login"],
-                      [names containsObject:@"notarc_saved_login"]);
+                      [names containsObject:@"notarc_saved_login"], [favs componentsJoinedByString:@";"].UTF8String);
           std::fflush(stdout);
           [NSApp terminate:nil];
         }];
@@ -2810,10 +2854,191 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
 #pragma clang diagnostic pop
 
 - (void)runFloatingVideoThenPageFit:(void (^)(void))done {
-  [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runSitePermissionSelfTest:^{ [self runMediaPermissionSelfTest:^{ [self runMediaRepeatSelfTest:^{ [self runSettingsWindowSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }]; }]; }]; }]; }];
+  [self runFavoritesDragSelfTest:^{ [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runSitePermissionSelfTest:^{ [self runMediaPermissionSelfTest:^{ [self runMediaRepeatSelfTest:^{ [self runSettingsWindowSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }]; }]; }]; }]; }]; }];
+}
+
+// Favorites drag and drop like Arc: a short click opens, press and drag lifts the tile and the others slide aside
+// around a drop spot, the order is saved; a Today tab dropped on the grid lands at that slot; a Favorite dragged out to
+// Today is an ordinary tab again; a cancelled drag changes nothing. Pinned tabs and folders reorder in the tab list,
+// and a Space on another profile keeps its own Favorites order. Ends with one swap of the original Favorites that the
+// session-restore check expects back after a restart.
+- (void)runFavoritesDragSelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  ArcSpace *start = w.currentSpace, *sp = start;
+  for (ArcSpace* s in w.spaces)
+    if (s.favorites.children.count > sp.favorites.children.count) sp = s;
+  if (sp != start) [w switchToSpace:sp];
+  ArcSpace* other = nil;
+  for (ArcSpace* s in w.spaces)
+    if (s.favorites && s.favorites != sp.favorites && ![s.profileDirectory isEqualToString:sp.profileDirectory]) other = s;
+  NSArray* (^ids)(NSArray<ArcItem*>*) = ^NSArray*(NSArray<ArcItem*>* a) {
+    NSMutableArray* o = [NSMutableArray array];
+    for (ArcItem* i in a) [o addObject:i.itemID ?: @""];
+    return o;
+  };
+  NSArray* otherBefore = ids(other.favorites.children);
+  NSArray<ArcItem*>* orig = [sp.favorites.children copy];
+  NSMutableArray<ArcItem*>* made = [NSMutableArray array];
+  for (NSString* n in @[ @"a", @"b", @"c", @"d" ]) {
+    [w openInNewTab:[@"https://example.org/favdrag-" stringByAppendingString:n] background:YES];
+    [made addObject:sp.unpinned.children.firstObject];
+  }
+  ArcItem *A = made[0], *B = made[1], *C = made[2], *D = made[3];
+  for (ArcItem* t in @[ A, B, C ]) [w moveItemToFavorites:t];
+  NSUInteger n = w.favoriteTileTitles.count;
+  ArcItem* first = nil;  // the tile in slot 0 before the drag
+  for (ArcItem* f in sp.favorites.children)
+    if ([w favoriteTileIndexForTest:f] == 0) first = f;
+  void (^press)(NSUInteger) = ^(NSUInteger tile) {
+    [w favoritesGridMouseForTest:NSEventTypeLeftMouseDown tile:tile dx:0 dy:0];
+    [w favoritesGridMouseForTest:NSEventTypeLeftMouseDragged tile:tile dx:14 dy:6];
+  };
+  // A short click opens the Favorite; a hand's wobble isn't a drag.
+  [w showItem:D];
+  NSUInteger ia = (NSUInteger)MAX(0, [w favoriteTileIndexForTest:A]);
+  [w favoritesGridMouseForTest:NSEventTypeLeftMouseDown tile:ia dx:0 dy:0];
+  [w favoritesGridMouseForTest:NSEventTypeLeftMouseDragged tile:ia dx:1 dy:1];
+  [w favoritesGridMouseForTest:NSEventTypeLeftMouseUp tile:ia dx:1 dy:1];
+  BOOL click = w.shownItem == A && !w.favoritesDragActiveForTest;
+  // Press and drag: the tile lifts and its own place stays open as the drop spot.
+  [w showItem:D];
+  [w favoritesGridMouseForTest:NSEventTypeLeftMouseDown tile:ia dx:0 dy:0];
+  [w favoritesGridMouseForTest:NSEventTypeLeftMouseDragged tile:ia dx:2 dy:0];
+  BOOL noEarly = !w.favoritesDragActiveForTest;
+  [w favoritesGridMouseForTest:NSEventTypeLeftMouseDragged tile:ia dx:14 dy:6];
+  BOOL lifted = w.favoritesDragActiveForTest && w.favoritesDropIndexForTest == (NSInteger)ia;
+  // Over slot 0 the drop spot moves there and the other tiles slide along to make room.
+  SelfTestDragInfo* info = [SelfTestDragInfo infoForItem:A window:w.window];
+  info.location = [w favoritesSlotPointForTest:0 count:n];
+  NSRect firstFrom = [w favoriteShownRectForTest:first];
+  BOOL entered = [w favoritesGridDragForTest:info phase:0] == NSDragOperationMove;
+  [w favoritesGridDragForTest:info phase:1];
+  NSString* mid = w.favoritesGridStateForTest;
+  BOOL spot = w.favoritesDropIndexForTest == 0 && [mid containsString:@"spot=1"];
+  NSRect firstTo = [w favoriteTargetRectForTest:first];
+  BOOL slides = first && NSMinX(firstTo) > NSMinX(firstFrom) + 10;
+  BOOL animating = [mid containsString:@"animating=1"] && !NSEqualRects([w favoriteShownRectForTest:first], firstTo);
+  WaitUntil(^{ return NSEqualRects([w favoriteShownRectForTest:first], [w favoriteTargetRectForTest:first]); }, 2, ^{
+    BOOL settled = NSEqualRects([w favoriteShownRectForTest:first], [w favoriteTargetRectForTest:first]) &&
+                   [w.favoritesGridStateForTest containsString:@"animating=0"];
+    BOOL dropped = [w favoritesGridDragForTest:info phase:3] == NSDragOperationMove;
+    [w favoritesGridMouseForTest:NSEventTypeLeftMouseUp tile:0 dx:0 dy:0];  // a stray mouse-up after the drop opens nothing
+    [w favoritesDragEndForTest:NSDragOperationMove];
+    BOOL order = sp.favorites.children.firstObject == A && [sp.favorites.children indexOfObject:first] == 1 &&
+                 [w favoriteTileIndexForTest:A] == 0 && [w favoriteTileIndexForTest:first] == 1;
+    BOOL noClick = w.shownItem == D && !w.favoritesDragActiveForTest;
+    BOOL keptHome = [A.pinnedURL hasPrefix:@"https://example.org/favdrag-a"];
+    // The new order is saved (the session-restore check also restarts NotArc); other profiles keep their own order.
+    [w saveSidebarNow];
+    NSArray* want = ids(sp.favorites.children);
+    BOOL persisted = NO, shared = YES, otherKept = !other || [ids(other.favorites.children) isEqual:otherBefore];
+    for (ArcSpace* s in SidebarStoreLoad(w.storePath, nil, nil)) {
+      if ([s.spaceID isEqualToString:sp.spaceID]) persisted = [ids(s.favorites.children) isEqual:want];
+      else if ([s.profileDirectory isEqualToString:sp.profileDirectory] && s.favorites) shared = shared && [ids(s.favorites.children) isEqual:want];
+      if (other && [s.spaceID isEqualToString:other.spaceID]) otherKept = otherKept && [ids(s.favorites.children) isEqual:otherBefore];
+    }
+    // A Today tab dragged onto the grid lands at the slot it's dropped on, with its address kept as its home.
+    SelfTestDragInfo* din = [SelfTestDragInfo infoForItem:D window:w.window];
+    NSUInteger n2 = w.favoriteTileTitles.count;
+    din.location = [w favoritesSlotPointForTest:2 count:n2 + 1];
+    BOOL dEnter = [w favoritesGridDragForTest:din phase:0] == NSDragOperationMove && w.favoritesDropIndexForTest == 2;
+    BOOL dIn = [w favoritesGridDragForTest:din phase:3] == NSDragOperationMove;
+    BOOL atSlot = dEnter && dIn && [w favoriteTileIndexForTest:D] == 2 && ![sp.unpinned.children containsObject:D] &&
+                  [D.pinnedURL hasPrefix:@"https://example.org/favdrag-d"] && w.favoritesDropIndexForTest == -1;
+    // A Favorite dragged out of the grid: its place closes up, and dropped on Today it's an ordinary tab again.
+    NSUInteger ib = (NSUInteger)MAX(0, [w favoriteTileIndexForTest:B]), before = w.favoriteTileTitles.count;
+    press(ib);
+    SelfTestDragInfo* dout = [SelfTestDragInfo infoForItem:B window:w.window];
+    dout.location = [w favoritesSlotPointForTest:ib count:before];
+    [w favoritesGridDragForTest:dout phase:0];
+    [w favoritesGridDragForTest:dout phase:2];
+    BOOL closed = w.favoritesDragActiveForTest && w.favoritesDropIndexForTest == -1 &&
+                  [w.favoritesGridStateForTest containsString:[NSString stringWithFormat:@"slots=%lu ", (unsigned long)(before - 1)]];
+    BOOL outOK = [w sidebarDropForTest:dout parent:sp.unpinned index:0];
+    [w favoritesDragEndForTest:NSDragOperationMove];
+    BOOL unpinned = outOK && sp.unpinned.children.firstObject == B && ![sp.favorites.children containsObject:B] && !B.pinnedURL &&
+                    [w favoriteTileIndexForTest:B] == -1 && w.favoriteTileTitles.count == before - 1;
+    // Esc (a cancelled drag) leaves the order as it was.
+    NSArray* beforeCancel = [sp.favorites.children copy];
+    press((NSUInteger)MAX(0, [w favoriteTileIndexForTest:C]));
+    SelfTestDragInfo* dc = [SelfTestDragInfo infoForItem:C window:w.window];
+    dc.location = [w favoritesSlotPointForTest:0 count:w.favoriteTileTitles.count];
+    [w favoritesGridDragForTest:dc phase:0];
+    [w favoritesGridDragForTest:dc phase:2];
+    [w favoritesDragEndForTest:NSDragOperationNone];
+    BOOL cancelKept = [sp.favorites.children isEqual:beforeCancel] && !w.favoritesDragActiveForTest &&
+                      [w.favoritesGridStateForTest containsString:@"spot=0"];
+    // Pinned tabs and folders reorder by drag in the tab list; a pinned tab dragged into Today is unpinned.
+    NSArray<ArcItem*>* pinBefore = [sp.pinned.children copy];
+    BOOL pinReorder = YES, folderReorder = YES;
+    if (pinBefore.count >= 2) {
+      ArcItem* last = pinBefore.lastObject;
+      pinReorder = [w sidebarDropForTest:[SelfTestDragInfo infoForItem:last window:w.window] parent:sp.pinned index:0] &&
+                   sp.pinned.children.firstObject == last;
+    }
+    ArcItem* folder = nil;
+    for (ArcItem* it in sp.pinned.children)
+      if (it.isFolder && !folder) folder = it;
+    if (folder)
+      folderReorder = [w sidebarDropForTest:[SelfTestDragInfo infoForItem:folder window:w.window] parent:sp.pinned
+                                      index:(NSInteger)sp.pinned.children.count] && sp.pinned.children.lastObject == folder;
+    [w openInNewTab:@"https://example.org/favdrag-pin" background:YES];
+    ArcItem* P = sp.unpinned.children.firstObject;
+    [w showItem:P];
+    [w togglePin:nil];
+    BOOL wasPinned = [sp.pinned.children containsObject:P] && P.pinnedURL.length;
+    BOOL toToday = [w sidebarDropForTest:[SelfTestDragInfo infoForItem:P window:w.window] parent:sp.unpinned index:0];
+    BOOL pinToToday = wasPinned && toToday && sp.unpinned.children.firstObject == P && !P.pinnedURL;
+    for (NSUInteger i = 0; i < pinBefore.count; ++i) [w moveItem:pinBefore[i] toParent:sp.pinned index:(NSInteger)i];
+    for (ArcItem* t in @[ A, C, D ]) [w removeItemFromFavorites:t pinned:NO];
+    for (ArcItem* t in @[ A, B, C, D, P ]) [w deleteSidebarItem:t];
+    BOOL cleaned = [ids(sp.favorites.children) isEqual:ids(orig)] && [ids(sp.pinned.children) isEqual:ids(pinBefore)];
+    // One swap of the original Favorites, by drag, left in place for the session-restore check's restart.
+    BOOL restartOrder = NO;
+    if (orig.count >= 2) {
+      ArcItem* last = nil;
+      for (ArcItem* f in orig)
+        if ([w favoriteTileIndexForTest:f] >= 0) last = f;
+      press((NSUInteger)MAX(0, [w favoriteTileIndexForTest:last]));
+      SelfTestDragInfo* ds = [SelfTestDragInfo infoForItem:last window:w.window];
+      ds.location = [w favoritesSlotPointForTest:0 count:w.favoriteTileTitles.count];
+      [w favoritesGridDragForTest:ds phase:0];
+      [w favoritesGridDragForTest:ds phase:3];
+      [w favoritesDragEndForTest:NSDragOperationMove];
+      restartOrder = [w favoriteTileIndexForTest:last] == 0;
+    }
+    NSMutableArray* hosts = [NSMutableArray array];
+    for (ArcItem* f in sp.favorites.children) [hosts addObject:[NSURL URLWithString:f.url ?: @""].host ?: @"-"];
+    std::printf("SELFTEST-FAVORDER-DEBUG saved=%s:%s\n", sp.spaceID.UTF8String, [hosts componentsJoinedByString:@","].UTF8String);
+    [w saveSidebarNow];
+    [[NSPasteboard pasteboardWithName:@"io.github.donnadieu.notarc.selftest.drag"] releaseGlobally];
+    if (sp != start) [w switchToSpace:start];
+    std::printf("SELFTEST-FAVDRAG click=%d noEarlyDrag=%d lifted=%d entered=%d spot=%d slides=%d animating=%d settled=%d "
+                "dropped=%d order=%d noClickAfterDrop=%d keptHome=%d persisted=%d sameProfileShared=%d otherProfileKept=%d "
+                "dropInAtSlot=%d closesUp=%d dragOutUnpins=%d cancelKept=%d pinnedReorder=%d folderReorder=%d "
+                "pinnedToTodayUnpins=%d cleaned=%d restartOrder=%d\n",
+                click, noEarly, lifted, entered, spot, slides, animating, settled, dropped, order, noClick, keptHome, persisted,
+                shared, otherKept, atSlot, closed, unpinned, cancelKept, pinReorder, folderReorder, pinToToday, cleaned,
+                restartOrder);
+    if (!spot || !slides || !settled || !order || !closed)
+      std::printf("SELFTEST-FAVDRAG-DEBUG mid=[%s] now=[%s] from=%s to=%s\n", mid.UTF8String, w.favoritesGridStateForTest.UTF8String,
+                  NSStringFromRect(firstFrom).UTF8String, NSStringFromRect(firstTo).UTF8String);
+    std::fflush(stdout);
+    done();
+  });
 }
 
 - (void)runSelfTestActions {
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"favdrag"]) {  // quick local loop
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runFavoritesDragSelfTest:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
+    });
+    return;
+  }
   if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"buttons"]) {  // quick local loop
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [self runWindowButtonsSelfTest:^{

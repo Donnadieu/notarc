@@ -17,6 +17,9 @@
 //   split <url> <url> [...]      open a split view
 //   newspace <name>              make a Space and switch to it
 //   peek-sidebar                 hide the sidebar and float it in, as the left-edge hover does
+//   fav-drag <tile> <slot>       hold that Favorite mid-drag with the drop spot at <slot> (-1: dragged out of the grid)
+//   fav-drag-end                 let go (as a cancelled drag)
+//   fav-lift <tile> <name>       the lifted tile picture the pointer carries, as <name>.png
 //   loading [0|1]                show the shown tab as loading
 //   inactive [0|1]               draw the window as inactive
 //   hover-today                  hover the Today divider (shows Clear)
