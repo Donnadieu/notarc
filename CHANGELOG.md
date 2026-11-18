@@ -3,6 +3,19 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## 0.30.6
+- Google Meet's microphone and camera work after one Allow, like Chrome. After you allow the camera and microphone,
+  Meet asks again for the microphone alone, then the camera alone; NotArc showed a new card for each, and until you
+  answered every one Meet waited ("microphone not found", or the camera never started). Now one Allow covers that
+  site in that tab for the visit, including reloads and requests that arrive while the card is open; leaving the site
+  ends it. "Remember for this site" still keeps the answer for good.
+- Before a site gets the camera or microphone, NotArc asks macOS when macOS hasn't been asked yet (as Chrome does).
+  When macOS has it turned off for NotArc, the site is refused and a card says where to turn it on, with a button
+  that opens that page of System Settings.
+- Settings shows its panes again. Each tab switch left the pane further above the window's visible area, so the window
+  looked empty on every tab (and was as tall as the longest pane). Every pane now has the same size and General
+  scrolls.
+
 ## 0.30.5
 - Google Meet's "Use camera and microphone" no longer closes NotArc. Meet's button is Chromium's new camera button
   (`<usermedia>`); after you allow it, Chromium asks again for the same camera when it thinks macOS hasn't been asked
