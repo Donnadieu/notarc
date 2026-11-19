@@ -116,7 +116,7 @@ def main(home):
     media = os.path.join(home, "NotArcMediaTest")
     os.makedirs(media, exist_ok=True)
     testdata = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata")
-    for name in ("media-test.html", "media-test.webm", "icon.png"):
+    for name in ("media-test.html", "media-test.webm", "icon.png", "media-h264.mp4", "media-x-video.mp4", "media-x-audio.mp4"):
         shutil.copyfile(os.path.join(testdata, name), os.path.join(media, name))
     print(arc)
 
