@@ -3,6 +3,13 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## 0.30.8
+- Videos play on X, Instagram Reels, Facebook and any site that serves MP4 (H.264 video with AAC sound). X showed
+  "The media could not be played" on every video, and Reels and many MP4 links didn't play, because the Chromium
+  engine NotArc used left those formats out. NotArc now ships an engine built with them, like Chrome, and decodes
+  them in hardware. YouTube already played and still does.
+- Not yet: videos that need DRM (Netflix and some paid or protected videos) still don't play.
+
 ## 0.30.7
 - Favorites can be dragged, as in Arc. Press a Favorite and move it: it lifts off the grid, a dashed empty slot shows
   where it will land, and the other icons slide out of the way as you move. Let go and it stays there; the order is
