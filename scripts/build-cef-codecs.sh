@@ -119,7 +119,8 @@ assemble() {
   DEST="$REPO/third_party/std/${STD_NAME}_codecs"
   rm -rf "$DEST"; ditto "$STD" "$DEST"
   rm -rf "$DEST/Release/Chromium Embedded Framework.framework" "$DEST/Debug"
-  ditto "$OUT/Chromium Embedded Framework.framework" "$DEST/Release/Chromium Embedded Framework.framework"
+  # The distribution's framework is unversioned (like CEF's make_distrib.py makes it): copy Versions/A's contents.
+  ditto "$OUT/Chromium Embedded Framework.framework/Versions/A" "$DEST/Release/Chromium Embedded Framework.framework"
   printf 'Built from source by scripts/build-cef-codecs.sh on %s with GN_DEFINES="%s"\n' "$(date -u +%F)" "$GN_DEFINES" \
     > "$DEST/CODECS.txt"
   echo "Done: $DEST"
