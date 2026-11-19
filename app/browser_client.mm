@@ -106,7 +106,7 @@ CefRefPtr<CefResourceHandler> BrowserClient::GetResourceHandler(CefRefPtr<CefBro
           size_t n = strlen(ext);
           return prefix.size() >= n && prefix.compare(prefix.size() - n, n, ext) == 0;
         };
-        type = ends(".webm") ? "video/webm" : ends(".png") ? "image/png" : ends(".js") ? "text/javascript" : "text/html";  // media checks (V75-V80)
+        type = ends(".webm") ? "video/webm" : ends(".mp4") ? "video/mp4" : ends(".png") ? "image/png" : ends(".js") ? "text/javascript" : "text/html";  // media checks (V75-V80)
       }
   }
   if (body.empty()) return nullptr;

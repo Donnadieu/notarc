@@ -655,3 +655,18 @@ trackpad; everything else is checked by the hidden self-test.
 162. **Dragging into Today unpins.** A Favorite or pinned tab dropped in Today loses its saved home address, as
     Remove from Favorites and Unpin do; dropped in Pinned (or a pinned folder) it keeps it. A tab dropped on the grid
     gets its current address as its home, as Move to Favorites does; reordering within the grid changes nothing else.
+
+## 2026-11-19: Videos on X, Facebook and Instagram (Omar's report)
+
+163. **NotArc ships a CEF framework built from source with H.264 and AAC** (`proprietary_codecs=true
+    ffmpeg_branding=Chrome`, `scripts/build-cef-codecs.sh`). Spotify's prebuilt CEF leaves them out, and there is no
+    runtime switch: X ("The media could not be played"), Instagram Reels, many Facebook videos and plain MP4 links
+    failed while YouTube (VP9/AV1) played. Third-party prebuilt "CEF with codecs" archives exist, but a browser
+    engine from an unknown builder isn't trusted with Omar's sign-ins, so we build our own from CEF's tagged commit.
+164. **Only the framework is built; headers, wrapper and CMake files come from the standard distribution of the same
+    CEF commit.** CEF's sample apps need Xcode's `ibtool`; NotArc never used them.
+165. **No Xcode needed.** The build script answers Chromium's Xcode queries from the Command Line Tools SDK, and
+    ANGLE compiles its internal Metal shaders at runtime (its own fallback when there's no Metal compiler) instead of
+    at build time.
+166. **H.264/AAC are patent-licensed.** Personal builds are fine; anyone distributing NotArc widely should check the
+    H.264/AAC licence terms (Via LA) for their case.

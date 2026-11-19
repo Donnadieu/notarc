@@ -2682,6 +2682,147 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
 }
 #pragma clang diagnostic pop
 
+// Videos play (Omar, Nov 17 and 19: X said "The media could not be played", Facebook and Instagram Reels didn't play).
+// Those sites serve H.264 video with AAC sound in MP4, and X, Facebook and Instagram stream it through Media Source
+// Extensions (separate video and audio buffers, like X's player). Plays a plain H.264/AAC MP4 and an MSE stream from
+// local fixtures (no network) and checks both pass 1 s of playback with frames and sound decoded and no error.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-retain-cycles"
+- (void)runVideoCodecsSelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSString* dir = [NSHomeDirectory() stringByAppendingPathComponent:@"NotArcMediaTest"];
+  NSArray* files = @[ @"media-h264.mp4", @"media-x-video.mp4", @"media-x-audio.mp4" ];
+  auto serve = [](NSString* url, NSData* d) {
+    BrowserClient::SetTestResponse(url.UTF8String, d ? std::string((const char*)d.bytes, d.length) : std::string());
+  };
+  BOOL fixtures = YES;
+  for (NSString* f in files) {
+    NSData* d = [NSData dataWithContentsOfFile:[dir stringByAppendingPathComponent:f]];
+    if (!d) fixtures = NO;
+    serve([@"https://video-t.example/" stringByAppendingString:f], d);
+  }
+  NSString* page =
+      @"<!doctype html><title>video test</title><body style='margin:0;background:#000'>"
+      @"<video id=a playsinline style='width:320px;height:180px'></video><video id=b playsinline style='width:320px;height:180px'></video>"
+      @"<script>(async()=>{const R={};"
+      @"const T1='video/mp4; codecs=\"avc1.42E01E, mp4a.40.2\"',T2='video/mp4; codecs=\"avc1.64001F\"',T3='audio/mp4; codecs=\"mp4a.40.2\"';"
+      @"R.mp4Type=document.createElement('video').canPlayType(T1)==='probably'?1:0;"
+      @"R.mseType=(window.MediaSource&&MediaSource.isTypeSupported(T2)&&MediaSource.isTypeSupported(T3))?1:0;"
+      @"try{const d=await navigator.mediaCapabilities.decodingInfo({type:'media-source',video:{contentType:T2,width:1280,height:720,bitrate:3e6,framerate:30}});"
+      @"R.hw=d.supported?(d.powerEfficient?'hw':'sw'):'none'}catch(e){R.hw='err'}"
+      @"const watch=v=>new Promise(res=>{const t0=Date.now();const tick=()=>{const e=v.error?('e'+v.error.code+':'+(v.error.message||'').slice(0,60)):'';"
+      @"if(v.currentTime>1)res({ok:1,err:e,t:v.currentTime});else if(e||Date.now()-t0>12000)res({ok:0,err:e||'timeout',t:v.currentTime});"
+      @"else setTimeout(tick,100)};tick()});"
+      @"const decoded=v=>({fr:(v.getVideoPlaybackQuality?v.getVideoPlaybackQuality().totalVideoFrames:0),"
+      @"au:(v.webkitAudioDecodedByteCount||0),vb:(v.webkitVideoDecodedByteCount||0)});"
+      @"const a=document.getElementById('a');a.volume=0.01;a.src='/media-h264.mp4';a.play().catch(e=>R.aPlay=e.name);"
+      @"R.a=await watch(a);Object.assign(R.a,decoded(a));a.pause();a.removeAttribute('src');a.load();"
+      @"const b=document.getElementById('b');b.volume=0.01;"
+      @"try{const ms=new MediaSource();b.src=URL.createObjectURL(ms);await new Promise(r=>ms.addEventListener('sourceopen',r,{once:true}));"
+      @"const add=async(sb,u)=>{const buf=await(await fetch(u)).arrayBuffer();"
+      @"await new Promise((r,j)=>{sb.addEventListener('updateend',r,{once:true});sb.addEventListener('error',()=>j(new Error('append')),{once:true});sb.appendBuffer(buf)})};"
+      @"const sv=ms.addSourceBuffer(T2),sa=ms.addSourceBuffer(T3);"  // like X's player: both buffers before any data
+      @"await add(sv,'/media-x-video.mp4');await add(sa,'/media-x-audio.mp4');ms.endOfStream();b.play().catch(e=>R.bPlay=e.name);"
+      @"R.b=await watch(b);Object.assign(R.b,decoded(b));}catch(e){R.b={ok:0,err:'mse:'+e.name+':'+e.message.slice(0,60)}}"
+      @"b.pause();b.removeAttribute('src');b.load();"
+      @"document.title='vid:'+JSON.stringify(R)})()</script></body>";
+  serve(@"https://video-t.example/page", [page dataUsingEncoding:NSUTF8StringEncoding]);
+  void (^finish)(void) = ^{
+    for (NSString* f in files) serve([@"https://video-t.example/" stringByAppendingString:f], nil);
+    serve(@"https://video-t.example/page", nil);
+    done();
+  };
+  [w openInNewTab:@"https://video-t.example/page"];
+  ArcItem* t = w.shownItem;
+  WaitUntil(^{ if (w.shownItem != t) [w showItem:t]; return (BOOL)[t.liveTitle hasPrefix:@"vid:"]; }, 40, ^{
+    NSString* title = t.liveTitle ?: @"";
+    NSDictionary* r = nil;
+    if ([title hasPrefix:@"vid:"])
+      r = [NSJSONSerialization JSONObjectWithData:[[title substringFromIndex:4] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+    NSDictionary* a = [r[@"a"] isKindOfClass:NSDictionary.class] ? r[@"a"] : @{};
+    NSDictionary* b = [r[@"b"] isKindOfClass:NSDictionary.class] ? r[@"b"] : @{};
+    BOOL noError = [a[@"err"] length] == 0 && [b[@"err"] length] == 0 && !r[@"aPlay"] && !r[@"bPlay"];
+    std::printf("SELFTEST-VIDEOCODECS fixtures=%d mp4Type=%d mseType=%d mp4Played=%d mp4Frames=%d mp4Sound=%d msePlayed=%d "
+                "mseFrames=%d mseSound=%d noError=%d\n",
+                fixtures, [r[@"mp4Type"] intValue] == 1, [r[@"mseType"] intValue] == 1, [a[@"ok"] intValue] == 1,
+                [a[@"fr"] intValue] > 0, [a[@"au"] intValue] > 0, [b[@"ok"] intValue] == 1, [b[@"fr"] intValue] > 0,
+                [b[@"au"] intValue] > 0, noError);
+    std::printf("SELFTEST-VIDEOCODECS-DEBUG %s\n", title.UTF8String);
+    std::fflush(stdout);
+    [w closeSidebarTab:t];
+    finish();
+  });
+}
+#pragma clang diagnostic pop
+
+// Live video sites (NOTARC_SELFTEST_ONLY=videosites, never in the suite: it needs the network). NOTARC_VIDEO_URLS is a
+// '|'-separated list. Opens each page, starts its videos muted (no click), and reports whether one passed 1 s of
+// playback with no error and whether the page shows X's "The media could not be played" message.
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-retain-cycles"
+- (void)runVideoSitesProbe:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSArray* urls = [NSProcessInfo.processInfo.environment[@"NOTARC_VIDEO_URLS"] ?: @"" componentsSeparatedByString:@"|"];
+  if (getenv("NOTARC_PROBE_ADBLOCK")) {  // the same pages with Block ads and trackers on (memory-only setting)
+    SettingSetBool(kSettingBlockAds, YES);
+    ApplyContentBlockerSettings();
+  }
+  NSString* js =
+      @"(()=>{if(!window.__eme){window.__eme='?';navigator.requestMediaKeySystemAccess('com.widevine.alpha',[{videoCapabilities:[{contentType:'video/mp4; codecs=\"avc1.42E01E\"'}]}])"
+      @".then(()=>window.__eme='yes',e=>window.__eme='no:'+e.name)}"
+      @"const vs=[...document.querySelectorAll('video')];let best=0,err='',src='';"
+      @"for(const v of vs){if(v.paused&&!v.ended){v.muted=true;v.play().catch(()=>{});}if(v.currentTime>best){best=v.currentTime;src=(v.currentSrc||'').slice(0,40)}"
+      @"if(v.error)err='e'+v.error.code+':'+(v.error.message||'').slice(0,50);}"
+      @"const txt=(document.body?document.body.innerText:'');const bad=/could not be played|can.t play this video|video unavailable/i.test(txt)?1:0;"
+      @"if(!vs.length)for(const b of document.querySelectorAll('[data-testid=videoPlayer],[data-testid=videoComponent],[data-testid=playButton],"
+      @"[aria-label=Play],[aria-label*=\"Play video\"],button.ytp-large-play-button,.vp-controls button'))try{b.click()}catch(e){}"
+      @"const c=document.createElement('video').canPlayType('video/mp4; codecs=\"avc1.42E01E, mp4a.40.2\"');"
+      @"const mr=performance.getEntriesByType('resource').filter(e=>/\\.(mp4|m4s|m3u8|mpd|webm)|playlist|range=|\\/video\\//i.test(e.name));"
+      @"document.title='vs:'+JSON.stringify({n:vs.length,t:+best.toFixed(2),err,bad,src,c,media:mr.length,widevine:window.__eme,lastMedia:mr.slice(-3).map(e=>e.name.split('?')[0].slice(-45)).join(' '),"
+      @"txt:txt.replace(/\\s+/g,' ').slice(0,90)})})()";
+  __block NSUInteger i = 0;
+  __block void (^next)(void) = nil;
+  next = ^{
+    if (i >= urls.count) {
+      void (^finish)(void) = done;  // keep it: clearing `next` frees this block and what it holds
+      next = nil;
+      finish();
+      return;
+    }
+    NSString* url = urls[i++];
+    if (!url.length) { next(); return; }
+    [w openInNewTab:url];
+    ArcItem* t = w.shownItem;
+    __block int tick = 0;
+    __block double best = 0;
+    __block NSString* last = @"-";
+    __block void (^poll)(void) = nil;
+    poll = ^{
+      ++tick;
+      if (w.shownItem != t) [w showItem:t];
+      if ([t.liveTitle hasPrefix:@"vs:"]) {
+        last = t.liveTitle;
+        NSDictionary* r = [NSJSONSerialization JSONObjectWithData:[[last substringFromIndex:3] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil];
+        best = MAX(best, [r[@"t"] doubleValue]);
+      }
+      if (best > 1 || tick >= 40) {
+        std::printf("SELFTEST-VIDEOSITE-DEBUG played=%d secs=%d url=%s last=%s\n", best > 1, tick / 2, url.UTF8String, last.UTF8String);
+        std::fflush(stdout);
+        [w runJS:@"document.querySelectorAll('video').forEach(v=>v.pause())" inItem:t];
+        [w closeSidebarTab:t];
+        dispatch_async(dispatch_get_main_queue(), ^{ poll = nil; next(); });  // clear it once it has returned
+        return;
+      }
+      if (tick > 6) [w runJS:js inItem:t];
+      if (tick == 14 && best == 0) [w clickPageForTest:t x:320 y:240];  // click-to-play players: one real click
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{ if (poll) poll(); });
+    };
+    poll();
+  };
+  next();
+}
+#pragma clang diagnostic pop
+
 // Manual check with real devices (NOTARC_SELFTEST_ONLY=realmedia NOTARC_REAL_DEVICES=1, never in the suite): permission
 // state, device lists, levels and frame sizes across repeat requests and reloads. NOTARC_PROBE_CODECS=1 lists codecs.
 #pragma clang diagnostic push
@@ -2854,7 +2995,7 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
 #pragma clang diagnostic pop
 
 - (void)runFloatingVideoThenPageFit:(void (^)(void))done {
-  [self runFavoritesDragSelfTest:^{ [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runSitePermissionSelfTest:^{ [self runMediaPermissionSelfTest:^{ [self runMediaRepeatSelfTest:^{ [self runSettingsWindowSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }]; }]; }]; }]; }]; }];
+  [self runFavoritesDragSelfTest:^{ [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runSitePermissionSelfTest:^{ [self runMediaPermissionSelfTest:^{ [self runMediaRepeatSelfTest:^{ [self runSettingsWindowSelfTest:^{ [self runVideoCodecsSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }]; }]; }]; }]; }]; }]; }];
 }
 
 // Favorites drag and drop like Arc: a short click opens, press and drag lifts the tile and the others slide aside
@@ -3078,6 +3219,26 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
       };
       if (getenv("NOTARC_PROBE_URL")) [self runSiteMediaProbe:fin];
       else [self runRealMediaProbe:fin];
+    });
+    return;
+  }
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"video"]) {  // quick local loop
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runVideoCodecsSelfTest:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
+    });
+    return;
+  }
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"videosites"]) {  // live sites, manual
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runVideoSitesProbe:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
     });
     return;
   }
