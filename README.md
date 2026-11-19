@@ -124,7 +124,10 @@ Requirements: an Apple Silicon Mac, Apple's Command Line Tools (Xcode isn't need
 (`brew install cmake ninja`).
 
 1. Download the CEF "Standard Distribution" for macOS ARM64 from https://cef-builds.spotifycdn.com/index.html,
-   unpack it under `third_party/std/`, and link it: `ln -sfn std/<cef_binary_folder> third_party/cef`
+   unpack it under `third_party/std/`, and link it: `ln -sfn std/<cef_binary_folder> third_party/cef`.
+   That build has no H.264/AAC, so X, Instagram and MP4 videos won't play. Release builds use a CEF framework built
+   from source with them: `scripts/build-cef-codecs.sh <work dir>` (a few hours, ~110 GB; no Xcode needed), then
+   `ln -sfn std/<cef_binary_folder>_codecs third_party/cef`.
 2. `mkdir -p build && cd build && cmake -G Ninja -DCMAKE_BUILD_TYPE=Release .. && ninja`
 3. Open `build/Release/NotArc.app`
 4. Optional: `scripts/package.sh` makes the release disk image in `dist/`

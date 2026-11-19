@@ -2765,8 +2765,10 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
       @"for(const v of vs){if(v.paused&&!v.ended){v.muted=true;v.play().catch(()=>{});}if(v.currentTime>best){best=v.currentTime;src=(v.currentSrc||'').slice(0,40)}"
       @"if(v.error)err='e'+v.error.code+':'+(v.error.message||'').slice(0,50);}"
       @"const txt=(document.body?document.body.innerText:'');const bad=/could not be played|can.t play this video|video unavailable/i.test(txt)?1:0;"
+      @"if(!vs.length)for(const b of document.querySelectorAll('[data-testid=videoPlayer],[data-testid=videoComponent],[data-testid=playButton],"
+      @"[aria-label=Play],[aria-label*=\"Play video\"],button.ytp-large-play-button,.vp-controls button'))try{b.click()}catch(e){}"
       @"const c=document.createElement('video').canPlayType('video/mp4; codecs=\"avc1.42E01E, mp4a.40.2\"');"
-      @"document.title='vs:'+JSON.stringify({n:vs.length,t:+best.toFixed(2),err,bad,src,c})})()";
+      @"document.title='vs:'+JSON.stringify({n:vs.length,t:+best.toFixed(2),err,bad,src,c,txt:txt.replace(/\\s+/g,' ').slice(0,90)})})()";
   __block NSUInteger i = 0;
   __block void (^next)(void) = nil;
   next = ^{
