@@ -28,7 +28,7 @@ run() {  # run <label> <env...>
   if ! grep -q '^SELFTEST-REALPROFILE .*prefsUntouched=1 dataUntouched=1' <<<"$lines"; then
     echo "MEDIA-CHECK FAIL [$label]: the run didn't finish cleanly (log: $log)"; FAIL=1
   fi
-  if sed -E 's/chromePages=[01] //' <<<"$lines" | grep -qE '=0( |$)'; then
+  if grep -qE '=0( |$)' <<<"$lines"; then
     echo "MEDIA-CHECK FAIL [$label]: a check failed (log: $log)"; FAIL=1
   fi
   local need=MEETREADY

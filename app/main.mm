@@ -2961,9 +2961,9 @@ static int StartLoopbackPongServer(void) {
                 NSDictionary* b = parse(r);
                 BOOL grantedA = !chrome || ([a[@"cam"] isEqual:@"granted"] && [a[@"mic"] isEqual:@"granted"]);
                 BOOL grantedB = !chrome || ([b[@"cam"] isEqual:@"granted"] && [b[@"mic"] isEqual:@"granted"]);
-                std::printf("SELFTEST-MEETREADY chromePages=%d asked=%d stream=%d devices=%d granted=%d oneTimeEnds=%d "
+                std::printf("SELFTEST-MEETREADY mode=%s asked=%d stream=%d devices=%d granted=%d oneTimeEnds=%d "
                             "rememberedNoCard=%d rememberedStream=%d rememberedDevices=%d rememberedGranted=%d\n",
-                            chrome, [card hasPrefix:@"camera,microphone:"], [a[@"live"] intValue] == 2, devicesOK(a), grantedA, ended,
+                            chrome ? "chrome" : "default", [card hasPrefix:@"camera,microphone:"], [a[@"live"] intValue] == 2, devicesOK(a), grantedA, ended,
                             !rCard, [b[@"live"] intValue] == 2, devicesOK(b), grantedB);
                 std::printf("SELFTEST-MEETREADY-DEBUG a=%s back=%s b=%s\n", aTitle.UTF8String ?: "-", back.UTF8String ?: "-",
                             r.liveTitle.UTF8String ?: "-");
