@@ -3,6 +3,22 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## 0.30.9
+- Camera and microphone work in Google Meet with Chrome-style pages on. After you allowed them, Meet still said
+  "Camera is off" with a warning on the mic and camera buttons ("Camera not found", "Mic not found"): Chrome-style
+  pages kept their own copy of your answer, which NotArc never filled in, so the page could open the camera but was
+  told there were no devices. NotArc now hands your Allow to the page the way Chrome stores it. An Allow without
+  "Remember" ends when you leave the site, like Chrome's "Allow this time". The notarized app is now checked for this
+  in both page modes before every release.
+- Beyond Identity and other sign-in apps on your Mac work. Their sign-in page talks to the app on your Mac
+  (127.0.0.1), and Chrome asks "wants to access other apps and services on this device" for that. NotArc didn't know
+  this question and quietly said no, so the sign-in never reached the app. It now asks with a card like any other
+  site request (Allow + "Remember for this site").
+- Sites that ask for a client certificate from your Keychain get a picker to choose one, like Chrome's (Cancel
+  continues without one). With no matching certificate NotArc continues without asking, as Chrome does.
+- Not available: passkeys saved in iCloud Keychain / Passwords. macOS only lets browsers that Apple has approved use
+  them. Beyond Identity doesn't need them.
+
 ## 0.30.8
 - Videos play on X, Instagram Reels, Facebook and any site that serves MP4 (H.264 video with AAC sound). X showed
   "The media could not be played" on every video, and Reels and many MP4 links didn't play, because the Chromium

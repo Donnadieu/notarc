@@ -1889,6 +1889,8 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
   NSMutableDictionary<NSNumber*, NSDictionary*>* _mediaGrants;
   NSPopover* _siteAlert;  // the site prompt that drops down from the address pill
   NSButton* _sitePromptRemember;
+  NSPopUpButton* _sitePromptChoice;  // a certificate card's list
+  NSString* _externalOpenedForTest;  // tests: the app link Allow would have opened
   NSPopover* _sitePopover;
   NSString* _siteSettingsOrigin;
   NSTextField* _address;
@@ -3077,6 +3079,13 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   _client->set_external_callback([weakSelf](int browserId, const std::string& url) {
     [OwnerOf(browserId, weakSelf) browser:browserId externalURL:[NSString stringWithUTF8String:url.c_str()]];
   });
+  _client->set_certificate_callback([weakSelf](int browserId, int requestId, const std::string& host, int port,
+                                               const std::vector<std::string>& names) {
+    NSMutableArray* list = [NSMutableArray array];
+    for (auto& n : names) [list addObject:[NSString stringWithUTF8String:n.c_str()] ?: @"Certificate"];
+    [OwnerOf(browserId, weakSelf) browser:browserId certificateRequest:requestId host:[NSString stringWithUTF8String:host.c_str()]
+                                     port:port names:list];
+  });
   _client->set_status_callback([weakSelf](int browserId, const std::string& text) {
     [OwnerOf(browserId, weakSelf) maxLinkHovered:[NSString stringWithUTF8String:text.c_str()] ?: @"" browser:browserId];
   });
@@ -3370,8 +3379,13 @@ static NSString* OriginKey(NSString* origin);
   }
   if (url.length && !item.pinnedURL.length && [self isPinnedItem:item]) item.pinnedURL = item.url ?: url;
   if (url.length) item.url = url;
-  if (url.length && _mediaGrants[@(browserId)] && ![_mediaGrants[@(browserId)][@"origin"] isEqualToString:OriginKey(url)])
+  if (url.length && _mediaGrants[@(browserId)] && ![_mediaGrants[@(browserId)][@"origin"] isEqualToString:OriginKey(url)]) {
+    NSDictionary* ended = _mediaGrants[@(browserId)];
     [_mediaGrants removeObjectForKey:@(browserId)];  // left the site: its camera / mic answer ends here
+    BOOL stillOpen = NO;  // another tab of the same Space on that site keeps its grant
+    for (NSDictionary* g in _mediaGrants.allValues) stillOpen |= [g[@"origin"] isEqualToString:ended[@"origin"]];
+    if (!stillOpen) [self tellChromiumMedia:[ended[@"names"] allObjects] allowed:NO browser:browserId origin:ended[@"origin"]];
+  }
   if (url.length && item == _shown) [self updateToolbarAddress];
   if (self.historyPath && !_history) _history = [[HistoryStore alloc] initWithPath:self.historyPath];
   if (url.length) [_history recordURL:url title:title space:[self spaceOwningItem:item].title];
@@ -4783,6 +4797,10 @@ static NSArray<NSArray*>* PermissionNames() {
     @[ @(CEF_PERMISSION_TYPE_KEYBOARD_LOCK), @"keyboard", @"capture keyboard shortcuts" ],
     @[ @(CEF_PERMISSION_TYPE_POINTER_LOCK), @"pointer", @"lock your pointer" ],
     @[ @(CEF_PERMISSION_TYPE_LOCAL_NETWORK), @"network", @"reach devices on your local network" ],
+    @[ @(CEF_PERMISSION_TYPE_LOCAL_NETWORK_ACCESS_DEPRECATED), @"network", @"reach devices on your local network" ],
+    // Chrome 142+ asks this when a site talks to an app on this Mac over 127.0.0.1 / localhost (Beyond Identity's
+    // sign-in page reaching its Authenticator app). NotArc used to refuse it silently as unknown (Omar, Nov 19).
+    @[ @(CEF_PERMISSION_TYPE_LOOPBACK_NETWORK), @"loopback", @"access other apps and services on this device" ],
     @[ @(CEF_PERMISSION_TYPE_SENSORS), @"sensors", @"use motion sensors" ],
   ];
 }
@@ -4836,6 +4854,7 @@ static NSString* OriginKey(NSString* origin) {
     if (!saved[n]) allKnown = NO;
   }
   if (allKnown) {
+    [self grantMedia:names browser:browserId origin:origin];  // remembered yes: Chromium must know it too (see tellChromiumMedia)
     _client->ResolvePermission(requestId, true);
     return;
   }
@@ -4864,6 +4883,35 @@ static NSString* OriginKey(NSString* origin) {
   NSDictionary* old = _mediaGrants[@(browserId)];
   if ([old[@"origin"] isEqualToString:OriginKey(origin)]) [media unionSet:old[@"names"]];
   _mediaGrants[@(browserId)] = @{ @"origin" : OriginKey(origin), @"names" : media };
+  [self tellChromiumMedia:media.allObjects allowed:YES browser:browserId origin:origin];
+}
+
+// Chrome-style pages read camera/mic permission from the Space profile's content settings, not from NotArc's answer:
+// without an ALLOW there, getUserMedia worked but enumerateDevices hid every device (no ids, no names) and
+// permissions.query said "prompt", so Meet showed "Camera not found" / "Mic not found" and stopped its preview
+// (Omar, Nov 19). Chrome stores the grant the same way. allowed=NO puts it back to "ask" (a one-time Allow ending).
+- (void)tellChromiumMedia:(NSArray<NSString*>*)names allowed:(BOOL)allowed browser:(int)browserId origin:(NSString*)origin {
+  auto it = _browsers.find(browserId);
+  if (it == _browsers.end() || !origin.length) return;
+  CefRefPtr<CefRequestContext> ctx = it->second->GetHost()->GetRequestContext();
+  CefString o([OriginKey(origin) stringByAppendingString:@"/"].UTF8String);
+  for (NSString* n in names) {
+    cef_content_setting_types_t type = [n isEqualToString:@"camera"]       ? CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA
+                                       : [n isEqualToString:@"microphone"] ? CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC
+                                                                           : CEF_CONTENT_SETTING_TYPE_NUM_VALUES;
+    if (type == CEF_CONTENT_SETTING_TYPE_NUM_VALUES) continue;
+    if (!allowed && [[self sitePermissionsForOrigin:origin][n] boolValue]) continue;  // remembered yes: keep it
+    ctx->SetContentSetting(o, o, type, allowed ? CEF_CONTENT_SETTING_VALUE_ALLOW : CEF_CONTENT_SETTING_VALUE_DEFAULT);
+  }
+}
+
+- (NSString*)chromiumMediaSettingForTest:(ArcItem*)item origin:(NSString*)origin {
+  auto it = _browsers.find(item.browserId);
+  if (it == _browsers.end()) return @"none";
+  CefRefPtr<CefRequestContext> ctx = it->second->GetHost()->GetRequestContext();
+  CefString o([OriginKey(origin) stringByAppendingString:@"/"].UTF8String);
+  return [NSString stringWithFormat:@"cam=%d mic=%d", ctx->GetContentSetting(o, o, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_CAMERA),
+                                    ctx->GetContentSetting(o, o, CEF_CONTENT_SETTING_TYPE_MEDIASTREAM_MIC)];
 }
 
 - (NSString*)mediaGrantForTest:(ArcItem*)item {
@@ -4895,7 +4943,7 @@ static NSString* OriginKey(NSString* origin) {
   NSString* name = [@"open:" stringByAppendingString:u.scheme.lowercaseString ?: @""];
   NSNumber* saved = [self sitePermissionsForOrigin:origin][name];
   if (saved) {
-    if (saved.boolValue) [NSWorkspace.sharedWorkspace openURL:u];
+    if (saved.boolValue) [self openExternalURL:u];
     return;
   }
   NSString* appName = [NSFileManager.defaultManager displayNameAtPath:app.path].stringByDeletingPathExtension;
@@ -4933,6 +4981,14 @@ static NSString* OriginKey(NSString* origin) {
     detail.textColor = NSColor.secondaryLabelColor;
     detail.preferredMaxLayoutWidth = W - 32;
     [views addObject:detail];
+  }
+  _sitePromptChoice = nil;
+  if ([p[@"choices"] count]) {
+    NSPopUpButton* choice = [[NSPopUpButton alloc] initWithFrame:NSZeroRect pullsDown:NO];
+    [choice addItemsWithTitles:p[@"choices"]];
+    [choice.widthAnchor constraintEqualToConstant:W - 32].active = YES;
+    [views addObject:choice];
+    _sitePromptChoice = choice;
   }
   NSButton* remember = [NSButton checkboxWithTitle:@"Remember for this site" target:nil action:nil];
   remember.font = [NSFont systemFontOfSize:12];
@@ -4997,12 +5053,48 @@ static NSString* OriginKey(NSString* origin) {
         [_sitePrompts removeObject:q];
         _client->ResolvePermission([q[@"id"] intValue], true);
       }
-  } else if (allow) [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:p[@"url"]]];
+  } else if ([p[@"type"] isEqualToString:@"certificate"]) {
+    _client->ResolveCertificate([p[@"id"] intValue], allow ? (int)_sitePromptChoice.indexOfSelectedItem : -1);
+  } else if (allow && [p[@"type"] isEqualToString:@"external"]) [self openExternalURL:[NSURL URLWithString:p[@"url"]]];
+  else if (allow) [NSWorkspace.sharedWorkspace openURL:[NSURL URLWithString:p[@"url"]]];
+  _sitePromptChoice = nil;
   [self showNextSitePrompt];
 }
 
+// An app link the person allowed (mailto:, zoommtg:, beyond-identity-endpoint:). Test runs record it instead, so no
+// real app ever opens from a self-test.
+- (void)openExternalURL:(NSURL*)u {
+  if (!u) return;
+  if (self.selfTestProfiles) {
+    _externalOpenedForTest = u.absoluteString;
+    return;
+  }
+  [NSWorkspace.sharedWorkspace openURL:u];
+}
+- (NSString*)externalOpenedForTest { return _externalOpenedForTest; }
+
+// A site asks for a client certificate and the Mac has some it accepts: Chrome's chooser, as a site card with the list
+// ("Select a certificate"); Cancel continues without one. Never remembered (Chrome asks again next time too).
+- (void)browser:(int)browserId certificateRequest:(int)requestId host:(NSString*)host port:(int)port names:(NSArray<NSString*>*)names {
+  NSString* origin = port && port != 443 ? [NSString stringWithFormat:@"https://%@:%d", host, port] : [@"https://" stringByAppendingString:host ?: @""];
+  [self queueSitePrompt:@{ @"type" : @"certificate", @"id" : @(requestId), @"browser" : @(browserId), @"origin" : origin, @"names" : @[],
+                           @"choices" : names ?: @[], @"title" : @"Select a certificate",
+                           @"detail" : [NSString stringWithFormat:@"%@ wants a certificate to sign you in.", host ?: @"This site"],
+                           @"allow" : @"OK", @"deny" : @"Cancel" }];
+}
+- (void)startCertificatePickerForTest:(ArcItem*)item host:(NSString*)host names:(NSArray<NSString*>*)names {
+  std::vector<std::string> list;
+  for (NSString* n in names) list.push_back(n.UTF8String);
+  _client->StartCertificatePickerForTest(item.browserId, host.UTF8String, list);
+}
+- (NSArray<NSString*>*)sitePromptChoicesForTest { return _sitePromptChoice.itemTitles ?: @[]; }
+- (NSNumber*)sitePromptChoiceForTest { return @(_sitePromptChoice.indexOfSelectedItem); }
+- (void)setSitePromptChoiceForTest:(NSNumber*)index { [_sitePromptChoice selectItemAtIndex:index.integerValue]; }
+- (NSNumber*)lastCertificateChoiceForTest { return @(_client->last_certificate_choice_for_test()); }
+
 - (NSString*)pendingSitePrompt {
   NSDictionary* p = _siteAlert ? _sitePrompts.firstObject : nil;
+  if ([p[@"type"] isEqualToString:@"certificate"]) return [@"certificate:" stringByAppendingString:p[@"origin"]];
   return p ? [NSString stringWithFormat:@"%@:%@", [p[@"names"] componentsJoinedByString:@","], p[@"origin"]] : nil;
 }
 

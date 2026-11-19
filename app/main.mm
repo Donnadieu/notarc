@@ -6,6 +6,10 @@
 #include <cstdio>
 #include <string>
 #include <vector>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 #import "app/floating_video.h"
 #import "app/arc_import.h"
@@ -2755,6 +2759,260 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
 }
 #pragma clang diagnostic pop
 
+// A tiny HTTP server on 127.0.0.1 (a random port), standing in for an app's local service such as Beyond Identity's
+// Authenticator. Answers every request with "pong" and CORS headers. Returns the port (0 = failed).
+static int StartLoopbackPongServer(void) {
+  int s = socket(AF_INET, SOCK_STREAM, 0);
+  if (s < 0) return 0;
+  int one = 1;
+  setsockopt(s, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  struct sockaddr_in a = {};
+  a.sin_family = AF_INET;
+  a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  a.sin_port = 0;
+  socklen_t len = sizeof a;
+  if (bind(s, (struct sockaddr*)&a, sizeof a) || listen(s, 8) || getsockname(s, (struct sockaddr*)&a, &len)) {
+    close(s);
+    return 0;
+  }
+  dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+    for (;;) {
+      int c = accept(s, nullptr, nullptr);
+      if (c < 0) return;
+      char buf[4096];
+      ssize_t n = read(c, buf, sizeof buf);
+      (void)n;
+      const char* r = "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nAccess-Control-Allow-Origin: *\r\n"
+                      "Access-Control-Allow-Private-Network: true\r\nContent-Length: 4\r\nConnection: close\r\n\r\npong";
+      write(c, r, strlen(r));
+      close(c);
+    }
+  });
+  return ntohs(a.sin_port);
+}
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-retain-cycles"
+// Sign-in apps on this Mac (Omar, Nov 19: "I cannot use Beyond Identity"). Beyond Identity's sign-in page talks to its
+// Authenticator app on 127.0.0.1 (Chrome asks "access other apps and services on this device"), or opens the app with
+// its beyond-identity-endpoint: link. A. a page's fetch to a local service asks once and, after Allow, reaches it;
+// B. an app link asks before opening the app, and Allow opens it (tests record it instead of opening anything);
+// C. a site asking for a client certificate gets a picker (Chrome's certificate chooser) and the choice is passed on.
+- (void)runSignInAppsSelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  int port = StartLoopbackPongServer();
+  NSString* html = [NSString stringWithFormat:@"<!doctype html><title>lna</title><body style='margin:0'>"
+                    @"<a id=app href='%@' style='display:block;width:200px;height:80px;background:#08f'>app</a></body>",
+                    [NSWorkspace.sharedWorkspace URLForApplicationToOpenURL:[NSURL URLWithString:@"beyond-identity-endpoint://selftest"]]
+                        ? @"beyond-identity-endpoint://selftest" : @"x-apple.systempreferences:com.apple.preference.security"];
+  NSData* page = [html dataUsingEncoding:NSUTF8StringEncoding];
+  BrowserClient::SetTestResponse("https://signin-t.example/", std::string((const char*)page.bytes, page.length));
+  NSString* fetchJS = [NSString stringWithFormat:@"(async()=>{try{const r=await fetch('http://127.0.0.1:%d/ping');"
+                       @"document.title='lb:'+(await r.text())}catch(e){document.title='lb:err:'+e.name}})()", port];
+  [w openInNewTab:@"https://signin-t.example/"];
+  ArcItem* t = w.shownItem;
+  __block NSString* card = nil;
+  WaitUntil(^{ return (BOOL)(!t.loading && [t.liveTitle isEqualToString:@"lna"]); }, 10, ^{
+    [w runJS:fetchJS inItem:t];
+    WaitUntil(^{
+      if (w.shownItem != t) [w showItem:t];
+      if (!card && w.pendingSitePrompt) {
+        card = w.pendingSitePrompt;
+        [w answerSitePrompt:YES remember:NO];
+      }
+      return (BOOL)[t.liveTitle hasPrefix:@"lb:"];
+    }, 12, ^{
+      BOOL asked = [card hasPrefix:@"loopback:https://signin-t.example"];
+      BOOL reached = [t.liveTitle isEqualToString:@"lb:pong"];
+      std::printf("SELFTEST-LOOPBACK server=%d asked=%d reached=%d\n", port > 0, asked, reached);
+      if (!asked || !reached) std::printf("SELFTEST-LOOPBACK-DEBUG card=%s title=%s\n", card.UTF8String ?: "-", t.liveTitle.UTF8String ?: "-");
+      std::fflush(stdout);
+      // B. The app link, clicked for real (a user gesture, like the sign-in page's button).
+      __block NSString* appCard = nil;
+      BOOL canRecord = [w respondsToSelector:NSSelectorFromString(@"externalOpenedForTest")];
+      [w clickPageForTest:t x:60 y:40];
+      WaitUntil(^{
+        if (w.shownItem != t) [w showItem:t];
+        if (!appCard && [w.pendingSitePrompt hasPrefix:@"open:"]) {
+          appCard = w.pendingSitePrompt;
+          [w answerSitePrompt:canRecord remember:NO];  // Allow only where tests record it instead of opening the app
+        }
+        return (BOOL)(appCard != nil);
+      }, 8, ^{
+        NSString* opened = canRecord ? [w valueForKey:@"externalOpenedForTest"] : nil;
+        std::printf("SELFTEST-APPSCHEME asked=%d opened=%d\n", appCard.length > 0, opened.length > 0 && [html containsString:opened]);
+        if (!appCard.length || !opened.length) std::printf("SELFTEST-APPSCHEME-DEBUG card=%s opened=%s\n", appCard.UTF8String ?: "-", opened.UTF8String ?: "-");
+        std::fflush(stdout);
+        // C. A client-certificate request with two certificates: a picker, and the second one chosen.
+        SEL start = NSSelectorFromString(@"startCertificatePickerForTest:host:names:");
+        if (![w respondsToSelector:start]) {
+          std::printf("SELFTEST-CLIENTCERT picker=0 listed=0 chose=0 cancel=0 empty=0\n");
+          std::fflush(stdout);
+          [w closeSidebarTab:t];
+          BrowserClient::SetTestResponse("https://signin-t.example/", "");
+          done();
+          return;
+        }
+        NSInvocation* inv = [NSInvocation invocationWithMethodSignature:[w methodSignatureForSelector:start]];
+        inv.selector = start;
+        ArcItem* item = t;
+        NSString* host = @"certs-t.example";
+        NSArray* names = @[ @"Omar Test (Work)", @"Omar Test (Device)" ];
+        [inv setArgument:&item atIndex:2];
+        [inv setArgument:&host atIndex:3];
+        [inv setArgument:&names atIndex:4];
+        [inv invokeWithTarget:w];
+        WaitUntil(^{ if (w.shownItem != t) [w showItem:t]; return (BOOL)(w.pendingSitePrompt != nil); }, 5, ^{
+          NSString* certCard = w.pendingSitePrompt;
+          NSArray* listed = [w valueForKey:@"sitePromptChoicesForTest"];
+          [w setValue:@1 forKey:@"sitePromptChoiceForTest"];
+          [w answerSitePrompt:YES remember:NO];
+          int chose = [[w valueForKey:@"lastCertificateChoiceForTest"] intValue];
+          [inv invokeWithTarget:w];  // again, and Cancel: no certificate
+          WaitUntil(^{ if (w.shownItem != t) [w showItem:t]; return (BOOL)(w.pendingSitePrompt != nil); }, 5, ^{
+            [w answerSitePrompt:NO remember:NO];
+            int cancelled = [[w valueForKey:@"lastCertificateChoiceForTest"] intValue];
+            std::printf("SELFTEST-CLIENTCERT picker=%d listed=%d chose=%d cancel=%d empty=1\n",
+                        [certCard hasPrefix:@"certificate:https://certs-t.example"], [listed isEqual:names], chose == 1, cancelled == -1);
+            if (![certCard hasPrefix:@"certificate:"]) std::printf("SELFTEST-CLIENTCERT-DEBUG card=%s\n", certCard.UTF8String ?: "-");
+            std::fflush(stdout);
+            [w closeSidebarTab:t];
+            BrowserClient::SetTestResponse("https://signin-t.example/", "");
+            done();
+          });
+        });
+      });
+    });
+  });
+}
+#pragma clang diagnostic pop
+
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Warc-retain-cycles"
+// Meet's pre-join screen (Omar, Nov 19: "Camera is off", "!" on mic and camera, with Chrome-style pages on): after
+// Allow, getUserMedia worked but enumerateDevices hid every device (no ids, no names) and permissions.query stayed
+// "prompt", so Meet said "Camera not found" / "Mic not found". Checks, like Meet: getUserMedia({audio, video}) after
+// Allow, then the device list has ids and names for both kinds; a remembered Allow (after a relaunch) gives the same
+// with no card; leaving the site ends a one-time Allow. Run it with NOTARC_CHROME_PAGES=1 too (Omar's mode).
+- (void)runMeetReadySelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSString* html = @"<!doctype html><title>meet</title><body>m</body>";
+  NSData* page = [html dataUsingEncoding:NSUTF8StringEncoding];
+  for (NSString* u in @[ @"https://meet-t.example/", @"https://meet-r.example/", @"https://leave-t.example/" ])
+    BrowserClient::SetTestResponse(u.UTF8String, std::string((const char*)page.bytes, page.length));
+  NSString* js =
+      @"(async()=>{const R={};const q=async n=>{try{return (await navigator.permissions.query({name:n})).state}catch(e){return 'err'}};"
+      @"const en=async()=>{const o={a:[0,0,0],v:[0,0,0]};for(const d of await navigator.mediaDevices.enumerateDevices()){"
+      @"const k=d.kind==='audioinput'?'a':d.kind==='videoinput'?'v':'';if(!k)continue;o[k][0]++;if(d.deviceId)o[k][1]++;if(d.label)o[k][2]++}return o};"
+      @"try{const s=await navigator.mediaDevices.getUserMedia({audio:true,video:true});R.live=s.getTracks().filter(t=>t.readyState==='live').length;"
+      @"R.dev=await en();R.cam=await q('camera');R.mic=await q('microphone');s.getTracks().forEach(t=>t.stop())}catch(e){R.err=e.name}"
+      @"document.title='meet:'+JSON.stringify(R)})()";
+  NSDictionary* (^parse)(ArcItem*) = ^NSDictionary*(ArcItem* x) {
+    NSString* s = x.liveTitle ?: @"";
+    if (![s hasPrefix:@"meet:"]) return @{};
+    return [NSJSONSerialization JSONObjectWithData:[[s substringFromIndex:5] dataUsingEncoding:NSUTF8StringEncoding] options:0 error:nil] ?: @{};
+  };
+  BOOL (^devicesOK)(NSDictionary*) = ^BOOL(NSDictionary* r) {
+    NSArray* a = r[@"dev"][@"a"], *v = r[@"dev"][@"v"];
+    return a.count == 3 && v.count == 3 && [a[1] intValue] > 0 && [a[2] intValue] > 0 && [v[1] intValue] > 0 && [v[2] intValue] > 0;
+  };
+  BOOL chrome = ChromePagesEnabled();
+  // A. First visit: Allow on the card (not remembered).
+  [w openInNewTab:@"https://meet-t.example/"];
+  ArcItem* t = w.shownItem;
+  __block NSString* card = nil;
+  WaitUntil(^{ return (BOOL)(!t.loading && [t.liveTitle isEqualToString:@"meet"]); }, 10, ^{
+    [w runJS:js inItem:t];
+    WaitUntil(^{
+      if (w.shownItem != t) [w showItem:t];
+      if (!card && w.pendingSitePrompt) {
+        card = w.pendingSitePrompt;
+        [w answerSitePrompt:YES remember:NO];
+      }
+      return (BOOL)[t.liveTitle hasPrefix:@"meet:"];
+    }, 15, ^{
+      NSDictionary* a = parse(t);
+      NSString* aTitle = t.liveTitle;
+      // A2. Leave the site and come back: a one-time Allow is over, so Chromium is back to "ask".
+      [w runJS:@"location.href='https://leave-t.example/'" inItem:t];
+      WaitUntil(^{ return (BOOL)(!t.loading && [t.url hasPrefix:@"https://leave-t.example"]); }, 10, ^{
+        [w runJS:@"location.href='https://meet-t.example/'" inItem:t];
+        WaitUntil(^{ return (BOOL)(!t.loading && [t.url hasPrefix:@"https://meet-t.example"] && [t.liveTitle isEqualToString:@"meet"]); }, 10, ^{
+          [w runJS:@"(async()=>{const s=await navigator.permissions.query({name:'camera'});document.title='back:'+s.state})()" inItem:t];
+          WaitUntil(^{ return (BOOL)[t.liveTitle hasPrefix:@"back:"]; }, 6, ^{
+            NSString* back = t.liveTitle;
+            BOOL ended = !chrome || [back isEqualToString:@"back:prompt"];
+            [w closeSidebarTab:t];
+            // B. Remembered Allow (as after a relaunch, Omar's case): no card, same result.
+            [w rememberSite:@"https://meet-r.example" names:@[ @"camera", @"microphone" ] allow:YES];
+            [w openInNewTab:@"https://meet-r.example/"];
+            ArcItem* r = w.shownItem;
+            __block BOOL rCard = NO;
+            WaitUntil(^{ return (BOOL)(!r.loading && [r.liveTitle isEqualToString:@"meet"]); }, 10, ^{
+              [w runJS:js inItem:r];
+              WaitUntil(^{
+                if (w.shownItem != r) [w showItem:r];
+                if (w.pendingSitePrompt) {
+                  rCard = YES;
+                  [w answerSitePrompt:YES remember:NO];
+                }
+                return (BOOL)[r.liveTitle hasPrefix:@"meet:"];
+              }, 15, ^{
+                NSDictionary* b = parse(r);
+                BOOL grantedA = !chrome || ([a[@"cam"] isEqual:@"granted"] && [a[@"mic"] isEqual:@"granted"]);
+                BOOL grantedB = !chrome || ([b[@"cam"] isEqual:@"granted"] && [b[@"mic"] isEqual:@"granted"]);
+                std::printf("SELFTEST-MEETREADY chromePages=%d asked=%d stream=%d devices=%d granted=%d oneTimeEnds=%d "
+                            "rememberedNoCard=%d rememberedStream=%d rememberedDevices=%d rememberedGranted=%d\n",
+                            chrome, [card hasPrefix:@"camera,microphone:"], [a[@"live"] intValue] == 2, devicesOK(a), grantedA, ended,
+                            !rCard, [b[@"live"] intValue] == 2, devicesOK(b), grantedB);
+                std::printf("SELFTEST-MEETREADY-DEBUG a=%s back=%s b=%s\n", aTitle.UTF8String ?: "-", back.UTF8String ?: "-",
+                            r.liveTitle.UTF8String ?: "-");
+                std::fflush(stdout);
+                [w showItem:r];
+                [w resetSitePermissions:nil];
+                [w closeSidebarTab:r];
+                for (NSString* u in @[ @"https://meet-t.example/", @"https://meet-r.example/", @"https://leave-t.example/" ])
+                  BrowserClient::SetTestResponse(u.UTF8String, "");
+                done();
+              });
+            });
+          });
+        });
+      });
+    });
+  });
+}
+#pragma clang diagnostic pop
+
+// Live WebAuthn check (NOTARC_SELFTEST_ONLY=webauthn, network, never in the suite): on NOTARC_PROBE_URL (default
+// webauthn.io) asks whether a platform authenticator (Touch ID / passkeys) is available and starts a platform
+// credential creation (NOTARC_PROBE_CREATE=1 only), reporting what came back within 20 s.
+- (void)runWebAuthnProbe:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSString* url = NSProcessInfo.processInfo.environment[@"NOTARC_PROBE_URL"] ?: @"https://webauthn.io/";
+  [w openInNewTab:url];
+  ArcItem* t = w.shownItem;
+  NSString* js =
+      @"(async()=>{const R={};try{R.uvpa=await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()}catch(e){R.uvpa='err:'+e.name}"
+      @"try{R.cond=await PublicKeyCredential.isConditionalMediationAvailable()}catch(e){R.cond='err:'+e.name}"
+      @"const t0=Date.now();if(!CREATE){R.create='skipped';document.title='wa:'+JSON.stringify(R);return}try{const c=await Promise.race([navigator.credentials.create({publicKey:{challenge:crypto.getRandomValues(new Uint8Array(32)),"
+      @"rp:{name:'NotArc probe'},user:{id:crypto.getRandomValues(new Uint8Array(16)),name:'probe',displayName:'probe'},"
+      @"pubKeyCredParams:[{type:'public-key',alg:-7}],authenticatorSelection:{authenticatorAttachment:'platform',userVerification:'required'},timeout:15000}}),"
+      @"new Promise((_,j)=>setTimeout(()=>j({name:'NoAnswer20s'}),20000))]);R.create='ok:'+c.type}catch(e){R.create=e.name+':'+(e.message||'').slice(0,80)}"
+      @"R.ms=Date.now()-t0;document.title='wa:'+JSON.stringify(R)})()";
+  // Creating a credential can show macOS's own Touch ID sheet on the real screen: only with NOTARC_PROBE_CREATE=1.
+  js = [js stringByReplacingOccurrencesOfString:@"!CREATE" withString:getenv("NOTARC_PROBE_CREATE") ? @"false" : @"true"];
+  WaitUntil(^{ return (BOOL)(!t.loading && t.liveTitle.length); }, 20, ^{
+    [w clickPageForTest:t x:5 y:5];  // a user gesture for the page
+    [w runJS:js inItem:t];
+    WaitUntil(^{ if (w.shownItem != t) [w showItem:t]; return (BOOL)[t.liveTitle hasPrefix:@"wa:"]; }, 30, ^{
+      std::printf("PROBE webauthn %s\n", t.liveTitle.UTF8String ?: "-");
+      std::fflush(stdout);
+      done();
+    });
+  });
+}
+
 // Live video sites (NOTARC_SELFTEST_ONLY=videosites, never in the suite: it needs the network). NOTARC_VIDEO_URLS is a
 // '|'-separated list. Opens each page, starts its videos muted (no click), and reports whether one passed 1 s of
 // playback with no error and whether the page shows X's "The media could not be played" message.
@@ -2995,7 +3253,7 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
 #pragma clang diagnostic pop
 
 - (void)runFloatingVideoThenPageFit:(void (^)(void))done {
-  [self runFavoritesDragSelfTest:^{ [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runSitePermissionSelfTest:^{ [self runMediaPermissionSelfTest:^{ [self runMediaRepeatSelfTest:^{ [self runSettingsWindowSelfTest:^{ [self runVideoCodecsSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }]; }]; }]; }]; }]; }]; }];
+  [self runFavoritesDragSelfTest:^{ [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runSitePermissionSelfTest:^{ [self runMediaPermissionSelfTest:^{ [self runMediaRepeatSelfTest:^{ [self runSettingsWindowSelfTest:^{ [self runVideoCodecsSelfTest:^{ [self runMeetReadySelfTest:^{ [self runSignInAppsSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }]; }]; }]; }]; }]; }]; }]; }]; }];
 }
 
 // Favorites drag and drop like Arc: a short click opens, press and drag lifts the tile and the others slide aside
@@ -3219,6 +3477,36 @@ static NSString* WindowButtonsLook(NSWindow* win, BOOL* system, BOOL* placed, BO
       };
       if (getenv("NOTARC_PROBE_URL")) [self runSiteMediaProbe:fin];
       else [self runRealMediaProbe:fin];
+    });
+    return;
+  }
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"meetready"]) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runMeetReadySelfTest:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
+    });
+    return;
+  }
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"signin"]) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runSignInAppsSelfTest:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
+    });
+    return;
+  }
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"webauthn"]) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runWebAuthnProbe:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
     });
     return;
   }

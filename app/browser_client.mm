@@ -646,3 +646,46 @@ void BrowserClient::OnProtocolExecution(CefRefPtr<CefBrowser> browser, CefRefPtr
   ExternalCallback cb = on_external_;
   CefPostTask(TID_UI, base::BindOnce([](ExternalCallback cb, int id, std::string url) { cb(id, url); }, cb, id, url));
 }
+
+bool BrowserClient::OnSelectClientCertificate(CefRefPtr<CefBrowser> browser, bool isProxy, const CefString& host, int port,
+                                              const X509CertificateList& certificates,
+                                              CefRefPtr<CefSelectClientCertificateCallback> callback) {
+  CEF_REQUIRE_UI_THREAD();
+  LogPermission("client certificate host=%s port=%d proxy=%d certificates=%zu", host.ToString().c_str(), port, isProxy,
+                certificates.size());
+  if (certificates.empty() || !browser || !on_certificate_) {  // nothing to choose: continue without, like Chrome
+    callback->Select(nullptr);
+    return true;
+  }
+  std::vector<std::string> names;
+  for (auto& c : certificates) {
+    std::string n = c->GetSubject() ? c->GetSubject()->GetDisplayName().ToString() : std::string();
+    std::string issuer = c->GetIssuer() ? c->GetIssuer()->GetDisplayName().ToString() : std::string();
+    if (n.empty()) n = "Certificate";
+    if (!issuer.empty() && issuer != n) n += " (" + issuer + ")";
+    names.push_back(n);
+  }
+  int id = next_certificate_id_++;
+  pending_certificates_[id] = PendingCertificate{callback, certificates};
+  on_certificate_(browser->GetIdentifier(), id, host.ToString(), port, names);
+  return true;
+}
+
+int BrowserClient::StartCertificatePickerForTest(int browser_id, const std::string& host, const std::vector<std::string>& names) {
+  int id = next_certificate_id_++;
+  pending_certificates_[id] = PendingCertificate{nullptr, {}};
+  if (on_certificate_) on_certificate_(browser_id, id, host, 443, names);
+  return id;
+}
+
+void BrowserClient::ResolveCertificate(int request_id, int index) {
+  auto it = pending_certificates_.find(request_id);
+  if (it == pending_certificates_.end()) return;
+  PendingCertificate p = it->second;
+  pending_certificates_.erase(it);
+  last_certificate_choice_ = index;
+  LogPermission("client certificate answer id=%d index=%d", request_id, index);
+  if (!p.callback) return;  // test picker
+  if (index >= 0 && index < (int)p.certificates.size()) p.callback->Select(p.certificates[index]);
+  else p.callback->Select(nullptr);
+}

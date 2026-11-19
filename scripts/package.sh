@@ -91,6 +91,8 @@ if [ "$ADHOC" != 1 ]; then
   rm -f "$STAGE/NotArc-notarize.zip"
   xcrun stapler staple "$APP"
   xcrun stapler validate "$APP"
+  # The notarized app itself must open the camera and mic like Meet does, in both page modes (Nov 19 2026).
+  "$ROOT/scripts/test-signed-media.sh" "$APP" || { echo "camera/mic check failed on the notarized app" >&2; exit 1; }
 fi
 
 mkdir -p "$OUT" "$STAGE/dmg"

@@ -84,6 +84,18 @@ class BrowserClient : public CefClient,
   }
   using ExternalCallback = std::function<void(int browser_id, const std::string& url)>;
   void set_external_callback(ExternalCallback cb) { on_external_ = std::move(cb); }
+  // A site asks for a client certificate (work sign-ins, VPN portals) and the Mac has matching ones: the UI shows
+  // Chrome's kind of picker and answers with ResolveCertificate (index into `names`, -1 = continue without one).
+  // With no matching certificate NotArc does what Chrome does: continue without asking.
+  using CertificateCallback =
+      std::function<void(int browser_id, int request_id, const std::string& host, int port, const std::vector<std::string>& names)>;
+  void set_certificate_callback(CertificateCallback cb) { on_certificate_ = std::move(cb); }
+  void ResolveCertificate(int request_id, int index);
+  int StartCertificatePickerForTest(int browser_id, const std::string& host, const std::vector<std::string>& names);
+  int last_certificate_choice_for_test() const { return last_certificate_choice_; }
+  bool OnSelectClientCertificate(CefRefPtr<CefBrowser> browser, bool isProxy, const CefString& host, int port,
+                                 const X509CertificateList& certificates,
+                                 CefRefPtr<CefSelectClientCertificateCallback> callback) override;
   CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
                                                                  CefRefPtr<CefRequest>, bool, bool, const CefString&,
                                                                  bool&) override {
@@ -257,6 +269,14 @@ class BrowserClient : public CefClient,
   std::map<int, CefRefPtr<CefUnresponsiveProcessCallback>> hung_;
   PermissionCallback on_permission_;
   ExternalCallback on_external_;
+  CertificateCallback on_certificate_;
+  struct PendingCertificate {
+    CefRefPtr<CefSelectClientCertificateCallback> callback;  // null for a test picker
+    X509CertificateList certificates;
+  };
+  std::map<int, PendingCertificate> pending_certificates_;
+  int next_certificate_id_ = 1;
+  int last_certificate_choice_ = -2;
   CaptureCallback on_capture_;
   SystemBlockedCallback on_system_blocked_;
   AutofillCallback on_autofill_;
