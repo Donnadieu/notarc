@@ -32,7 +32,7 @@ static NSArray<NSArray<NSString*>*>* MatchChoices() {
   if (!_routing) {
     _routing = [LinkRouting new];
     _routing.rules = @[];
-    _routing.defaultDestination = @"little";
+    _routing.defaultDestination = @"space";  // a tab in the front window, unless a rule says otherwise
   }
   [self buildUI];
   return self;

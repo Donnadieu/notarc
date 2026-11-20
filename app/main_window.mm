@@ -1813,6 +1813,7 @@ static MainWindowController* OwnerOf(int browserId, MainWindowController* fallba
 // The first window owns the shared pieces (profile contexts, sidebar save); others are views onto the same
 // Spaces, like Arc's StorableWindows (one sidebar, each window with its own Space, tab and split).
 static __weak MainWindowController* gMainWindow;
+static __weak MainWindowController* gFrontWindow;  // the browser window last in front (links from other apps open there)
 static NSMutableArray<MainWindowController*>* gWindows;
 static BOOL gQuitting = NO;  // quitting closes every window, but the other windows should come back next launch
 
@@ -2578,6 +2579,7 @@ static BOOL gQuitting = NO;  // quitting closes every window, but the other wind
 - (void)windowDidEndLiveResize:(NSNotification*)note { [self positionWindowButtons]; }
 - (void)windowDidExitFullScreen:(NSNotification*)note { [self positionWindowButtons]; }
 - (void)windowDidBecomeMain:(NSNotification*)note {
+  if (note.object == self.window) gFrontWindow = self;
   [self positionWindowButtons];
   [self applyWindowActive];
 }
@@ -2959,7 +2961,29 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
     }
     [lr saveTo:path];
   }
+  // Before Nov 2026, links that matched no rule opened in a Little window (Arc's default, copied with Arc's rules).
+  // Omar wants them as a tab in the front window: switch that default once; a choice made later in Air Traffic
+  // Control stays.
+  if (!SettingBool(kSettingLinksAsTabsMigrated)) {
+    SettingSetBool(kSettingLinksAsTabsMigrated, YES);
+    if ([lr.defaultDestination isEqualToString:@"little"]) {
+      lr.defaultDestination = @"space";
+      lr.defaultSpaceID = nil;
+      [lr saveTo:path];
+    }
+  }
   return lr;
+}
+
+// The window a link from another app opens in: the browser window you were last using (Arc does the same), else the
+// frontmost one, else the main one. NotArc is usually in the background then, so it can't just ask for the main window.
++ (MainWindowController*)windowForExternalLinks {
+  MainWindowController* last = gFrontWindow;
+  if (last && [gWindows containsObject:last] && !last->_closing && last.window.isVisible) return last;
+  for (NSWindow* win in NSApp.orderedWindows)
+    for (MainWindowController* w in gWindows)
+      if (w.window == win && !w->_closing) return w;
+  return gMainWindow;
 }
 
 - (NSString*)routeExternalLink:(NSString*)url sourceApp:(NSString*)bundleID {
@@ -2975,6 +2999,10 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   for (ArcSpace* s in _spaces) if (spaceID && [s.spaceID isEqualToString:spaceID]) target = s;
   if (target != _space) [self switchToSpace:target];
   [self openInNewTab:url];
+  if (!self.selfTestProfiles) {  // a link from another app brings its window forward, even from the Dock
+    if (self.window.miniaturized) [self.window deminiaturize:nil];
+    [self.window makeKeyAndOrderFront:nil];
+  }
   return target.title ?: @"";
 }
 
@@ -14136,6 +14164,7 @@ static BOOL LibraryIsMediaFile(NSString* path) {
     [self reloadSidebar];
     [gWindows addObject:self];
     [self showWindow:nil];
+    gFrontWindow = self;  // a new window opens in front (hidden test windows never become main)
     [self installSwipeNavigation];
     __weak MainWindowController* weakSelf = self;
     _mediaTimer = [NSTimer scheduledTimerWithTimeInterval:2 repeats:YES block:^(NSTimer*) { [weakSelf pollMediaNow]; }];

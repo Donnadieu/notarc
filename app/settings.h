@@ -8,7 +8,8 @@ extern NSString* const kSettingAutoArchiveHours;       // double; 0 = never. Def
 extern NSString* const kSettingSearchEngine;           // "google" | "duckduckgo" | "bing" | "ecosia" | "kagi"
 extern NSString* const kSettingPeekPinnedLinks;        // BOOL, default YES
 extern NSString* const kSettingPeekShiftClick;         // BOOL, default YES
-extern NSString* const kSettingExternalLinksLittle;    // BOOL, default YES (NO = open as a Today tab)
+extern NSString* const kSettingExternalLinksLittle;    // BOOL, default NO: links from other apps open as a Today tab (YES = Little window)
+extern NSString* const kSettingLinksAsTabsMigrated;    // BOOL: Arc's "Little window" default for links was turned into a tab once
 // Self-test runs call SettingsUseMemoryOnly() so SettingSetBool never writes the user's real preferences.
 void SettingsUseMemoryOnly(void);
 // The setting's value, else its default (registered defaults only in memory-only runs).
@@ -95,6 +96,7 @@ void SettingsDidChange(void);
 @interface SettingsWindowController : NSWindowController
 + (instancetype)shared;
 - (BOOL)defaultBrowserRowConsistent;  // tests
+- (NSString*)defaultBrowserButtonTitle;  // tests
 - (void)addPane:(NSString*)identifier title:(NSString*)title symbol:(NSString*)sfSymbol view:(NSView*)view;
 - (NSArray<NSString*>*)paneIdentifiers;
 - (void)selectPane:(NSString*)identifier;
