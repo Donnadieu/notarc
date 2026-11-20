@@ -3514,6 +3514,9 @@ static BOOL FavHueIn(float h, float lo, float hi) { return lo <= hi ? (h >= lo &
     BOOL offMain = store.onMainCount == 0;
     CGFloat edge[3], inner[3], edgeB[3], innerB[3];
     BOOL selRed[2] = {NO, NO}, plain[2] = {NO, NO}, tint[2] = {NO, NO};
+    // Omar's own Arc (dark): the open tile is about half white (YouTube 164,138,145) with a border about as
+    // saturated as 255,111,113 (s 0.56). 0.30.10 drew 0.43 brightness and s 0.33.
+    BOOL arcFill = NO, arcBorder = NO;
     NSRect ry = [w favoriteTileRectForTest:Y], rb = [w favoriteTileRectForTest:B];
     double (^dist)(const CGFloat*, const CGFloat*) = ^double(const CGFloat* a, const CGFloat* b) {
       return sqrt(pow(a[0] - b[0], 2) + pow(a[1] - b[1], 2) + pow(a[2] - b[2], 2));
@@ -3529,6 +3532,11 @@ static BOOL FavHueIn(float h, float lo, float hi) { return lo <= hi ? (h >= lo &
       float eh = FavGlowHue(edge);
       selRed[dark] = FavHueIn(eh, 340, 20) && edge[0] - edge[2] > 0.15;
       plain[dark] = dist(edgeB, innerB) < 0.06;
+      if (dark) {
+        arcFill = (inner[0] + inner[1] + inner[2]) / 3 >= 0.5;
+        CGFloat mx = MAX(edge[0], MAX(edge[1], edge[2])), mn = MIN(edge[0], MIN(edge[1], edge[2]));
+        arcBorder = mx > 0 && (mx - mn) / mx >= 0.45;
+      }
       tint[dark] = (inner[0] - inner[2]) > (innerB[0] - innerB[2]) + (dark ? 0.06 : 0.04);  // plain selection: +0.02-0.03
       std::printf("SELFTEST-FAVGLOW-DEBUG dark=%d edge=%.2f,%.2f,%.2f inner=%.2f,%.2f,%.2f other=%.2f,%.2f,%.2f/%.2f,%.2f,%.2f\n", dark,
                   edge[0], edge[1], edge[2], inner[0], inner[1], inner[2], edgeB[0], edgeB[1], edgeB[2], innerB[0], innerB[1], innerB[2]);
@@ -3536,15 +3544,19 @@ static BOOL FavHueIn(float h, float lo, float hi) { return lo <= hi ? (h >= lo &
         [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}]
             writeToFile:[shots stringByAppendingPathComponent:[NSString stringWithFormat:@"favglow-selected-%@.png", dark ? @"dark" : @"light"]] atomically:YES];
     }
-    // Hover: a fainter border in Brain.fm's purple; opening it makes it full strength.
+    // Hover: a fainter border in Brain.fm's purple; opening it makes it full strength. Strength = how far the
+    // border pixel moved from the plain tile's edge (the open tile's fill is bright, as in Arc, so not vs. its fill).
+    CGFloat plainEdge[3] = {edgeB[0], edgeB[1], edgeB[2]};
     [w favoritesGridHoverForTest:B];
     NSBitmapImageRep* hrep = [w favoritesGridSnapshotForTest:YES];
     CGFloat sc = hrep.pixelsWide / MAX(1.0, NSWidth(w.favoritesGridFrame));
     FavGlowPixel(hrep, NSMakePoint(NSMidX(rb), NSMinY(rb) + 0.75), sc, edgeB);
     FavGlowPixel(hrep, NSMakePoint(NSMinX(rb) + 10, NSMinY(rb) + 10), sc, innerB);
-    double hoverStrength = dist(edgeB, innerB);
+    double hoverStrength = dist(edgeB, plainEdge);
+    CGFloat pe0 = plainEdge[0], pe1 = plainEdge[1], pe2 = plainEdge[2];
     float hoverHue = FavGlowHue(edgeB);
     BOOL hoverPurple = FavHueIn(hoverHue, 245, 305) && hoverStrength > 0.05;
+    BOOL arcFillD = arcFill, arcBorderD = arcBorder;
     BOOL selRedL = selRed[0], selRedD = selRed[1], plainL = plain[0], plainD = plain[1], tintL = tint[0], tintD = tint[1];
     if (shots.length)
       [[hrep representationUsingType:NSBitmapImageFileTypePNG properties:@{}]
@@ -3558,7 +3570,8 @@ static BOOL FavHueIn(float h, float lo, float hi) { return lo <= hi ? (h >= lo &
       NSBitmapImageRep* srep = [w favoritesGridSnapshotForTest:YES];
       FavGlowPixel(srep, NSMakePoint(NSMidX(rb), NSMinY(rb) + 0.75), sc, e2);
       FavGlowPixel(srep, NSMakePoint(NSMinX(rb) + 10, NSMinY(rb) + 10), sc, i2);
-      double selStrength = dist(e2, i2);
+      CGFloat pe[3] = {pe0, pe1, pe2};
+      double selStrength = dist(e2, pe);
       BOOL hoverFainter = hoverPurple && selStrength > hoverStrength * 1.25;
       std::printf("SELFTEST-FAVGLOW-DEBUG hover=%.3f selected=%.3f hue=%.0f\n", hoverStrength, selStrength, hoverHue);
       // GitHub's black icon: a neutral rim until its page reports a theme-color, then that colour.
@@ -3593,9 +3606,9 @@ static BOOL FavHueIn(float h, float lo, float hi) { return lo <= hi ? (h >= lo &
           std::printf("SELFTEST-FAVGLOW youtubeRed=%d brainfmPurple=%d outlookBlue=%d basecampTeal=%d gmailMulti=%d githubNeutral=%d "
                       "themeColorParse=%d pendingFirst=%d offMain=%d cached=%d selectedRedDark=%d selectedRedLight=%d "
                       "tintDark=%d tintLight=%d othersPlainDark=%d othersPlainLight=%d hoverPurple=%d hoverFainter=%d "
-                      "fadesIn=%d themeFallback=%d idleNoRedraw=%d iconChangeUpdates=%d\n",
+                      "fadesIn=%d themeFallback=%d idleNoRedraw=%d iconChangeUpdates=%d arcFillDark=%d arcBorderDark=%d\n",
                       ytRed, bfmPurple, olBlue, bcTeal, gmMulti, ghNeutral, cssOK, pending, offMain, cached, selRedD, selRedL,
-                      tintD, tintL, plainD, plainL, hoverPurple, hoverFainter, fades && fadesAgain, theme, idle, updated);
+                      tintD, tintL, plainD, plainL, hoverPurple, hoverFainter, fades && fadesAgain, theme, idle, updated, arcFillD, arcBorderD);
           if (!idle) std::printf("SELFTEST-FAVGLOW-DEBUG idleDraws=%lu\n", (unsigned long)idleDraws);
           std::fflush(stdout);
           done();

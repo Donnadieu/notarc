@@ -3,6 +3,13 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## 0.30.11
+- The open Favorite now looks like it does in your own Arc, measured side by side: the tile is about half white
+  (it was too dim) with a light tint of the site's colour, and a solid 2 pt border in a stronger version of that
+  colour (YouTube red, Brain.fm lilac). A multi-colour icon like Gmail's drifts gently between its colours instead
+  of showing all four, an icon with no colour (GitHub) gets a light grey rim, and the extra inner glow is gone
+  (Arc has none).
+
 ## 0.30.10
 - Favorites show their site's colour, as in Arc. The open Favorite's tile gets a thin border in the colours of its
   icon (YouTube red, Brain.fm purple, Outlook blue; a multi-colour icon like Gmail's runs through its colours around

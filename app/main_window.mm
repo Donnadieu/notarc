@@ -1396,24 +1396,25 @@ static NSBezierPath* TileRing(NSRect r, CGFloat inset, CGFloat width) {
 - (void)drawGlow:(FaviconColors*)fc rect:(NSRect)r strength:(CGFloat)k selected:(BOOL)sel dark:(BOOL)dark {
   if (k <= 0) return;
   NSBezierPath* shape = [NSBezierPath bezierPathWithRoundedRect:r xRadius:kFavRadius yRadius:kFavRadius];
-  if (!fc.tint) {  // no colour in the icon or the page: a neutral rim
-    [[NSColor colorWithWhite:dark ? 1 : 0 alpha:(dark ? 0.30 : 0.12) * k] setStroke];
-    NSBezierPath* p = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(r, 0.75, 0.75) xRadius:kFavRadius - 0.75 yRadius:kFavRadius - 0.75];
-    p.lineWidth = 1.5;
-    [p stroke];
+  if (!fc.tint) {  // no colour in the icon or the page: a light grey rim (Arc's GitHub tile)
+    FillRing(TileRing(r, 0, 2), r, @[ [NSColor colorWithWhite:dark ? 1 : 0 alpha:1] ], (dark ? 0.38 : 0.14) * k);
     return;
   }
-  [[fc.tint colorWithAlphaComponent:(dark ? 0.13 : 0.07) * k] setFill];  // the light tint of the site's colour
+  [[fc.tint colorWithAlphaComponent:(dark ? 0.12 : 0.07) * k] setFill];  // the light tint of the site's colour
   [shape fill];
-  // Pastel, as Arc's (its red border over a dark theme measured about half way to white); a little deeper on light
-  // sidebars so it still reads against the near-white tile.
+  // Measured on Omar's own Arc (dark theme): a solid ~2 pt border, the site colour about a third of the way to white
+  // (YouTube 255,111,113); a multi-colour icon's border drifts gently between its colours (Gmail pink to tan), so
+  // each side's colour is pulled most of the way to the main one. No inner glow.
   NSMutableArray<NSColor*>* stops = [NSMutableArray array];
-  for (NSColor* c in fc.ring) [stops addObject:[c blendedColorWithFraction:dark ? 0.5 : 0.3 ofColor:NSColor.whiteColor] ?: c];
-  FillRing(TileRing(r, 0, 1.5), r, stops, 0.9 * k);
-  if (sel) FillRing(TileRing(r, 1.5, 2.5), r, stops, (dark ? 0.22 : 0.16) * k);  // soft inner glow
+  for (NSColor* c in fc.ring) {
+    NSColor* m = [c blendedColorWithFraction:0.55 ofColor:fc.tint] ?: c;
+    [stops addObject:[m blendedColorWithFraction:dark ? 0.3 : 0.15 ofColor:NSColor.whiteColor] ?: m];
+  }
+  FillRing(TileRing(r, 0, 2), r, stops, k);
 }
 - (void)drawTile:(ArcItem*)it rect:(NSRect)r selected:(BOOL)sel hovered:(BOOL)hov dark:(BOOL)dark {
-  CGFloat a = dark ? (sel ? 0.22 : hov ? 0.15 : 0.10) : (sel ? 0.85 : hov ? 0.6 : 0.4);
+  // Arc's open Favorite is about half white on a dark sidebar (150,150,158 over 42,40,62 in Omar's Arc).
+  CGFloat a = dark ? (sel ? 0.48 : hov ? 0.15 : 0.10) : (sel ? 0.85 : hov ? 0.6 : 0.4);
   NSColor* fill = dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:a] : [NSColor colorWithWhite:1 alpha:a];
   [fill setFill];
   [[NSBezierPath bezierPathWithRoundedRect:r xRadius:kFavRadius yRadius:kFavRadius] fill];
