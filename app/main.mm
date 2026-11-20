@@ -102,7 +102,15 @@
 @property(nonatomic, copy) NSString* visualPlan;  // --visual-shots=<plan>: hidden design renders (app/visual_shots.h)
 @property(nonatomic, copy) NSString* pendingSource;
 @property(nonatomic, strong) NSMutableArray<NSString*>* pendingURLs;  // links that arrived before the window
+@property(nonatomic) NSUInteger linksAtLaunch;  // tests: links that arrived while NotArc was still starting
+- (void)openExternalURLs:(NSArray<NSURL*>*)urls source:(NSString*)source;
+- (void)start;
 @end
+
+// NOTARC_SELFTEST_ONLY=openlinks (scripts/test-open-links.py): links sent through Launch Services from outside.
+static BOOL OpenLinksTestMode() {
+  return [NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"openlinks"];
+}
 
 static BOOL gCrashTestDone = NO;
 static BOOL gMaxTestDone = NO;    // self-test: the Arc Max checks (#58, #59) printed
@@ -644,6 +652,12 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
   self.window.archivePath = ArchiveStorePath(self.selfTest);
   self.window.historyPath = HistoryStorePath(self.selfTest);
   self.window.linkRoutingPath = LinkRoutingPath(self.selfTest);
+  if (self.selfTest && OpenLinksTestMode()) {  // pages for the links scripts/test-open-links.py sends (no network)
+    NSString* cold = NSProcessInfo.processInfo.environment[@"NOTARC_OPENLINKS_COLD"];
+    for (NSString* u in @[ cold ?: @"", @"https://links-warm.example/a?b=1#c", @"https://links-front.example/",
+                            @"https://links-two.example/1", @"https://links-two.example/2" ])
+      if (u.length) BrowserClient::SetTestResponse(u.UTF8String, "<!doctype html><title>link</title><body>link</body>");
+  }
   if (self.selfTest) {
     [[NSFileManager defaultManager] removeItemAtPath:self.window.linkRoutingPath error:nil];
     // Profiles the self-test makes ("NotArc Profile N") start fresh each run instead of piling up. Only
@@ -689,7 +703,10 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
   [self.window showWindow:nil];
   [self.window createBrowsers];
   if (!self.selfTest) [self.window restoreSavedWindows];  // windows open at the last quit (#39)
-  for (NSString* url in self.pendingURLs) [self.window routeExternalLink:url sourceApp:self.pendingSource];
+  self.linksAtLaunch = self.pendingURLs.count;
+  // Links that started NotArc (opened from Mail, Slack...): after the saved windows are back, in the front one.
+  for (NSString* url in self.pendingURLs)
+    [[MainWindowController windowForExternalLinks] routeExternalLink:url sourceApp:self.pendingSource];
   self.pendingURLs = nil;
   if (!self.selfTest) [NSApp activateIgnoringOtherApps:YES];
   if (!self.selfTest) {  // never in hidden test runs
@@ -711,7 +728,7 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
         win.ignoresMouseEvents = YES;
       }
     }];
-    [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
+    if (!OpenLinksTestMode()) [self.window openTabsForSelfTest:1];  // first tab of every Space, each in its own profile
     if (self.visualPlan) {
       VisualShotsRun(self.window, self.visualPlan);
       return;
@@ -948,12 +965,16 @@ static void SelfTestMakeWebData(NSString* path, NSData* key, BOOL typeTokens, NS
           [w3.window close];
           dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
             BOOL closedAgain = [MainWindowController openWindowCount] == 1;
-            [w saveSidebarNow];
             std::printf("SELFTEST-WINDOWS opened=%d shared=%d moved=%d sameBrowser=%d synced=%d back=%d closed=%d kept=%d "
                         "saved=%d forgot=%d restored=%d closedAgain=%d button=%d chromeMoved=%d chromeBack=%d\n",
                         opened, shared, moved, sameBrowser, synced, back, closed, kept, saved, forgot, restored, closedAgain, button,
                         chromeMoved, chromeBack);
-            finish();
+            std::fflush(stdout);
+            [self runExternalLinksSelfTest:^{
+              if (w.shownItem != t && [w.currentSpace.allTabs containsObject:t]) [w showItem:t];  // the restore marker
+              [w saveSidebarNow];
+              finish();
+            }];
           });
         });
       });
@@ -3618,7 +3639,171 @@ static BOOL FavHueIn(float h, float lo, float hi) { return lo <= hi ? (h >= lo &
   });
 }
 
+// Links from other apps (Omar, Nov 19 2026: "How can I make NotArc my default browser?"). Mail, Slack, One and `open URL`
+// all hand NotArc an open-URL event: each link must land as a new tab in the front window, shown, with no Little window
+// and no extra window; also with a second window in front, two links at once, and a local .html file (NotArc's HTML
+// document types). Arc's old "Little window" default for unmatched links becomes a tab once; a later Air Traffic Control
+// choice stays. Runs after the multi-window checks, so no other check shares the screen with the second window.
+- (void)runExternalLinksSelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  ArcItem* shownBefore = w.shownItem;
+  NSUInteger windowsBefore = [MainWindowController openWindowCount];
+  NSUInteger littleBefore = w.littleWindowCount;
+  NSString* page = @"<!doctype html><title>link</title><body>link</body>";
+  NSArray<NSString*>* urls = @[ @"https://links-mail.example/a", @"https://links-slack.example/b", @"https://links-one.example/c",
+                                @"https://links-two.example/1", @"https://links-two.example/2", @"https://links-migrate.example/",
+                                @"https://links-front.example/d" ];
+  for (NSString* u in urls) BrowserClient::SetTestResponse(u.UTF8String, page.UTF8String);
+  NSMutableArray<ArcItem*>* made = [NSMutableArray array];
+  BOOL (^landed)(MainWindowController*, NSString*) = ^BOOL(MainWindowController* win, NSString* url) {
+    ArcItem* s = win.shownItem;
+    if (![s.url isEqualToString:url]) return NO;
+    [made addObject:s];
+    return win.currentSpace.unpinned.children.firstObject == s;  // a new Today tab, at the top as Arc does
+  };
+  NSString* path = w.linkRoutingPath;
+  NSData* savedRouting = [NSData dataWithContentsOfFile:path];
+  id migratedBefore = SettingObject(kSettingLinksAsTabsMigrated);
+  [[NSFileManager defaultManager] removeItemAtPath:path error:nil];  // no Air Traffic Control rules yet
+  // A. From Mail, Slack and One: a tab in the front (only) window.
+  [self openExternalURLs:@[ [NSURL URLWithString:urls[0]] ] source:@"com.apple.mail"];
+  BOOL mail = landed(w, urls[0]);
+  [self openExternalURLs:@[ [NSURL URLWithString:urls[1]] ] source:@"com.tinyspeck.slackmacgap"];
+  BOOL slack = landed(w, urls[1]);
+  [self openExternalURLs:@[ [NSURL URLWithString:urls[2]] ] source:@"ai.forjado.one"];
+  BOOL one = landed(w, urls[2]);
+  BOOL noLittle = w.littleWindowCount == littleBefore;
+  BOOL noWindow = [MainWindowController openWindowCount] == windowsBefore;
+  // B. Two links in one event: both open, the last one shown.
+  [self openExternalURLs:@[ [NSURL URLWithString:urls[3]], [NSURL URLWithString:urls[4]] ] source:nil];
+  NSArray<ArcItem*>* today = w.currentSpace.unpinned.children;
+  BOOL two = landed(w, urls[4]) && today.count > 1 && [today[1].url isEqualToString:urls[3]];
+  if (today.count > 1 && [today[1].url isEqualToString:urls[3]]) [made addObject:today[1]];
+  // C. A local .html file (Finder's Open With).
+  NSString* html = [NSTemporaryDirectory() stringByAppendingPathComponent:@"notarc-selftest-link.html"];
+  [page writeToFile:html atomically:YES encoding:NSUTF8StringEncoding error:nil];
+  NSURL* fileURL = [NSURL fileURLWithPath:html];
+  [self openExternalURLs:@[ fileURL ] source:@"com.apple.finder"];
+  BOOL file = landed(w, fileURL.absoluteString);
+  // D. Arc's "Little window" default, saved before this update: a tab from now on; a choice made later stays.
+  LinkRouting* little = [LinkRouting new];
+  little.rules = @[];
+  little.defaultDestination = @"little";
+  [little saveTo:path];
+  SettingSetObject(kSettingLinksAsTabsMigrated, nil);
+  [self openExternalURLs:@[ [NSURL URLWithString:urls[5]] ] source:nil];
+  BOOL migrated = landed(w, urls[5]) && w.littleWindowCount == littleBefore &&
+                  [[LinkRouting loadFrom:path].defaultDestination isEqualToString:@"space"];
+  [little saveTo:path];  // picked again in Air Traffic Control after the update
+  BOOL keptChoice = [[w linkRouting].defaultDestination isEqualToString:@"little"];
+  [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+  // E. A second window in front: the link opens there; the main window keeps its tab.
+  MainWindowController* w2 = [w openNewWindowShowing:nil];
+  [w2.window orderFront:nil];
+  ArcItem* mainShown = w.shownItem;
+  [self openExternalURLs:@[ [NSURL URLWithString:urls[6]] ] source:@"com.apple.mail"];
+  BOOL front = landed(w2, urls[6]);
+  BOOL mainKept = w.shownItem == mainShown;
+  [w2.window close];
+  dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC / 2), dispatch_get_main_queue(), ^{
+    BOOL closed = [MainWindowController openWindowCount] == windowsBefore;
+    for (ArcItem* t in made) [w deleteSidebarItem:t];
+    if (shownBefore && w.shownItem != shownBefore) [w showItem:shownBefore];
+    if (savedRouting) [savedRouting writeToFile:path atomically:YES];
+    SettingSetObject(kSettingLinksAsTabsMigrated, migratedBefore);
+    [[NSFileManager defaultManager] removeItemAtPath:html error:nil];
+    std::printf("SELFTEST-EXTERNALLINKS mail=%d slack=%d one=%d noLittle=%d noWindow=%d two=%d file=%d migrated=%d "
+                "keptChoice=%d front=%d mainKept=%d closed=%d\n",
+                mail, slack, one, noLittle, noWindow, two, file, migrated, keptChoice, front, mainKept, closed);
+    std::fflush(stdout);
+    done();
+  });
+}
+
+// NOTARC_SELFTEST_ONLY=openlinks: scripts/test-open-links.py started this copy and sends links to it through Launch
+// Services (the path Mail, Slack and `open URL` use). The first one (NOTARC_OPENLINKS_COLD) is sent while NotArc is
+// still starting; each later one is asked for with an OPENLINKS-SEND line, and the result printed once it arrives.
+- (void)runOpenLinksDriverChecks:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSString* cold = NSProcessInfo.processInfo.environment[@"NOTARC_OPENLINKS_COLD"] ?: @"";
+  NSString* (^same)(NSString*) = ^NSString*(NSString* u) {  // /var and /private/var are the same file
+    return [u hasPrefix:@"file:"] ? [NSURL URLWithString:u].URLByResolvingSymlinksInPath.path : u;
+  };
+  ArcItem* (^tabFor)(NSString*) = ^ArcItem*(NSString* url) {
+    for (ArcItem* t in w.currentSpace.unpinned.children)
+      if (t.url && [same(t.url) isEqualToString:same(url)]) return t;
+    return nil;
+  };
+  BOOL (^quiet)(void) = ^BOOL { return [MainWindowController openWindowCount] == 1 && w.littleWindowCount == 0; };
+  WaitUntil(^{ return (BOOL)(tabFor(cold) != nil); }, 15, ^{
+    ArcItem* c = tabFor(cold);
+    std::printf("SELFTEST-OPENLINKS-COLD atLaunch=%d tab=%d shown=%d oneWindow=%d noLittle=%d\n", self.linksAtLaunch > 0,
+                c != nil, c && w.shownItem == c, [MainWindowController openWindowCount] == 1, w.littleWindowCount == 0);
+    NSString* warm = @"https://links-warm.example/a?b=1#c";
+    std::printf("OPENLINKS-SEND %s\n", warm.UTF8String);
+    std::fflush(stdout);
+    WaitUntil(^{ return (BOOL)(tabFor(warm) != nil); }, 15, ^{
+      ArcItem* a = tabFor(warm);
+      std::printf("SELFTEST-OPENLINKS-WARM tab=%d shown=%d top=%d quiet=%d\n", a != nil, a && w.shownItem == a,
+                  a && w.currentSpace.unpinned.children.firstObject == a, quiet());
+      MainWindowController* w2 = [w openNewWindowShowing:nil];
+      [w2.window orderFront:nil];
+      ArcItem* mainShown = w.shownItem;
+      NSString* front = @"https://links-front.example/";
+      std::printf("OPENLINKS-SEND %s\n", front.UTF8String);
+      std::fflush(stdout);
+      WaitUntil(^{ return (BOOL)(tabFor(front) != nil); }, 15, ^{
+        ArcItem* f = tabFor(front);
+        std::printf("SELFTEST-OPENLINKS-FRONT inFront=%d mainKept=%d\n", f && w2.shownItem == f, w.shownItem == mainShown);
+        [w2.window close];
+        NSString* one = @"https://links-two.example/1", *two = @"https://links-two.example/2";
+        std::printf("OPENLINKS-SEND %s %s\n", one.UTF8String, two.UTF8String);
+        std::fflush(stdout);
+        WaitUntil(^{ return (BOOL)(tabFor(one) && tabFor(two)); }, 15, ^{
+          std::printf("SELFTEST-OPENLINKS-MULTI both=%d lastShown=%d quiet=%d\n", tabFor(one) && tabFor(two),
+                      tabFor(two) && w.shownItem == tabFor(two), quiet());
+          NSString* html = [NSHomeDirectory() stringByAppendingPathComponent:@"notarc-openlinks.html"];  // the throwaway home
+          [@"<!doctype html><title>file</title>" writeToFile:html atomically:YES encoding:NSUTF8StringEncoding error:nil];
+          NSString* file = [NSURL fileURLWithPath:html].absoluteString;
+          std::printf("OPENLINKS-SEND %s\n", file.UTF8String);
+          std::fflush(stdout);
+          WaitUntil(^{ return (BOOL)(tabFor(file) != nil); }, 15, ^{
+            if (!tabFor(file))
+              std::printf("SELFTEST-OPENLINKS-FILE-DEBUG top=%s\n", w.currentSpace.unpinned.children.firstObject.url.UTF8String ?: "-");
+            std::printf("SELFTEST-OPENLINKS-FILE tab=%d shown=%d quiet=%d\n", tabFor(file) != nil,
+                        tabFor(file) && w.shownItem == tabFor(file), quiet());
+            std::printf("OPENLINKS-DONE\n");
+            std::fflush(stdout);
+            [[NSFileManager defaultManager] removeItemAtPath:html error:nil];
+            done();
+          });
+        });
+      });
+    });
+  });
+}
+
 - (void)runSelfTestActions {
+  if (OpenLinksTestMode()) {
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 2 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runOpenLinksDriverChecks:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
+    });
+    return;
+  }
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"links"]) {  // quick local loop
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runExternalLinksSelfTest:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
+    });
+    return;
+  }
   if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"favglow"]) {  // quick local loop
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [self runFavoriteGlowSelfTest:^{
@@ -4550,7 +4735,15 @@ static BOOL FavHueIn(float h, float lo, float hi) { return lo <= hi ? (h >= lo &
               BOOL row = [[SettingsWindowController shared] defaultBrowserRowConsistent];
               NSArray* types = NSBundle.mainBundle.infoDictionary[@"CFBundleURLTypes"];
               BOOL schemes = [[types.firstObject[@"CFBundleURLSchemes"] componentsJoinedByString:@","] isEqualToString:@"http,https"];
-              std::printf("SELFTEST-DEFAULTBROWSER detect=%d row=%d schemes=%d\n", detect, row, schemes);
+              // macOS lists an app as a web browser when it takes http and https; HTML and XHTML files open in it too.
+              NSMutableSet* docs = [NSMutableSet set];
+              for (NSDictionary* d in NSBundle.mainBundle.infoDictionary[@"CFBundleDocumentTypes"])
+                if ([d[@"CFBundleTypeRole"] isEqualToString:@"Viewer"]) [docs addObjectsFromArray:d[@"LSItemContentTypes"] ?: @[]];
+              BOOL htmlTypes = [docs containsObject:@"public.html"] && [docs containsObject:@"public.xhtml"];
+              NSString* title = [[SettingsWindowController shared] defaultBrowserButtonTitle];
+              BOOL button = [title isEqualToString:@"Make NotArc my default browser"];
+              std::printf("SELFTEST-DEFAULTBROWSER detect=%d row=%d schemes=%d htmlTypes=%d button=%d\n", detect, row, schemes,
+                          htmlTypes, button);
             }
             std::printf("SELFTEST-SHORTCUTEDIT set=%d conflict=%d reset=%d display=%d window=%d\n", set, conflict, reset, display, window);
           }
@@ -7545,14 +7738,17 @@ static NSString* SourceAppOfCurrentEvent() {
 }
 
 - (void)application:(NSApplication*)app openURLs:(NSArray<NSURL*>*)urls {
-  NSString* source = SourceAppOfCurrentEvent();
+  [self openExternalURLs:urls source:SourceAppOfCurrentEvent()];
+}
+
+- (void)openExternalURLs:(NSArray<NSURL*>*)urls source:(NSString*)source {
   for (NSURL* url in urls) {
     if (!self.window) {
       if (!self.pendingURLs) self.pendingURLs = [NSMutableArray array];
       [self.pendingURLs addObject:url.absoluteString];
       if (source) self.pendingSource = source;
     } else {
-      [self.window routeExternalLink:url.absoluteString sourceApp:source];
+      [[MainWindowController windowForExternalLinks] routeExternalLink:url.absoluteString sourceApp:source];
     }
   }
 }
@@ -7761,7 +7957,14 @@ int main(int argc, char* argv[]) {
     delegate.snapshotPath = snapshotPath;
     delegate.visualPlan = visualPlan;
     NSApp.delegate = delegate;
-    [delegate performSelectorOnMainThread:@selector(start) withObject:nil waitUntilDone:NO];
+    if (selfTest && OpenLinksTestMode()) {
+      // scripts/test-open-links.py: Launch Services hands a cold-launch link to NotArc while AppKit finishes launching,
+      // before start runs (the link waits in pendingURLs). From a test, Launch Services only accepts the link once the
+      // event loop runs, so start a moment later here and the first link arrives before the window, as in real use.
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{ [delegate start]; });
+    } else {
+      [delegate performSelectorOnMainThread:@selector(start) withObject:nil waitUntilDone:NO];
+    }
 
     CefRunMessageLoop();
     SessionMarkerEnd(selfTest);  // reached only on a clean quit; a crash or force-quit leaves the marker

@@ -14,6 +14,7 @@ NSString* const kSettingSearchEngine = @"searchEngine";
 NSString* const kSettingPeekPinnedLinks = @"peekPinnedLinks";
 NSString* const kSettingPeekShiftClick = @"peekShiftClick";
 NSString* const kSettingExternalLinksLittle = @"externalLinksOpenInLittleWindow";
+NSString* const kSettingLinksAsTabsMigrated = @"externalLinksAsTabsMigrated";
 NSString* const kSettingLittleArchiveHours = @"littleWindowArchiveHours";
 NSString* const kSettingShowToolbar = @"showToolbar";
 NSString* const kSettingAutoPiP = @"autoPictureInPicture";
@@ -27,7 +28,7 @@ void SettingsRegisterDefaults(void) {
     kSettingSearchEngine : @"google",
     kSettingPeekPinnedLinks : @YES,
     kSettingPeekShiftClick : @YES,
-    kSettingExternalLinksLittle : @YES,
+    kSettingExternalLinksLittle : @NO,  // Omar, Nov 2026: links from other apps open as a tab in the front window
     kSettingLittleArchiveHours : @6,
     kSettingShowToolbar : @NO,
     kSettingAutoPiP : @YES,
@@ -833,8 +834,12 @@ static MainWindowController* Browser() { return [MainWindowController mainContro
 // Default Browser (#69): shows which app opens links now, and a button that asks macOS to make it NotArc.
 - (NSView*)defaultBrowserRow {
   _defaultLabel = [NSTextField labelWithString:@""];
-  _defaultButton = [self button:@"Make NotArc Default Browser" action:@selector(makeDefault:) target:self];
+  _defaultButton = [self button:@"Make NotArc my default browser" action:@selector(makeDefault:) target:self];
   [self refreshDefaultBrowser];
+  // The choice can change outside NotArc (macOS's own prompt, System Settings > Desktop & Dock): re-read on coming back.
+  [NSNotificationCenter.defaultCenter removeObserver:self name:NSApplicationDidBecomeActiveNotification object:nil];
+  [NSNotificationCenter.defaultCenter addObserver:self selector:@selector(refreshDefaultBrowser)
+                                             name:NSApplicationDidBecomeActiveNotification object:nil];
   return [self row:@[ _defaultLabel, _defaultButton ]];
 }
 
@@ -849,6 +854,11 @@ static MainWindowController* Browser() { return [MainWindowController mainContro
 - (void)makeDefault:(id)sender {
   __weak SettingsWindowController* weakSelf = self;
   MakeNotArcDefaultBrowser(^(BOOL ok) { [weakSelf refreshDefaultBrowser]; });
+}
+
+- (NSString*)defaultBrowserButtonTitle {  // tests
+  if (!_defaultButton) [self defaultBrowserRow];
+  return _defaultButton.title;
 }
 
 - (BOOL)defaultBrowserRowConsistent {  // tests

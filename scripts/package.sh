@@ -93,6 +93,8 @@ if [ "$ADHOC" != 1 ]; then
   xcrun stapler validate "$APP"
   # The notarized app itself must open the camera and mic like Meet does, in both page modes (Nov 19 2026).
   "$ROOT/scripts/test-signed-media.sh" "$APP" || { echo "camera/mic check failed on the notarized app" >&2; exit 1; }
+  # Default browser (Nov 20 2026): http/https and HTML types declared; links handed over by Launch Services land as tabs.
+  python3 "$ROOT/scripts/test-open-links.py" "$APP" || { echo "open-links check failed on the notarized app" >&2; exit 1; }
 fi
 
 mkdir -p "$OUT" "$STAGE/dmg"

@@ -2959,7 +2959,27 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
     }
     [lr saveTo:path];
   }
+  // Before Nov 2026, links that matched no rule opened in a Little window (Arc's default, copied with Arc's rules).
+  // Omar wants them as a tab in the front window: switch that default once; a choice made later in Air Traffic
+  // Control stays.
+  if (!SettingBool(kSettingLinksAsTabsMigrated)) {
+    SettingSetBool(kSettingLinksAsTabsMigrated, YES);
+    if ([lr.defaultDestination isEqualToString:@"little"]) {
+      lr.defaultDestination = @"space";
+      lr.defaultSpaceID = nil;
+      [lr saveTo:path];
+    }
+  }
   return lr;
+}
+
+// The window a link from another app opens in: the frontmost browser window (Arc opens it in the window you were
+// last using), else the main one.
++ (MainWindowController*)windowForExternalLinks {
+  for (NSWindow* win in NSApp.orderedWindows)
+    for (MainWindowController* w in gWindows)
+      if (w.window == win && !w->_closing) return w;
+  return gMainWindow;
 }
 
 - (NSString*)routeExternalLink:(NSString*)url sourceApp:(NSString*)bundleID {
@@ -2975,6 +2995,10 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
   for (ArcSpace* s in _spaces) if (spaceID && [s.spaceID isEqualToString:spaceID]) target = s;
   if (target != _space) [self switchToSpace:target];
   [self openInNewTab:url];
+  if (!self.selfTestProfiles) {  // a link from another app brings its window forward, even from the Dock
+    if (self.window.miniaturized) [self.window deminiaturize:nil];
+    [self.window makeKeyAndOrderFront:nil];
+  }
   return target.title ?: @"";
 }
 

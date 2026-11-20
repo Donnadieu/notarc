@@ -3,6 +3,14 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## Unreleased
+- NotArc as your default browser: Settings > General has a "Make NotArc my default browser" button and says which
+  app opens links now (it updates when you come back from macOS's own prompt or System Settings). macOS lists NotArc
+  under Desktop & Dock > Default web browser; HTML and now XHTML files open in it too.
+- A link you click in Mail, Slack, One or any other app opens as a new tab in the front NotArc window, shown, whether
+  NotArc was already open or not (no Little window, no extra window, no lost link). Air Traffic Control rules still
+  apply; the old "Little window for links from other apps" default, copied from Arc, becomes a tab once.
+
 ## 0.30.11
 - The open Favorite now looks like it does in your own Arc, measured side by side: the tile is about half white
   (it was too dim) with a light tint of the site's colour, and a solid 2 pt border in a stronger version of that

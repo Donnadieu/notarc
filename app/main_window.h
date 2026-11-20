@@ -12,6 +12,7 @@ NSString* CleanLinkURL(NSString* url);
 
 NSString* MediaBarTitle(NSString* pageTitle);  // the mini player's title for a page title (V3)
 @class Boost;
+@class LinkRouting;
 @class FaviconColors;
 @class BoostColorWheel;
 @class AutofillController;
@@ -242,6 +243,8 @@ extern const CGFloat kSidebarDefaultWidth, kSidebarMinWidth, kSidebarMaxWidth;  
 // Air Traffic Control (#34): opens a link from another app where the rules say (a Space or a Little Window).
 // Returns "little", or the title of the Space it went to.
 - (NSString*)routeExternalLink:(NSString*)url sourceApp:(NSString*)bundleID;
+- (LinkRouting*)linkRouting;  // Air Traffic Control rules, read from disk on every link
++ (MainWindowController*)windowForExternalLinks;  // the front browser window
 - (IBAction)showAirTrafficControl:(id)sender;
 // Incognito window (#40, Cmd+Shift+N): its own in-memory profile, shared by all open Incognito windows and wiped
 // when the last one closes. Nothing goes to History, the Archive or disk.
