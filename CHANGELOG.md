@@ -3,7 +3,7 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
-## Unreleased
+## 0.30.12
 - NotArc as your default browser: Settings > General has a "Make NotArc my default browser" button and says which
   app opens links now (it updates when you come back from macOS's own prompt or System Settings). macOS lists NotArc
   under Desktop & Dock > Default web browser; HTML and now XHTML files open in it too.
