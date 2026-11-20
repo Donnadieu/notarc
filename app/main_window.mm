@@ -33,6 +33,7 @@
 #import "app/easel_clip.h"
 #import "app/live_folder.h"
 #import "app/favicons.h"
+#import "app/favicon_colors.h"
 #import "app/tidy_title.h"
 #import "app/space_fetch.h"
 #import "app/email_peek.h"
@@ -1163,6 +1164,8 @@ NSString* MediaBarTitle(NSString* pageTitle) {
 - (void)favoritesGridNeedsLayout;
 - (void)favoritesGridDragEnded;
 - (NSImage*)iconImageForItem:(ArcItem*)item;
+- (FaviconColors*)faviconColorsForItem:(ArcItem*)item;
+- (NSView*)favoritesGridView;
 - (ArcItem*)shownItem;
 - (BOOL)usingDefaultTheme;
 @end
@@ -1207,7 +1210,9 @@ static NSString* const kFavSpotKey = @"\u00b7spot";
 @property(nonatomic) BOOL ownDrag;               // the drag started on this grid and hasn't ended
 @property(nonatomic) NSInteger dropIndex;        // the drop spot's slot among the other tiles (-1: none)
 @property(nonatomic) BOOL testDrag;              // hidden self-tests: drag start recorded, no real drag loop
+@property(nonatomic) NSUInteger drawCount;       // tests: drawRect calls (an idle grid draws nothing)
 + (NSUInteger)rowsForCount:(NSUInteger)n;
+- (BOOL)glowAnimating;
 - (CGFloat)heightForWidth:(CGFloat)w;
 - (NSRect)tileRect:(NSUInteger)i;
 - (NSRect)tileRect:(NSUInteger)i count:(NSUInteger)n;
@@ -1226,6 +1231,9 @@ static NSString* const kFavSpotKey = @"\u00b7spot";
   NSDictionary<NSString*, NSValue*>* _slideFrom;  // where each tile was drawn when the slots last changed
   CFTimeInterval _slideStart;
   NSTimer* _slideTimer;
+  __weak ArcItem* _glowItem;  // the open Favorite whose coloured border is shown (or fading in)
+  CFTimeInterval _glowStart;
+  NSTimer* _glowTimer;        // runs only while the border fades in (~0.25 s), never when idle
 }
 + (NSUInteger)rowsForCount:(NSUInteger)n { return n ? (n + 3) / 4 : 0; }
 + (NSUInteger)columnsForCount:(NSUInteger)n {
@@ -1351,11 +1359,68 @@ static NSString* const kFavSpotKey = @"\u00b7spot";
   NSInteger i = _dragItem ? -1 : [self indexAt:p];
   return i >= 0 ? self.items[(NSUInteger)i].displayTitle : @"";
 }
+// Arc's site colour on a Favorite: the open one gets a thin border running through its icon's colours (YouTube red,
+// Gmail red-yellow-green-blue around the tile) with a soft inner glow and a light tint of its main colour; hovering
+// another shows a fainter border. Arc's border is a static gradient (no idle shimmer); it fades in when opened.
+// The colours come from FaviconColorStore (worked out off the main thread, cached per icon image).
+static void FillRing(NSBezierPath* clip, NSRect r, NSArray<NSColor*>* stops, CGFloat alpha) {
+  if (!stops.count || alpha <= 0) return;
+  [NSGraphicsContext saveGraphicsState];
+  [clip addClip];
+  const int kWedges = 48;
+  CGFloat cx = NSMidX(r), cy = NSMidY(r), w = r.size.width, h = r.size.height;
+  NSUInteger n = stops.count;
+  for (int i = 0; i < kWedges; ++i) {
+    double t0 = 2 * M_PI * i / kWedges, t1 = 2 * M_PI * (i + 1.08) / kWedges, mid = (i + 0.5) / kWedges * n;
+    NSUInteger k = (NSUInteger)floor(mid) % n;
+    double f = mid - floor(mid);
+    NSColor* c = [stops[k] blendedColorWithFraction:f ofColor:stops[(k + 1) % n]] ?: stops[k];
+    [[c colorWithAlphaComponent:alpha] setFill];
+    NSBezierPath* p = [NSBezierPath bezierPath];  // a slice from the centre, angles from the top, clockwise (flipped view)
+    [p moveToPoint:NSMakePoint(cx, cy)];
+    [p lineToPoint:NSMakePoint(cx + sin(t0) * w, cy - cos(t0) * h)];
+    [p lineToPoint:NSMakePoint(cx + sin(t1) * w, cy - cos(t1) * h)];
+    [p closePath];
+    [p fill];
+  }
+  [NSGraphicsContext restoreGraphicsState];
+}
+static NSBezierPath* TileRing(NSRect r, CGFloat inset, CGFloat width) {
+  NSRect o = NSInsetRect(r, inset, inset), i = NSInsetRect(o, width, width);
+  NSBezierPath* p = [NSBezierPath bezierPathWithRoundedRect:o xRadius:kFavRadius - inset yRadius:kFavRadius - inset];
+  [p appendBezierPath:[NSBezierPath bezierPathWithRoundedRect:i xRadius:MAX(0, kFavRadius - inset - width)
+                                                       yRadius:MAX(0, kFavRadius - inset - width)]];
+  p.windingRule = NSWindingRuleEvenOdd;
+  return p;
+}
+- (void)drawGlow:(FaviconColors*)fc rect:(NSRect)r strength:(CGFloat)k selected:(BOOL)sel dark:(BOOL)dark {
+  if (k <= 0) return;
+  NSBezierPath* shape = [NSBezierPath bezierPathWithRoundedRect:r xRadius:kFavRadius yRadius:kFavRadius];
+  if (!fc.tint) {  // no colour in the icon or the page: a neutral rim
+    [[NSColor colorWithWhite:dark ? 1 : 0 alpha:(dark ? 0.30 : 0.12) * k] setStroke];
+    NSBezierPath* p = [NSBezierPath bezierPathWithRoundedRect:NSInsetRect(r, 0.75, 0.75) xRadius:kFavRadius - 0.75 yRadius:kFavRadius - 0.75];
+    p.lineWidth = 1.5;
+    [p stroke];
+    return;
+  }
+  [[fc.tint colorWithAlphaComponent:(dark ? 0.13 : 0.07) * k] setFill];  // the light tint of the site's colour
+  [shape fill];
+  // Pastel, as Arc's (its red border over a dark theme measured about half way to white); a little deeper on light
+  // sidebars so it still reads against the near-white tile.
+  NSMutableArray<NSColor*>* stops = [NSMutableArray array];
+  for (NSColor* c in fc.ring) [stops addObject:[c blendedColorWithFraction:dark ? 0.5 : 0.3 ofColor:NSColor.whiteColor] ?: c];
+  FillRing(TileRing(r, 0, 1.5), r, stops, 0.9 * k);
+  if (sel) FillRing(TileRing(r, 1.5, 2.5), r, stops, (dark ? 0.22 : 0.16) * k);  // soft inner glow
+}
 - (void)drawTile:(ArcItem*)it rect:(NSRect)r selected:(BOOL)sel hovered:(BOOL)hov dark:(BOOL)dark {
   CGFloat a = dark ? (sel ? 0.22 : hov ? 0.15 : 0.10) : (sel ? 0.85 : hov ? 0.6 : 0.4);
   NSColor* fill = dark ? [NSColor colorWithSRGBRed:0.98 green:0.984 blue:1 alpha:a] : [NSColor colorWithWhite:1 alpha:a];
   [fill setFill];
   [[NSBezierPath bezierPathWithRoundedRect:r xRadius:kFavRadius yRadius:kFavRadius] fill];
+  if (sel || hov) {
+    FaviconColors* fc = [self.owner faviconColorsForItem:it];
+    if (fc) [self drawGlow:fc rect:r strength:sel ? [self glowProgress] : 0.4 selected:sel dark:dark];
+  }
   NSImage* icon = [self.owner iconImageForItem:it];
   NSRect ir = NSMakeRect(round(NSMidX(r) - 8), round(NSMidY(r) - 8), 16, 16);
   if (icon.isTemplate) {
@@ -1392,9 +1457,35 @@ static NSString* const kFavSpotKey = @"\u00b7spot";
   [[NSColor colorWithWhite:dark ? 1 : 0 alpha:dark ? 0.45 : 0.35] setStroke];
   [p stroke];
 }
+// The border fades in over a quarter second when a Favorite opens; the timer stops as soon as it's done.
+- (double)glowProgress {
+  if (!_glowTimer) return 1;
+  double t = (CACurrentMediaTime() - _glowStart) / 0.25;
+  return t >= 1 ? 1 : 1 - pow(1 - t, 2);
+}
+- (BOOL)glowAnimating { return _glowTimer != nil; }
+- (void)glowTick {
+  self.needsDisplay = YES;
+  if (CACurrentMediaTime() - _glowStart < 0.25) return;
+  [_glowTimer invalidate];
+  _glowTimer = nil;
+}
+- (void)noteShown:(ArcItem*)shown {
+  if (shown == _glowItem) return;
+  _glowItem = shown;
+  if (!shown || ![_items containsObject:shown] || NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) return;
+  _glowStart = CACurrentMediaTime();
+  if (!_glowTimer) {
+    __weak FavoritesGridView* weakSelf = self;
+    _glowTimer = [NSTimer timerWithTimeInterval:1.0 / 60 repeats:YES block:^(NSTimer* t) { [weakSelf glowTick]; }];
+    [NSRunLoop.mainRunLoop addTimer:_glowTimer forMode:NSRunLoopCommonModes];
+  }
+}
 - (void)drawRect:(NSRect)dirty {
+  self.drawCount++;
   BOOL dark = IsDark(self);
   ArcItem* shown = [self.owner shownItem];
+  [self noteShown:shown];
   for (id slot in self.slots) {
     NSRect r = [self shownRectForKey:[self keyFor:slot]];
     if (slot == NSNull.null) {
@@ -3054,11 +3145,15 @@ NSInteger SwipeDirectionForScroll(CGFloat dx, CGFloat dy, BOOL precise, BOOL beg
     [OwnerOf(browserId, weakSelf) applyAdBlockCosmeticsToBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
     [OwnerOf(browserId, weakSelf) installCallHookInBrowser:browserId];
     [OwnerOf(browserId, weakSelf) detectLanguageInBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
+    [OwnerOf(browserId, weakSelf) probeThemeColorInBrowser:browserId url:[NSString stringWithUTF8String:url.c_str()]];
     [OwnerOf(browserId, weakSelf) thumbnailAfterLoadOfBrowser:browserId];
   });
   _client->set_notify_callback([weakSelf](int browserId, const std::string& json, const std::string& pageURL) {
     NSString* j = [NSString stringWithUTF8String:json.c_str()], *u = [NSString stringWithUTF8String:pageURL.c_str()];
     dispatch_async(dispatch_get_main_queue(), ^{ [OwnerOf(browserId, weakSelf) browser:browserId notification:j pageURL:u]; });
+  });
+  _client->set_theme_color_callback([weakSelf](int browserId, const std::string& css) {
+    [OwnerOf(browserId, weakSelf) browser:browserId themeColor:[NSString stringWithUTF8String:css.c_str()] ?: @""];
   });
   _client->set_lang_callback([weakSelf](int browserId, const std::string& lang) {
     [OwnerOf(browserId, weakSelf) browser:browserId pageLanguage:[NSString stringWithUTF8String:lang.c_str()]];
@@ -3835,6 +3930,29 @@ static NSString* OriginKey(NSString* origin);
   return globe;
 }
 
+// A Favorite's site colours (open / hovered tile border and tint). nil while they're worked out in the background;
+// the grid redraws when they're ready.
+- (FaviconColors*)faviconColorsForItem:(ArcItem*)item {
+  NSString* url = item.url.length ? item.url : item.pinnedURL;
+  __weak MainWindowController* weakSelf = self;
+  return [[FaviconColorStore shared] colorsForIcon:[self iconImageForItem:item] site:FaviconSiteKey(url)
+                                             ready:^{ weakSelf.favoritesGridView.needsDisplay = YES; }];
+}
+- (NSView*)favoritesGridView { return _favGrid; }
+// Favorites only: the page's <meta name="theme-color">, the fallback colour for icons with none (GitHub's black cat).
+- (void)probeThemeColorInBrowser:(int)browserId url:(NSString*)url {
+  ArcItem* item = [self itemForBrowser:browserId];
+  ArcSpace* space = item ? [self spaceOwningItem:item] : nil;
+  if (!item || ![url hasPrefix:@"http"] || ![space.favorites.children containsObject:item]) return;
+  auto it = _browsers.find(browserId);
+  if (it != _browsers.end()) it->second->GetMainFrame()->ExecuteJavaScript(kFaviconThemeColorJS.UTF8String, "", 0);
+}
+- (void)browser:(int)browserId themeColor:(NSString*)css {
+  ArcItem* item = [self itemForBrowser:browserId];
+  NSString* site = FaviconSiteKey([self itemCurrentURL:item]);
+  if (site && [[FaviconColorStore shared] setThemeColor:css forSite:site]) _favGrid.needsDisplay = YES;
+}
+
 - (void)queueIconRefresh {
   if (_iconRefreshQueued) return;
   _iconRefreshQueued = YES;
@@ -3955,6 +4073,38 @@ static NSString* OriginKey(NSString* origin);
   NSUInteger i = [_favGrid.items indexOfObject:item];
   return i == NSNotFound ? -1 : (NSInteger)i;
 }
+// Favorite colours (tests): the grid drawn into a bitmap (flipped: row 0 is the top), in light or dark.
+- (NSBitmapImageRep*)favoritesGridSnapshotForTest:(BOOL)dark {
+  NSAppearance* was = _favGrid.appearance;
+  _favGrid.appearance = [NSAppearance appearanceNamed:dark ? NSAppearanceNameDarkAqua : NSAppearanceNameAqua];
+  NSBitmapImageRep* grid = [_favGrid bitmapImageRepForCachingDisplayInRect:_favGrid.bounds];
+  [_favGrid cacheDisplayInRect:_favGrid.bounds toBitmapImageRep:grid];
+  _favGrid.appearance = was;
+  // Over a sidebar-like backdrop (Arc's default dark indigo, or a light lilac), as it's seen.
+  NSBitmapImageRep* rep = [[NSBitmapImageRep alloc] initWithBitmapDataPlanes:NULL pixelsWide:grid.pixelsWide
+      pixelsHigh:grid.pixelsHigh bitsPerSample:8 samplesPerPixel:4 hasAlpha:YES isPlanar:NO
+      colorSpaceName:NSDeviceRGBColorSpace bytesPerRow:0 bitsPerPixel:0];
+  rep = [rep bitmapImageRepByRetaggingWithColorSpace:NSColorSpace.sRGBColorSpace];
+  [NSGraphicsContext saveGraphicsState];
+  NSGraphicsContext.currentContext = [NSGraphicsContext graphicsContextWithBitmapImageRep:rep];
+  NSRect all = NSMakeRect(0, 0, grid.pixelsWide, grid.pixelsHigh);
+  [(dark ? [NSColor colorWithSRGBRed:0.09 green:0.06 blue:0.25 alpha:1] : [NSColor colorWithSRGBRed:0.88 green:0.86 blue:0.93 alpha:1]) setFill];
+  NSRectFill(all);
+  [grid drawInRect:all fromRect:NSZeroRect operation:NSCompositingOperationSourceOver fraction:1 respectFlipped:NO hints:nil];
+  [NSGraphicsContext restoreGraphicsState];
+  return rep;
+}
+- (NSRect)favoriteTileRectForTest:(ArcItem*)item {
+  NSInteger i = [self favoriteTileIndexForTest:item];
+  return i < 0 ? NSZeroRect : [_favGrid tileRect:(NSUInteger)i];
+}
+- (void)favoritesGridHoverForTest:(ArcItem*)item {
+  _favGrid.hovered = item ? [self favoriteTileIndexForTest:item] : -1;
+  _favGrid.needsDisplay = YES;
+}
+- (NSUInteger)favoritesGridDrawCountForTest { return _favGrid.drawCount; }
+- (BOOL)favoritesGlowAnimatingForTest { return _favGrid.glowAnimating; }
+- (void)favoritesGridDisplayForTest { [_favGrid displayIfNeeded]; }
 - (void)favoritesHoldDragForShots:(NSUInteger)tile slot:(NSInteger)slot {
   [self favoritesGridMouseForTest:NSEventTypeLeftMouseDown tile:tile dx:0 dy:0];
   [self favoritesGridMouseForTest:NSEventTypeLeftMouseDragged tile:tile dx:14 dy:6];

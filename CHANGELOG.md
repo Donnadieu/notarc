@@ -3,6 +3,14 @@
 All NotArc releases are on [GitHub Releases](https://github.com/Donnadieu/notarc/releases). Apple Silicon, macOS 13
 or later. From 0.5.0 on, NotArc updates itself.
 
+## 0.30.10
+- Favorites show their site's colour, as in Arc. The open Favorite's tile gets a thin border in the colours of its
+  icon (YouTube red, Brain.fm purple, Outlook blue; a multi-colour icon like Gmail's runs through its colours around
+  the tile), a soft inner glow and a light tint; hovering another Favorite shows a fainter border. The border fades in
+  when you open a Favorite and then stays still, like Arc's (no shimmer while idle). The colour comes from the site's
+  icon (white, black and grey are skipped); an icon with no colour, like GitHub's, uses the page's own theme colour,
+  else a neutral rim. Colours are worked out in the background once per icon and follow the icon when it changes.
+
 ## 0.30.9
 - Camera and microphone work in Google Meet with Chrome-style pages on. After you allowed them, Meet still said
   "Camera is off" with a warning on the mic and camera buttons ("Camera not found", "Mic not found"): Chrome-style

@@ -208,6 +208,9 @@ class BrowserClient : public CefClient,
   static const char* NotificationShimJS();
   using LangCallback = std::function<void(int browser_id, const std::string& lang)>;  // page language (#52)
   void set_lang_callback(LangCallback cb) { on_lang_ = std::move(cb); }
+  // A Favorite's page reported its <meta name="theme-color"> ("__notarc_theme__:<css>" console line).
+  using ThemeColorCallback = std::function<void(int browser_id, const std::string& css)>;
+  void set_theme_color_callback(ThemeColorCallback cb) { on_theme_color_ = std::move(cb); }
   using LoadEndCallback = std::function<void(int browser_id, const std::string& url)>;
   void set_load_end_callback(LoadEndCallback cb) { on_load_end_ = std::move(cb); }
   void OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int httpStatusCode) override;
@@ -262,6 +265,7 @@ class BrowserClient : public CefClient,
   LoadEndCallback on_load_end_;
   LoadingCallback on_loading_;
   LangCallback on_lang_;
+  ThemeColorCallback on_theme_color_;
   NotifyCallback on_notify_;
   FaviconCallback on_favicon_;
   StatusCallback on_status_;
