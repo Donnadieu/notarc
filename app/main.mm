@@ -44,6 +44,8 @@
 #import "app/easel_clip.h"
 #import "app/live_folder.h"
 #import "app/settings.h"
+#import "app/favicon_colors.h"
+#import "app/favicons.h"
 #import "app/test_isolation.h"
 #import "app/app_icons.h"
 #include "app/content_blocker.h"
@@ -3253,7 +3255,7 @@ static int StartLoopbackPongServer(void) {
 #pragma clang diagnostic pop
 
 - (void)runFloatingVideoThenPageFit:(void (^)(void))done {
-  [self runFavoritesDragSelfTest:^{ [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runSitePermissionSelfTest:^{ [self runMediaPermissionSelfTest:^{ [self runMediaRepeatSelfTest:^{ [self runSettingsWindowSelfTest:^{ [self runVideoCodecsSelfTest:^{ [self runMeetReadySelfTest:^{ [self runSignInAppsSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }]; }]; }]; }]; }]; }]; }]; }]; }];
+  [self runFavoritesDragSelfTest:^{ [self runFavoriteGlowSelfTest:^{ [self runFloatingVideoSelfTest:^{ [self runSidebarResizeSelfTest:^{ [self runSidebarToggleSelfTest:^{ [self runSitePermissionSelfTest:^{ [self runMediaPermissionSelfTest:^{ [self runMediaRepeatSelfTest:^{ [self runSettingsWindowSelfTest:^{ [self runVideoCodecsSelfTest:^{ [self runMeetReadySelfTest:^{ [self runSignInAppsSelfTest:^{ [self runPageFitSelfTest:done]; }]; }]; }]; }]; }]; }]; }]; }]; }]; }]; }]; }];
 }
 
 // Favorites drag and drop like Arc: a short click opens, press and drag lifts the tile and the others slide aside
@@ -3427,7 +3429,193 @@ static int StartLoopbackPongServer(void) {
   });
 }
 
+// Favorite site colours (Arc): the open Favorite's tile gets a thin border in its favicon's colours (a gradient for
+// a multi-colour icon like Gmail's), a soft inner glow and a light tint; hovering another shows a fainter border; the
+// rest stay plain. Colours come from the favicon's pixels (white/black/grey skipped) off the main thread, cached per
+// icon, with the page's theme-color as the fallback, then a neutral rim. Real favicons are in NotArcMediaTest.
+static void FavGlowPixel(NSBitmapImageRep* rep, NSPoint p, CGFloat scale, CGFloat out[3]) {
+  NSColor* c = [[rep colorAtX:(NSInteger)floor(p.x * scale) y:(NSInteger)floor(p.y * scale)] colorUsingColorSpace:NSColorSpace.sRGBColorSpace];
+  out[0] = c.redComponent, out[1] = c.greenComponent, out[2] = c.blueComponent;
+}
+static float FavGlowHue(const CGFloat c[3]) {
+  FavColor f;
+  f.r = (float)c[0], f.g = (float)c[1], f.b = (float)c[2], f.ok = true;
+  float h, s, v;
+  FavColorToHSB(f, &h, &s, &v);
+  return h;
+}
+static BOOL FavHueIn(float h, float lo, float hi) { return lo <= hi ? (h >= lo && h <= hi) : (h >= lo || h <= hi); }
+
+- (void)runFavoriteGlowSelfTest:(void (^)(void))done {
+  MainWindowController* w = self.window;
+  NSString* dir = [NSHomeDirectory() stringByAppendingPathComponent:@"NotArcMediaTest"];
+  NSData* (^png)(NSString*) = ^NSData*(NSString* n) {
+    return [NSData dataWithContentsOfFile:[dir stringByAppendingPathComponent:[NSString stringWithFormat:@"favicon-%@.png", n]]];
+  };
+  FavPalette (^palette)(NSString*) = ^FavPalette(NSString* n) {
+    NSImage* img = [[NSImage alloc] initWithData:png(n) ?: [NSData data]];
+    CGImageRef cg = [img CGImageForProposedRect:NULL context:nil hints:nil];
+    return cg ? FaviconPaletteFromCGImage(cg) : FavPalette();
+  };
+  float h, s, v;
+  // 1. The colour picked from real favicons.
+  FavPalette yt = palette(@"youtube"), bfm = palette(@"brainfm"), ol = palette(@"outlook"), bc = palette(@"basecamp"),
+             gm = palette(@"gmail"), gh = palette(@"github");
+  FavColorToHSB(FavGlowColor(yt.dominant), &h, &s, &v);
+  BOOL ytRed = yt.dominant.ok && FavHueIn(h, 345, 15) && s > 0.5;
+  std::printf("SELFTEST-FAVGLOW-DEBUG youtube=%.0f/%.2f/%.2f", h, s, v);
+  FavColorToHSB(FavGlowColor(bfm.dominant), &h, &s, &v);
+  BOOL bfmPurple = bfm.dominant.ok && FavHueIn(h, 250, 300) && s > 0.35;
+  std::printf(" brainfm=%.0f/%.2f/%.2f", h, s, v);
+  FavColorToHSB(FavGlowColor(ol.dominant), &h, &s, &v);
+  BOOL olBlue = ol.dominant.ok && FavHueIn(h, 195, 285) && s > 0.35;
+  std::printf(" outlook=%.0f/%.2f/%.2f", h, s, v);
+  FavColorToHSB(FavGlowColor(bc.dominant), &h, &s, &v);  // Basecamp's icon is a dark slate (#29353c): a muted teal
+  BOOL bcTeal = bc.dominant.ok && FavHueIn(h, 160, 215) && s >= 0.3;
+  std::printf(" basecamp=%.0f/%.2f/%.2f", h, s, v);
+  NSMutableSet* gmHues = [NSMutableSet set];  // Gmail: the border runs through several of its colours
+  for (int i = 0; i < kFavRingStops; ++i) {
+    FavColorToHSB(gm.ring[i], &h, &s, &v);
+    if (gm.ring[i].ok && s > 0.3) [gmHues addObject:@((int)(fmod(h + 30, 360) / 60))];
+  }
+  BOOL gmMulti = gmHues.count >= 3;
+  BOOL ghNeutral = !gh.dominant.ok;
+  std::printf(" gmailHues=%lu\n", (unsigned long)gmHues.count);
+  // 2. theme-color text.
+  FavColor css = FavColorFromCSS("#2377D2");
+  FavColorToHSB(css, &h, &s, &v);
+  BOOL cssOK = css.ok && fabsf(h - 211) < 3 && FavColorFromCSS("rgb(255, 0, 0)").ok && !FavColorFromCSS("red").ok &&
+               FavColorIsNeutral(FavColorFromCSS("rgba(255, 255, 255, 0.98)")) && FavColorIsNeutral(FavColorFromCSS("#000")) &&
+               [kFaviconThemeColorJS containsString:@"theme-color"] && [kFaviconThemeColorJS containsString:@"__notarc_theme__:"];
+  // 3. Three Favorites with real icons: YouTube, Brain.fm, GitHub (no colour of its own).
+  FaviconColorStore* store = FaviconColorStore.shared;
+  NSUInteger computed0 = store.computeCount;
+  ArcSpace* sp = w.currentSpace;
+  ArcItem* shownBefore = w.shownItem;
+  NSMutableArray<ArcItem*>* made = [NSMutableArray array];
+  NSArray* names = @[ @"youtube", @"brainfm", @"github" ];
+  for (NSString* n in names) {
+    NSString* url = [NSString stringWithFormat:@"https://favglow-%@.example/", n];
+    [[FaviconStore shared] setIconData:png(n) forURL:url];
+    [w openInNewTab:url background:YES];
+    ArcItem* t = sp.unpinned.children.firstObject;
+    [w moveItemToFavorites:t];
+    [made addObject:t];
+  }
+  ArcItem *Y = made[0], *B = made[1], *G = made[2];
+  [w showItem:Y];
+  [w favoritesGridDisplayForTest];
+  BOOL fades = w.favoritesGlowAnimatingForTest || NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
+  BOOL pending = [w faviconColorsForItem:Y] == nil;  // worked out in the background the first time
+  WaitUntil(^{ return (BOOL)([w faviconColorsForItem:Y] && [w faviconColorsForItem:B] && [w faviconColorsForItem:G] && !w.favoritesGlowAnimatingForTest); }, 3, ^{
+    NSUInteger computed1 = store.computeCount;
+    [w faviconColorsForItem:Y];
+    BOOL cached = store.computeCount == computed1 && computed1 >= computed0 + 3;
+    BOOL offMain = store.onMainCount == 0;
+    CGFloat edge[3], inner[3], edgeB[3], innerB[3];
+    BOOL selRed[2] = {NO, NO}, plain[2] = {NO, NO}, tint[2] = {NO, NO};
+    NSRect ry = [w favoriteTileRectForTest:Y], rb = [w favoriteTileRectForTest:B];
+    double (^dist)(const CGFloat*, const CGFloat*) = ^double(const CGFloat* a, const CGFloat* b) {
+      return sqrt(pow(a[0] - b[0], 2) + pow(a[1] - b[1], 2) + pow(a[2] - b[2], 2));
+    };
+    NSString* shots = NSProcessInfo.processInfo.environment[@"NOTARC_FAVGLOW_SHOTS"];
+    for (int dark = 0; dark < 2; ++dark) {
+      NSBitmapImageRep* rep = [w favoritesGridSnapshotForTest:dark];
+      CGFloat sc = rep.pixelsWide / MAX(1.0, NSWidth(w.favoritesGridFrame));
+      FavGlowPixel(rep, NSMakePoint(NSMidX(ry), NSMinY(ry) + 0.75), sc, edge);
+      FavGlowPixel(rep, NSMakePoint(NSMinX(ry) + 10, NSMinY(ry) + 10), sc, inner);
+      FavGlowPixel(rep, NSMakePoint(NSMidX(rb), NSMinY(rb) + 0.75), sc, edgeB);
+      FavGlowPixel(rep, NSMakePoint(NSMinX(rb) + 10, NSMinY(rb) + 10), sc, innerB);
+      float eh = FavGlowHue(edge);
+      selRed[dark] = FavHueIn(eh, 340, 20) && edge[0] - edge[2] > 0.15;
+      plain[dark] = dist(edgeB, innerB) < 0.06;
+      tint[dark] = (inner[0] - inner[2]) > (innerB[0] - innerB[2]) + (dark ? 0.06 : 0.04);  // plain selection: +0.02-0.03
+      std::printf("SELFTEST-FAVGLOW-DEBUG dark=%d edge=%.2f,%.2f,%.2f inner=%.2f,%.2f,%.2f other=%.2f,%.2f,%.2f/%.2f,%.2f,%.2f\n", dark,
+                  edge[0], edge[1], edge[2], inner[0], inner[1], inner[2], edgeB[0], edgeB[1], edgeB[2], innerB[0], innerB[1], innerB[2]);
+      if (shots.length)
+        [[rep representationUsingType:NSBitmapImageFileTypePNG properties:@{}]
+            writeToFile:[shots stringByAppendingPathComponent:[NSString stringWithFormat:@"favglow-selected-%@.png", dark ? @"dark" : @"light"]] atomically:YES];
+    }
+    // Hover: a fainter border in Brain.fm's purple; opening it makes it full strength.
+    [w favoritesGridHoverForTest:B];
+    NSBitmapImageRep* hrep = [w favoritesGridSnapshotForTest:YES];
+    CGFloat sc = hrep.pixelsWide / MAX(1.0, NSWidth(w.favoritesGridFrame));
+    FavGlowPixel(hrep, NSMakePoint(NSMidX(rb), NSMinY(rb) + 0.75), sc, edgeB);
+    FavGlowPixel(hrep, NSMakePoint(NSMinX(rb) + 10, NSMinY(rb) + 10), sc, innerB);
+    double hoverStrength = dist(edgeB, innerB);
+    float hoverHue = FavGlowHue(edgeB);
+    BOOL hoverPurple = FavHueIn(hoverHue, 245, 305) && hoverStrength > 0.05;
+    BOOL selRedL = selRed[0], selRedD = selRed[1], plainL = plain[0], plainD = plain[1], tintL = tint[0], tintD = tint[1];
+    if (shots.length)
+      [[hrep representationUsingType:NSBitmapImageFileTypePNG properties:@{}]
+          writeToFile:[shots stringByAppendingPathComponent:@"favglow-hover-dark.png"] atomically:YES];
+    [w favoritesGridHoverForTest:nil];
+    [w showItem:B];
+    [w favoritesGridDisplayForTest];
+    BOOL fadesAgain = w.favoritesGlowAnimatingForTest || NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion;
+    WaitUntil(^{ return (BOOL)!w.favoritesGlowAnimatingForTest; }, 2, ^{
+      CGFloat e2[3], i2[3];
+      NSBitmapImageRep* srep = [w favoritesGridSnapshotForTest:YES];
+      FavGlowPixel(srep, NSMakePoint(NSMidX(rb), NSMinY(rb) + 0.75), sc, e2);
+      FavGlowPixel(srep, NSMakePoint(NSMinX(rb) + 10, NSMinY(rb) + 10), sc, i2);
+      double selStrength = dist(e2, i2);
+      BOOL hoverFainter = hoverPurple && selStrength > hoverStrength * 1.25;
+      std::printf("SELFTEST-FAVGLOW-DEBUG hover=%.3f selected=%.3f hue=%.0f\n", hoverStrength, selStrength, hoverHue);
+      // GitHub's black icon: a neutral rim until its page reports a theme-color, then that colour.
+      FaviconColors* g0 = [w faviconColorsForItem:G];
+      BOOL neutral = g0 && !g0.tint;
+      [store setThemeColor:@"#2377D2" forSite:@"favglow-github.example"];
+      FaviconColors* g1 = [w faviconColorsForItem:G];
+      FavColor gc;
+      CGFloat r = 0, gg = 0, b = 0;
+      [[g1.tint colorUsingColorSpace:NSColorSpace.sRGBColorSpace] getRed:&r green:&gg blue:&b alpha:NULL];
+      gc.r = (float)r, gc.g = (float)gg, gc.b = (float)b, gc.ok = true;
+      float th, ts, tv;
+      FavColorToHSB(gc, &th, &ts, &tv);
+      BOOL theme = neutral && g1.fromTheme && FavHueIn(th, 200, 222);
+      // Idle: nothing redraws the grid on its own (no shimmer loop).
+      NSUInteger d0 = w.favoritesGridDrawCountForTest;
+      dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        NSUInteger idleDraws = w.favoritesGridDrawCountForTest - d0;
+        BOOL idle = idleDraws <= 3 && !w.favoritesGlowAnimatingForTest;
+        // A new favicon for the site gets new colours (YouTube's tile now shows Brain.fm's icon: purple).
+        [[FaviconStore shared] setIconData:png(@"brainfm") forURL:Y.url];
+        WaitUntil(^{ return (BOOL)([w faviconColorsForItem:Y] != nil); }, 2, ^{
+          FaviconColors* y2 = [w faviconColorsForItem:Y];
+          CGFloat rr = 0, g2 = 0, bb = 0;
+          [[y2.tint colorUsingColorSpace:NSColorSpace.sRGBColorSpace] getRed:&rr green:&g2 blue:&bb alpha:NULL];
+          CGFloat yc[3] = {rr, g2, bb};
+          BOOL updated = FavHueIn(FavGlowHue(yc), 250, 300);
+          [[FaviconStore shared] setIconData:png(@"youtube") forURL:Y.url];
+          for (ArcItem* t in made) [w removeItemFromFavorites:t pinned:NO];
+          for (ArcItem* t in made) [w deleteSidebarItem:t];
+          if (shownBefore) [w showItem:shownBefore];
+          std::printf("SELFTEST-FAVGLOW youtubeRed=%d brainfmPurple=%d outlookBlue=%d basecampTeal=%d gmailMulti=%d githubNeutral=%d "
+                      "themeColorParse=%d pendingFirst=%d offMain=%d cached=%d selectedRedDark=%d selectedRedLight=%d "
+                      "tintDark=%d tintLight=%d othersPlainDark=%d othersPlainLight=%d hoverPurple=%d hoverFainter=%d "
+                      "fadesIn=%d themeFallback=%d idleNoRedraw=%d iconChangeUpdates=%d\n",
+                      ytRed, bfmPurple, olBlue, bcTeal, gmMulti, ghNeutral, cssOK, pending, offMain, cached, selRedD, selRedL,
+                      tintD, tintL, plainD, plainL, hoverPurple, hoverFainter, fades && fadesAgain, theme, idle, updated);
+          if (!idle) std::printf("SELFTEST-FAVGLOW-DEBUG idleDraws=%lu\n", (unsigned long)idleDraws);
+          std::fflush(stdout);
+          done();
+        });
+      });
+    });
+  });
+}
+
 - (void)runSelfTestActions {
+  if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"favglow"]) {  // quick local loop
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+      [self runFavoriteGlowSelfTest:^{
+        std::printf("SELFTEST-REALPROFILE %s\n", TestIsolationReport().UTF8String);
+        std::fflush(stdout);
+        [self.window closeAllBrowsers];
+      }];
+    });
+    return;
+  }
   if ([NSProcessInfo.processInfo.environment[@"NOTARC_SELFTEST_ONLY"] isEqualToString:@"favdrag"]) {  // quick local loop
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 3 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
       [self runFavoritesDragSelfTest:^{

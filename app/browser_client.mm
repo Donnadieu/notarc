@@ -379,6 +379,11 @@ bool BrowserClient::OnConsoleMessage(CefRefPtr<CefBrowser> browser, cef_log_seve
     if (on_lang_) on_lang_(browser->GetIdentifier(), m.substr(kLang.size()));
     return true;
   }
+  static const std::string kTheme = "__notarc_theme__:";
+  if (m.compare(0, kTheme.size(), kTheme) == 0) {
+    if (on_theme_color_) on_theme_color_(browser->GetIdentifier(), m.substr(kTheme.size(), 64));
+    return true;
+  }
   // Max page scripts (#58, #59) reply as "__notarc_max__:<nonce>:..." lines.
   if (m.compare(0, 15, "__notarc_max__:") == 0) {
     if (NSString* line = [NSString stringWithUTF8String:m.c_str()]) MaxHandleConsoleMessage(line);

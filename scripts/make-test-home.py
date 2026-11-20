@@ -116,7 +116,10 @@ def main(home):
     media = os.path.join(home, "NotArcMediaTest")
     os.makedirs(media, exist_ok=True)
     testdata = os.path.join(os.path.dirname(os.path.abspath(__file__)), "testdata")
-    for name in ("media-test.html", "media-test.webm", "icon.png", "media-h264.mp4", "media-x-video.mp4", "media-x-audio.mp4"):
+    # Real site favicons (Favorite colour checks): YouTube, Brain.fm, Outlook, Basecamp, Gmail, GitHub.
+    favicons = tuple(f"favicon-{n}.png" for n in ("youtube", "brainfm", "outlook", "basecamp", "gmail", "github"))
+    for name in ("media-test.html", "media-test.webm", "icon.png", "media-h264.mp4", "media-x-video.mp4",
+                 "media-x-audio.mp4") + favicons:
         shutil.copyfile(os.path.join(testdata, name), os.path.join(media, name))
     print(arc)
 

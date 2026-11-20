@@ -175,6 +175,8 @@ static ArcItem* FindTab(ArcSpace* space, NSString* text) {
       if (s) [c switchToSpace:s];
     } else if ([cmd isEqual:@"fav-drag"] && args.count >= 2) {  // fav-drag <tile> <slot>: hold a Favorite mid-drag
       [c favoritesHoldDragForShots:(NSUInteger)[args[0] integerValue] slot:[args[1] integerValue]];
+    } else if ([cmd isEqual:@"fav-hover"]) {  // fav-hover <title> (none clears): a Favorite tile's hover look
+      [c favoritesGridHoverForTest:arg.length ? FindTab(c.currentSpace, arg) : nil];
     } else if ([cmd isEqual:@"fav-drag-end"]) {
       [c favoritesDragEndForTest:NSDragOperationNone];
     } else if ([cmd isEqual:@"fav-lift"] && args.count >= 2) {  // fav-lift <tile> <name>: the lifted tile on its own

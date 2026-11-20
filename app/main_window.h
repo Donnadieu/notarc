@@ -12,6 +12,7 @@ NSString* CleanLinkURL(NSString* url);
 
 NSString* MediaBarTitle(NSString* pageTitle);  // the mini player's title for a page title (V3)
 @class Boost;
+@class FaviconColors;
 @class BoostColorWheel;
 @class AutofillController;
 @class EaselView;
@@ -645,6 +646,15 @@ extern const CGFloat kSidebarDefaultWidth, kSidebarMinWidth, kSidebarMaxWidth;  
 - (NSRect)favoriteShownRectForTest:(ArcItem*)item;   // where the tile is drawn now (mid-slide)
 - (NSRect)favoriteTargetRectForTest:(ArcItem*)item;  // where it's sliding to
 - (NSInteger)favoriteTileIndexForTest:(ArcItem*)item;
+// Favorite site colours (tests): the grid in a bitmap (row 0 = top), a tile's rect, hover, draws and the fade-in.
+- (NSBitmapImageRep*)favoritesGridSnapshotForTest:(BOOL)dark;
+- (NSRect)favoriteTileRectForTest:(ArcItem*)item;
+- (void)favoritesGridHoverForTest:(ArcItem*)item;  // nil clears
+- (NSUInteger)favoritesGridDrawCountForTest;
+- (BOOL)favoritesGlowAnimatingForTest;
+- (void)favoritesGridDisplayForTest;
+- (void)browser:(int)browserId themeColor:(NSString*)css;  // a page's <meta name="theme-color">
+- (FaviconColors*)faviconColorsForItem:(ArcItem*)item;      // nil while worked out in the background
 - (BOOL)sidebarDropForTest:(id<NSDraggingInfo>)info parent:(ArcItem*)parent index:(NSInteger)index;  // tab list drop
 - (void)favoritesHoldDragForShots:(NSUInteger)tile slot:(NSInteger)slot;  // renders: a Favorite held mid-drag
 - (NSImage*)favoriteLiftedImageForTest:(NSUInteger)tile;

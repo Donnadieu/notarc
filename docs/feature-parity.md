@@ -11,7 +11,7 @@ see [CHANGELOG.md](../CHANGELOG.md) for what each release added. Things NotArc d
 ## Look and feel
 - [x] Window frame: no title bar, page as a rounded card (10/9/9 pt inset, 8 pt corners) on the Space colour with a hairline edge and a soft shadow in light mode, 273 pt sidebar (#122)
 - [x] Sidebar top: window buttons, sidebar toggle, back/forward/reload, address pill with site buttons (#123)
-- [x] Sidebar rows: Arc-style tab, folder and section rows with Arc's hover, selected and pressed colours; Favorites tile grid, Space title and "+ New Tab" row, 41 pt rows (#124)
+- [x] Sidebar rows: Arc-style tab, folder and section rows with Arc's hover, selected and pressed colours; Favorites tile grid (the open Favorite gets a border and tint in its site's icon colours, fainter on hover), Space title and "+ New Tab" row, 41 pt rows (#124)
 - [x] Space switcher icons at the bottom of the sidebar, archive button and "+" menu (#125)
 - [x] Space-switch slide and page card pop animations: the sidebar slides left/right when switching Spaces, the page card pops when the tab changes, both off with Reduce Motion (#126)
 - [x] Command bar styling: rounded translucent card, Arc's text colours, selected row as an Arc-blue pill, an icon per row, hairline under the field (#127)
